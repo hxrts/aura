@@ -2,7 +2,7 @@
 
 use super::state::with_state_mut_validated;
 use crate::handlers::Invitation;
-use aura_core::identifiers::InvitationId;
+use aura_core::types::identifiers::InvitationId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

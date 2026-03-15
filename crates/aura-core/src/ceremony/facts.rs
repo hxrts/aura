@@ -6,10 +6,10 @@
 
 use crate::ceremony::SupersessionReason;
 use crate::domain::status::{CeremonyState, CeremonyStatus, SupersessionReason as StatusReason};
-use crate::identifiers::CeremonyId;
 use crate::query::ConsensusId;
 use crate::threshold::AgreementMode;
 use crate::time::PhysicalTime;
+use crate::types::identifiers::CeremonyId;
 
 /// Common metadata carried by ceremony facts.
 #[derive(Debug, Clone, PartialEq, Eq)]

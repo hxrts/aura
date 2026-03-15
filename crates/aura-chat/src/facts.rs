@@ -35,8 +35,8 @@
 //! registry.register::<ChatFact>("chat", Box::new(ChatFactReducer));
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,

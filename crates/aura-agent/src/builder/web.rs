@@ -29,7 +29,7 @@
 
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 #[cfg(feature = "web")]
 use std::path::PathBuf;
 

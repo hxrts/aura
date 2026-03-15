@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 
 use super::error::FactoryError;
 use crate::handlers::{EffectType, ExecutionMode};

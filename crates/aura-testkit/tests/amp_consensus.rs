@@ -12,8 +12,8 @@ use std::collections::HashMap;
 #[tokio::test]
 async fn amp_consensus_smoke() {
     // Minimal proposal and witness set.
-    let ctx = aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]);
-    let channel = aura_core::identifiers::ChannelId::from_bytes([1u8; 32]);
+    let ctx = aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]);
+    let channel = aura_core::types::identifiers::ChannelId::from_bytes([1u8; 32]);
     let proposal = ProposedChannelEpochBump {
         context: ctx,
         channel,
@@ -81,8 +81,8 @@ async fn amp_consensus_success_path_with_frost() {
     // For now, single-authority and error-path tests (amp_consensus_smoke,
     // amp_consensus_missing_keys_fails) provide adequate coverage of the consensus logic.
 
-    let ctx = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
-    let channel = aura_core::identifiers::ChannelId::from_bytes([2u8; 32]);
+    let ctx = aura_core::types::identifiers::ContextId::new_from_entropy([2u8; 32]);
+    let channel = aura_core::types::identifiers::ChannelId::from_bytes([2u8; 32]);
     let proposal = ProposedChannelEpochBump {
         context: ctx,
         channel,
@@ -159,8 +159,8 @@ async fn amp_consensus_missing_keys_fails() {
     )
     .unwrap();
     let proposal = ProposedChannelEpochBump {
-        context: aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
-        channel: aura_core::identifiers::ChannelId::from_bytes([1u8; 32]),
+        context: aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        channel: aura_core::types::identifiers::ChannelId::from_bytes([1u8; 32]),
         parent_epoch: 0,
         new_epoch: 1,
         bump_id: aura_core::Hash32::new([2u8; 32]),

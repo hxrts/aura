@@ -530,7 +530,7 @@ impl JournalEffects for CompositeTestHandler {
 
     async fn get_flow_budget(
         &self,
-        context: &aura_core::identifiers::ContextId,
+        context: &aura_core::types::identifiers::ContextId,
         peer: &aura_core::AuthorityId,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         self.journal.get_flow_budget(context, peer).await
@@ -538,7 +538,7 @@ impl JournalEffects for CompositeTestHandler {
 
     async fn update_flow_budget(
         &self,
-        context: &aura_core::identifiers::ContextId,
+        context: &aura_core::types::identifiers::ContextId,
         peer: &aura_core::AuthorityId,
         budget: &aura_core::FlowBudget,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
@@ -547,7 +547,7 @@ impl JournalEffects for CompositeTestHandler {
 
     async fn charge_flow_budget(
         &self,
-        context: &aura_core::identifiers::ContextId,
+        context: &aura_core::types::identifiers::ContextId,
         peer: &aura_core::AuthorityId,
         cost: aura_core::FlowCost,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {

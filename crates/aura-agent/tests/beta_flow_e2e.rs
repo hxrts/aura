@@ -14,8 +14,8 @@ use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvita
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::AmpJournalEffects;
@@ -406,9 +406,9 @@ async fn test_channel_invitation() -> TestResult {
         .invite_to_channel(
             invitee,
             home_id.clone(),
-            None, // context_id
+            None,                                  // context_id
             Some("shared-parity-lab".to_string()), // nickname_suggestion
-            None, // bootstrap
+            None,                                  // bootstrap
             Some("Join our discussion channel".to_string()),
             None, // expires_in_ms
         )

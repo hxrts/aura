@@ -24,7 +24,7 @@
 //!                                                 └─────────────────┘
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use aura_core::FlowCost;
 use aura_guards::types;

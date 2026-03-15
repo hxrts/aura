@@ -14,8 +14,8 @@ use aura_core::{
         guard::{EffectCommand, EffectInterpreter, EffectResult, JournalEntry, SimulationEvent},
         NetworkAddress,
     },
-    identifiers::AuthorityId,
     time::TimeStamp,
+    types::AuthorityId,
     AuraError, AuraResult as Result, FlowCost,
 };
 use rand::{RngCore, SeedableRng};

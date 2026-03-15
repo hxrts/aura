@@ -9,7 +9,7 @@
 use super::types::GuardOperationId;
 use aura_core::{
     effects::{EffectCommand, GuardOutcome, GuardSnapshot, JournalEntry},
-    identifiers::AuthorityId,
+    types::identifiers::AuthorityId,
     Cap, Fact, FlowCost,
 };
 use std::fmt::Debug;

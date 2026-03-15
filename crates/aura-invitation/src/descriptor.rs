@@ -8,7 +8,7 @@
 
 #![forbid(unsafe_code)]
 
-use aura_core::identifiers::{AuthorityId, InvitationId};
+use aura_core::types::identifiers::{AuthorityId, InvitationId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

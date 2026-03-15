@@ -30,7 +30,7 @@ use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::*;
 use aura_core::hash::hash as aura_hash;
-use aura_core::scope::AuthorizationOp;
+use aura_core::types::scope::AuthorizationOp;
 use aura_core::{AuraError, AuthorityId, ContextId};
 use aura_effects::{
     crypto::RealCryptoHandler,
@@ -198,7 +198,7 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
         &self,
         _token_data: &[u8],
         _operation: AuthorizationOp,
-        _scope: &aura_core::scope::ResourceScope,
+        _scope: &aura_core::types::scope::ResourceScope,
     ) -> Result<AuthorizationDecision, AuthorizationError> {
         Ok(AuthorizationDecision {
             authorized: true,
@@ -210,7 +210,7 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
         &self,
         _token_data: &[u8],
         _fact_type: &str,
-        _scope: &aura_core::scope::ResourceScope,
+        _scope: &aura_core::types::scope::ResourceScope,
     ) -> Result<bool, AuthorizationError> {
         Ok(true)
     }
@@ -1569,7 +1569,7 @@ impl AuraEffectSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
     use aura_guards::GuardContextProvider;
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::SyncEffects;

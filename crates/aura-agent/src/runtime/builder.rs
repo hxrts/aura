@@ -22,7 +22,7 @@ use super::system::RuntimeSystem;
 use super::{EffectContext, EffectExecutor, LifecycleManager};
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::RendezvousHandler;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 // Re-export ExecutionMode from aura_core for convenience
 pub use aura_core::effects::ExecutionMode;
@@ -358,7 +358,8 @@ impl EffectSystemBuilder {
                     let authority_id = self
                         .authority_id
                         .ok_or(BuildError::MissingRequired("authority_id"))?;
-                    let context_id = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
+                    let context_id =
+                        aura_core::types::identifiers::ContextId::new_from_entropy([2u8; 32]);
                     let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
 
                     // Use a minimal async runtime just for building
@@ -404,7 +405,7 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
         let ctx = EffectContext::new(
             authority_id,
-            aura_core::identifiers::ContextId::new_from_entropy([9u8; 32]),
+            aura_core::types::identifiers::ContextId::new_from_entropy([9u8; 32]),
             ExecutionMode::Testing,
         );
 
@@ -427,7 +428,7 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([8u8; 32]);
         let ctx = EffectContext::new(
             authority_id,
-            aura_core::identifiers::ContextId::new_from_entropy([10u8; 32]),
+            aura_core::types::identifiers::ContextId::new_from_entropy([10u8; 32]),
             ExecutionMode::Testing,
         );
 

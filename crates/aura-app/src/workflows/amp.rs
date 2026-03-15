@@ -1,7 +1,7 @@
 //! AMP workflows (channel state inspection and maintenance).
 
 use super::error::runtime_call;
-use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ProposedChannelEpochBump, RelationalFact,

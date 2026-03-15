@@ -11,9 +11,9 @@ use crate::fact::{
 
 use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::time::{OrderTime, TimeDomain, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{
     effects::{storage::StorageEffects, CryptoEffects, RandomEffects},
     AccountId, AuraError, Ed25519VerifyingKey,

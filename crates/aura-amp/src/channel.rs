@@ -13,9 +13,9 @@ use aura_core::effects::amp::{
 };
 use aura_core::effects::random::RandomExtendedEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, ProposedChannelEpochBump, RelationalFact,
@@ -61,7 +61,7 @@ where
                 .order_time()
                 .await
                 .map_err(|e| AmpChannelError::Internal(e.to_string()))?;
-            aura_core::identifiers::ChannelId::from_bytes(order.0)
+            aura_core::types::identifiers::ChannelId::from_bytes(order.0)
         };
 
         let config = AmpRuntimeConfig::default();

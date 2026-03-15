@@ -4,7 +4,7 @@
 //! across effect operations in the authority-centric runtime.
 
 use super::EffectContext;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 
 /// Trait for types that can execute within a context
 #[allow(dead_code)] // Part of future contextual execution API

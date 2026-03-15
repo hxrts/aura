@@ -2,7 +2,7 @@
 //!
 //! Type-safe channel participant set ensuring minimum participant count.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use std::fmt;
 
 /// Minimum number of participants for a channel

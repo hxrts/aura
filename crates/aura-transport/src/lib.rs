@@ -32,7 +32,7 @@
 //!     Envelope, TransportConfig, PrivacyLevel, ConnectionId,
 //!     PeerInfo, PrivacyAwareSelectionCriteria,
 //! };
-//! use aura_core::identifiers::ContextId;
+//! use aura_core::types::identifiers::ContextId;
 //!
 //! // Privacy-aware envelope with context scoping
 //! let message = b"Hello, world!".to_vec();

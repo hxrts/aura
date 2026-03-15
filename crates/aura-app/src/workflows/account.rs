@@ -12,7 +12,7 @@ use crate::views::PendingAccountBootstrap;
 use crate::workflows::{context, runtime::require_runtime, settings, system};
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use std::sync::Arc;
 

@@ -66,7 +66,7 @@
 //! let signature = crypto.sign(&key, &message).await?;
 //!
 //! // Or compose into a runtime (done by aura-agent or aura-protocol)
-//! let runtime = RuntimeBuilder::new()
+//! let runtime = EffectSystemBuilder::production()
 //!     .with_crypto(crypto)
 //!     .with_storage(storage)
 //!     .build();

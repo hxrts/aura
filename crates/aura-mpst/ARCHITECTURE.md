@@ -23,6 +23,18 @@ guards and Aura-specific extensions.
 - Extensions handled externally via aura-macros.
 - Provides the same `choreography!` macro interface over Telltale.
 
+## Ownership Model
+
+- `aura-mpst` is primarily `Pure`.
+- It defines protocol/specification structure rather than `ActorOwned` runtime
+  ownership.
+- Session/delegation transfer semantics consumed by generated protocols should
+  remain explicit and `MoveOwned` in higher layers.
+- Capability or authority requirements should be carried in typed protocol
+  artifacts, not hidden in runtime-local conventions.
+- `Observed` tooling may inspect generated artifacts but not author protocol
+  truth.
+
 ### Detailed Specifications
 
 ### InvariantMpstProjectionSafety
@@ -46,4 +58,3 @@ Contract alignment:
 - No multi-party coordination logic (only types and runtime abstractions).
 - Protocol implementations belong in feature crates (Layer 5).
 - Macro parsing belongs in aura-macros.
-

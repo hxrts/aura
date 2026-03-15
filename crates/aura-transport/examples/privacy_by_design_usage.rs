@@ -8,7 +8,7 @@
 //! - Default behavior preserves privacy
 //! - Context scoping is fundamental to all operations
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_transport::{
     ConnectionId, Envelope, HolePunchMessage, PeerInfo, PrivacyAwareSelectionCriteria,
     PrivacyLevel, StunMessage, TransportConfig,

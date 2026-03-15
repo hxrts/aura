@@ -33,6 +33,18 @@ conflict-free state reduction across distributed replicas.
 - Content addressing: Facts identified by hash (CID).
 - Nonce uniqueness per namespace (`InvariantNonceUnique`).
 
+## Ownership Model
+
+- `aura-journal` is primarily `Pure`.
+- It owns fact reduction and journal-domain semantics, not `ActorOwned` runtime
+  state.
+- Any exclusive authority semantics exposed here should remain typed and
+  `MoveOwned`, never hidden behind shared mutable rewrites.
+- Capability checks that gate acceptance or interpretation should remain
+  explicit in typed journal/domain surfaces.
+- Downstream projections are `Observed` consumers of reduced journal state and
+  must not become semantic owners.
+
 ### Detailed Specifications
 
 ### InvariantCRDTConvergence

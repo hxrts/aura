@@ -23,8 +23,8 @@ pub use reducers::register_moderation_facts;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ContextId};
     use aura_core::time::PhysicalTime;
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
     use aura_journal::reduction::RelationalBindingType;
     use aura_journal::{DomainFact, FactRegistry};
 

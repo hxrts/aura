@@ -5,7 +5,7 @@
 
 use crate::commitment_tree::authority_state::AuthorityTreeState;
 use crate::fact::AttestedOp;
-use aura_core::authority::TreeStateSummary;
+use aura_core::types::authority::TreeStateSummary;
 use aura_core::types::Epoch;
 use aura_core::Hash32;
 

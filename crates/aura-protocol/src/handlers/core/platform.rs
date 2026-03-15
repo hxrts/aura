@@ -15,7 +15,7 @@ impl PlatformDetector {
     /// Detect the current platform
     pub fn detect_platform() -> Result<PlatformInfo, FactoryError> {
         let storage: std::sync::Arc<dyn StorageEffects> =
-            std::sync::Arc::new(PathStorageAdapter::with_default_path());
+            std::sync::Arc::new(FilesystemStorageHandler::with_default_path());
         Self::detect_platform_with_storage(storage.as_ref())
     }
 
@@ -135,13 +135,6 @@ impl PlatformDetector {
         interfaces
     }
 }
-
-/// Path-based storage adapter for platform detection
-///
-/// Uses the proper FilesystemStorageHandler from aura-effects instead of
-/// reimplementing. This maintains the architectural boundary and avoids
-/// direct runtime/filesystem usage outside effects layer.
-pub type PathStorageAdapter = FilesystemStorageHandler;
 
 /// Platform information
 #[derive(Debug, Clone)]

@@ -13,8 +13,8 @@ use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui_contract::RuntimeFact;
-use aura_core::{identifiers::ChannelId, AuthorityId};
-use aura_ui::{UiController, UiScreen};
+use aura_core::{types::identifiers::ChannelId, AuthorityId};
+use aura_ui::UiController;
 use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_wasm_bindgen::{from_value, to_value};
 use std::cell::{Cell, RefCell};
@@ -160,14 +160,14 @@ fn queue_pending_create_account(nickname: &str) -> Result<SemanticCommandRespons
     Ok(SemanticCommandResponse::accepted_without_value())
 }
 
-fn browser_screen(screen: ScreenId) -> Option<UiScreen> {
+fn browser_screen(screen: ScreenId) -> Option<ScreenId> {
     match screen {
-        ScreenId::Onboarding => Some(UiScreen::Onboarding),
-        ScreenId::Neighborhood => Some(UiScreen::Neighborhood),
-        ScreenId::Chat => Some(UiScreen::Chat),
-        ScreenId::Contacts => Some(UiScreen::Contacts),
-        ScreenId::Notifications => Some(UiScreen::Notifications),
-        ScreenId::Settings => Some(UiScreen::Settings),
+        ScreenId::Onboarding => Some(ScreenId::Onboarding),
+        ScreenId::Neighborhood => Some(ScreenId::Neighborhood),
+        ScreenId::Chat => Some(ScreenId::Chat),
+        ScreenId::Contacts => Some(ScreenId::Contacts),
+        ScreenId::Notifications => Some(ScreenId::Notifications),
+        ScreenId::Settings => Some(ScreenId::Settings),
     }
 }
 
@@ -281,7 +281,7 @@ async fn submit_semantic_command(
             ))
         }
         IntentAction::StartDeviceEnrollment { device_name, .. } => {
-            controller.set_screen(UiScreen::Settings);
+            controller.set_screen(ScreenId::Settings);
             controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
             let start = ceremony_workflows::start_device_enrollment_ceremony(
                 &controller.app_core(),
@@ -309,12 +309,12 @@ async fn submit_semantic_command(
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
-            controller.set_screen(UiScreen::Settings);
+            controller.set_screen(ScreenId::Settings);
             controller.set_settings_section(browser_settings_section(section));
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::RemoveSelectedDevice => {
-            controller.set_screen(UiScreen::Settings);
+            controller.set_screen(ScreenId::Settings);
             controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
             let device_id = selected_device_id(&controller)?;
             ceremony_workflows::start_device_removal_ceremony(&controller.app_core(), device_id)
@@ -323,7 +323,7 @@ async fn submit_semantic_command(
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::SwitchAuthority { authority_id } => {
-            controller.set_screen(UiScreen::Settings);
+            controller.set_screen(ScreenId::Settings);
             controller.set_settings_section(browser_settings_section(SettingsSection::Authority));
             if selected_authority_id(&controller).as_deref() == Some(authority_id.as_str()) {
                 return Ok(SemanticCommandResponse::accepted_without_value());
@@ -706,12 +706,12 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             return JsValue::FALSE;
         };
         let target = match screen_name.as_str() {
-            "onboarding" => UiScreen::Onboarding,
-            "neighborhood" => UiScreen::Neighborhood,
-            "chat" => UiScreen::Chat,
-            "contacts" => UiScreen::Contacts,
-            "notifications" => UiScreen::Notifications,
-            "settings" => UiScreen::Settings,
+            "onboarding" => ScreenId::Onboarding,
+            "neighborhood" => ScreenId::Neighborhood,
+            "chat" => ScreenId::Chat,
+            "contacts" => ScreenId::Contacts,
+            "notifications" => ScreenId::Notifications,
+            "settings" => ScreenId::Settings,
             _ => return JsValue::FALSE,
         };
         navigate_controller.set_screen(target);

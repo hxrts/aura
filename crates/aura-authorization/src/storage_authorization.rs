@@ -5,7 +5,7 @@
 //! authorization concern and belongs in the authorization domain (aura-authorization).
 
 // Authorization logic moved from aura-store to proper domain (aura-authorization)
-use aura_core::scope::{ResourceScope, StoragePath};
+use aura_core::types::scope::{ResourceScope, StoragePath};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
     macros::{fact, policy, rule},

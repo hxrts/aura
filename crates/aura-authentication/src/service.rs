@@ -29,7 +29,7 @@ use crate::guards::{
     RecoveryContext, RecoveryOperationType,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};

@@ -1,6 +1,6 @@
 //! Types for moderation query results
 
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 
 /// Current ban status for a user

@@ -8,7 +8,7 @@
 //! `Result<HandlerResult, CliError>` to drive structured output.
 
 // Import types from aura-agent (runtime layer)
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 
 // Import agent types from aura-agent (runtime layer)
 pub use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext};

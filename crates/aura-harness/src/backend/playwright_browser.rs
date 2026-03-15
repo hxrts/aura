@@ -1321,8 +1321,12 @@ mod tests {
             "browser bridge should reject malformed semantic requests with typed context"
         );
         assert!(
-            bridge_source.contains("unsupported semantic browser command"),
-            "browser bridge should fail closed on unsupported semantic commands"
+            bridge_source.contains("unsupported screen"),
+            "browser bridge should preserve typed semantic rejection paths for invalid command payloads"
+        );
+        assert!(
+            !bridge_source.contains("unsupported semantic browser command"),
+            "browser bridge should cover the typed semantic intent surface directly instead of keeping a generic unsupported-intent fallback"
         );
         assert!(
             driver_source.contains("resetObservationState(session, \"submit_semantic_command\")"),

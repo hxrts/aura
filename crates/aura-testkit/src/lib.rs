@@ -135,15 +135,9 @@ pub mod test_utils;
 pub mod time;
 pub mod verification;
 
-// Make privacy module available at top level for backward compatibility
-pub mod privacy {
-    pub use crate::configuration::privacy::*;
-}
-
 // Re-export commonly used items from modular structure
 #[allow(ambiguous_glob_reexports)]
 pub use builders::*;
-pub use configuration::TestConfig as ConfigTestConfig;
 pub use conformance::*;
 pub use conformance_diff::*;
 pub use effect_api::*;
@@ -156,8 +150,7 @@ pub use mock_runtime_bridge::MockRuntimeBridge;
 pub use mocks::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use replay::*;
-// Re-export simulation components (excluding ambiguous transport)
-pub use simulation::transport as simulation_transport;
+// Re-export simulation components
 pub use simulation::{choreography::*, network::*};
 
 // Re-export protocol test API types
@@ -176,8 +169,6 @@ pub use verification::*;
 pub use aura_core::AccountId;
 pub use aura_journal::journal_api::{AccountSummary, Journal};
 
-// Re-export Journal as AccountState for backward compatibility in tests
-pub type AccountState = Journal;
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use std::collections::BTreeMap;
 pub use uuid::Uuid;

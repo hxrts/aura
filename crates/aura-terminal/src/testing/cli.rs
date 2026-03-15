@@ -45,7 +45,7 @@ use async_lock::RwLock;
 use aura_agent::AgentBuilder;
 use aura_app::ui::prelude::*;
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
 

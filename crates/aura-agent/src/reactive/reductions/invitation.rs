@@ -5,7 +5,7 @@
 
 use crate::reactive::scheduler::ViewReduction;
 use aura_composition::{downcast_delta, ViewDelta, ViewDeltaReducer};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_invitation::{InvitationDelta, InvitationViewReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
@@ -49,8 +49,8 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
 mod tests {
     use super::*;
     use aura_composition::IntoViewDelta;
-    use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
     use aura_invitation::{InvitationDirection, InvitationFact, InvitationStatus};
     use aura_journal::DomainFact;
 

@@ -3,11 +3,11 @@
 //! Pure fact types for transport layer state changes.
 //! These facts are defined here (Layer 2) and committed by higher layers.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
     FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
 };
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use serde::{Deserialize, Serialize};
 

@@ -6,7 +6,7 @@
 #![allow(clippy::incompatible_msrv)]
 
 use aura_app::ui::contract::{list_item_dom_id, ControlId, FieldId, ListId, ModalId};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use dioxus::prelude::*;
 use dioxus_shadcn::components::badge::{Badge as LbBadge, BadgeVariant as LbBadgeVariant};
 use dioxus_shadcn::components::card::Card as LbCard;

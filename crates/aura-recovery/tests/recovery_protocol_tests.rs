@@ -5,7 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::redundant_clone, clippy::useless_vec)]
 
-use aura_core::{identifiers::AuthorityId, Hash32, TrustLevel};
+use aura_core::{types::identifiers::AuthorityId, Hash32, TrustLevel};
 use aura_recovery::{
     guardian_ceremony::{CeremonyId, CeremonyResponse, CeremonyStatus, GuardianRotationOp},
     types::{GuardianProfile, GuardianSet},

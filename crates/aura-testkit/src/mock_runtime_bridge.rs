@@ -29,9 +29,9 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::ThresholdConfig;
 use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::SigningContext;
 use aura_core::{DeviceId, ThresholdSignature};
@@ -356,9 +356,9 @@ impl RuntimeBridge for MockRuntimeBridge {
     ) -> Result<Option<ContextId>, IntentError> {
         let facts = self.facts.read().await;
         for fact in facts.iter().rev() {
-            if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(
-                checkpoint,
-            )) = fact
+            if let RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+            ) = fact
             {
                 if checkpoint.channel == channel {
                     return Ok(Some(checkpoint.context));

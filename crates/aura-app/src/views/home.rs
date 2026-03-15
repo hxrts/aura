@@ -4,7 +4,7 @@
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
 use crate::workflows::budget::HomeFlowBudget;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
 use aura_social::{AccessLevel, AccessLevelCapabilityConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -608,7 +608,7 @@ impl HomesState {
 #[cfg(test)]
 mod tests {
     use super::{HomeMember, HomeRole};
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
     use proptest::prelude::*;
 
     fn role_strategy() -> impl Strategy<Value = HomeRole> {

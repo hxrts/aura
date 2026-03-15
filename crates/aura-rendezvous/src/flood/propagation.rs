@@ -27,7 +27,7 @@ use aura_core::{
         },
         CryptoEffects, NetworkEffects,
     },
-    identifiers::AuthorityId,
+    types::AuthorityId,
 };
 use aura_social::SocialTopology;
 use std::collections::HashSet;

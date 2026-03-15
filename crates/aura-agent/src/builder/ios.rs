@@ -27,7 +27,7 @@
 use aura_core::effects::ExecutionMode;
 #[cfg(feature = "ios")]
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 
 use crate::builder::BuildError;
 use crate::core::AgentConfig;

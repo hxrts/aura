@@ -6,7 +6,7 @@
 //! Note: Tests for deprecated AuraRuntime have been removed.
 //! Use aura-agent::AgentRuntime for new code.
 
-use aura_core::{identifiers::DeviceId, ContextId};
+use aura_core::{types::identifiers::DeviceId, ContextId};
 use aura_mpst::telltale_choreography::extensions::ExtensionRegistry;
 
 #[test]

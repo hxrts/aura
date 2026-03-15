@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::types::identifiers::{DeviceId, SessionId};
 
 use crate::types::ProtocolType;
 

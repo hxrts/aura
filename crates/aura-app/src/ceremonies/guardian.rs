@@ -2,7 +2,7 @@
 //!
 //! Type-safe guardian candidate set ensuring non-empty contact list.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use std::fmt;
 
 /// Error when constructing guardian candidates

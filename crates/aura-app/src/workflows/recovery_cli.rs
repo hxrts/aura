@@ -34,8 +34,8 @@ pub const DISPUTE_WINDOW_HOURS_MAX: u64 = 720;
 use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects};
 use aura_core::frost::PublicKeyPackage;
-use aura_core::identifiers::{AuthorityId, ContextId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ContextId, RecoveryId};
 use aura_core::{hash, AuraError, FactValue, Hash32};
 use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
 use aura_recovery::recovery_protocol::{

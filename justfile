@@ -167,10 +167,6 @@ harness-run-browser scenario config="configs/harness/browser-loopback.toml" arti
 harness-lint-browser scenario config="configs/harness/browser-loopback.toml":
     just harness-lint -- --config {{ config }} --scenario {{ scenario }}
 
-# Audit semantic migration state for harness scenarios and legacy MBT executor paths
-harness-migration-audit:
-    bash scripts/check/harness-migration-audit.sh
-
 harness-boundary-check:
     bash scripts/check/harness-boundary-policy.sh
 
@@ -234,8 +230,8 @@ ci-shared-flow-policy:
 ci-harness-command-plane-boundary:
     bash scripts/check/harness-command-plane-boundary.sh
 
-ci-harness-scenario-canonical-model:
-    bash scripts/check/harness-scenario-canonical-model.sh
+ci-harness-scenario-shape-contract:
+    bash scripts/check/harness-scenario-shape-contract.sh
 
 ci-harness-runtime-events-authoritative:
     bash scripts/check/harness-runtime-events-authoritative.sh

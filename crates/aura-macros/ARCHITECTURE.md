@@ -23,6 +23,16 @@ type-safe Rust code for distributed protocols.
 - All work happens at compile time.
 - Uses empty extension registry (extensions handled by aura-macros itself).
 
+## Ownership Model
+
+- `aura-macros` is primarily `Pure`.
+- It owns compile-time translation, not `ActorOwned` runtime lifecycle.
+- Ownership transfer and capability requirements should appear in generated
+  typed surfaces rather than being inferred from ad hoc runtime conventions.
+- Macro output may expose `MoveOwned` or capability-gated contracts, but the
+  macro crate does not own those lifecycles at runtime.
+- `Observed` tooling may inspect expansions, not mutate semantic truth.
+
 ### Detailed Specifications
 
 ### InvariantChoreographyAnnotationProjection
@@ -46,4 +56,3 @@ Contract alignment:
 - No runtime code or effect implementations.
 - Generated code uses types from aura-mpst for choreographies.
 - No multi-party coordination (only generates code).
-

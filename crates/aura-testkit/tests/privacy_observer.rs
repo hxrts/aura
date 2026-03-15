@@ -1,6 +1,8 @@
 //! Tests for privacy observer functionality
 
-use aura_testkit::privacy::{simulate_rendezvous_trace, traces_equivalent, PrivacyObserver};
+use aura_testkit::configuration::privacy::{
+    simulate_rendezvous_trace, traces_equivalent, PrivacyObserver,
+};
 
 #[test]
 fn observer_traces_are_indistinguishable() {

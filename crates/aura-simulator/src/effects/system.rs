@@ -12,7 +12,7 @@ use aura_core::{
         },
         *,
     },
-    identifiers::DeviceId,
+    types::DeviceId,
     AuraError, AuraFault, AuraFaultKind,
 };
 use aura_testkit::stateful_effects::{

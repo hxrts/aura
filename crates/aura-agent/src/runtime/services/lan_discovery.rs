@@ -4,10 +4,10 @@
 //! via `UdpEffects` (Layer 3) and wired by the runtime. The packet/config types live in
 //! `aura-rendezvous` as pure data.
 
-use super::runtime_tasks::TaskGroup;
+use crate::runtime::TaskGroup;
 use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor,
 };

@@ -12,7 +12,7 @@
 use async_trait::async_trait;
 use aura_core::{
     effects::{LeakageBudget, LeakageEffects, LeakageEvent, ObserverClass, StorageEffects},
-    identifiers::ContextId,
+    types::identifiers::ContextId,
     AuraError, Result,
 };
 use serde_json::{from_str, to_string};

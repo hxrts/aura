@@ -16,7 +16,7 @@ use tempfile::NamedTempFile;
 
 /// Stateless Quint evaluator handler implementing core evaluation effects
 #[derive(Debug, Clone)]
-pub struct QuintEvaluator {
+pub struct QuintEffectHandler {
     /// Configuration for the evaluator
     config: QuintEvaluatorConfig,
 }
@@ -45,7 +45,7 @@ impl Default for QuintEvaluatorConfig {
     }
 }
 
-impl QuintEvaluator {
+impl QuintEffectHandler {
     /// Create a new stateless Quint evaluator with default configuration
     pub fn new() -> Self {
         Self::with_config(QuintEvaluatorConfig::default())
@@ -62,14 +62,14 @@ impl QuintEvaluator {
     }
 }
 
-impl Default for QuintEvaluator {
+impl Default for QuintEffectHandler {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl QuintEvaluationEffects for QuintEvaluator {
+impl QuintEvaluationEffects for QuintEffectHandler {
     async fn load_property_spec(&self, spec_source: &str) -> Result<PropertySpec> {
         if self.config.verbose {
             tracing::debug!("Loading property spec from source");
@@ -260,7 +260,7 @@ impl QuintEvaluationEffects for QuintEvaluator {
 }
 
 #[async_trait]
-impl QuintVerificationEffects for QuintEvaluator {
+impl QuintVerificationEffects for QuintEffectHandler {
     async fn verify_property(
         &self,
         property: &Property,

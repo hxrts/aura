@@ -5,7 +5,7 @@
 
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -31,7 +31,7 @@ pub struct AuthorityContext {
 
     /// Internal device identifier (derived from authority, not exposed publicly)
     #[allow(dead_code)]
-    pub(crate) device_id: aura_core::identifiers::DeviceId,
+    pub(crate) device_id: aura_core::types::identifiers::DeviceId,
 }
 
 /// Information about a relational context
@@ -102,7 +102,7 @@ impl AuthorityContext {
 
     /// Internal access to device ID (crate-private)
     #[allow(dead_code)]
-    pub(crate) fn device_id(&self) -> aura_core::identifiers::DeviceId {
+    pub(crate) fn device_id(&self) -> aura_core::types::identifiers::DeviceId {
         self.device_id
     }
 }

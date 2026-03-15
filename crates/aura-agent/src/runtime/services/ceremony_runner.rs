@@ -9,10 +9,10 @@ use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
 use aura_core::domain::status::CeremonyStatus;
-use aura_core::identifiers::CeremonyId;
 use aura_core::query::ConsensusId;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::{DeviceId, Hash32};
 
 /// Inputs required to initiate a ceremony.
@@ -20,7 +20,7 @@ use aura_core::{DeviceId, Hash32};
 pub struct CeremonyInitRequest {
     pub ceremony_id: CeremonyId,
     pub kind: CeremonyKind,
-    pub initiator_id: aura_core::identifiers::AuthorityId,
+    pub initiator_id: aura_core::types::identifiers::AuthorityId,
     pub threshold_k: u16,
     pub total_n: u16,
     pub participants: Vec<ParticipantIdentity>,

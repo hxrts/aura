@@ -70,7 +70,7 @@ use aura_core::{
         NetworkEffects, ObserverClass, PhysicalTimeEffects, RandomCoreEffects, RandomEffects,
         StorageCoreEffects, StorageEffects,
     },
-    identifiers::AuthorityId,
+    types::identifiers::AuthorityId,
     AuraError, AuraResult as Result,
 };
 use std::sync::Arc;
@@ -245,7 +245,7 @@ where
                     source: self.authority_id,
                     destination: self.authority_id, // Self-leakage for deterministic accounting
                     #[allow(clippy::unwrap_used)] // Infallible: 32-byte hash slice to 16-byte array
-                    context_id: aura_core::identifiers::ContextId::from_uuid(uuid::Uuid::from_bytes(
+                    context_id: aura_core::types::identifiers::ContextId::from_uuid(uuid::Uuid::from_bytes(
                         aura_core::hash::hash(self.authority_id.to_string().as_bytes())[..16]
                             .try_into()
                             .unwrap(),
@@ -395,7 +395,7 @@ mod tests {
 
         async fn get_flow_budget(
             &self,
-            _context: &aura_core::identifiers::ContextId,
+            _context: &aura_core::types::identifiers::ContextId,
             _peer: &AuthorityId,
         ) -> Result<aura_core::FlowBudget> {
             Ok(aura_core::FlowBudget::default())
@@ -403,7 +403,7 @@ mod tests {
 
         async fn update_flow_budget(
             &self,
-            _context: &aura_core::identifiers::ContextId,
+            _context: &aura_core::types::identifiers::ContextId,
             _peer: &AuthorityId,
             budget: &aura_core::FlowBudget,
         ) -> Result<aura_core::FlowBudget> {
@@ -412,7 +412,7 @@ mod tests {
 
         async fn charge_flow_budget(
             &self,
-            _context: &aura_core::identifiers::ContextId,
+            _context: &aura_core::types::identifiers::ContextId,
             _peer: &AuthorityId,
             _cost: aura_core::FlowCost,
         ) -> Result<aura_core::FlowBudget> {
@@ -437,16 +437,16 @@ mod tests {
     impl FlowBudgetEffects for MockFlowBudgetEffects {
         async fn charge_flow(
             &self,
-            context: &aura_core::identifiers::ContextId,
+            context: &aura_core::types::identifiers::ContextId,
             peer: &AuthorityId,
             cost: aura_core::FlowCost,
-        ) -> Result<aura_core::flow::Receipt> {
+        ) -> Result<aura_core::types::flow::Receipt> {
             let mut budgets = self.budgets.lock().await;
             let budget = budgets.entry(*peer).or_insert(1000);
             let cost_value = cost.value();
             if *budget >= cost_value {
                 *budget -= cost_value;
-                Ok(aura_core::flow::Receipt {
+                Ok(aura_core::types::flow::Receipt {
                     ctx: *context,
                     src: *peer,
                     dst: *peer, // Using peer for both in mock
@@ -475,14 +475,14 @@ mod tests {
 
         async fn get_leakage_budget(
             &self,
-            _context_id: aura_core::identifiers::ContextId,
+            _context_id: aura_core::types::identifiers::ContextId,
         ) -> Result<aura_core::effects::LeakageBudget> {
             Ok(aura_core::effects::LeakageBudget::zero())
         }
 
         async fn check_leakage_budget(
             &self,
-            _context_id: aura_core::identifiers::ContextId,
+            _context_id: aura_core::types::identifiers::ContextId,
             _observer: ObserverClass,
             _amount: u64,
         ) -> Result<bool> {
@@ -491,7 +491,7 @@ mod tests {
 
         async fn get_leakage_history(
             &self,
-            _context_id: aura_core::identifiers::ContextId,
+            _context_id: aura_core::types::identifiers::ContextId,
             _since_timestamp: Option<&aura_core::time::PhysicalTime>,
         ) -> Result<Vec<LeakageEvent>> {
             Ok(vec![])
@@ -717,7 +717,7 @@ mod tests {
 
         let authority = AuthorityId::new_from_entropy([2u8; 32]);
         let cmd = EffectCommand::ChargeBudget {
-            context: aura_core::identifiers::ContextId::new_from_entropy([3u8; 32]),
+            context: aura_core::types::identifiers::ContextId::new_from_entropy([3u8; 32]),
             authority,
             peer: authority,
             amount: aura_core::FlowCost::new(100),

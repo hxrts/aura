@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 
-use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, SessionId};
 use aura_simulator::{
     PropertyEvent, PropertyMonitoringConfig, PropertyStateSnapshot, ProtocolPropertyClass,
     ProtocolPropertySuiteIds, SimulationEffectComposer, SimulationScenarioConfig,

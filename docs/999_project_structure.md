@@ -4,6 +4,10 @@ This document provides the authoritative reference for Aura's crate organization
 
 The **primary specifications** live in `docs/` (e.g., consensus in `docs/108_consensus.md`, ceremony lifecycles in `docs/109_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
 
+The repo-wide ownership taxonomy is defined in
+[Ownership Model](122_ownership_model.md). This document specifies how those
+ownership rules map onto Aura's crate and layer structure.
+
 ## 8-Layer Architecture
 
 Aura's codebase is organized into 8 clean architectural layers. Each layer builds on the layers below without circular dependencies.
@@ -46,6 +50,34 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 └────────────────────────────────────────────────────┘
 ```
 
+## Repo-Wide Ownership Categories
+
+Aura uses four ownership categories:
+
+- `Pure`
+- `MoveOwned`
+- `ActorOwned`
+- `Observed`
+
+These categories are architectural, not stylistic.
+
+- `Pure` code is deterministic and effect-free.
+- `MoveOwned` code represents exclusive authority through consumed values such
+  as handles, owner tokens, and transfer records.
+- `ActorOwned` code owns long-lived mutable async state under one live task or
+  supervisor.
+- `Observed` code reads authoritative state and may submit typed commands, but
+  must not author semantic truth.
+
+Two repo-wide rules apply across every layer:
+
+1. Parity-critical mutation and publication must be capability-gated.
+2. Parity-critical operations must end in typed terminal success, failure, or
+   cancellation.
+
+If a parity-critical subsystem cannot explain who owns state, how ownership is
+transferred, and how failure terminates, the architecture is incomplete.
+
 ## Layer 1: Foundation — `aura-core`
 
 **Purpose**: Single source of truth for all domain concepts and interfaces.
@@ -61,6 +93,13 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 - AMP channel lifecycle effect surface: `aura-core::effects::amp::AmpChannelEffects` (implemented by runtime, simulator, and testkit mocks).
 
 **Key principle**: Interfaces only, no implementations or business logic.
+
+**Ownership expectation**:
+- primarily `Pure`
+- defines the shared ownership, capability, and terminality vocabulary used by
+  higher layers
+- does not own long-lived mutable runtime state
+- provides capability-gated boundaries rather than bypassing them
 
 **Exceptions**:
 
@@ -116,6 +155,12 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 ## Layer 2: Specification — Domain Crates and Choreography
 
 **Purpose**: Define domain semantics and protocol specifications.
+
+**Ownership expectation**:
+- default to `Pure`
+- use `MoveOwned` only when transfer semantics are part of the domain model
+- avoid `ActorOwned` runtime-style state
+- expose typed results and typed domain failures rather than implicit failure
 
 ### Layer 2 Architecture Diff (Invariants)
 
@@ -286,6 +331,13 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **Purpose**: Effect implementation and handler composition.
 
+**Ownership expectation**:
+- `aura-effects` handlers remain stateless by default
+- `aura-composition` may assemble and configure systems, but should not grow ad
+  hoc authority ownership or hidden semantic lifecycle
+- capability checks should flow through shared contracts, not handler-local
+  shortcuts
+
 ### `aura-effects` — Stateless Effect Handlers
 
 **Purpose**: Stateless, single-party effect implementations. **Architectural Decision**: `aura-effects` is the designated singular point of interaction with non-deterministic operating system services (entropy, wall-clock time, network I/O, file system). This design choice makes the architectural boundary explicit and centralizes impure operations.
@@ -332,6 +384,13 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **Purpose**: Multi-party coordination and distributed protocol orchestration.
 
+**Ownership expectation**:
+- use `MoveOwned` for delegation, session ownership, endpoint transfer, and
+  stale-owner invalidation
+- use `ActorOwned` only for justified long-lived orchestration state
+- coordination authority and semantic publication should be capability-gated
+- async orchestration flows should have typed terminal outcomes
+
 **Contains**:
 - Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`) in `aura-guards`
 - Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
@@ -355,6 +414,14 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 ## Layer 5: Feature/Protocol Implementation
 
 **Purpose**: Complete end-to-end protocol implementations.
+
+**Ownership expectation**:
+- feature workflows should have one authoritative semantic owner
+- wrappers, adapters, and compatibility helpers must not publish stronger
+  semantics than canonical workflows
+- long-running feature operations need typed lifecycle and typed terminal
+  failure
+- parity-critical mutation/publication must be capability-gated
 
 **Crates**:
 
@@ -385,6 +452,15 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **Purpose**: Assemble complete running systems for production deployment.
 
+**Ownership expectation**:
+- this is the primary `ActorOwned` layer
+- runtime services, supervisors, readiness coordinators, and caches should be
+  actor-owned
+- ownership transfer still uses `MoveOwned` handoff surfaces rather than direct
+  shared mutable rewrites
+- runtime mutation and publication should require explicit capabilities
+- long-running operations and services must have typed terminal lifecycle
+
 **`aura-agent`**: Production runtime for deployment with application lifecycle management, runtime-specific configuration, production deployment concerns, and system integration.
 
 **`aura-app`**: Portable headless application core providing the business logic and state management layer for all platforms. Exposes a platform-agnostic API consumed by terminal, iOS, Android, and web frontends. Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`).
@@ -412,6 +488,13 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **Purpose**: User-facing applications with main entry points.
 
+**Ownership expectation**:
+- primarily `Observed`
+- command ingress mechanics may be `ActorOwned` at the shell boundary
+- UI must not co-author parity-critical semantic lifecycle or readiness truth
+- render and projection layers consume authoritative state rather than
+  inventing it
+
 **`aura-terminal`**: Terminal-based interface combining CLI commands and an interactive TUI (Terminal User Interface). Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic and state management.
 
 **Key characteristic**: Contains `main()` entry point that users run directly. Binary is named `aura`.
@@ -421,6 +504,13 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 ## Layer 8: Testing and Development Tools
 
 **Purpose**: Cross-cutting test utilities, formal verification bridges, and generative testing infrastructure.
+
+**Ownership expectation**:
+- test infrastructure may simulate `ActorOwned` and `MoveOwned` systems
+- parity-critical lanes must still respect production ownership boundaries
+- harness and diagnostics are primarily `Observed`
+- test-only mutation shortcuts should be narrow, documented, and
+  capability-aware
 
 **`aura-testkit`**: Comprehensive testing infrastructure including:
 - Shared test fixtures and scenario builders
@@ -445,8 +535,10 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 Shared UX contract ownership is split intentionally:
 - `aura-app::ui_contract` owns parity-critical ids, action contracts, support declarations, and typed observation shapes
-- Layer 7 frontends consume that contract and publish semantic state
-- `aura-harness` consumes those semantic publications and must treat them as side-effect-free authoritative observation surfaces
+- Layer 7 frontends consume that contract and export observed semantic
+  projections
+- `aura-harness` consumes those observed projections and must treat them as
+  side-effect-free authoritative observation surfaces
 
 Deterministic observation policy:
 - parity-critical waits bind to declared readiness, event, or quiescence conditions

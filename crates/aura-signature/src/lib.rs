@@ -71,7 +71,7 @@ use guardian::verify_guardian_signature;
 use threshold::verify_threshold_signature;
 
 // Re-export domain types
-pub use aura_core::relationships::*;
+pub use aura_core::types::relationships::*;
 
 // Re-export registry types (from merged aura-identity)
 pub use registry::{AuthorityRegistry, AuthorityStatus, VerificationResult};

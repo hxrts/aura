@@ -12,12 +12,11 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
-use crate::runtime::services::RuntimeTaskRegistry;
-use crate::runtime::AuraEffectSystem;
+use crate::runtime::{AuraEffectSystem, TaskSupervisor};
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_core::Hash32;
 use std::str::FromStr;
@@ -31,7 +30,7 @@ pub struct InvitationServiceApi {
     handler: InvitationHandler,
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
-    tasks: Arc<RuntimeTaskRegistry>,
+    tasks: Arc<TaskSupervisor>,
 }
 
 impl std::fmt::Debug for InvitationServiceApi {
@@ -55,7 +54,7 @@ impl InvitationServiceApi {
             handler,
             effects,
             ceremony_runner,
-            tasks: Arc::new(RuntimeTaskRegistry::new()),
+            tasks: Arc::new(TaskSupervisor::new()),
         })
     }
 
@@ -64,7 +63,7 @@ impl InvitationServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
-        tasks: Arc<RuntimeTaskRegistry>,
+        tasks: Arc<TaskSupervisor>,
     ) -> AgentResult<Self> {
         let handler = InvitationHandler::new(authority_context)?;
         Ok(Self {
@@ -227,6 +226,56 @@ impl InvitationServiceApi {
                 tasks.spawn_local_named("register", fut);
             } else {
                 tasks.spawn_named("register", fut);
+            }
+        }
+    }
+
+    fn spawn_invitation_acceptance_ceremony_progress(
+        &self,
+        ceremony_id: CeremonyId,
+        invitation: &Invitation,
+    ) {
+        let ceremony_runner = self.ceremony_runner.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.accept_ceremony.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let receiver_id = invitation.receiver_id;
+        let fut = async move {
+            let participant = aura_core::threshold::ParticipantIdentity::guardian(receiver_id);
+            if let Err(error) = ceremony_runner
+                .record_response(&ceremony_id, participant)
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    ceremony_id = %ceremony_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "Invitation acceptance ceremony response registration failed"
+                );
+                return;
+            }
+            if let Err(error) = ceremony_runner
+                .commit(&ceremony_id, CeremonyCommitMetadata::default())
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    ceremony_id = %ceremony_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "Invitation acceptance ceremony commit failed"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("accept_commit", fut);
+            } else {
+                tasks.spawn_named("accept_commit", fut);
             }
         }
     }
@@ -456,20 +505,7 @@ impl InvitationServiceApi {
                 self.spawn_contact_acceptance_notification(invitation.invitation_id.clone());
             }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
-                let _ = self
-                    .ceremony_runner
-                    .record_response(
-                        &ceremony_id,
-                        aura_core::threshold::ParticipantIdentity::guardian(invitation.receiver_id),
-                    )
-                    .await
-                    .map_err(|e| {
-                        AgentError::internal(format!("Failed to record invitation acceptance: {e}"))
-                    })?;
-                let _ = self
-                    .ceremony_runner
-                    .commit(&ceremony_id, CeremonyCommitMetadata::default())
-                    .await;
+                self.spawn_invitation_acceptance_ceremony_progress(ceremony_id, &invitation);
             }
         }
 
@@ -826,10 +862,7 @@ mod tests {
             InvitationType::Channel {
                 nickname_suggestion,
                 ..
-            } => assert_eq!(
-                nickname_suggestion.as_deref(),
-                Some("shared-parity-lab")
-            ),
+            } => assert_eq!(nickname_suggestion.as_deref(), Some("shared-parity-lab")),
             _ => panic!("expected channel invitation"),
         }
     }

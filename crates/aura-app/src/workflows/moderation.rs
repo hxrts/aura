@@ -12,8 +12,7 @@ use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snaps
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
-    effects::amp::ChannelLeaveParams,
-    identifiers::{ChannelId, ContextId},
+    effects::amp::ChannelLeaveParams, types::identifiers::{ChannelId, ContextId},
     AuraError,
 };
 use aura_journal::{fact::RelationalFact, DomainFact};
@@ -32,7 +31,7 @@ struct ModerationScope {
     context_id: ContextId,
     home_id: ChannelId,
     can_moderate: bool,
-    peers: Vec<aura_core::identifiers::AuthorityId>,
+    peers: Vec<aura_core::types::identifiers::AuthorityId>,
 }
 
 fn parse_channel_hint(channel: &str) -> Result<ChannelSelector, AuraError> {
@@ -253,7 +252,7 @@ async fn commit_and_fanout(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     scope: &ModerationScope,
     fact: RelationalFact,
-    extra_peers: &[aura_core::identifiers::AuthorityId],
+    extra_peers: &[aura_core::types::identifiers::AuthorityId],
 ) -> Result<(), AuraError> {
     runtime
         .commit_relational_facts(std::slice::from_ref(&fact))
@@ -282,7 +281,7 @@ async fn commit_and_fanout(
 
 async fn send_moderation_fact_with_retry(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    peer: aura_core::identifiers::AuthorityId,
+    peer: aura_core::types::identifiers::AuthorityId,
     context_id: ContextId,
     fact: &RelationalFact,
 ) -> Result<(), AuraError> {
@@ -314,7 +313,7 @@ async fn send_moderation_fact_with_retry(
 async fn apply_local_home_projection<F>(
     app_core: &Arc<RwLock<AppCore>>,
     scope: &ModerationScope,
-    actor: aura_core::identifiers::AuthorityId,
+    actor: aura_core::types::identifiers::AuthorityId,
     timestamp_ms: u64,
     update: F,
 ) -> Result<(), AuraError>
@@ -347,7 +346,7 @@ where
 async fn resolve_target_authority(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
-) -> Result<aura_core::identifiers::AuthorityId, AuraError> {
+) -> Result<aura_core::types::identifiers::AuthorityId, AuraError> {
     if let Ok(contact) = crate::workflows::query::resolve_contact(app_core, target).await {
         return Ok(contact.id);
     }
@@ -371,7 +370,7 @@ pub async fn kick_user(
 pub async fn kick_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
-    target_id: aura_core::identifiers::AuthorityId,
+    target_id: aura_core::types::identifiers::AuthorityId,
     reason: Option<&str>,
     kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
@@ -426,7 +425,7 @@ pub async fn ban_user(
 pub async fn ban_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<ChannelId>,
-    target_id: aura_core::identifiers::AuthorityId,
+    target_id: aura_core::types::identifiers::AuthorityId,
     reason: Option<&str>,
     banned_at_ms: u64,
 ) -> Result<(), AuraError> {
@@ -486,7 +485,7 @@ pub async fn unban_user(
 pub async fn unban_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<ChannelId>,
-    target_id: aura_core::identifiers::AuthorityId,
+    target_id: aura_core::types::identifiers::AuthorityId,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.can_moderate {
@@ -537,7 +536,7 @@ pub async fn mute_user(
 pub async fn mute_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<ChannelId>,
-    target_id: aura_core::identifiers::AuthorityId,
+    target_id: aura_core::types::identifiers::AuthorityId,
     duration_secs: Option<u64>,
     muted_at_ms: u64,
 ) -> Result<(), AuraError> {
@@ -600,7 +599,7 @@ pub async fn unmute_user(
 pub async fn unmute_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<ChannelId>,
-    target_id: aura_core::identifiers::AuthorityId,
+    target_id: aura_core::types::identifiers::AuthorityId,
 ) -> Result<(), AuraError> {
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.can_moderate {
@@ -709,7 +708,7 @@ mod tests {
         Contact, ContactsState,
     };
     use crate::AppConfig;
-    use aura_core::{crypto::hash::hash, identifiers::AuthorityId};
+    use aura_core::{crypto::hash::hash, types::identifiers::AuthorityId};
 
     #[tokio::test]
     async fn moderation_requires_home() {

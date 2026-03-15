@@ -1,5 +1,5 @@
 use aura_macros::ceremony_facts;
-use aura_core::identifiers::CeremonyId;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::threshold::AgreementMode;
 
 #[ceremony_facts]

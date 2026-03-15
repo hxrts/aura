@@ -3,7 +3,7 @@
 //! Tests for the type-safe ceremony patterns.
 
 use super::*;
-use aura_core::identifiers::{AuthorityId, ChannelId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, DeviceId};
 use std::sync::atomic::{AtomicU8, Ordering};
 use uuid::Uuid;
 

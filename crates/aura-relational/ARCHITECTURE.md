@@ -21,6 +21,16 @@ guardian request handling, and consensus-backed relationship establishment.
 - Cross-authority relationships are established through explicit consensus flows.
 - Guardian bindings require mutual agreement.
 
+## Ownership Model
+
+- `aura-relational` is primarily `Pure` relational-domain logic.
+- Relationship establishment or transfer semantics that require exclusivity
+  should be explicit and `MoveOwned`.
+- Long-lived coordination for relationship workflows belongs in higher-layer
+  single-owner coordinators rather than hidden mutable crate state.
+- Capability-gated publication is required for parity-critical relational facts.
+- `Observed` views may inspect relationship state but not author it.
+
 ### Detailed Specifications
 
 ### InvariantRelationalMutualAgreement
@@ -47,4 +57,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

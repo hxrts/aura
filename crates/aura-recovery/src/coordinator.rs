@@ -19,9 +19,9 @@ use crate::effects::RecoveryEffects;
 use crate::types::{RecoveryEvidence, RecoveryResponse, RecoveryShare};
 use crate::RecoveryResult;
 use async_trait::async_trait;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{SignableOperation, SigningContext, ThresholdSignature};
 use aura_core::tree::TreeCommitment;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::sync::Arc;
 
 /// Base trait for all recovery coordinators.

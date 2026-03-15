@@ -19,10 +19,8 @@ use aura_app::ui::types::{
         RecoveryApproval as AppRecoveryApproval, RecoveryProcess as AppRecoveryProcess,
         RecoveryProcessStatus as AppRecoveryProcessStatus, RecoveryState as AppRecoveryState,
     },
+    MessageDeliveryStatus,
 };
-
-// Re-export portable MessageDeliveryStatus from aura-app
-pub use aura_app::ui::types::MessageDeliveryStatus as PortableDeliveryStatus;
 
 /// A chat channel
 #[derive(Clone, Debug, Default)]
@@ -142,24 +140,24 @@ impl DeliveryStatus {
     /// Whether the message has reached the recipient's device
     pub fn is_delivered(&self) -> bool {
         // Delegate to portable implementation
-        PortableDeliveryStatus::from(*self).is_delivered()
+        MessageDeliveryStatus::from(*self).is_delivered()
     }
 
     /// Whether the message has been read by the recipient
     pub fn is_read(&self) -> bool {
         // Delegate to portable implementation
-        PortableDeliveryStatus::from(*self).is_read()
+        MessageDeliveryStatus::from(*self).is_read()
     }
 
     /// Whether the message is still pending (not yet confirmed delivered)
     pub fn is_pending(&self) -> bool {
         // Delegate to portable implementation
-        PortableDeliveryStatus::from(*self).is_pending()
+        MessageDeliveryStatus::from(*self).is_pending()
     }
 }
 
 /// Convert local DeliveryStatus to portable MessageDeliveryStatus from aura-app
-impl From<DeliveryStatus> for PortableDeliveryStatus {
+impl From<DeliveryStatus> for MessageDeliveryStatus {
     fn from(status: DeliveryStatus) -> Self {
         match status {
             DeliveryStatus::Sending => Self::Sending,
@@ -172,14 +170,14 @@ impl From<DeliveryStatus> for PortableDeliveryStatus {
 }
 
 /// Convert portable MessageDeliveryStatus from aura-app to local DeliveryStatus
-impl From<PortableDeliveryStatus> for DeliveryStatus {
-    fn from(status: PortableDeliveryStatus) -> Self {
+impl From<MessageDeliveryStatus> for DeliveryStatus {
+    fn from(status: MessageDeliveryStatus) -> Self {
         match status {
-            PortableDeliveryStatus::Sending => Self::Sending,
-            PortableDeliveryStatus::Sent => Self::Sent,
-            PortableDeliveryStatus::Delivered => Self::Delivered,
-            PortableDeliveryStatus::Read => Self::Read,
-            PortableDeliveryStatus::Failed => Self::Failed,
+            MessageDeliveryStatus::Sending => Self::Sending,
+            MessageDeliveryStatus::Sent => Self::Sent,
+            MessageDeliveryStatus::Delivered => Self::Delivered,
+            MessageDeliveryStatus::Read => Self::Read,
+            MessageDeliveryStatus::Failed => Self::Failed,
         }
     }
 }

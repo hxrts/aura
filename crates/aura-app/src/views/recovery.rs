@@ -1,6 +1,6 @@
 //! # Recovery View State
 
-use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

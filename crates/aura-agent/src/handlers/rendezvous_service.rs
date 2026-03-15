@@ -14,7 +14,7 @@ use crate::runtime::{
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ContextId};
 use aura_core::util::serialization::to_vec;
 use aura_core::Hash32;
 use aura_mpst::CompositionManifest;

@@ -32,7 +32,7 @@ use aura_agent::EffectContext;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::FrostThreshold;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
@@ -232,7 +232,7 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
 #[tokio::test]
 async fn control_guardian_ceremony_works_with_demo_peers() {
     use aura_core::hash;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
     use aura_journal::DomainFact;
     use aura_relational::ContactFact;
     use aura_terminal::demo::DemoSimulator;
@@ -244,7 +244,7 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
     let bob_device_id_str = "demo:bob";
     let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
     let bob_authority =
-        aura_core::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
+        aura_core::types::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
     let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 

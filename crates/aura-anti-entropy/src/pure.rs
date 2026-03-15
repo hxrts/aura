@@ -48,7 +48,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(1),
-                        aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
+                        aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
                         vec![1, 2, 3],
                     )
                     .expect("valid leaf"),

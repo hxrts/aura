@@ -19,6 +19,16 @@ with explicit guard chain enforcement on network operations.
 - Persistent storage uses shared commitment tree storage keys.
 - Vector-clock metadata remains causally consistent (`InvariantVectorClockConsistent`).
 
+## Ownership Model
+
+- `aura-anti-entropy` keeps reconciliation logic `Pure`.
+- Any exclusive sync-session or reconciliation ownership should remain
+  `MoveOwned` in higher-layer coordination surfaces.
+- Long-lived background reconciliation ownership belongs in explicit
+  `ActorOwned` runtime services, not hidden here.
+- Guarded sync publication must remain capability-aware and typed.
+- `Observed` tooling may inspect reconciliation outcomes but not define them.
+
 ### Detailed Specifications
 
 ### InvariantAntiEntropyReconciliationPurity

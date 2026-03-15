@@ -1,6 +1,6 @@
 //! Integration-ish tests for AMP transport helpers using simulated state.
 
-use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_transport::amp::{derive_for_recv, derive_for_send, AmpHeader, AmpRatchetState};
 
 #[test]

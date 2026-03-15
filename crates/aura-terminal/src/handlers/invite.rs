@@ -13,7 +13,7 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::InvitationAction;
 use aura_app::ui::types::{parse_invitation_role, InvitationRoleValue};
-use aura_core::identifiers::{AuthorityId, InvitationId};
+use aura_core::types::identifiers::{AuthorityId, InvitationId};
 use std::str::FromStr;
 
 // CLI handlers use direct agent service access (more efficient for CLI context)
@@ -223,6 +223,7 @@ async fn create_invitation(
                 None,
                 None,
                 None,
+                None,
                 expires_ms,
             )
             .await
@@ -238,7 +239,7 @@ async fn create_invitation(
 mod tests {
     use super::*;
     use aura_agent::handlers::InvitationType;
-    use aura_core::identifiers::{ChannelId, InvitationId};
+    use aura_core::types::identifiers::{ChannelId, InvitationId};
 
     fn test_shareable(invitation_type: InvitationType) -> ShareableInvitation {
         ShareableInvitation {

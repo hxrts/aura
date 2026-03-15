@@ -16,7 +16,7 @@ use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects, TransportError,
 };
 use aura_core::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
+use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::util::serialization::to_vec;
 use aura_core::FlowCost;
 use aura_macros::choreography;
@@ -123,7 +123,7 @@ pub struct SessionCreationFailed {
 }
 
 mod session_id_serde {
-    use aura_core::identifiers::SessionId;
+    use aura_core::types::identifiers::SessionId;
     use serde::{de::Error, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
@@ -917,7 +917,7 @@ impl SessionOperations {
         _effects: &AuraEffectSystem,
         session_type: &SessionType,
     ) -> AgentResult<String> {
-        use aura_core::identifiers::SessionId;
+        use aura_core::types::identifiers::SessionId;
 
         let current_time = self.effects.current_timestamp().await.unwrap_or(0);
         let device_id = self.device_id();
@@ -951,7 +951,7 @@ impl SessionOperations {
     async fn get_session_status_via_effects(
         &self,
         _effects: &AuraEffectSystem,
-        _session_id: &aura_core::identifiers::SessionId,
+        _session_id: &aura_core::types::identifiers::SessionId,
     ) -> AgentResult<Option<SessionHandle>> {
         // Lookup session status
         // Session status lookup is not persisted in this handler yet, so misses return None.
@@ -1037,7 +1037,7 @@ impl SessionOperations {
 mod tests {
     use super::*;
     use crate::core::{AgentConfig, AuthorityContext};
-    use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
+    use aura_core::types::identifiers::{AccountId, AuthorityId, DeviceId};
     use std::sync::Arc;
 
     #[tokio::test]

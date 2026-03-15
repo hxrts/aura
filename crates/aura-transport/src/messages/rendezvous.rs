@@ -475,7 +475,7 @@ pub struct PskHandshakeConfig {
     /// Pre-shared key for PSK-based handshake
     pub k_psk: [u8; 32],
     /// Expected peer authority identifier
-    pub expected_peer_authority: aura_core::identifiers::AuthorityId,
+    pub expected_peer_authority: aura_core::types::identifiers::AuthorityId,
     /// Local authority certificate for identity proof
     pub local_authority_cert: Vec<u8>,
     /// Selected transport for the handshake

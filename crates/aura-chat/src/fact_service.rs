@@ -3,7 +3,7 @@
 //! Provides guard-compatible operations that emit `ChatFact` instances and
 //! return explicit effect commands for an async interpreter to execute.
 
-use aura_core::identifiers::ChannelId;
+use aura_core::types::identifiers::ChannelId;
 
 use crate::facts::ChatFact;
 use crate::guards::{
@@ -103,7 +103,7 @@ impl ChatFactService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
     use aura_core::FlowCost;
 
     #[test]

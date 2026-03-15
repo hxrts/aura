@@ -9,8 +9,8 @@ use crate::runtime::services::ceremony_runner::{
 };
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects};
-use aura_core::identifiers::CeremonyId;
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::Epoch;
 use aura_core::{DeviceId, Hash32};
 use aura_sync::protocols::ota_ceremony::{

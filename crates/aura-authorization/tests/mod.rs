@@ -1,8 +1,8 @@
 //! Test modules for aura-authorization capability system
 
 use aura_authorization::biscuit_authorization::BiscuitAuthorizationBridge;
-use aura_core::identifiers::AuthorityId;
-use aura_core::scope::{AuthorityOp, AuthorizationOp, ResourceScope};
+use aura_core::types::identifiers::AuthorityId;
+use aura_core::types::scope::{AuthorityOp, AuthorizationOp, ResourceScope};
 use biscuit_auth::macros::*;
 
 #[test]

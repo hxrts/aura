@@ -148,7 +148,7 @@ pub(super) fn sync_neighborhood_navigation_state(
         .unwrap_or(false);
     let is_detail_mode = matches!(
         state.neighborhood.mode,
-        crate::tui::state_machine::NeighborhoodMode::Detail
+        crate::tui::state::NeighborhoodMode::Detail
     );
     let expose_remote_home_details = is_selected_home_entered
         && is_detail_mode

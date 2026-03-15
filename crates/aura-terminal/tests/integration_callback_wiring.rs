@@ -43,7 +43,7 @@ use aura_app::views::{
 };
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;

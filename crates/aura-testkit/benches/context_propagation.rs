@@ -6,7 +6,7 @@
 //! - ContextId creation and manipulation
 //! - AuthorityId operations
 
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_core::ContextId;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use uuid::Uuid;

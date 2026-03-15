@@ -5,7 +5,7 @@
 use aura_agent::{AgentBuilder, AuthorityId, EffectContext, ExecutionMode};
 use aura_core::effects::SessionType;
 use aura_core::hash::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -74,8 +74,8 @@ async fn test_threshold_session_via_agent() -> Result<(), Box<dyn std::error::Er
     // Create 3 device IDs for a 2-of-3 threshold
     let participants = vec![
         device_id,
-        aura_core::identifiers::DeviceId::new_from_entropy([1u8; 32]),
-        aura_core::identifiers::DeviceId::new_from_entropy([2u8; 32]),
+        aura_core::types::identifiers::DeviceId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::DeviceId::new_from_entropy([2u8; 32]),
     ];
 
     let handle = sessions

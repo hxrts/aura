@@ -22,7 +22,7 @@
 //! ```
 
 use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 use hex;
 
@@ -744,7 +744,7 @@ mod tests {
     use assert_matches::assert_matches;
     use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
-    use aura_core::{identifiers::ContextId, time::PhysicalTime, Hash32};
+    use aura_core::{types::identifiers::ContextId, time::PhysicalTime, Hash32};
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])

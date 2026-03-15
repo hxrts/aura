@@ -6,7 +6,7 @@
 use aura_amp::AmpJournalEffects;
 use aura_core::effects::time::OrderClockEffects;
 use aura_core::effects::JournalEffects;
-use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_journal::fact::{ChannelCheckpoint, ChannelPolicy, RelationalFact};
 use aura_testkit::mock_effects::MockEffects;

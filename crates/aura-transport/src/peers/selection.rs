@@ -4,7 +4,7 @@
 //! Target: <200 lines (focused implementation).
 
 use super::info::{PeerInfo, ReliabilityLevel};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

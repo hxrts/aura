@@ -17,8 +17,8 @@ use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportError, TransportReceipt,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
 use aura_guards::chain::create_send_guard;
 use aura_guards::types::CapabilityId;

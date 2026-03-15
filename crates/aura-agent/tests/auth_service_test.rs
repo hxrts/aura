@@ -4,7 +4,7 @@
 
 use aura_agent::{AgentBuilder, AuthMethod, AuthorityId, EffectContext, ExecutionMode};
 use aura_core::hash::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {

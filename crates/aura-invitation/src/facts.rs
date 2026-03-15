@@ -38,9 +38,9 @@
 
 use crate::InvitationType;
 use aura_core::crypto::hash;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_core::threshold::AgreementMode;
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -545,7 +545,7 @@ fn derived_context_id(fact: &InvitationFact) -> ContextId {
 }
 
 mod authority_id_display_serde {
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
     use serde::{Deserialize, Deserializer, Serializer};
     use std::str::FromStr;
 

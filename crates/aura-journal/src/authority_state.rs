@@ -17,9 +17,11 @@ use async_trait::async_trait;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::threshold::{SignableOperation, SigningContext};
 use aura_core::tree::TreeOp;
-use aura_core::{authority::TreeStateSummary, AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{types::authority::TreeStateSummary, AuraError, Authority, AuthorityId, Hash32, Result};
 // Using aura-core type aliases for cryptographic types
-use aura_core::authority::{Ed25519Signature as Signature, Ed25519VerifyingKey as PublicKey};
+use aura_core::types::authority::{
+    Ed25519Signature as Signature, Ed25519VerifyingKey as PublicKey,
+};
 
 /// Authority state derived from facts
 ///
@@ -300,7 +302,7 @@ mod tests {
     #[test]
     fn test_authority_state_creation() {
         // Test basic authority state creation
-        let tree_state = aura_core::authority::TreeStateSummary::new();
+        let tree_state = aura_core::types::authority::TreeStateSummary::new();
         let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
 
         let authority_state = AuthorityState::new(tree_state.clone());

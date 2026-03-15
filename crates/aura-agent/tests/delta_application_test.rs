@@ -152,7 +152,7 @@ fn make_timestamp(ms: u64) -> TimeStamp {
 }
 
 fn make_guardian_fact(index: u64) -> Fact {
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
     use aura_core::Hash32;
 
     Fact::new(

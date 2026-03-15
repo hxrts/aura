@@ -23,6 +23,18 @@ verification capabilities.
 - Used for protocol specification verification, not runtime.
 - Re-exports `quint_evaluator` types for interop.
 
+## Ownership Model
+
+- `aura-quint` is primarily `Pure` plus `Observed`.
+- It owns verification bridge schemas and analysis logic, not `ActorOwned`
+  runtime semantic ownership.
+- Any artifact handoff or verification-result transfer should remain explicit
+  and typed rather than hidden mutable state.
+- Verification outputs are downstream observations over modeled behavior; they
+  do not author runtime truth.
+- Capability semantics may be modeled and checked here, but runtime mutation
+  remains outside this crate.
+
 ### Detailed Specifications
 
 ### InvariantQuintIrDeterminism

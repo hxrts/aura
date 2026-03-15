@@ -8,7 +8,7 @@ use crate::workflows::parse::parse_authority_id;
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_core::AuraError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -220,7 +220,7 @@ mod tests {
     use crate::views::{Contact, ContactsState};
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_list_contacts() {

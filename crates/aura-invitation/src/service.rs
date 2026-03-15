@@ -23,8 +23,8 @@ use crate::guards::{
 };
 use crate::InvitationOperation;
 use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_guards::types::CapabilityId;
 use serde::{Deserialize, Serialize};
@@ -158,7 +158,7 @@ pub enum InvitationType {
 }
 
 mod channel_id_serde {
-    use aura_core::identifiers::ChannelId;
+    use aura_core::types::identifiers::ChannelId;
     use serde::{Deserialize, Deserializer, Serializer};
     use std::str::FromStr;
 

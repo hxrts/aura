@@ -19,8 +19,8 @@ use aura_core::effects::{
     JournalEffects, ReactiveEffects, ThresholdSigningEffects, TransportEffects,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use aura_rendezvous::LanDiscoveryConfig;
@@ -180,7 +180,7 @@ async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
 async fn wait_for_chat_fact(
     effects: &Arc<aura_agent::AuraEffectSystem>,
     authority_id: AuthorityId,
-    channel_id: aura_core::identifiers::ChannelId,
+    channel_id: aura_core::types::identifiers::ChannelId,
 ) -> TestResult {
     timeout(Duration::from_secs(5), async {
         loop {
@@ -564,7 +564,7 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
     let effects_b = agent_b.runtime().effects();
 
     let context_id = ContextId::new_from_entropy([42u8; 32]);
-    let channel_id = aura_core::identifiers::ChannelId::from_bytes([43u8; 32]);
+    let channel_id = aura_core::types::identifiers::ChannelId::from_bytes([43u8; 32]);
     let fact = ChatFact::channel_created_ms(
         context_id,
         channel_id,
@@ -656,7 +656,7 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         1_700_000_000_001,
     )
     .await?;
-    let dm_channel_id: aura_core::identifiers::ChannelId = dm_a
+    let dm_channel_id: aura_core::types::identifiers::ChannelId = dm_a
         .parse()
         .map_err(|_| anyhow!("failed to parse dm channel id from start_direct_chat"))?;
 
@@ -810,7 +810,7 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
         1_700_000_100_001,
     )
     .await?;
-    let dm_channel_id: aura_core::identifiers::ChannelId = dm_name
+    let dm_channel_id: aura_core::types::identifiers::ChannelId = dm_name
         .parse()
         .map_err(|_| anyhow!("failed to parse dm channel id from start_direct_chat"))?;
 

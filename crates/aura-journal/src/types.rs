@@ -5,7 +5,7 @@ use aura_core::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 // Re-export shared types from crypto and aura-core
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use aura_core::GuardianId;
 
 /// Guardian metadata

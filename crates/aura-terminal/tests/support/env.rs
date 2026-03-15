@@ -14,7 +14,7 @@ use aura_agent::core::{AgentBuilder, AgentConfig, AuraAgent};
 use aura_agent::EffectContext;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::{create_account, TuiMode};
 use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};

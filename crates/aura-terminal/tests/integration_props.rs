@@ -22,7 +22,7 @@ use aura_terminal::tui::props::{
 };
 use aura_terminal::tui::screens::ChatFocus;
 use aura_terminal::tui::screens::Screen;
-use aura_terminal::tui::state_machine::{
+use aura_terminal::tui::state::{
     transition, ChatFocus as StateChatFocus, DetailFocus, DispatchCommand, NicknameModalState,
     QueuedModal, TuiCommand, TuiState,
 };

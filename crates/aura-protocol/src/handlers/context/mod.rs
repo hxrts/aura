@@ -25,7 +25,7 @@ mod tests {
     use super::*;
     use crate::effects::choreographic::{ChoreographicRole, RoleIndex};
     use crate::handlers::ExecutionMode;
-    use aura_core::identifiers::{AuthorityId, DeviceId};
+    use aura_core::types::identifiers::{AuthorityId, DeviceId};
     use aura_core::SessionId;
     use std::time::Duration;
 

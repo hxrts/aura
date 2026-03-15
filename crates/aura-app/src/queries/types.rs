@@ -13,11 +13,11 @@
 use serde::{Deserialize, Serialize};
 
 use aura_core::{
-    identifiers::{AuthorityId, ChannelId, ContextId},
     query::{
         DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate,
         Query, QueryCapability, QueryParseError,
     },
+    types::{AuthorityId, ChannelId, ContextId},
 };
 
 use crate::views::MessageDeliveryStatus;

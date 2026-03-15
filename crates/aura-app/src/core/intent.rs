@@ -10,9 +10,9 @@
 //! ```
 
 use aura_core::effects::intent::{AuthorizationLevel, IntentMetadata};
-use aura_core::identifiers::{AuthorityId, ContextId};
 #[cfg(any())]
 use aura_core::time::TimeStamp;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::Epoch;
 #[cfg(any())]
 use aura_journal::JournalFact;

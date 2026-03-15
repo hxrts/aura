@@ -12,7 +12,7 @@ use crate::workflows::snapshot_policy::contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
-use aura_core::identifiers::ChannelId;
+use aura_core::types::identifiers::ChannelId;
 use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
@@ -217,9 +217,9 @@ pub async fn set_read_receipt_policy(
 /// * `timestamp_ms` - Current timestamp
 pub async fn emit_read_receipts(
     app_core: &Arc<RwLock<AppCore>>,
-    context_id: aura_core::identifiers::ContextId,
+    context_id: aura_core::types::identifiers::ContextId,
     channel_id: ChannelId,
-    unread_messages: Vec<(String, aura_core::identifiers::AuthorityId)>,
+    unread_messages: Vec<(String, aura_core::types::identifiers::AuthorityId)>,
     timestamp_ms: u64,
 ) -> Result<u32, AuraError> {
     let runtime = require_runtime(app_core).await?;

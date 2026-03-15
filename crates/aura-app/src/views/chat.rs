@@ -1,7 +1,7 @@
 //! # Chat View State
 
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

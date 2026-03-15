@@ -32,6 +32,17 @@ verification with authority lifecycle management and session validation.
 - FROST-compatible threshold verification.
 - Device naming LWW: Latest timestamp wins.
 
+## Ownership Model
+
+- `aura-signature` is primarily `Pure`.
+- It models verification and signature-domain semantics rather than
+  `ActorOwned` service state.
+- Any transfer of signing authority should remain explicit and `MoveOwned` in
+  higher-layer APIs rather than implicit mutation here.
+- Capability and attestation semantics must stay explicit so higher layers can
+  gate mutation/publication correctly.
+- `Observed` consumers may render signature-derived state but not author it.
+
 ### Detailed Specifications
 
 ### InvariantAuthorityLifecycleMonotonicity
@@ -57,4 +68,3 @@ Contract alignment:
 - No authorization logic (use `aura-authorization`).
 - No handler composition (use `aura-composition`).
 - Uses Layer 2 fact pattern (no aura-journal dependency).
-

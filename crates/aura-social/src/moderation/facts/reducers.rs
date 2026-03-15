@@ -2,8 +2,8 @@
 
 use super::constants::*;
 use super::fact_types::*;
-use aura_core::identifiers::ContextId;
 use aura_core::types::facts::FactEnvelope;
+use aura_core::types::identifiers::ContextId;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer, FactRegistry,

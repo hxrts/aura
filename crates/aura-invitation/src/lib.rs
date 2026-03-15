@@ -191,26 +191,6 @@ pub struct Relationship {
     pub created_at: u64,
 }
 
-/// Type alias for guardian identifier
-///
-/// Compatibility alias for `GuardianId` used in invitation contexts
-pub type Guardian = GuardianId;
-
-/// Type alias for a set of guardians
-///
-/// Represents a collection of guardian identifiers
-pub type GuardianSet = Vec<GuardianId>;
-
-/// Type alias for authentication errors
-///
-/// Compatibility alias for `AuthenticationError` used in invitation flows
-pub type AuthError = AuthenticationError;
-
-/// Type alias for authentication results
-///
-/// Compatibility alias for authentication operation results
-pub type AuthResult<T> = Result<T, AuthenticationError>;
-
 // Re-export domain fact types
 pub use facts::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 
@@ -255,7 +235,6 @@ pub use aura_core::{
 
 // Re-export WoT types (using Biscuit tokens instead of legacy capabilities)
 pub use aura_authorization::{BiscuitError, BiscuitTokenManager, TokenAuthority};
-pub use biscuit_auth::Biscuit as BiscuitToken;
 
 // Re-export auth types
 pub use aura_authentication::{

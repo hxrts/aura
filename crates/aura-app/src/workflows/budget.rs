@@ -19,7 +19,7 @@
 //!
 //! ```rust,ignore
 //! use aura_app::workflows::budget::{HomeFlowBudget, BudgetError};
-//! use aura_core::identifiers::HomeId;
+//! use aura_core::types::identifiers::HomeId;
 //!
 //! let mut budget = HomeFlowBudget::new(HomeId::default());
 //!
@@ -42,7 +42,7 @@ use crate::signal_defs::{BUDGET_SIGNAL, BUDGET_SIGNAL_NAME};
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::identifiers::HomeId;
+use aura_core::types::identifiers::HomeId;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -559,7 +559,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
 ///
 /// ```rust
 /// use aura_app::ui::workflows::budget::{HomeFlowBudget, format_budget_compact};
-/// use aura_core::identifiers::HomeId;
+/// use aura_core::types::identifiers::HomeId;
 ///
 /// let budget = HomeFlowBudget::new(HomeId::default());
 /// let compact = format_budget_compact(&budget);
@@ -586,7 +586,7 @@ pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
 ///
 /// ```rust
 /// use aura_app::ui::workflows::budget::{HomeFlowBudget, check_can_add_member};
-/// use aura_core::identifiers::HomeId;
+/// use aura_core::types::identifiers::HomeId;
 ///
 /// let budget = HomeFlowBudget::new(HomeId::default());
 /// assert!(check_can_add_member(&budget).is_ok());

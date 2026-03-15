@@ -10,11 +10,11 @@
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
 use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
     FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
 };
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::{ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};

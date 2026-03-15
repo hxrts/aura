@@ -8,8 +8,8 @@
 //! (not devices) are the cryptographic actors that issue and manage tokens.
 
 use aura_authorization::biscuit_token::{BiscuitError, BiscuitTokenManager, TokenAuthority};
-use aura_core::identifiers::AuthorityId;
-use aura_core::scope::{AuthorityOp, ResourceScope, StoragePath};
+use aura_core::types::identifiers::AuthorityId;
+use aura_core::types::scope::{AuthorityOp, ResourceScope, StoragePath};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 use std::collections::HashMap;
 use std::time::SystemTime;

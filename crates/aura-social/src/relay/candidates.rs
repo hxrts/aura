@@ -4,8 +4,7 @@
 
 use crate::SocialTopology;
 use aura_core::{
-    effects::relay::{RelayCandidate, RelayContext},
-    identifiers::AuthorityId,
+    effects::relay::{RelayCandidate, RelayContext}, types::identifiers::AuthorityId,
 };
 use std::sync::Arc;
 
@@ -120,7 +119,7 @@ impl RelayCandidateBuilder {
 mod tests {
     use super::*;
     use crate::facts::HomeId;
-    use aura_core::{effects::relay::RelayRelationship, identifiers::ContextId};
+    use aura_core::{effects::relay::RelayRelationship, types::identifiers::ContextId};
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

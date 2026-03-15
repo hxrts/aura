@@ -30,7 +30,7 @@ use aura_core::effects::{
     ChaosEffects, SimulationEnvironmentConfig, SimulationEnvironmentFactory, TestingEffects,
     TransportEnvelope,
 };
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use parking_lot::RwLock;
 use std::path::Path;
@@ -951,7 +951,7 @@ mod tests {
     #[tokio::test]
     async fn test_run_scenario_with_property_monitoring() {
         use crate::properties::{PropertyEvent, PropertyStateSnapshot};
-        use aura_core::identifiers::{ContextId, SessionId};
+        use aura_core::types::identifiers::{ContextId, SessionId};
         use aura_testkit::DeviceTestFixture;
         use uuid::Uuid;
 
@@ -1003,7 +1003,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_scenario_property_monitoring_no_violations() {
-        use aura_core::identifiers::{ContextId, SessionId};
+        use aura_core::types::identifiers::{ContextId, SessionId};
         use aura_testkit::DeviceTestFixture;
         use uuid::Uuid;
 

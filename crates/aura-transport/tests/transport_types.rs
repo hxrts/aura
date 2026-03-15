@@ -2,8 +2,8 @@
 
 #![allow(clippy::expect_used, missing_docs)]
 
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_transport::types::{
     ConnectionCloseReason, ConnectionInfo, ConnectionState, Envelope, FrameType, PrivacyContext,

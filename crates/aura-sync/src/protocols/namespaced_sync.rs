@@ -7,7 +7,7 @@
 
 use crate::core::config::SyncConfig;
 use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
@@ -185,9 +185,9 @@ impl NamespacedSync {
             }
         };
 
-        let scope = aura_core::scope::ResourceScope::Authority {
+        let scope = aura_core::types::scope::ResourceScope::Authority {
             authority_id: *authority,
-            operation: aura_core::scope::AuthorityOp::UpdateTree,
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
         };
         self.validate_token(effects, &peer_token_bytes, "sync:authority", &scope)
             .await
@@ -257,9 +257,9 @@ impl NamespacedSync {
             }
         };
 
-        let scope = aura_core::scope::ResourceScope::Context {
+        let scope = aura_core::types::scope::ResourceScope::Context {
             context_id: *context,
-            operation: aura_core::scope::ContextOp::UpdateParams,
+            operation: aura_core::types::scope::ContextOp::UpdateParams,
         };
         self.validate_token(effects, &peer_token_bytes, "sync:context", &scope)
             .await
@@ -286,7 +286,7 @@ impl NamespacedSync {
         effects: &E,
         token_bytes: &[u8],
         operation: &str,
-        scope: &aura_core::scope::ResourceScope,
+        scope: &aura_core::types::scope::ResourceScope,
     ) -> Result<bool> {
         let root = self.load_root_public_key(effects).await?;
         let token = biscuit_auth::Biscuit::from(token_bytes, root).map_err(|e| {

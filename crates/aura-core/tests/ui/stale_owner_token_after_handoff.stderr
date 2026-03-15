@@ -1,0 +1,19 @@
+error[E0382]: borrow of moved value: `token`
+ --> tests/ui/stale_owner_token_after_handoff.rs:7:13
+  |
+5 |     let token = issue_owner_token(&capability, "token-1", "session");
+  |         ----- move occurs because `token` has type `OwnerToken<&str, &str>`, which does not implement the `Copy` trait
+6 |     let _transfer = token.handoff("owner-b");
+  |                           ------------------ `token` moved due to this method call
+7 |     let _ = token.scope();
+  |             ^^^^^ value borrowed here after move
+  |
+note: `OwnerToken::<Scope, TokenId>::handoff` takes ownership of the receiver `self`, which moves `token`
+ --> src/ownership.rs
+  |
+  |     pub fn handoff<Recipient>(self, recipient: Recipient) -> OwnershipTransfer<Scope, TokenId, Recipient> {
+  |                               ^^^^
+help: you can `clone` the value and consume it, but this might not be your desired behavior
+  |
+6 |     let _transfer = token.clone().handoff("owner-b");
+  |                          ++++++++

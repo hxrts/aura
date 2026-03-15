@@ -11,7 +11,7 @@ use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
-use aura_core::identifiers::CeremonyId;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::{AuthorityId, DeviceId};
 
 /// Handles device threshold key ceremony messages
@@ -217,7 +217,8 @@ impl<'a> ThresholdHandler<'a> {
             h.update(ceremony_id.as_bytes());
             h.finalize()
         };
-        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+        let ceremony_context =
+            aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
 
         let mut metadata = std::collections::HashMap::new();
         metadata.insert(
@@ -328,7 +329,8 @@ impl<'a> ThresholdHandler<'a> {
             h.update(ceremony_id.as_str().as_bytes());
             h.finalize()
         };
-        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+        let ceremony_context =
+            aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
 
         for participant in &ceremony_state.participants {
             let aura_core::threshold::ParticipantIdentity::Device(device_id) = participant else {

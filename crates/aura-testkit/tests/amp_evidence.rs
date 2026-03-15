@@ -5,7 +5,7 @@
 use aura_amp::{AmpEvidenceEffects, EvidenceDelta, EvidenceRecord, AMP_EVIDENCE_KEY_PREFIX};
 use aura_consensus::ConsensusId;
 use aura_core::domain::Hash32;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_testkit::mock_effects::MockEffects;
 
 fn test_consensus_id() -> ConsensusId {

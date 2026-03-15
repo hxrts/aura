@@ -901,7 +901,7 @@ mod tests {
 
     #[test]
     fn test_chat_view_props_extraction() {
-        use crate::tui::state_machine::CreateChannelModalState;
+        use crate::tui::state::CreateChannelModalState;
 
         let mut state = TuiState::new();
         state.chat.insert_mode = true;
@@ -931,7 +931,7 @@ mod tests {
 
     #[test]
     fn test_chat_info_modal_props_extraction() {
-        use crate::tui::state_machine::ChannelInfoModalState;
+        use crate::tui::state::ChannelInfoModalState;
 
         let mut state = TuiState::new();
         // Use queue for modal visibility - use factory constructor
@@ -946,7 +946,7 @@ mod tests {
 
     #[test]
     fn test_contacts_view_props_extraction() {
-        use crate::tui::state_machine::NicknameModalState;
+        use crate::tui::state::NicknameModalState;
 
         let mut state = TuiState::new();
         state.contacts.selected_index = 7;
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn test_settings_view_props_extraction() {
-        use crate::tui::state_machine::NicknameSuggestionModalState;
+        use crate::tui::state::NicknameSuggestionModalState;
 
         let mut state = TuiState::new();
         state.settings.section = SettingsSection::Devices;
@@ -1008,7 +1008,7 @@ mod tests {
 
     #[test]
     fn test_settings_add_device_modal_props_extraction() {
-        use crate::tui::state_machine::AddDeviceModalState;
+        use crate::tui::state::AddDeviceModalState;
 
         let mut state = TuiState::new();
         // Use queue for modal visibility

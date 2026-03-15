@@ -136,7 +136,7 @@ pub struct ChatScreenProps {
     /// Callback when sending a message (channel_id, content)
     pub on_send: Option<SendCallback>,
     /// Callback when creating a new channel (name, topic)
-    pub on_create_channel: Option<CreateChannelCallback>,
+    pub(crate) on_create_channel: Option<CreateChannelCallback>,
     /// Callback when retrying a failed message (message_id, channel, content)
     pub on_retry_message: Option<RetryMessageCallback>,
     /// Callback when setting channel topic (channel_id, topic)
@@ -370,7 +370,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         .unwrap_or_else(|| {
             selected_channel_id
                 .as_ref()
-                .and_then(|id| id.parse::<aura_core::identifiers::ChannelId>().ok())
+                .and_then(|id| id.parse::<aura_core::types::identifiers::ChannelId>().ok())
                 .map(|id| chat_state.messages_for_channel(&id))
                 .unwrap_or(&[])
                 .iter()

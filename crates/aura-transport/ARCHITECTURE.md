@@ -25,6 +25,18 @@ and authority-centric messaging.
   `InvariantContextIsolation`, `InvariantReceiptValidityWindow`, and
   `InvariantCrossEpochReplayPrevention`.
 
+## Ownership Model
+
+- `aura-transport` is primarily `Pure`.
+- It defines transport-domain semantics and typed receipts, not `ActorOwned`
+  connection ownership.
+- Channel/session transfer semantics that require exclusivity should be carried
+  as `MoveOwned` contracts in higher layers.
+- Capability-gated send and receive authority should remain explicit at the
+  typed boundary.
+- Runtime services and `Observed` projections consume these contracts
+  downstream; they do not redefine them here.
+
 ### Detailed Specifications
 
 ### InvariantSequenceMonotonic

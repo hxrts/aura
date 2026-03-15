@@ -15,7 +15,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_terminal::demo::{spawn_amp_inbox_listener, DemoSimulator, EchoPeer};
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;

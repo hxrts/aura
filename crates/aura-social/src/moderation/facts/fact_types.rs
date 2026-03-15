@@ -1,7 +1,7 @@
 //! Moderation fact type definitions
 
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 

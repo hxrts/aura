@@ -10,8 +10,8 @@ use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, Ceremony
 use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::identifiers::CeremonyId;
 use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::{hash, AuthorityId, ContextId};
 use aura_journal::fact::RelationalFact;
 use aura_journal::ProtocolRelationalFact;

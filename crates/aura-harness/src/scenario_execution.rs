@@ -43,9 +43,7 @@ pub fn execute_with_run_budgets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate,
-    };
+    use crate::config::{InstanceConfig, InstanceMode, RunSection, RuntimeSubstrate};
     use crate::coordinator::HarnessCoordinator;
     use aura_app::scenario_contract::{
         ActorId, EnvironmentAction, ScenarioAction as SemanticAction, ScenarioStep as SemanticStep,

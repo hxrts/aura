@@ -1,6 +1,6 @@
 //! Online property definitions for simulation-time monitoring.
 
-use aura_core::identifiers::{ContextId, SessionId};
+use aura_core::types::identifiers::{ContextId, SessionId};
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -23,15 +23,15 @@ mod factories;
 mod types;
 
 // Re-export types
+pub(crate) use types::CreateChannelCallback;
 pub use types::{
-    AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateChannelCallback,
-    CreateHomeCallback, CreateNeighborhoodCallback, ExportInvitationCallback, GoHomeCallback,
-    GuardianSelectCallback, IdCallback, ImportDeviceEnrollmentCallback, InvitationCallback,
-    JoinChannelCallback, NeighborhoodHomeCallback, NoArgCallback, RecoveryCallback,
-    RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetModeratorCallback,
-    SetTopicCallback, StartChatCallback, StringOptStringCallback, StringOptStringVecU8Callback,
-    ThreeStringCallback, ThresholdCallback, TwoStringCallback, UpdateNicknameCallback,
-    UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
+    AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateHomeCallback,
+    CreateNeighborhoodCallback, ExportInvitationCallback, GoHomeCallback, GuardianSelectCallback,
+    IdCallback, ImportDeviceEnrollmentCallback, InvitationCallback, JoinChannelCallback,
+    NeighborhoodHomeCallback, NoArgCallback, RecoveryCallback, RemoveDeviceCallback,
+    RetryMessageCallback, SendCallback, SetModeratorCallback, SetTopicCallback, StartChatCallback,
+    StringOptStringCallback, ThreeStringCallback, ThresholdCallback, TwoStringCallback,
+    UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 
 // Re-export factories

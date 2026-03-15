@@ -7,7 +7,7 @@
 
 use aura_consensus::ConsensusId;
 use aura_core::effects::StorageEffects;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

@@ -1,7 +1,7 @@
 //! Rendezvous cache manager for handler-local state.
 
 use super::state::with_state_mut_validated;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::RendezvousDescriptor;
 use std::collections::HashMap;
 use std::sync::Arc;

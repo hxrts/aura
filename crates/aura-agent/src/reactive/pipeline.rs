@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use aura_app::ReactiveHandler;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_journal::fact::Fact;
 use aura_journal::FactRegistry;
 use tokio::sync::{broadcast, mpsc};
@@ -20,10 +20,9 @@ use super::{
     ChatSignalView, ContactsSignalView, HomeSignalView, InvitationsSignalView, RecoverySignalView,
 };
 use super::{FactSource, ReactiveScheduler, SchedulerConfig};
-use crate::runtime::services::runtime_tasks::TaskGroup;
-use crate::runtime::AuraEffectSystem;
 use crate::runtime::{
-    RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity, RuntimeDiagnosticSink,
+    AuraEffectSystem, RuntimeDiagnostic, RuntimeDiagnosticKind, RuntimeDiagnosticSeverity,
+    RuntimeDiagnosticSink, TaskGroup,
 };
 use crate::task_registry::TaskSupervisor;
 

@@ -10,7 +10,7 @@ use aura_agent::{
     RecoveryState,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{ContextId, DeviceId, RecoveryId};
+use aura_core::types::identifiers::{ContextId, DeviceId, RecoveryId};
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {

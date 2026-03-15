@@ -19,7 +19,7 @@ use aura_core::effects::{
     ChannelLeaveParams, ChannelSendParams, ExecutionMode, TransportEffects,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::{AuraError, Hash32, Result};
 use aura_journal::fact::ProtocolRelationalFact;
 use aura_journal::fact::{ChannelBootstrap, CommittedChannelEpochBump, RelationalFact};
@@ -461,6 +461,7 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 receiver_id,
                                 channel.to_string(),
                                 None,
+                                Some(channel.to_string()),
                                 Some(bootstrap),
                                 None,
                                 None,

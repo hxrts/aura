@@ -108,7 +108,7 @@ use aura_app::ui::prelude::*;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::{AgentBuilder, EffectContext};
-use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
+use aura_core::{effects::ExecutionMode, types::identifiers::DeviceId, AuraError};
 use std::sync::Arc;
 
 // Re-export unified terminal error types

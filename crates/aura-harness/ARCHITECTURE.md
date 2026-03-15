@@ -23,7 +23,7 @@ By default it is intended to validate the real Aura runtime and real user interf
 
 ## Key Modules
 - `config.rs`: Schema parsing for run config, semantic scenarios, and compatibility-only executor fixtures.
-- `compatibility_step.rs`: Internal compatibility IR for frontend-conformance execution and targeted executor tests.
+- `compatibility_step.rs`: Internal compatibility IR for frontend-conformance execution and targeted executor tests. It is intentionally limited to renderer-mechanic primitives and no longer carries a general fallback scenario dialect.
 - `coordinator.rs`: Multi-instance orchestration and per-instance command routing.
 - `tool_api.rs`: Versioned request and response surface used by tests and automation.
 - `executor.rs`: Semantic and compatibility scenario execution with deterministic budgets.
@@ -193,7 +193,7 @@ Verification hooks:
   - `scenarios/harness/semantic-observation-browser-smoke.toml`
   - `scenarios/harness/real-runtime-mixed-startup-smoke.toml`
 - Direct Quint-to-TUI execution paths have been removed. Quint now emits semantic traces rather than frontend-driving scripts.
-- The inventoried harness scenario corpus is now semantic-only and executes through the semantic step model. Frontend-conformance coverage still reuses parts of the executor's internal compatibility IR, but that IR is no longer a user-authored scenario dialect and no longer models product semantic intents.
+- The inventoried harness scenario corpus is now semantic-only and executes through the semantic step model. Frontend-conformance coverage still reuses a small internal compatibility IR, but that IR is no longer a user-authored scenario dialect, no longer models product semantic intents, and is now limited to a narrow set of renderer-mechanic primitives such as launch, send, wait, parity, clipboard, and fault-delay actions.
 
 ### Migration Sequence
 1. Define shared semantic contracts in `aura-app`.

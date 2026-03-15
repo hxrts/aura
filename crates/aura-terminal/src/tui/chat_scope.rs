@@ -4,7 +4,7 @@ use aura_app::ui::types::{
     chat::is_note_to_self_channel_name, Channel as AppChannel, ChannelType, ChatState,
     NeighborhoodState,
 };
-use aura_core::identifiers::ChannelId;
+use aura_core::types::identifiers::ChannelId;
 
 /// Resolve the active home scope for chat from neighborhood traversal state.
 #[must_use]
@@ -148,7 +148,7 @@ mod tests {
         Channel as AppChannel, ChannelType, ChatState, NeighborhoodState, TraversalPosition,
     };
     use aura_core::crypto::hash::hash;
-    use aura_core::identifiers::ChannelId;
+    use aura_core::types::identifiers::ChannelId;
 
     fn test_channel_id(seed: &str) -> ChannelId {
         ChannelId::from_bytes(hash(seed.as_bytes()))

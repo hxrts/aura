@@ -4,7 +4,7 @@
 //! Capabilities are time-limited, attenuatable tokens that grant specific permissions
 //! for specific resources.
 
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

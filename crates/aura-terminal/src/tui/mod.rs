@@ -54,10 +54,6 @@ pub mod theme;
 pub mod types;
 pub mod updates;
 
-// Backwards compatibility: re-export state as state_machine
-#[doc(hidden)]
-pub use state as state_machine;
-
 // Shared infrastructure
 pub mod callbacks;
 pub(crate) mod chat_scope;

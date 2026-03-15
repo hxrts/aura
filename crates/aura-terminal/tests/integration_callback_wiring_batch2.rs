@@ -35,7 +35,7 @@ use aura_app::signal_defs::{
 use aura_app::views::chat::ChannelType;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};

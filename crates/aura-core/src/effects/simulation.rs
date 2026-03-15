@@ -465,7 +465,7 @@ impl<T> SimulationEffects for T where
 // ============================================================================
 
 use crate::effects::transport::TransportEnvelope;
-use crate::identifiers::AuthorityId;
+use crate::types::identifiers::AuthorityId;
 use crate::DeviceId;
 // Allow parking_lot::RwLock here because:
 // 1. The simulation feature is only used by Layer 6-8 (runtime/test layers)

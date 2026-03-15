@@ -137,7 +137,7 @@ pub fn derive_domain_fact_impl(input: proc_macro::TokenStream) -> proc_macro::To
                 #schema_version
             }
 
-            fn context_id(&self) -> aura_core::identifiers::ContextId {
+            fn context_id(&self) -> aura_core::types::identifiers::ContextId {
                 #context_impl
             }
 

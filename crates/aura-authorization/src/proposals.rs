@@ -29,7 +29,7 @@
 //! ```rust
 //! use aura_authorization::proposals::{ProposalFact, ProposalState, PROPOSAL_FACT_TYPE_ID};
 //! use aura_authorization::effect_policy::{OperationType, ApprovalThreshold};
-//! use aura_core::identifiers::{ContextId, AuthorityId};
+//! use aura_core::types::identifiers::{ContextId, AuthorityId};
 //!
 //! // Create a proposal for removing a channel member
 //! let fact = ProposalFact::created(
@@ -50,8 +50,8 @@
 //! ```
 
 use crate::effect_policy::{ApprovalThreshold, OperationType};
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

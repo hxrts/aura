@@ -5,8 +5,8 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{FlowBudgetEffects, JournalEffects};
-use aura_core::flow::{FlowCost, FlowNonce, Receipt, ReceiptSig};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::flow::{FlowCost, FlowNonce, Receipt, ReceiptSig};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Hash32};
 use biscuit_auth::Biscuit;
 use std::sync::Arc;

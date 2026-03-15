@@ -32,7 +32,7 @@
 //! ```
 
 use crate::facts::{MembershipChangeType, RecoveryFact};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
 use aura_journal::DomainFact;
 use std::collections::HashMap;

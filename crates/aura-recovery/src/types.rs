@@ -3,8 +3,8 @@
 //! All types use the authority model - guardians are identified by `AuthorityId`,
 //! not by device. Device information is obtained via commitment tree queries.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::ThresholdSignature;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::TrustLevel;
 use serde::{Deserialize, Serialize};
 

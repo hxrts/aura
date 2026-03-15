@@ -18,7 +18,7 @@
 
 use super::state::SchedulerStats;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::util::graph::{CycleError, DagNode};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::FactRegistry;
@@ -1102,7 +1102,7 @@ mod tests {
 
     #[test]
     fn test_guardian_reduction() {
-        use aura_core::{identifiers::AuthorityId, Hash32};
+        use aura_core::{types::identifiers::AuthorityId, Hash32};
 
         let reduction = GuardianReduction;
         let facts = vec![
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn test_recovery_reduction() {
-        use aura_core::identifiers::AuthorityId;
+        use aura_core::types::identifiers::AuthorityId;
         use aura_journal::DomainFact;
         use aura_recovery::RecoveryFact;
 

@@ -68,7 +68,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
 - **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/user-flow-guidance-sync.sh`
-- **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy scripted scenario language is quarantined to explicit non-shared fixtures
+- **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
 
 ### Conditional Compilation

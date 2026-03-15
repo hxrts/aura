@@ -14,9 +14,9 @@ use async_lock::RwLock;
 use aura_core::{
     crypto::tree_signing::{frost_aggregate, frost_verify_aggregate, NonceToken},
     effects::{PhysicalTimeEffects, RandomEffects},
-    epochs::Epoch,
     frost::{NonceCommitment, PartialSignature, PublicKeyPackage, Share, ThresholdSignature},
     time::{PhysicalTime, ProvenancedTime, TimeStamp},
+    types::Epoch,
     AuraError, AuthorityId, Hash32, Result,
 };
 use rand::SeedableRng;

@@ -47,8 +47,8 @@ use aura_core::domain::status::{
     ParticipantResponse, ProposalState,
 };
 use aura_core::domain::Consistency;
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{OrderTime, PhysicalTime};
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{CeremonyId, Hash32};
 use aura_journal::Fact;
 

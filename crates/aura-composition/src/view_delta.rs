@@ -51,7 +51,7 @@
 //! registry.register("chat", Box::new(ChatViewReducer));
 //! ```
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;

@@ -1,11 +1,11 @@
-use super::runtime_tasks::TaskGroup;
 use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::reactive::{ReactivePipeline, SchedulerConfig};
+use crate::runtime::TaskGroup;
 use crate::runtime::{AuraEffectSystem, RuntimeDiagnosticSink};
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};

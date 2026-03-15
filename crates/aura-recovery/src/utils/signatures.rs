@@ -88,7 +88,7 @@ impl SignatureUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
 
     fn create_test_share(signature: Vec<u8>) -> RecoveryShare {
         RecoveryShare {

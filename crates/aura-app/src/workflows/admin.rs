@@ -3,7 +3,7 @@
 use crate::workflows::journal::{encode_fact_content, persist_fact_value};
 use aura_core::effects::JournalEffects;
 use aura_core::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId};
+use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId};
 use aura_core::types::Epoch;
 use aura_core::AuraError;
 use aura_journal::fact::{FactContent, RelationalFact};

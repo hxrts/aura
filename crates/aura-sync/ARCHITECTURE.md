@@ -21,6 +21,17 @@ coordination, and writer fence semantics for distributed journal consistency.
 - Protocols should operate on explicit inputs (snapshot, budget, timestamp).
 - Merkle verification ensures fact integrity across peers.
 
+## Ownership Model
+
+- `aura-sync` combines `Pure` verification/reconciliation logic with explicit
+  `MoveOwned` sync-session authority where exclusivity matters.
+- Long-lived background sync ownership belongs in explicit `ActorOwned` runtime
+  managers, not hidden in sync helpers.
+- Sync mutation and publication must remain capability-gated and typed.
+- Retry and completion semantics should terminate explicitly rather than through
+  ambiguous background state.
+- `Observed` consumers may inspect sync state but not author it.
+
 ### Detailed Specifications
 
 ### InvariantSyncMerkleVerification
@@ -47,4 +58,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

@@ -9,12 +9,12 @@ use crate::fact::{
     RelationalFact,
 };
 use aura_core::{
-    authority::TreeStateSummary,
     effects::LeakageBudget,
     hash,
-    identifiers::{AuthorityId, ChannelId, ContextId},
     time::OrderTime,
     tree::{commit_leaf, policy_hash, LeafId, Policy},
+    types::authority::TreeStateSummary,
+    types::identifiers::{AuthorityId, ChannelId, ContextId},
     Hash32,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -198,7 +198,7 @@ fn apply_rotate_epoch(
 }
 
 /// Compute deterministic hash of authority state
-fn compute_authority_state_hash(state: &aura_core::authority::AuthorityState) -> Hash32 {
+fn compute_authority_state_hash(state: &aura_core::types::authority::AuthorityState) -> Hash32 {
     let mut hasher = hash::hasher();
 
     // Hash tree state commitment
@@ -282,7 +282,7 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
 /// has a Context namespace instead of an Authority namespace.
 pub fn reduce_authority(
     journal: &Journal,
-) -> Result<aura_core::authority::AuthorityState, ReductionNamespaceError> {
+) -> Result<aura_core::types::authority::AuthorityState, ReductionNamespaceError> {
     match &journal.namespace {
         JournalNamespace::Authority(_) => {
             // Extract all attested operations
@@ -312,7 +312,7 @@ pub fn reduce_authority(
                 .collect::<Result<_, _>>()
                 .unwrap_or_else(|_| BTreeSet::new());
 
-            Ok(aura_core::authority::AuthorityState { tree_state, facts })
+            Ok(aura_core::types::authority::AuthorityState { tree_state, facts })
         }
         JournalNamespace::Context(_) => Err(ReductionNamespaceError::ContextAsAuthority),
     }
@@ -339,7 +339,7 @@ pub fn reduce_account_facts(
 /// are applied in the correct order based on their parent commitments.
 pub fn reduce_authority_with_validation(
     journal: &Journal,
-) -> Result<aura_core::authority::AuthorityState, String> {
+) -> Result<aura_core::types::authority::AuthorityState, String> {
     match &journal.namespace {
         JournalNamespace::Authority(_) => {
             // Extract all attested operations with their parent commitments
@@ -385,7 +385,7 @@ pub fn reduce_authority_with_validation(
                 .collect::<Result<_, _>>()
                 .unwrap_or_else(|_| BTreeSet::new());
 
-            Ok(aura_core::authority::AuthorityState { tree_state, facts })
+            Ok(aura_core::types::authority::AuthorityState { tree_state, facts })
         }
         JournalNamespace::Context(_) => {
             Err("Cannot reduce context journal as authority state".to_string())
@@ -946,8 +946,8 @@ fn convert_to_core_fact(
 mod tests {
     use super::*;
     use crate::fact::Fact;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::TimeStamp;
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::Hash32;
 
     #[test]

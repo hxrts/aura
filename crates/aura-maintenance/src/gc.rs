@@ -1,6 +1,6 @@
 //! Garbage collection helpers for maintenance workflows.
 
-use aura_core::epochs::Epoch;
+use aura_core::types::epochs::Epoch;
 
 /// GC plan for DKG transcript blobs tied to snapshot epochs.
 #[derive(Debug, Clone, Copy)]

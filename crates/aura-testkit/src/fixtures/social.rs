@@ -4,8 +4,8 @@
 //! Includes helpers for creating homes, neighborhoods, and social topologies.
 
 use aura_core::effects::relay::RelayRelationship;
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::AuthorityId;
 use aura_social::facts::{
     HomeConfigFact, HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact,
     NeighborhoodId, NeighborhoodMemberFact, OneHopLinkFact,

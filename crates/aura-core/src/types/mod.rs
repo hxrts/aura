@@ -13,11 +13,10 @@ pub mod identifiers;
 pub mod participants;
 pub mod relationships;
 pub mod scope;
-pub mod sessions;
 
 // Re-export all public types for convenience
 pub use authority::{Authority, AuthorityRef, AuthorityState, TreeStateSummary};
-pub use epochs::*;
+pub use epochs::{Epoch, ParticipantId};
 pub use flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
 pub use identifiers::{
     derive_legacy_authority_from_device, AccountId, AuthorityId, ChannelId, ContextId, DataId,
@@ -34,7 +33,6 @@ pub use relationships::*;
 pub use scope::{
     AuthorityOp, ContextOp, ResourceScope, ResourceScopeParseError, StoragePath, StoragePathError,
 };
-pub use sessions::*;
 
 // Fact encoding types
 pub use facts::{

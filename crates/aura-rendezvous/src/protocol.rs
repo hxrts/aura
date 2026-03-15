@@ -7,7 +7,7 @@
 // The choreography! macro generates unit returns which trigger this lint
 #![allow(clippy::unused_unit)]
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn test_descriptor_offer_serialization() {
         use crate::facts::{RendezvousDescriptor, TransportHint};
-        use aura_core::identifiers::{AuthorityId, ContextId};
+        use aura_core::types::identifiers::{AuthorityId, ContextId};
 
         let descriptor = RendezvousDescriptor {
             authority_id: AuthorityId::new_from_entropy([1u8; 32]),
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_relay_request_serialization() {
-        use aura_core::identifiers::AuthorityId;
+        use aura_core::types::identifiers::AuthorityId;
 
         let request = RelayRequest {
             target: AuthorityId::new_from_entropy([10u8; 32]),

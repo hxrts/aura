@@ -3,7 +3,7 @@
 //! This module contains message types for rendezvous protocols:
 //! - Rendezvous and peer discovery
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 use crate::protocols::rendezvous_constants::PROTOCOL_RENDEZVOUS;

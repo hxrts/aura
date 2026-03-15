@@ -2,7 +2,7 @@
 
 use super::state::with_state_mut_validated;
 use crate::handlers::recovery::{ActiveRecovery, RecoveryState};
-use aura_core::identifiers::RecoveryId;
+use aura_core::types::identifiers::RecoveryId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -8,8 +8,7 @@ use crate::signal_defs::{
 };
 use crate::ui_contract::{
     AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, OperationId, OperationInstanceId,
-    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
-    SemanticOperationStatus,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
 };
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;

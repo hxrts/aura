@@ -7,7 +7,7 @@ use crate::facts::HomeId;
 use crate::{Home, Neighborhood};
 use aura_core::{
     effects::relay::{RelayCandidate, RelayRelationship},
-    identifiers::AuthorityId,
+    types::identifiers::AuthorityId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

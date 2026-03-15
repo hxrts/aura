@@ -4,7 +4,7 @@
 //! Handles home creation, member changes, and storage statistics.
 
 use crate::reactive::scheduler::ViewReduction;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
@@ -106,8 +106,8 @@ impl ViewReduction<HomeDelta> for HomeReduction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
     use aura_social::HomeId;
 
     fn test_context_id() -> ContextId {

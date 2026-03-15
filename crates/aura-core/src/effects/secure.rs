@@ -30,8 +30,8 @@
 //! - Device attestation certificates
 //! - Critical configuration data
 
-use crate::identifiers::{ChannelId, ContextId};
 use crate::time::PhysicalTime;
+use crate::types::identifiers::{ChannelId, ContextId};
 use crate::{AuraError, Hash32};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

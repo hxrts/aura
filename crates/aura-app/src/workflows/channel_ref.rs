@@ -1,7 +1,7 @@
 //! Shared channel reference helpers for workflows.
 
 use aura_core::crypto::hash::hash;
-use aura_core::identifiers::ChannelId;
+use aura_core::types::identifiers::ChannelId;
 use aura_core::AuraError;
 
 /// Reference to a channel identifier or name.

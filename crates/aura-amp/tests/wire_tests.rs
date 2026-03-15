@@ -2,7 +2,7 @@
 
 use aura_amp::wire::{deserialize_message, serialize_message, AmpMessage, AMP_WIRE_SCHEMA_VERSION};
 use aura_core::effects::amp::AmpHeader;
-use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 
 fn test_context() -> ContextId {
     ContextId::from_uuid(uuid::Uuid::from_bytes([1u8; 16]))

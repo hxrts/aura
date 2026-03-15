@@ -295,7 +295,7 @@ let fixture = TestFixture::with_config(config).await?;
 Use deterministic identifier generation:
 
 ```rust
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 let auth1 = AuthorityId::from_entropy([1u8; 32]);
 let auth2 = AuthorityId::from_entropy([2u8; 32]);

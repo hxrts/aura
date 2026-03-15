@@ -49,8 +49,6 @@ pub use crate::time::{TimeDomain, TimeStamp};
 
 // === Authority ===
 pub use crate::types::authority::{Authority, AuthorityState};
-/// Alias for AuthorityId (for backwards compatibility)
-pub use crate::types::identifiers::AuthorityId as AuthId;
 
 // === Tree Types ===
 pub use crate::tree::{Epoch, LeafId, NodeIndex, Policy};

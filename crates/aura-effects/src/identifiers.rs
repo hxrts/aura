@@ -4,7 +4,7 @@
 //! ambient entropy. Tests should prefer deterministic seeds in aura-core test_utils.
 
 use aura_core::effects::RandomEffects;
-use aura_core::identifiers::{
+use aura_core::types::identifiers::{
     AccountId, AuthorityId, ContextId, DeviceId, EventId, GuardianId, OperationId, SessionId,
 };
 

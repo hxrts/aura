@@ -3,8 +3,8 @@
 //! This module defines domain-specific facts emitted by the consensus protocol,
 //! including equivocation proofs and consensus results.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
 use aura_journal::extensibility::{DomainFact, FactEnvelope, FactReducer};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};

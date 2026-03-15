@@ -3,7 +3,7 @@
 //! Portable account-related types for backup/restore operations.
 //! These types are FFI-safe and can be used across all frontends.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;

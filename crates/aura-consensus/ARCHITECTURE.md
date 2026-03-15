@@ -31,6 +31,17 @@ signatures. Sole strong-agreement mechanism in Aura; all other coordination is C
 - Progress requires honest threshold participation.
 - Type-level guarantees: `ThresholdShareSet::combine()` only after threshold proven.
 
+## Ownership Model
+
+- `aura-consensus` uses `MoveOwned` for proposal, transcript, and ceremony
+  authority that must remain exclusive.
+- Long-lived consensus coordination may be `ActorOwned` where supervision and
+  lifecycle matter, but that ownership must stay explicit.
+- Capability-gated agreement and publication boundaries must remain typed and
+  auditable.
+- Consensus operations require typed terminal success, failure, or abort paths.
+- `Observed` projections and diagnostics remain downstream of consensus truth.
+
 ### Detailed Specifications
 
 ### InvariantUniqueCommitPerInstance

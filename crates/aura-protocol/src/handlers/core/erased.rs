@@ -10,7 +10,7 @@ use aura_composition::registry::Handler;
 use aura_core::context::ContextSnapshot;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 use aura_mpst::LocalSessionType;
 
 /// Primary interface for all Aura handlers
@@ -118,7 +118,7 @@ pub struct AuraHandlerFactory;
 
 impl AuraHandlerFactory {
     /// Create a handler for testing
-    pub fn for_testing(device_id: aura_core::identifiers::DeviceId) -> Box<dyn AuraHandler> {
+    pub fn for_testing(device_id: aura_core::types::identifiers::DeviceId) -> Box<dyn AuraHandler> {
         let composite = aura_composition::CompositeHandler::for_testing(device_id);
         let adapter = CompositeHandlerAdapter::new(composite);
         Box::new(adapter)
@@ -126,7 +126,7 @@ impl AuraHandlerFactory {
 
     /// Create a handler for production
     pub fn for_production(
-        device_id: aura_core::identifiers::DeviceId,
+        device_id: aura_core::types::identifiers::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
         // Production handler assembly is owned by aura-agent.
         let _ = device_id;
@@ -139,7 +139,7 @@ impl AuraHandlerFactory {
 
     /// Create a handler for simulation
     pub fn for_simulation(
-        device_id: aura_core::identifiers::DeviceId,
+        device_id: aura_core::types::identifiers::DeviceId,
         _seed: u64,
     ) -> Box<dyn AuraHandler> {
         let composite = aura_composition::CompositeHandler::for_simulation(device_id, _seed);
@@ -195,7 +195,7 @@ impl HandlerUtils {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use aura_core::identifiers::{AuthorityId, DeviceId};
+    use aura_core::types::identifiers::{AuthorityId, DeviceId};
 
     #[tokio::test]
     async fn test_handler_basic_functionality() {

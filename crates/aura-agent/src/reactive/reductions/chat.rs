@@ -6,7 +6,7 @@
 use crate::reactive::scheduler::ViewReduction;
 use aura_chat::{ChatDelta, ChatViewReducer, CHAT_FACT_TYPE_ID};
 use aura_composition::{downcast_delta, ViewDelta, ViewDeltaReducer};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
 /// Reduction adapter for chat view
@@ -50,8 +50,8 @@ mod tests {
     use super::*;
     use aura_chat::ChatFact;
     use aura_composition::IntoViewDelta;
-    use aura_core::identifiers::{ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::{ChannelId, ContextId};
     use aura_journal::DomainFact;
 
     fn test_context_id() -> ContextId {

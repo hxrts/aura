@@ -5,6 +5,8 @@
 Aura uses algebraic effects to abstract system capabilities. Effect traits define abstract interfaces for cryptography, storage, networking, time, and randomness. Handlers implement these traits with concrete behavior. Context propagation ensures consistent execution across async boundaries.
 
 This document covers effect trait design, handler patterns, and the context model. See [Runtime](104_runtime.md) for lifecycle management, service composition, and guard chain execution.
+See [Ownership Model](122_ownership_model.md) for the repo-wide
+`Pure`/`MoveOwned`/`ActorOwned`/`Observed` taxonomy.
 
 The `aura-agent` runtime uses structured concurrency with explicit session ownership.
 Session-bound effects execute only under the current owner via canonical ingress.
@@ -17,6 +19,28 @@ The runtime contract is intentionally split:
 - move semantics govern session and endpoint ownership
 
 Effect execution that touches session state belongs to the second category, not the first.
+
+## Ownership At Effect Boundaries
+
+Effect traits sit at an ownership boundary and should preserve the repo-wide
+ownership model rather than hide it.
+
+- Effect trait definitions in `aura-core` are primarily `Pure`.
+- Long-lived mutable async ownership belongs to `ActorOwned` runtime services,
+  not to effect trait definitions or ad hoc handler-local state.
+- Exclusive authority transfer belongs to `MoveOwned` handles, owner tokens, or
+  transfer records rather than shared mutable rewrites.
+- Effect handlers may implement capabilities, but parity-critical mutation and
+  publication should remain capability-gated in the exposed API shape.
+
+Practical implications:
+
+- define trait methods so callers can preserve typed ownership and typed failure
+- do not use effect handlers as a loophole for bypassing authority checks
+- do not let observation-facing layers gain semantic mutation power through
+  convenience helpers
+- ensure long-running effect-driven flows report typed terminal outcomes rather
+  than implicit success or silent hangs
 
 ## Effect Traits
 

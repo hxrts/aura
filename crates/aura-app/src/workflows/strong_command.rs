@@ -20,7 +20,7 @@ use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_run
 use crate::workflows::{context, invitation, messaging, moderation, moderator, query, settings};
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::AuraError;
 use std::collections::BTreeMap;
 use std::fmt;

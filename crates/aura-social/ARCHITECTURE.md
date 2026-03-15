@@ -23,6 +23,16 @@ discovery, relay selection, and content moderation for the social graph.
 - Membership and moderatorship changes should follow approved workflows.
 - Home relationships define trust boundaries.
 
+## Ownership Model
+
+- `aura-social` is primarily `Pure` social-topology and view/reducer logic.
+- Any exclusive moderation or topology transition semantics should remain
+  explicit and `MoveOwned`.
+- Long-lived topology/discovery ownership belongs in explicit `ActorOwned`
+  higher-layer coordinators rather than hidden mutable crate state.
+- Capability-gated publication is required for parity-critical social facts.
+- `Observed` social views are downstream and must not author semantic truth.
+
 ### Detailed Specifications
 
 ### InvariantSocialBoundaryScopedMembership
@@ -49,4 +59,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

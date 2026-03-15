@@ -9,4 +9,4 @@ pub mod snapshot;
 
 pub use app::AuraUiRoot;
 pub use clipboard::{ClipboardPort, MemoryClipboard};
-pub use model::{RenderedHarnessSnapshot, UiController, UiScreen};
+pub use model::{RenderedHarnessSnapshot, UiController, ScreenId};

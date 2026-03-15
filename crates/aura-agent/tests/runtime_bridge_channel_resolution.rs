@@ -1,7 +1,9 @@
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 
-use async_lock::RwLock;
 use anyhow::Result;
+use async_lock::RwLock;
 use aura_agent::AgentBuilder;
 use aura_app::core::{AppConfig, AppCore};
 use aura_app::ui::workflows::context::ensure_local_home_projection;
@@ -9,7 +11,7 @@ use aura_app::ui::workflows::messaging::{create_channel, invite_user_to_channel}
 use aura_core::context::EffectContext;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 
 #[tokio::test]
 async fn create_channel_produces_runtime_resolvable_channel_context() -> Result<()> {

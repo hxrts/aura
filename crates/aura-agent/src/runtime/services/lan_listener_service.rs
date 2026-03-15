@@ -1,10 +1,10 @@
-use super::runtime_tasks::TaskGroup;
 use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::LanTransportService;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::system::spawn_lan_transport_listener_tasks;
 use crate::runtime::AuraEffectSystem;
+use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;

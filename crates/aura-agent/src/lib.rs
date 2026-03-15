@@ -172,11 +172,11 @@ pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, Rendezvou
 pub use runtime::system::RuntimeShutdownError;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::{
-    AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectOperation,
-    EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, EffectType,
-    FlowBudgetManager, LifecycleManager, OperationSessionId, ReceiptManager, RuntimeBuilder,
-    RuntimeChoreographySessionId, RuntimeService, RuntimeServiceContext, RuntimeSystem,
-    RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth, SharedTransport,
+    AuraHandlerAdapter, EffectContext, EffectExecutor, EffectOperation, EffectRegistry,
+    EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, EffectType, FlowBudgetManager,
+    LifecycleManager, OperationSessionId, ReceiptManager, RuntimeChoreographySessionId,
+    RuntimeService, RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth,
+    SharedTransport, TaskSupervisor,
 };
 
 // Protocol adapter for choreography execution (used by tests)
@@ -257,7 +257,7 @@ pub use runtime::EffectSystemFactory;
 
 // Re-export core types for convenience (authority-first)
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+pub use aura_core::types::identifiers::{AuthorityId, ContextId, SessionId};
 
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use fact_registry::build_fact_registry;

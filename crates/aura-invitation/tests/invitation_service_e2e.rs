@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::util::test_utils::test_authority_id;
 use aura_core::FlowCost;
 use aura_guards::types::CapabilityId;

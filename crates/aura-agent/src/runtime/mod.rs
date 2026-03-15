@@ -55,7 +55,6 @@ pub mod errors;
 pub mod instrumentation;
 pub mod reliability;
 pub mod session_ingress;
-pub mod task_supervisor;
 
 // Choreography integration
 pub mod choreography_adapter;
@@ -76,6 +75,8 @@ pub mod storage_coordinator;
 pub mod time_handler;
 
 // Re-export main types for convenience
+#[allow(unused_imports)] // Re-exported for public API
+pub use crate::task_registry::{TaskGroup, TaskSupervisionError, TaskSupervisor};
 pub use aura_core::OperationSessionId;
 pub use builder::EffectSystemBuilder;
 #[allow(unused_imports)] // Re-exported for public API
@@ -83,8 +84,7 @@ pub use builder::EffectSystemBuilder;
 pub use choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
 #[allow(unused_imports)] // Re-exported for public API
 pub use choreography_adapter::{
-    AuraHandlerAdapter, AuraProtocolAdapter, ChoreographyAdapter, GuardConfig,
-    MessageGuardRequirements,
+    AuraHandlerAdapter, AuraProtocolAdapter, GuardConfig, MessageGuardRequirements,
 };
 pub use context::EffectContext;
 pub use contracts::{AuraDelegationCoherence, AuraDelegationWitness, AuraLinkBoundary};
@@ -118,8 +118,6 @@ pub use session_ingress::{
 pub use shared_transport::SharedTransport;
 #[allow(unused_imports)] // Re-exported for public API
 pub use system::{RuntimeActivityGate, RuntimeActivityState, RuntimePublicOperationError};
-#[allow(unused_imports)] // Re-exported for public API
-pub use task_supervisor::{TaskGroup, TaskSupervisionError, TaskSupervisor};
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
@@ -158,6 +156,9 @@ pub use aura_guards::guards::journal::{
 };
 
 // Subsystem re-exports (available for incremental adoption
+pub use registry::{
+    EffectOperation, EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectType,
+};
 #[allow(unused_imports)]
 pub use subsystems::choreography::{
     RuntimeChoreographySessionId, SessionOwnerCapability, SessionOwnerCapabilityScope,
@@ -165,20 +166,13 @@ pub use subsystems::choreography::{
 #[allow(unused_imports)]
 pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 
-/// Public API type aliases for runtime components.
-pub type RuntimeSystem = AuraEffectSystem;
-pub type RuntimeBuilder = EffectSystemBuilder;
-pub use registry::{
-    EffectOperation, EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectType,
-};
-
 pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;
 #[allow(unused_imports)] // Re-exported for public API
 pub use services::{
     AuthorityManager, AuthorityStatus, FlowBudgetManager, ReceiptManager, RuntimeService,
-    RuntimeServiceContext, RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth,
-    SyncManagerConfig, SyncManagerState, SyncServiceManager,
+    RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SyncManagerConfig,
+    SyncManagerState, SyncServiceManager,
 };
 
 // Simulation factory re-export

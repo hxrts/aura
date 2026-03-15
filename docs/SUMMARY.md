@@ -27,6 +27,7 @@
 - [Simulation Infrastructure Reference](119_simulator.md)
 - [Formal Verification Reference](120_verification.md)
 - [User Flow Harness](121_user_flow_harness.md)
+- [Ownership Model](122_ownership_model.md)
 - [Hello World Guide](801_hello_world_guide.md)
 - [Effects and Handlers Guide](802_effects_guide.md)
 - [Choreography Development Guide](803_choreography_guide.md)

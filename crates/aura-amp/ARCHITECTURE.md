@@ -19,6 +19,16 @@ relational journal facts.
 - Channel epochs are monotone; committed bumps supersede proposals.
 - Evidence is optional and does not affect channel state reconstruction.
 
+## Ownership Model
+
+- `aura-amp` combines `Pure` channel-state reduction with `MoveOwned`
+  coordination where channel/session authority must be exclusive.
+- It should avoid implicit shared ownership of channel lifecycle.
+- Long-lived coordination should be `ActorOwned` only when explicitly
+  supervised by higher layers.
+- Capability-gated message and checkpoint publication must remain explicit.
+- `Observed` consumers may render AMP state but not author it.
+
 ### Detailed Specifications
 
 ### InvariantAmpEpochMonotonic
@@ -46,4 +56,3 @@ Contract alignment:
 ## Core + Orchestrator Rule
 - Pure helpers live under `amp/core`.
 - Orchestrators must depend on effects explicitly.
-

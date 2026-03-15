@@ -38,7 +38,7 @@
 //! ```
 
 use crate::reduction::{RelationalBinding, RelationalBindingType};
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -269,7 +269,7 @@ pub fn validate_type_ids(type_ids: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
     use serde::{Deserialize, Serialize};
 
     // Test domain fact type

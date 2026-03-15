@@ -6,7 +6,7 @@
 use super::helpers::{hash_relay_seed, select_by_tiers};
 use aura_core::{
     effects::relay::{RelayCandidate, RelayContext, RelaySelector},
-    identifiers::AuthorityId,
+    types::identifiers::AuthorityId,
 };
 
 /// Deterministic random relay selector.
@@ -153,7 +153,7 @@ impl RelaySelector for DeterministicRandomSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

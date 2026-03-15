@@ -4,7 +4,7 @@
 //! for the resource scope types that are now defined in aura-core.
 
 // Re-export the core types from aura-core
-pub use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
+pub use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 #[cfg(test)]
 mod tests {

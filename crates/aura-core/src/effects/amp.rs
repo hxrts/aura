@@ -4,7 +4,7 @@
 //! messages. Implementations live in higher layers (protocol/runtime). This
 //! module must remain interface-only (no state or OS access).
 
-use crate::identifiers::{AuthorityId, ChannelId, ContextId};
+use crate::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use crate::Hash32;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

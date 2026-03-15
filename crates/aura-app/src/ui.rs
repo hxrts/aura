@@ -225,8 +225,8 @@ pub mod types {
         format_wizard_progress, wizard_progress_percent, AccountSetupStep, CreateChannelStep,
         RecoverySetupStep,
     };
-    pub use aura_core::identifiers::{AuthorityId, ContextId};
     pub use aura_core::time::TimeStamp;
+    pub use aura_core::types::identifiers::{AuthorityId, ContextId};
 
     // AMP types for channel state inspection
     pub use aura_journal::ChannelEpochState;

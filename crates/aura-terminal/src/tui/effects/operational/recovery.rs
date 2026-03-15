@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
-use aura_core::identifiers::CeremonyId;
+use aura_core::types::identifiers::CeremonyId;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -136,14 +136,15 @@ pub async fn handle_recovery(
                     match runtime {
                         Some(rt) => {
                             // Parse contact_id to AuthorityId
-                            let receiver: aura_core::identifiers::AuthorityId = match id.parse() {
-                                Ok(auth_id) => auth_id,
-                                Err(_) => {
-                                    return Some(Err(OpError::InvalidArgument(format!(
-                                        "Invalid contact ID: {id}"
-                                    ))));
-                                }
-                            };
+                            let receiver: aura_core::types::identifiers::AuthorityId =
+                                match id.parse() {
+                                    Ok(auth_id) => auth_id,
+                                    Err(_) => {
+                                        return Some(Err(OpError::InvalidArgument(format!(
+                                            "Invalid contact ID: {id}"
+                                        ))));
+                                    }
+                                };
 
                             // Get current user's authority for subject
                             let subject = rt.authority_id();

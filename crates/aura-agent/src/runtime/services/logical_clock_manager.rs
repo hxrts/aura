@@ -6,8 +6,8 @@
 use super::state::with_state_mut_validated;
 use async_trait::async_trait;
 use aura_core::effects::time::{LogicalClockEffects, TimeError};
-use aura_core::identifiers::DeviceId;
 use aura_core::time::{LogicalTime, VectorClock};
+use aura_core::types::identifiers::DeviceId;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -48,11 +48,6 @@ impl LogicalClockManager {
             state: Arc::new(RwLock::new(LogicalClockState::default())),
             device_id,
         }
-    }
-
-    /// Get the current logical clock state (snapshot).
-    pub async fn snapshot(&self) -> LogicalClockState {
-        self.state.read().await.clone()
     }
 
     /// Advance the logical clock using an observed vector clock.

@@ -467,7 +467,7 @@ pub struct PskHandshakeConfig {
     /// Pre-shared key for PSK-based handshake
     pub k_psk: [u8; 32],
     /// Expected peer device identifier
-    pub expected_peer_device_id: aura_core::identifiers::DeviceId,
+    pub expected_peer_device_id: aura_core::types::identifiers::DeviceId,
     /// Local device certificate for identity proof
     pub local_device_cert: Vec<u8>,
     /// Selected transport for the handshake

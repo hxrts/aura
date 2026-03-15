@@ -19,7 +19,7 @@ use aura_app::ui::workflows::recovery_cli::{
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::frost::PublicKeyPackage;
 use aura_core::hash;
-use aura_core::identifiers::RecoveryId;
+use aura_core::types::identifiers::RecoveryId;
 use aura_core::Hash32;
 use aura_effects::StorageCoreEffects;
 use std::collections::BTreeMap;

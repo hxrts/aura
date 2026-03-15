@@ -146,9 +146,7 @@ goal = "validate artifact generation"
 
 [[steps]]
 id = "seed"
-action = "set_var"
-name = "artifact_seed"
-value = "ok"
+action = "launch_actors"
 "#;
     if let Err(error) = fs::write(&scenario_path, scenario_toml) {
         panic!("failed writing scenario file: {error}");

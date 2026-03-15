@@ -15,5 +15,5 @@ mod snapshot;
 
 pub use app::{AppConfig, AppCore};
 pub use error::IntentError;
-pub use intent::{ChannelType as IntentChannelType, Intent, InvitationType, Screen};
+pub use intent::{ChannelType, Intent, InvitationType, Screen};
 pub use snapshot::StateSnapshot;

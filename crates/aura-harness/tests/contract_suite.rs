@@ -142,9 +142,7 @@ goal = "emit artifacts"
 
 [[steps]]
 id = "seed"
-action = "set_var"
-name = "artifact_seed"
-value = "ok"
+action = "launch_actors"
 "#;
     if let Err(error) = std::fs::write(&scenario_path, scenario_body) {
         panic!("write scenario failed: {error}");

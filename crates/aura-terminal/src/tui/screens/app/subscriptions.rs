@@ -4,8 +4,10 @@
 //! signal-subscription use_future homes here.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
+
+use parking_lot::RwLock;
 
 use iocraft::prelude::*;
 
@@ -88,15 +90,11 @@ impl SharedAuthorityId {
         Self(Arc::new(RwLock::new(None)))
     }
 
-    pub fn read(
-        &self,
-    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Option<AuthorityId>>> {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, Option<AuthorityId>> {
         self.0.read()
     }
 
-    pub fn write(
-        &self,
-    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Option<AuthorityId>>> {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Option<AuthorityId>> {
         self.0.write()
     }
 }
@@ -114,10 +112,7 @@ pub fn use_authority_id_subscription(
         let authority_id = shared.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                match authority_id.write() {
-                    Ok(mut guard) => *guard = settings_state.authority_id.parse::<AuthorityId>().ok(),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
             })
             .await;
         }
@@ -248,11 +243,11 @@ impl SharedContacts {
         Self(Arc::new(RwLock::new(Vec::new())))
     }
 
-    pub fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<Contact>>> {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, Vec<Contact>> {
         self.0.read()
     }
 
-    pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<Contact>>> {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<Contact>> {
         self.0.write()
     }
 }
@@ -267,15 +262,11 @@ impl SharedDiscoveredPeers {
         Self(Arc::new(RwLock::new(Vec::new())))
     }
 
-    pub fn read(
-        &self,
-    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<DiscoveredPeer>>> {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, Vec<DiscoveredPeer>> {
         self.0.read()
     }
 
-    pub fn write(
-        &self,
-    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<DiscoveredPeer>>> {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<DiscoveredPeer>> {
         self.0.write()
     }
 }
@@ -310,10 +301,7 @@ pub fn use_discovered_peers_subscription(
 
                 let new_count = lan_peers.len();
 
-                match peers.write() {
-                    Ok(mut guard) => *guard = lan_peers,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *peers.write() = lan_peers;
 
                 if let Some(ref tx) = update_tx {
                     let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
@@ -334,7 +322,7 @@ pub fn use_discovered_peers_subscription(
 /// Returns an Arc that closures can capture. The subscription updates the Arc's
 /// contents whenever contacts change, so readers always get current data.
 ///
-/// Uses std::sync::RwLock so dispatch handlers can read synchronously.
+/// Uses parking_lot::RwLock so dispatch handlers can read synchronously.
 ///
 /// If `update_tx` is provided, sends `ContactCountChanged` whenever the contact count changes.
 /// This keeps `TuiState.contacts.contact_count` in sync for keyboard navigation.
@@ -358,10 +346,7 @@ pub fn use_contacts_subscription(
                     contacts_state.all_contacts().map(Contact::from).collect();
                 let new_count = contact_list.len();
 
-                match contacts.write() {
-                    Ok(mut guard) => *guard = contact_list,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *contacts.write() = contact_list;
 
                 // Send contact count update for keyboard navigation
                 if let Some(ref tx) = update_tx {
@@ -388,11 +373,11 @@ impl SharedDevices {
         Self(Arc::new(RwLock::new(Vec::new())))
     }
 
-    pub fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<Device>>> {
+    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, Vec<Device>> {
         self.0.read()
     }
 
-    pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<Device>>> {
+    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<Device>> {
         self.0.write()
     }
 }
@@ -422,10 +407,7 @@ pub fn use_devices_subscription(
                         last_seen: d.last_seen,
                     })
                     .collect();
-                match devices.write() {
-                    Ok(mut guard) => *guard = list,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *devices.write() = list;
                 if settings_state.devices.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
                         publish_ui_update(tx, UiUpdate::RuntimeBootstrapFinalized);
@@ -452,7 +434,7 @@ pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 /// Returns an Arc that closures can capture. The subscription updates the Arc's
 /// contents whenever chat state changes, so readers always get current data.
 ///
-/// Uses std::sync::RwLock so dispatch handlers can read synchronously.
+/// Uses parking_lot::RwLock so dispatch handlers can read synchronously.
 pub fn use_messages_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
@@ -467,12 +449,7 @@ pub fn use_messages_subscription(
         let messages = shared_messages.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let channel_id = {
-                    selected_channel_id
-                        .read()
-                        .ok()
-                        .and_then(|guard| guard.clone())
-                };
+                let channel_id = selected_channel_id.read().clone();
 
                 // Get messages for that channel (or empty if none selected)
                 let message_list: Vec<Message> = if let Some(channel_id) = channel_id {
@@ -493,10 +470,7 @@ pub fn use_messages_subscription(
                     Vec::new()
                 };
 
-                match messages.write() {
-                    Ok(mut guard) => *guard = message_list,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *messages.write() = message_list;
             })
             .await;
         }
@@ -582,14 +556,13 @@ fn publish_scoped_channels(
             .iter()
             .any(|channel| channel.id == selected_channel_id);
         if !already_present {
-            let preserved = channels.read().ok().and_then(|guard| {
-                guard
-                    .iter()
-                    .find(|channel| {
-                        channel.id == selected_channel_id && is_dm_like_shared_channel(channel)
-                    })
-                    .cloned()
-            });
+            let preserved = channels
+                .read()
+                .iter()
+                .find(|channel| {
+                    channel.id == selected_channel_id && is_dm_like_shared_channel(channel)
+                })
+                .cloned();
             if let Some(channel) = preserved {
                 channel_list.push(channel);
                 channel_list.sort_by(|left, right| left.name.cmp(&right.name));

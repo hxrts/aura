@@ -11,7 +11,7 @@ use aura_app::ui::types::{
     AuthorityRecord,
 };
 use aura_core::effects::{PhysicalTimeEffects, StorageCoreEffects};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 /// Handle authority inspection commands
 ///

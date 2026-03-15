@@ -1,7 +1,7 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::SyncMetrics;
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use aura_core::{AttestedOp, Hash32};
 use aura_protocol::effects::{BloomDigest, SyncEffects, SyncError};
 

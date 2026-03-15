@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
@@ -24,9 +25,9 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    latest_invitation_code, observe_operation, wait_for_operation_submission,
-    ChannelBinding, ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend,
-    SubmittedAction, UiOperationHandle, UiSnapshotEvent,
+    latest_invitation_code, observe_operation, wait_for_operation_submission, ChannelBinding,
+    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
+    UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -129,7 +130,10 @@ fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
     }
 }
 
-fn authoritative_channel_binding(snapshot: &UiSnapshot, channel_name: &str) -> Option<ChannelBinding> {
+fn authoritative_channel_binding(
+    snapshot: &UiSnapshot,
+    channel_name: &str,
+) -> Option<ChannelBinding> {
     snapshot
         .runtime_events
         .iter()
@@ -149,6 +153,31 @@ fn authoritative_channel_binding(snapshot: &UiSnapshot, channel_name: &str) -> O
             }
             _ => None,
         })
+}
+
+fn materialized_channel_binding(
+    snapshot: &UiSnapshot,
+    previous_channel_ids: &BTreeSet<String>,
+) -> Option<ChannelBinding> {
+    let channels = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Channels)?;
+    let mut new_channel_ids = channels
+        .items
+        .iter()
+        .filter(|item| !previous_channel_ids.contains(&item.id))
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    new_channel_ids.sort();
+    new_channel_ids.dedup();
+    match new_channel_ids.as_slice() {
+        [channel_id] => Some(ChannelBinding {
+            channel_id: channel_id.clone(),
+            context_id: None,
+        }),
+        _ => None,
+    }
 }
 
 struct RunningSession {
@@ -1498,12 +1527,25 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         channel_name: &str,
     ) -> Result<SubmittedAction<ChannelBinding>> {
+        let previous_snapshot = self.ui_snapshot()?;
         let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::create_channel());
-        let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateChannel {
-            channel_name: channel_name.to_string(),
-        })
-        .context("submit_create_channel: create_channel_command")?;
+            observe_operation(&previous_snapshot, &OperationId::create_channel());
+        let previous_channel_ids = previous_snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Channels)
+            .map(|list| {
+                list.items
+                    .iter()
+                    .map(|item| item.id.clone())
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let receipt_handle = self
+            .send_harness_command(&HarnessUiCommand::CreateChannel {
+                channel_name: channel_name.to_string(),
+            })
+            .context("submit_create_channel: create_channel_command")?;
         let handle = match receipt_handle {
             Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
             None => wait_for_operation_submission(
@@ -1517,6 +1559,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
         loop {
             let snapshot = self.ui_snapshot()?;
             if let Some(binding) = authoritative_channel_binding(&snapshot, channel_name) {
+                return Ok(SubmittedAction::with_ui_operation(binding, handle));
+            }
+            if let Some(binding) = materialized_channel_binding(&snapshot, &previous_channel_ids) {
                 return Ok(SubmittedAction::with_ui_operation(binding, handle));
             }
             if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
@@ -1653,8 +1698,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         member_count: Some(member_count),
                         ..
                     } if *member_count > 1 => channel.id.clone(),
-                        _ => None,
-                    });
+                    _ => None,
+                });
         let already_joined = snapshot
             .lists
             .iter()
@@ -1821,17 +1866,72 @@ impl SharedSemanticBackend for LocalPtyBackend {
 mod tests {
     use std::fs;
     use std::path::Path;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::Duration;
 
     use super::*;
     use crate::config::InstanceMode;
 
+    fn unique_test_dir(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "aura-harness-local-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap_or_else(|error| panic!("create temp test dir: {error}"));
+        root
+    }
+
+    fn snapshot_with_channels(channel_ids: &[(&str, bool)]) -> UiSnapshot {
+        UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: aura_app::ui_contract::ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: Some(1),
+            },
+            quiescence: aura_app::ui_contract::QuiescenceSnapshot {
+                state: aura_app::ui_contract::QuiescenceState::Settled,
+                reason_codes: Vec::new(),
+            },
+            selections: channel_ids
+                .iter()
+                .find_map(|(id, selected)| {
+                    selected.then(|| aura_app::ui_contract::SelectionSnapshot {
+                        list: ListId::Channels,
+                        item_id: (*id).to_string(),
+                    })
+                })
+                .into_iter()
+                .collect(),
+            lists: vec![aura_app::ui_contract::ListSnapshot {
+                id: ListId::Channels,
+                items: channel_ids
+                    .iter()
+                    .map(|(id, selected)| aura_app::ui_contract::ListItemSnapshot {
+                        id: (*id).to_string(),
+                        selected: *selected,
+                        confirmation: aura_app::ui_contract::ConfirmationState::PendingLocal,
+                    })
+                    .collect(),
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        }
+    }
+
     fn test_config() -> InstanceConfig {
         InstanceConfig {
             id: "local-test".to_string(),
             mode: InstanceMode::Local,
-            data_dir: std::env::temp_dir().join("aura-harness-local-test"),
+            data_dir: unique_test_dir("default"),
             device_id: None,
             bind_address: "127.0.0.1:41001".to_string(),
             demo_mode: false,
@@ -1886,7 +1986,7 @@ mod tests {
     fn local_backend_injects_default_clipboard_isolation_env() {
         let mut config = test_config();
         config.id = "local-test-clipboard-default".to_string();
-        config.data_dir = std::env::temp_dir().join("aura-harness-local-clipboard-default");
+        config.data_dir = unique_test_dir("clipboard-default");
         config.command = Some("bash".to_string());
         config.args = vec![
             "-lc".to_string(),
@@ -1912,6 +2012,30 @@ mod tests {
         if let Err(error) = backend.stop() {
             panic!("backend must stop: {error}");
         }
+    }
+
+    #[test]
+    fn materialized_channel_binding_uses_unique_new_channel_id() {
+        let snapshot = snapshot_with_channels(&[
+            ("channel:note-to-self", false),
+            ("channel:shared-parity-lab", true),
+        ]);
+        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
+        let binding = materialized_channel_binding(&snapshot, &previous)
+            .unwrap_or_else(|| panic!("expected new materialized channel binding"));
+        assert_eq!(binding.channel_id, "channel:shared-parity-lab");
+        assert_eq!(binding.context_id, None);
+    }
+
+    #[test]
+    fn materialized_channel_binding_rejects_ambiguous_channel_delta() {
+        let snapshot = snapshot_with_channels(&[
+            ("channel:note-to-self", false),
+            ("channel:shared-a", false),
+            ("channel:shared-b", true),
+        ]);
+        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
+        assert!(materialized_channel_binding(&snapshot, &previous).is_none());
     }
 
     #[test]
@@ -1977,7 +2101,7 @@ mod tests {
         let mut config = test_config();
         config.command = None;
         config.args.clear();
-        config.data_dir = std::env::temp_dir().join("aura-harness-local-default-cmd");
+        config.data_dir = unique_test_dir("default-cmd");
         config.device_id = Some("local-test-device".to_string());
         config.bind_address = "127.0.0.1:49999".to_string();
 
@@ -2027,7 +2151,7 @@ mod tests {
     fn local_backend_respects_clipboard_env_override() {
         let mut config = test_config();
         config.id = "local-test-clipboard-override".to_string();
-        config.data_dir = std::env::temp_dir().join("aura-harness-local-clipboard-override");
+        config.data_dir = unique_test_dir("clipboard-override");
         config.command = Some("bash".to_string());
         config.args = vec![
             "-lc".to_string(),
@@ -2086,7 +2210,7 @@ mod tests {
     fn missing_tui_ui_snapshot_fails_loudly() {
         let mut config = test_config();
         config.id = "local-test-missing-ui-snapshot".to_string();
-        config.data_dir = std::env::temp_dir().join("aura-harness-local-missing-ui-snapshot");
+        config.data_dir = unique_test_dir("missing-ui-snapshot");
 
         let mut backend = LocalPtyBackend::new(config, Some(20), Some(120));
         backend
@@ -2170,7 +2294,7 @@ mod tests {
 
     #[test]
     fn local_tail_log_reads_dat_fallback_path() {
-        let temp_root = std::env::temp_dir().join("aura-harness-tail-log-dat");
+        let temp_root = unique_test_dir("tail-log-dat");
         let _ = fs::remove_dir_all(&temp_root);
         if let Err(error) = fs::create_dir_all(&temp_root) {
             panic!("create temp dir: {error}");

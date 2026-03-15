@@ -228,7 +228,7 @@ impl OtaHandler {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);

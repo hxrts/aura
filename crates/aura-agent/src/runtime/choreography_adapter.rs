@@ -29,7 +29,7 @@
 use async_trait::async_trait;
 use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::FlowCost;
 use aura_guards::guards::journal::JournalCoupler;
@@ -875,9 +875,6 @@ where
         })
     }
 }
-
-/// Public API alias for the choreography adapter.
-pub use AuraHandlerAdapter as ChoreographyAdapter;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn map_runtime_error(error: AuraChoreographyError) -> TelltaleChoreographyError {

@@ -15,7 +15,7 @@ use crate::types::{Result as SimResult, SimulatorConfig, SimulatorContext, Simul
 use aura_agent::{AuraEffectSystem, EffectSystemFactory};
 use aura_core::effects::{SimulationEnvironmentConfig, SimulationEnvironmentFactory};
 use aura_core::hash::hash;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};
 use std::collections::HashMap;

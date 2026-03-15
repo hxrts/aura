@@ -9,8 +9,8 @@ use aura_core::effects::amp::{
     AmpChannelEffects, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
     ChannelLeaveParams, ChannelSendParams,
 };
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::FlowCost;
 use aura_journal::extensibility::DomainFact;
 use aura_testkit::mock_effects::MockEffects;

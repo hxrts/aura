@@ -4,7 +4,7 @@
 
 use super::authority_state::{AuthorityManagerState, AuthorityState, AuthorityStatus};
 use super::state::with_state_mut_validated;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

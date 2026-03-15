@@ -12,8 +12,8 @@
 //! entry point (first guard in chain); enables delegation without trusted intermediaries.
 
 use crate::BiscuitError;
-use aura_core::scope::{AuthorizationOp, ResourceScope};
-use aura_core::{hash::hash, identifiers::AuthorityId};
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
+use aura_core::{hash::hash, types::identifiers::AuthorityId};
 use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
 use std::time::Duration;
 

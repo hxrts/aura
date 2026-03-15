@@ -5,7 +5,7 @@
 
 #![allow(missing_docs)] // Macro-generated variants/fields
 
-use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_macros::aura_error_types;
 use serde::{Deserialize, Serialize};

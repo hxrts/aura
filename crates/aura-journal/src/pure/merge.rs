@@ -73,8 +73,8 @@ pub fn journal_join_assign(j1: &mut Journal, j2: Journal) {
 mod tests {
     use super::*;
     use crate::fact::{Fact, FactContent, JournalNamespace, SnapshotFact};
-    use aura_core::identifiers::AuthorityId;
     use aura_core::time::{OrderTime, TimeStamp};
+    use aura_core::types::identifiers::AuthorityId;
     use aura_core::Hash32;
 
     fn make_journal(authority_seed: u8) -> Journal {

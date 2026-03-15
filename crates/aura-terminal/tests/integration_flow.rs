@@ -48,7 +48,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::StorageCoreEffects;
 use aura_core::effects::StorageEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_effects::{
     EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
     RealSecureStorageHandler,
@@ -983,7 +983,7 @@ async fn test_signal_emission_coverage() {
 /// Generate a deterministic invite code for a demo agent (mirrors hints.rs logic)
 fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     use aura_core::hash::hash;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
     use base64::Engine;
     use uuid::Uuid;
 

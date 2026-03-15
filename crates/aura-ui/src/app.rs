@@ -12,14 +12,14 @@ use crate::model::{
     AccessDepth, AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
     CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMemberSelectionKey,
     NeighborhoodMode, NotificationSelectionId, SettingsSection, ThresholdWizardStep, UiController,
-    UiModel, UiScreen, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
+    UiModel, ScreenId, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
     DEFAULT_CAPABILITY_PARTIAL,
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
     ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-    OperationState, ScreenId as ContractScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL,
@@ -44,7 +44,7 @@ use aura_app::ui::workflows::{
 use aura_app::ui_contract::{bridged_operation_statuses, ChannelFactKey, RuntimeFact};
 use aura_app::views::chat::{is_note_to_self_channel_name, NOTE_TO_SELF_CHANNEL_NAME};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, CeremonyId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::ChannelId;
 use dioxus::dioxus_core::schedule_update;
 use dioxus::events::KeyboardData;
@@ -1682,7 +1682,7 @@ fn submit_runtime_modal_action(
                 .and_then(|model| selected_contact_for_modal(&contacts_runtime, model));
             let is_settings_screen = current_model
                 .as_ref()
-                .map(|model| matches!(model.screen, UiScreen::Settings))
+                .map(|model| matches!(model.screen, ScreenId::Settings))
                 .unwrap_or(false);
             spawn(async move {
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
@@ -2313,6 +2313,7 @@ fn submit_runtime_chat_input(
                         None,
                         None,
                         None,
+                        None,
                     )
                     .await
                     .map(|_| Some("home invitation sent".to_string()))
@@ -2435,7 +2436,7 @@ fn handle_runtime_character_shortcut(
     }
 
     match (model.screen, key) {
-        (UiScreen::Neighborhood, "m") => {
+        (ScreenId::Neighborhood, "m") => {
             let app_core = controller.app_core().clone();
             spawn(async move {
                 match context_workflows::create_neighborhood(&app_core, "Neighborhood".to_string())
@@ -2448,7 +2449,7 @@ fn handle_runtime_character_shortcut(
             });
             true
         }
-        (UiScreen::Neighborhood, "v") => {
+        (ScreenId::Neighborhood, "v") => {
             let Some(home_id) = selected_home_id_for_modal(neighborhood_runtime, model) else {
                 controller.runtime_error_toast("Select a home first");
                 rerender();
@@ -2464,7 +2465,7 @@ fn handle_runtime_character_shortcut(
             });
             true
         }
-        (UiScreen::Neighborhood, "L") => {
+        (ScreenId::Neighborhood, "L") => {
             let Some(home_id) = selected_home_id_for_modal(neighborhood_runtime, model) else {
                 controller.runtime_error_toast("Select a home first");
                 rerender();
@@ -2915,7 +2916,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         "0".to_string()
     };
     let should_exit_insert_mode_from_shell =
-        matches!(model.screen, UiScreen::Chat) && model.input_mode;
+        matches!(model.screen, ScreenId::Chat) && model.input_mode;
     let shell_header_exit_input_controller = controller.clone();
     let shell_footer_exit_input_controller = controller.clone();
     let keydown_runtime_snapshot = runtime_snapshot.clone();
@@ -2983,7 +2984,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     }
                 }
                 if matches!(event.data().key(), Key::Enter)
-                    && matches!(model.screen, UiScreen::Chat)
+                    && matches!(model.screen, ScreenId::Chat)
                     && model.input_mode
                     && submit_runtime_chat_input(
                         keydown_controller.clone(),
@@ -3053,7 +3054,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                             class: "inline-flex h-8 items-center justify-center whitespace-nowrap px-6 text-xs font-sans font-bold uppercase leading-none tracking-[0.12em] text-foreground cursor-pointer hover:text-muted-foreground transition-colors",
                             onclick: {
                                 move |_| {
-                                    controller.set_screen(UiScreen::Neighborhood);
+                                    controller.set_screen(ScreenId::Neighborhood);
                                     render_tick.set(render_tick() + 1);
                                 }
                             },
@@ -4646,7 +4647,7 @@ fn ContactsScreen(
                                                     timestamp_ms,
                                                 ).await {
                                                     Ok(channel_id) => {
-                                                        controller.set_screen(UiScreen::Chat);
+                                                        controller.set_screen(ScreenId::Chat);
                                                         controller.select_channel_by_name(&channel_id);
                                                     }
                                                     Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -5343,43 +5344,43 @@ fn SettingsScreen(
     }
 }
 
-fn screen_tabs(active: UiScreen) -> Vec<(UiScreen, &'static str, bool)> {
+fn screen_tabs(active: ScreenId) -> Vec<(ScreenId, &'static str, bool)> {
     [
         (
-            UiScreen::Neighborhood,
+            ScreenId::Neighborhood,
             "Neighborhood",
-            active == UiScreen::Neighborhood,
+            active == ScreenId::Neighborhood,
         ),
-        (UiScreen::Chat, "Chat", active == UiScreen::Chat),
-        (UiScreen::Contacts, "Contacts", active == UiScreen::Contacts),
+        (ScreenId::Chat, "Chat", active == ScreenId::Chat),
+        (ScreenId::Contacts, "Contacts", active == ScreenId::Contacts),
         (
-            UiScreen::Notifications,
+            ScreenId::Notifications,
             "Notifications",
-            active == UiScreen::Notifications,
+            active == ScreenId::Notifications,
         ),
-        (UiScreen::Settings, "Settings", active == UiScreen::Settings),
+        (ScreenId::Settings, "Settings", active == ScreenId::Settings),
     ]
     .to_vec()
 }
 
-fn nav_button_id(screen: UiScreen) -> &'static str {
+fn nav_button_id(screen: ScreenId) -> &'static str {
     match screen {
-        UiScreen::Onboarding => ControlId::OnboardingRoot
+        ScreenId::Onboarding => ControlId::OnboardingRoot
             .web_dom_id()
             .required_dom_id("OnboardingRoot must define a web DOM id"),
-        UiScreen::Neighborhood => ControlId::NavNeighborhood
+        ScreenId::Neighborhood => ControlId::NavNeighborhood
             .web_dom_id()
             .required_dom_id("NavNeighborhood must define a web DOM id"),
-        UiScreen::Chat => ControlId::NavChat
+        ScreenId::Chat => ControlId::NavChat
             .web_dom_id()
             .required_dom_id("NavChat must define a web DOM id"),
-        UiScreen::Contacts => ControlId::NavContacts
+        ScreenId::Contacts => ControlId::NavContacts
             .web_dom_id()
             .required_dom_id("NavContacts must define a web DOM id"),
-        UiScreen::Notifications => ControlId::NavNotifications
+        ScreenId::Notifications => ControlId::NavNotifications
             .web_dom_id()
             .required_dom_id("NavNotifications must define a web DOM id"),
-        UiScreen::Settings => ControlId::NavSettings
+        ScreenId::Settings => ControlId::NavSettings
             .web_dom_id()
             .required_dom_id("NavSettings must define a web DOM id"),
     }
@@ -5421,54 +5422,54 @@ fn render_screen_content(
     resolved_scheme: ColorScheme,
 ) -> Element {
     match model.screen {
-        UiScreen::Onboarding => rsx! {
+        ScreenId::Onboarding => rsx! {
             div {
-                id: ControlId::Screen(ContractScreenId::Onboarding)
+                id: ControlId::Screen(ScreenId::Onboarding)
                     .web_dom_id()
                     .required_dom_id("Screen(Onboarding) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {OnboardingScreen()}
             }
         },
-        UiScreen::Neighborhood => rsx! {
+        ScreenId::Neighborhood => rsx! {
             div {
-                id: ControlId::Screen(ContractScreenId::Neighborhood)
+                id: ControlId::Screen(ScreenId::Neighborhood)
                     .web_dom_id()
                     .required_dom_id("Screen(Neighborhood) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {NeighborhoodScreen(model, neighborhood_runtime, controller, render_tick)}
             }
         },
-        UiScreen::Chat => rsx! {
+        ScreenId::Chat => rsx! {
             div {
-                id: ControlId::Screen(ContractScreenId::Chat)
+                id: ControlId::Screen(ScreenId::Chat)
                     .web_dom_id()
                     .required_dom_id("Screen(Chat) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {ChatScreen(model, chat_runtime, controller, render_tick)}
             }
         },
-        UiScreen::Contacts => rsx! {
+        ScreenId::Contacts => rsx! {
             div {
-                id: ControlId::Screen(ContractScreenId::Contacts)
+                id: ControlId::Screen(ScreenId::Contacts)
                     .web_dom_id()
                     .required_dom_id("Screen(Contacts) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {ContactsScreen(model, contacts_runtime, controller, render_tick)}
             }
         },
-        UiScreen::Notifications => rsx! {
+        ScreenId::Notifications => rsx! {
             div {
-                id: ControlId::Screen(ContractScreenId::Notifications)
+                id: ControlId::Screen(ScreenId::Notifications)
                     .web_dom_id()
                     .required_dom_id("Screen(Notifications) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
                 {NotificationsScreen(model, notifications_runtime, controller, render_tick)}
             }
         },
-        UiScreen::Settings => rsx! {
+        ScreenId::Settings => rsx! {
             div {
-                id: ControlId::Screen(ContractScreenId::Settings)
+                id: ControlId::Screen(ScreenId::Settings)
                     .web_dom_id()
                     .required_dom_id("Screen(Settings) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
@@ -5532,7 +5533,7 @@ fn upsert_snapshot_operation(
 }
 
 fn screen_readiness(
-    screen: UiScreen,
+    screen: ScreenId,
     _neighborhood_runtime: &NeighborhoodRuntimeView,
     _chat_runtime: &ChatRuntimeView,
     _contacts_runtime: &ContactsRuntimeView,
@@ -5540,12 +5541,12 @@ fn screen_readiness(
     _notifications_runtime: &NotificationsRuntimeView,
 ) -> UiReadiness {
     match screen {
-        UiScreen::Onboarding => UiReadiness::Loading,
-        UiScreen::Neighborhood
-        | UiScreen::Chat
-        | UiScreen::Contacts
-        | UiScreen::Notifications
-        | UiScreen::Settings => UiReadiness::Ready,
+        ScreenId::Onboarding => UiReadiness::Loading,
+        ScreenId::Neighborhood
+        | ScreenId::Chat
+        | ScreenId::Contacts
+        | ScreenId::Notifications
+        | ScreenId::Settings => UiReadiness::Ready,
     }
 }
 
@@ -6262,36 +6263,36 @@ fn modal_view(model: &UiModel, chat_runtime: &ChatRuntimeView) -> Option<ModalVi
     })
 }
 
-fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) {
+fn help_modal_content(screen: ScreenId) -> (Vec<String>, Vec<(String, String)>) {
     let details = match screen {
-        UiScreen::Onboarding => vec![
+        ScreenId::Onboarding => vec![
             "Onboarding reference".to_string(),
             "Create or import a local account before entering the main application.".to_string(),
         ],
-        UiScreen::Neighborhood => vec![
+        ScreenId::Neighborhood => vec![
             "Neighborhood reference".to_string(),
             "Browse homes, access depth, and neighborhood detail views.".to_string(),
         ],
-        UiScreen::Chat => vec![
+        ScreenId::Chat => vec![
             "Chat reference".to_string(),
             "Navigate channels, compose messages, and manage channel metadata.".to_string(),
         ],
-        UiScreen::Contacts => vec![
+        ScreenId::Contacts => vec![
             "Contacts reference".to_string(),
             "Manage invitations, nicknames, guardians, and direct-message handoff.".to_string(),
         ],
-        UiScreen::Notifications => vec![
+        ScreenId::Notifications => vec![
             "Notifications reference".to_string(),
             "Review pending notices and move through the notification feed.".to_string(),
         ],
-        UiScreen::Settings => vec![
+        ScreenId::Settings => vec![
             "Settings reference".to_string(),
             "Adjust profile, recovery, devices, authority, and appearance.".to_string(),
         ],
     };
 
     let keybind_rows = match screen {
-        UiScreen::Onboarding => vec![
+        ScreenId::Onboarding => vec![
             (
                 "type".to_string(),
                 "Enter account name or import code".to_string(),
@@ -6301,7 +6302,7 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
                 "Submit the active onboarding form".to_string(),
             ),
         ],
-        UiScreen::Neighborhood => vec![
+        ScreenId::Neighborhood => vec![
             ("1-5".to_string(), "Switch screens".to_string()),
             ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
             ("enter".to_string(), "Toggle map/detail view".to_string()),
@@ -6310,7 +6311,7 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
             ("d".to_string(), "Cycle access depth".to_string()),
             ("esc".to_string(), "Close modal / back out".to_string()),
         ],
-        UiScreen::Chat => vec![
+        ScreenId::Chat => vec![
             ("1-5".to_string(), "Switch screens".to_string()),
             ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
             (
@@ -6323,7 +6324,7 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
             ("o".to_string(), "Open channel info".to_string()),
             ("esc".to_string(), "Close modal / exit input".to_string()),
         ],
-        UiScreen::Contacts => vec![
+        ScreenId::Contacts => vec![
             ("1-5".to_string(), "Switch screens".to_string()),
             ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
             (
@@ -6345,7 +6346,7 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
             ("c".to_string(), "Open DM for selected contact".to_string()),
             ("r".to_string(), "Remove contact".to_string()),
         ],
-        UiScreen::Notifications => vec![
+        ScreenId::Notifications => vec![
             ("1-5".to_string(), "Switch screens".to_string()),
             ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
             (
@@ -6358,7 +6359,7 @@ fn help_modal_content(screen: UiScreen) -> (Vec<String>, Vec<(String, String)>) 
             ),
             ("esc".to_string(), "Close modal".to_string()),
         ],
-        UiScreen::Settings => vec![
+        ScreenId::Settings => vec![
             ("1-5".to_string(), "Switch screens".to_string()),
             ("tab / shift+tab".to_string(), "Cycle screens".to_string()),
             (

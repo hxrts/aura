@@ -553,9 +553,9 @@ impl PeerManager {
         };
 
         // Create a resource scope for sync operations
-        let sync_resource = aura_core::scope::ResourceScope::Authority {
+        let sync_resource = aura_core::types::scope::ResourceScope::Authority {
             authority_id: aura_core::AuthorityId::new_from_entropy([1u8; 32]),
-            operation: aura_core::scope::AuthorityOp::UpdateTree,
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
         };
 
         // Check if the token grants sync capability using the guard evaluator

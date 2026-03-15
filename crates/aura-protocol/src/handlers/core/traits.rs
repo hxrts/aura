@@ -3,7 +3,7 @@
 //! Core trait for creating Aura handlers with consistent configuration patterns
 //! across different execution modes.
 
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 
 use super::{AuraHandlerConfig, FactoryError};
 use crate::handlers::EffectType;

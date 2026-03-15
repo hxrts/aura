@@ -1,6 +1,6 @@
 //! Online property monitor for simulation ticks.
 
-use aura_core::identifiers::{ContextId, SessionId};
+use aura_core::types::identifiers::{ContextId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -413,7 +413,7 @@ impl Default for AuraPropertyMonitor {
 
 #[cfg(test)]
 mod tests {
-    use aura_core::identifiers::{ContextId, SessionId};
+    use aura_core::types::identifiers::{ContextId, SessionId};
     use uuid::Uuid;
 
     use super::*;

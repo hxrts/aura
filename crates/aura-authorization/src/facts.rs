@@ -6,12 +6,12 @@
 //! **Authority Model**: Facts reference authorities using the authority-centric
 //! model where authorities hide internal device structure.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
     FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, MAX_FACT_PAYLOAD_BYTES,
 };
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
 use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::Cap;
@@ -331,8 +331,8 @@ impl FactDeltaReducer<WotFact, WotFactDelta> for WotFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::scope::ContextOp;
     use aura_core::types::facts::FactDeltaReducer;
+    use aura_core::types::scope::ContextOp;
 
     fn pt(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {

@@ -24,7 +24,7 @@ use crate::{
 use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
-    identifiers::{AuthorityId, ChannelId, ContextId},
+    types::{AuthorityId, ChannelId, ContextId},
     AuraError,
 };
 use std::sync::Arc;
@@ -738,7 +738,7 @@ pub async fn get_current_position(app_core: &Arc<RwLock<AppCore>>) -> Option<Tra
 pub async fn initialize_test_home(
     app_core: &Arc<RwLock<AppCore>>,
     name: &str,
-    authority_id: aura_core::identifiers::AuthorityId,
+    authority_id: aura_core::types::identifiers::AuthorityId,
     timestamp_ms: u64,
 ) -> Result<ChannelId, AuraError> {
     use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
@@ -810,7 +810,7 @@ mod tests {
     async fn test_resolve_active_home_uses_selected_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([21u8; 32]);
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([21u8; 32]);
 
         let selected_home = ChannelId::from_bytes(hash(b"selected-home"));
         let selected_ctx = ContextId::new_from_entropy(hash(b"selected-ctx"));
@@ -838,7 +838,7 @@ mod tests {
     async fn test_resolve_active_home_uses_deterministic_fallback() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
 
         let home_a = ChannelId::from_bytes(hash(b"home-z"));
         let home_b = ChannelId::from_bytes(hash(b"home-a"));
@@ -895,7 +895,7 @@ mod tests {
     async fn test_current_home_context_or_authority_default_uses_active_home_when_available() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
         let home_id = ChannelId::from_bytes(hash(b"chat-home"));
         let home_ctx = ContextId::new_from_entropy(hash(b"chat-home-ctx"));
 
@@ -924,7 +924,7 @@ mod tests {
     async fn test_current_home_context_or_authority_default_falls_back_without_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([32u8; 32]);
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([32u8; 32]);
 
         let (resolved_ctx, used_home_context) =
             current_home_context_or_authority_default(&app_core, authority)
@@ -941,7 +941,7 @@ mod tests {
     async fn test_move_position_selects_known_target_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([11u8; 32]);
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([11u8; 32]);
 
         let home_a = ChannelId::from_bytes(hash(b"home-a"));
         let home_b = ChannelId::from_bytes(hash(b"home-b"));

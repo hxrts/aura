@@ -27,8 +27,8 @@
 //! let restored = SocialFact::from_bytes(&fact.to_bytes());
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 // Re-export HomeId and NeighborhoodId from aura-core for backwards compatibility
-pub use aura_core::identifiers::{HomeId, NeighborhoodId};
+pub use aura_core::types::identifiers::{HomeId, NeighborhoodId};
 
 // ============================================================================
 // Home Facts

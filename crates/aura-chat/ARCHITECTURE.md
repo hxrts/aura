@@ -20,6 +20,16 @@ state reduction for encrypted group and direct messaging.
 - Message payloads are opaque bytes; decryption is a higher-layer concern.
 - Channel creation and membership changes are journaled as facts.
 
+## Ownership Model
+
+- `aura-chat` is primarily `Pure` fact, reducer, and workflow-domain logic.
+- Chat/channel authority transfer and operation handles should be explicit and
+  `MoveOwned` where exclusivity matters.
+- Long-lived mutable chat runtime ownership belongs in explicit `ActorOwned`
+  services in higher layers, not hidden in chat helpers.
+- Message and membership publication must remain capability-gated and typed.
+- `Observed` chat views are downstream and must not author chat truth.
+
 ### Detailed Specifications
 
 ### InvariantChatContextReduction
@@ -46,4 +56,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

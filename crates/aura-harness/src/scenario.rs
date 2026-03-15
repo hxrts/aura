@@ -7,9 +7,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::config::{
-    load_scenario_config, require_existing_file, RunConfig, ScenarioConfig,
-};
+use crate::config::{load_scenario_config, require_existing_file, RunConfig, ScenarioConfig};
 
 pub struct ScenarioRunner;
 
@@ -66,22 +64,6 @@ impl ScenarioRunner {
                     ));
                 }
             }
-        }
-
-        let mut previous_request_id: Option<u64> = None;
-        for step in compatibility_steps {
-            let Some(request_id) = step.request_id else {
-                continue;
-            };
-            if previous_request_id.is_some_and(|previous| request_id <= previous) {
-                errors.push(format!(
-                    "step {} request_id={} must be strictly greater than previous request_id={}",
-                    step.id,
-                    request_id,
-                    previous_request_id.unwrap_or(0)
-                ));
-            }
-            previous_request_id = Some(request_id);
         }
 
         if compatibility_steps.len() > 100 {

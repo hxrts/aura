@@ -26,7 +26,7 @@ pub use aura_app::ui::workflows::invitation::{
 async fn resolve_contact_authority_id(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
-) -> Result<aura_core::identifiers::AuthorityId, OpError> {
+) -> Result<aura_core::types::identifiers::AuthorityId, OpError> {
     let target = target.trim();
     if target.is_empty() {
         return Err(OpError::InvalidArgument(

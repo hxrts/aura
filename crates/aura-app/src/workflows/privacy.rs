@@ -21,7 +21,7 @@
 //! ```
 
 use aura_core::hash;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 /// Normalize a context name for consistent lookup.
 ///
@@ -98,7 +98,7 @@ pub fn anonymize_peer_id(peer_id: &str) -> String {
 ///
 /// ```rust,ignore
 /// use aura_app::workflows::privacy::anonymize_authority_id;
-/// use aura_core::identifiers::AuthorityId;
+/// use aura_core::types::identifiers::AuthorityId;
 ///
 /// let auth_id: AuthorityId = /* ... */;
 /// let anon = anonymize_authority_id(&auth_id);

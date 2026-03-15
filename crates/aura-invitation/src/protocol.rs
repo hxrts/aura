@@ -5,7 +5,7 @@
 
 use crate::facts::CeremonyRelationshipId;
 use crate::InvitationType;
-use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -414,7 +414,7 @@ pub const DEVICE_ENROLLMENT_PROTOCOL_ID: &str = "invitation_device_enrollment.de
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
+    use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
     use aura_core::util::serialization::{from_slice, to_vec};
 
     fn test_authority() -> AuthorityId {

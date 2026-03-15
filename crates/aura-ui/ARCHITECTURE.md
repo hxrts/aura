@@ -32,7 +32,8 @@ text snapshot rendering used by harness automation.
   execution and render-convergence checks.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from
   `aura-app::ui_contract`; they are not locally reinvented here.
-- Published semantic state must support stale-state detection through shared
+- Published observed semantic projections must support stale-state detection
+  through shared
   revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every
   other screen.
@@ -67,8 +68,8 @@ It must not use:
 | Shared-flow completion helpers | `Observed` | upstream workflow/runtime coordinators | auxiliary UI facts/toasts/modal dismissal only | harness, shells |
 
 ### InvariantUiSnapshotReflectsSemanticState
-`aura-ui` publishes semantic state that matches the shared contract rather than
-frontend-local incidental structure.
+`aura-ui` exports observed semantic projections that match the shared contract
+rather than frontend-local incidental structure.
 
 Enforcement locus:
 - `model.rs` owns typed selection, operation, toast, and runtime-event state.

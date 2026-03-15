@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::FlowCost;
 use aura_guards::chain::SendGuardChain;
 use aura_guards::types::CapabilityId;

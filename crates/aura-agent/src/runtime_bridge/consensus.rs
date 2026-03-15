@@ -2,8 +2,8 @@ use aura_app::IntentError;
 use aura_consensus::protocol::ConsensusParams;
 use aura_core::byzantine::{ByzantineSafetyAttestation, CapabilitySnapshot};
 use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
-use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{AuraError, Hash32, Prestate};
 use aura_effects::RuntimeCapabilityHandler;
 use aura_protocol::admission::{

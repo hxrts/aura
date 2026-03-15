@@ -20,7 +20,7 @@ use aura_core::effects::noise::{
 use aura_core::effects::{
     CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
 };
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_rendezvous::{
     facts::{RendezvousDescriptor, RendezvousFact, TransportHint},

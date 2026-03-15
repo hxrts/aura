@@ -10,7 +10,7 @@
 #![allow(clippy::uninlined_format_args)] // Test code uses explicit format args for clarity
 
 use aura_composition::{CompositeHandler, Handler};
-use aura_core::{hash::hash, identifiers::DeviceId, AuraResult, ExecutionMode};
+use aura_core::{hash::hash, types::identifiers::DeviceId, AuraResult, ExecutionMode};
 use aura_macros::aura_test;
 use aura_testkit::DeviceTestFixture;
 use std::time::Duration;

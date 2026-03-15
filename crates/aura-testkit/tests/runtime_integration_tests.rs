@@ -16,7 +16,7 @@
 //! Tests validating choreographic execution following unified effect system architecture
 
 use aura_composition::CompositeHandler;
-use aura_core::{identifiers::DeviceId, AuraResult};
+use aura_core::{types::identifiers::DeviceId, AuraResult};
 use aura_macros::aura_test;
 use aura_protocol::effects::*;
 use std::time::Duration;

@@ -381,10 +381,10 @@ use aura_core::effects::{
     BiscuitAuthorizationEffects, FlowBudgetEffects, JournalEffects, RandomCoreEffects,
     StorageCoreEffects, StorageExtendedEffects,
 };
-use aura_core::flow::{FlowBudget, Receipt};
-use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
+use aura_core::types::flow::{FlowBudget, Receipt};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
 use aura_core::ExecutionMode;
 use aura_core::{AuraError, FlowCost, Journal, Result as AuraResult};
 use aura_guards::guards::GuardContextProvider;

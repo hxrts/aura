@@ -3,7 +3,7 @@
 //! Provides essential message wrappers with built-in privacy preservation, context scoping,
 //! and minimal framing metadata. Target: <150 lines (concise implementation).
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraResult;
 use serde::{Deserialize, Serialize};
 

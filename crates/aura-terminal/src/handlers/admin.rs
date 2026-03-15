@@ -4,7 +4,7 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_app::ui::workflows::admin;
-use aura_core::identifiers::{AccountId, AuthorityId};
+use aura_core::types::identifiers::{AccountId, AuthorityId};
 
 use crate::AdminAction;
 

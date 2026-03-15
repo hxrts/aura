@@ -7,8 +7,8 @@
 use super::types::ConsensusId;
 use aura_core::{
     crypto::tree_signing::NonceToken,
-    epochs::Epoch,
     frost::{NonceCommitment, PartialSignature},
+    types::Epoch,
     AuthorityId, Hash32, Result,
 };
 use serde::{Deserialize, Serialize};
@@ -549,7 +549,7 @@ impl WitnessTracker {
     /// Call this when you have full context available (consensus_id, prestate_hash, etc.)
     pub fn record_signature_with_detection(
         &mut self,
-        context_id: aura_core::identifiers::ContextId,
+        context_id: aura_core::types::identifiers::ContextId,
         witness: AuthorityId,
         signature: PartialSignature,
         consensus_id: crate::ConsensusId,

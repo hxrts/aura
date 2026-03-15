@@ -8,7 +8,7 @@ use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_run
 use crate::workflows::{channel_ref::ChannelRef, snapshot_policy::chat_snapshot};
 use crate::{views::home::HomeRole, AppCore};
 use async_lock::RwLock;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::AuraError;
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::moderation::facts::{HomeGrantModeratorFact, HomeRevokeModeratorFact};

@@ -6,7 +6,7 @@
 use crate::model::{
     AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
     CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMode,
-    SettingsSection, ThresholdWizardStep, UiModel, UiScreen,
+    SettingsSection, ThresholdWizardStep, UiModel, ScreenId,
 };
 use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 
@@ -62,12 +62,12 @@ fn render_account_setup_snapshot(model: &UiModel) -> String {
 
 fn panel_row(model: &UiModel, row_idx: usize) -> (String, String, String) {
     match model.screen {
-        UiScreen::Onboarding => (String::new(), String::new(), String::new()),
-        UiScreen::Neighborhood => neighborhood_row(model, row_idx),
-        UiScreen::Chat => chat_row(model, row_idx),
-        UiScreen::Contacts => contacts_row(model, row_idx),
-        UiScreen::Notifications => notifications_row(model, row_idx),
-        UiScreen::Settings => settings_row(model, row_idx),
+        ScreenId::Onboarding => (String::new(), String::new(), String::new()),
+        ScreenId::Neighborhood => neighborhood_row(model, row_idx),
+        ScreenId::Chat => chat_row(model, row_idx),
+        ScreenId::Contacts => contacts_row(model, row_idx),
+        ScreenId::Notifications => notifications_row(model, row_idx),
+        ScreenId::Settings => settings_row(model, row_idx),
     }
 }
 

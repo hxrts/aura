@@ -4,7 +4,7 @@
 //! runtime, managing execution contexts, and coordinating effect handler invocation.
 
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -225,7 +225,7 @@ mod tests {
     use crate::runtime::registry::EffectRegistry;
     use crate::EffectContext;
     use aura_core::effects::ExecutionMode;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
     use futures::future::BoxFuture;
     use std::sync::Arc;
 

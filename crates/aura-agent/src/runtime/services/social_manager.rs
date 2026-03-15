@@ -6,7 +6,7 @@
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use async_trait::async_trait;
 use aura_core::effects::relay::{RelayCandidate, RelayContext, RelaySelector};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_social::{DiscoveryLayer, Home, Neighborhood, SocialTopology};
 use aura_transport::relay::DeterministicRandomSelector;
 use std::sync::Arc;

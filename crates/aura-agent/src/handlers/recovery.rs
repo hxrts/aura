@@ -12,7 +12,7 @@ use crate::fact_types::{
 use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomExtendedEffects;
-use aura_core::identifiers::{AuthorityId, RecoveryId};
+use aura_core::types::identifiers::{AuthorityId, RecoveryId};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
 use aura_guards::types::CapabilityId;

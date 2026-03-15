@@ -10,8 +10,8 @@ use crate::{
 use async_lock::RwLock;
 use aura_core::{
     effects::{PhysicalTimeEffects, RandomEffects},
-    epochs::Epoch,
     frost::{PublicKeyPackage, Share},
+    types::Epoch,
     AuraError, AuthorityId, ContextId, Prestate, Result,
 };
 use std::collections::HashMap;

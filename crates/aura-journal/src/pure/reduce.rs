@@ -30,7 +30,7 @@
 
 use crate::fact::Journal;
 use crate::reduction::{self, ReductionNamespaceError, RelationalState};
-use aura_core::authority::AuthorityState;
+use aura_core::types::authority::AuthorityState;
 
 /// Pure authority reduction function.
 ///
@@ -76,8 +76,8 @@ pub fn context_reduce(journal: &Journal) -> Result<RelationalState, ReductionNam
 mod tests {
     use super::*;
     use crate::fact::{Fact, FactContent, JournalNamespace, SnapshotFact};
-    use aura_core::identifiers::AuthorityId;
     use aura_core::time::{OrderTime, TimeStamp};
+    use aura_core::types::identifiers::AuthorityId;
     use aura_core::Hash32;
 
     fn make_authority_journal(seed: u8) -> Journal {

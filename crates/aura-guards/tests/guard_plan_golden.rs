@@ -1,5 +1,5 @@
 #![allow(missing_docs)]
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::executor::GuardPlan;

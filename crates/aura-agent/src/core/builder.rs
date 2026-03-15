@@ -5,7 +5,7 @@ use crate::core::agent::AuraAgent;
 use crate::runtime::services::{RendezvousManagerConfig, SyncManagerConfig};
 use crate::runtime::{EffectContext, EffectSystemBuilder};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 
 /// Builder for creating agents
 pub struct AgentBuilder {

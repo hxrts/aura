@@ -21,8 +21,8 @@ use super::state::{
 };
 use crate::facts::{ConsensusFact, EquivocationProof};
 use crate::types::ConsensusId;
-use aura_core::identifiers::ContextId;
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::ContextId;
 use aura_core::{AuthorityId, Hash32};
 
 /// Validation error types for detailed diagnostics.

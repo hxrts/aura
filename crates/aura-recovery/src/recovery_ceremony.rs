@@ -42,8 +42,8 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{AuraError, AuraResult, Hash32};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -493,7 +493,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         .expect("Invalid hex")
         .try_into()
         .expect("Invalid length - expected 16 bytes");
-    let original_authority = aura_core::identifiers::AuthorityId::from_uuid(
+    let original_authority = aura_core::types::identifiers::AuthorityId::from_uuid(
         uuid::Uuid::from_bytes(original_authority_bytes),
     );
 
@@ -1628,7 +1628,7 @@ async fn test_moderator_role_flow() {
     use async_lock::RwLock;
     use aura_app::views::home::{HomeMember, HomeRole, HomeState};
     use aura_app::AppCore;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use aura_terminal::tui::effects::EffectCommand;
@@ -1855,7 +1855,7 @@ async fn test_neighborhood_navigation_flow() {
         NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition,
     };
     use aura_app::AppCore;
-    use aura_core::identifiers::ChannelId;
+    use aura_core::types::identifiers::ChannelId;
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use aura_terminal::tui::effects::EffectCommand;
@@ -2309,7 +2309,7 @@ async fn test_channel_mode_operations() {
     use async_lock::RwLock;
     use aura_app::views::home::{HomeRole, HomeState};
     use aura_app::AppCore;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use std::sync::Arc;
 
     let test_dir =
@@ -3145,7 +3145,7 @@ async fn test_account_backup_restore_flow() {
 async fn test_device_management() {
     use async_lock::RwLock;
     use aura_app::AppCore;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use aura_terminal::tui::effects::EffectCommand;
@@ -3262,7 +3262,7 @@ async fn test_snapshot_data_accuracy() {
     use aura_app::views::home::HomeState;
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::{InitializedAppCore, IoContext};
     use std::sync::Arc;
@@ -3452,8 +3452,8 @@ async fn test_snapshot_data_accuracy() {
 #[cfg(any())]
 #[tokio::test]
 async fn test_intent_creates_journal_facts() {
-    use aura_app::core::{AppConfig, AppCore, Intent, IntentChannelType};
-    use aura_core::identifiers::AuthorityId;
+    use aura_app::core::{AppConfig, AppCore, ChannelType, Intent};
+    use aura_core::types::identifiers::AuthorityId;
 
     println!("\n=== Intent Creates Journal Facts E2E Test ===\n");
 
@@ -3486,7 +3486,7 @@ async fn test_intent_creates_journal_facts() {
     // Dispatch CreateChannel intent - this should create a journal fact
     let result = app_core.dispatch(Intent::CreateChannel {
         name: "test-channel".to_string(),
-        channel_type: IntentChannelType::Home,
+        channel_type: ChannelType::Home,
     });
     assert!(result.is_ok(), "CreateChannel dispatch should succeed");
 
@@ -3517,7 +3517,7 @@ async fn test_intent_creates_journal_facts() {
     // Dispatch another intent to verify accumulation
     let _ = app_core.dispatch(Intent::CreateChannel {
         name: "another-channel".to_string(),
-        channel_type: IntentChannelType::DirectMessage,
+        channel_type: ChannelType::DirectMessage,
     });
     assert_eq!(
         app_core.pending_facts().len(),
@@ -3549,8 +3549,8 @@ async fn test_intent_creates_journal_facts() {
 #[cfg(any())]
 #[tokio::test]
 async fn test_journal_save_load_roundtrip() {
-    use aura_app::core::{AppConfig, AppCore, Intent, IntentChannelType};
-    use aura_core::identifiers::AuthorityId;
+    use aura_app::core::{AppConfig, AppCore, ChannelType, Intent};
+    use aura_core::types::identifiers::AuthorityId;
 
     println!("\n=== Journal Save/Load Roundtrip E2E Test ===\n");
 
@@ -3575,25 +3575,25 @@ async fn test_journal_save_load_roundtrip() {
     app_core.set_authority(authority);
 
     // Dispatch some intents to create journal facts
-    // Using CreateChannel which only requires String name and IntentChannelType
+    // Using CreateChannel which only requires String name and ChannelType
     app_core
         .dispatch(Intent::CreateChannel {
             name: "channel-1".to_string(),
-            channel_type: IntentChannelType::Home,
+            channel_type: ChannelType::Home,
         })
         .expect("CreateChannel should succeed");
 
     app_core
         .dispatch(Intent::CreateChannel {
             name: "channel-2".to_string(),
-            channel_type: IntentChannelType::DirectMessage,
+            channel_type: ChannelType::DirectMessage,
         })
         .expect("CreateChannel 2 should succeed");
 
     app_core
         .dispatch(Intent::CreateChannel {
             name: "test-room".to_string(),
-            channel_type: IntentChannelType::Guardian,
+            channel_type: ChannelType::Guardian,
         })
         .expect("CreateChannel 3 should succeed");
 
@@ -3759,8 +3759,8 @@ async fn test_journal_compaction_primitives() {
 #[cfg(any())]
 #[tokio::test]
 async fn test_settings_persistence() {
-    use aura_app::core::{AppConfig, AppCore, Intent, IntentChannelType};
-    use aura_core::identifiers::AuthorityId;
+    use aura_app::core::{AppConfig, AppCore, ChannelType, Intent};
+    use aura_core::types::identifiers::AuthorityId;
 
     println!("\n=== Settings Persistence E2E Test ===\n");
 
@@ -3789,14 +3789,14 @@ async fn test_settings_persistence() {
     app_core
         .dispatch(Intent::CreateChannel {
             name: "general".to_string(),
-            channel_type: IntentChannelType::Home,
+            channel_type: ChannelType::Home,
         })
         .expect("CreateChannel should succeed");
 
     app_core
         .dispatch(Intent::CreateChannel {
             name: "random".to_string(),
-            channel_type: IntentChannelType::DirectMessage,
+            channel_type: ChannelType::DirectMessage,
         })
         .expect("CreateChannel 2 should succeed");
 
@@ -3860,8 +3860,8 @@ async fn test_settings_persistence() {
 #[cfg(any())]
 #[tokio::test]
 async fn test_channel_lifecycle() {
-    use aura_app::core::{AppConfig, AppCore, Intent, IntentChannelType};
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_app::core::{AppConfig, AppCore, ChannelType, Intent};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
 
     println!("\n=== Channel Lifecycle E2E Test ===\n");
 
@@ -3888,7 +3888,7 @@ async fn test_channel_lifecycle() {
     println!("Step 1: Creating channel...");
     let result = app_core.dispatch(Intent::CreateChannel {
         name: "test-room".to_string(),
-        channel_type: IntentChannelType::Home,
+        channel_type: ChannelType::Home,
     });
     assert!(result.is_ok(), "CreateChannel should succeed");
     assert_eq!(

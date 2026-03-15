@@ -9,7 +9,7 @@
 //! - Mock handlers for isolated testing
 //! - Integration testing for choreographic protocols
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_transport::{
     ConnectionId, Envelope, HolePunchMessage, PeerInfo, PrivacyAwareSelectionCriteria,
     PrivacyLevel, StunMessage, TransportConfig,

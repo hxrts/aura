@@ -232,7 +232,7 @@ impl MerkleVerifier {
 
                         // NOTE: Merkle proof and signature verification require additional
                         // infrastructure:
-                        // - IndexedFact would need to carry MerkleProof from the sender
+                        // - IndexedFact would need to carry SimpleMerkleProof from the sender
                         // - IndexedFact would need to carry authority signature
                         // When these are available, add verification here.
 

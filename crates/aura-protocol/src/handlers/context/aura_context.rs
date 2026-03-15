@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_core::{AccountId, SessionId};
 
 use super::{AgentContext, ChoreographicContext, MiddlewareContext, SimulationContext};

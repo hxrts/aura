@@ -11,7 +11,7 @@ use crate::guards::executor::{execute_guard_plan, BorrowedEffectInterpreter, Gua
 use crate::guards::{
     config::GuardRuntimeConfig, privacy::track_leakage_consumption, JournalCoupler, LeakageBudget,
 };
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, FlowCost, Receipt};
 use tracing::{debug, warn};
 

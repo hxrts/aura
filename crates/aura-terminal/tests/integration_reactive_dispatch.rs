@@ -28,7 +28,7 @@
 use std::sync::{Arc, RwLock};
 
 use aura_terminal::tui::screens::Screen;
-use aura_terminal::tui::state_machine::{
+use aura_terminal::tui::state::{
     transition, DispatchCommand, GuardianCandidate, QueuedModal, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::Contact;
@@ -123,7 +123,7 @@ impl DispatchTestHarness {
                     .collect();
 
                 // Use the factory constructor for proper initialization
-                let modal_state = aura_terminal::tui::state_machine::GuardianSetupModalState::from_contacts_with_selection(candidates, selected);
+                let modal_state = aura_terminal::tui::state::GuardianSetupModalState::from_contacts_with_selection(candidates, selected);
 
                 // IMPORTANT: Modify new_state, not some other state object
                 new_state
@@ -140,7 +140,7 @@ impl DispatchTestHarness {
 
     fn get_guardian_setup_modal(
         &self,
-    ) -> Option<&aura_terminal::tui::state_machine::GuardianSetupModalState> {
+    ) -> Option<&aura_terminal::tui::state::GuardianSetupModalState> {
         if let Some(QueuedModal::GuardianSetup(state)) = self.state.modal_queue.current() {
             Some(state)
         } else {
@@ -309,12 +309,12 @@ fn test_guardian_ceremony_in_progress_escape_cancels() {
     state = new_state;
 
     // Enqueue an in-progress guardian ceremony modal
-    let modal = aura_terminal::tui::state_machine::GuardianSetupModalState::in_ceremony(Some(
+    let modal = aura_terminal::tui::state::GuardianSetupModalState::in_ceremony(Some(
         "ceremony-123".to_string(),
     ));
     state
         .modal_queue
-        .enqueue(aura_terminal::tui::state_machine::QueuedModal::GuardianSetup(modal));
+        .enqueue(aura_terminal::tui::state::QueuedModal::GuardianSetup(modal));
 
     // Escape should cancel (not silently dismiss)
     let (new_state, commands) = transition(&state, events::escape());

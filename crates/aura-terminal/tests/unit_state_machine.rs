@@ -30,7 +30,7 @@ mod support;
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::navigation::TwoPanelFocus;
 use aura_terminal::tui::screens::Screen;
-use aura_terminal::tui::state_machine::{
+use aura_terminal::tui::state::{
     ChatFocus, ChatMemberCandidate, ChatMemberSelectModalState, ContactSelectModalState,
     CreateChannelModalState, CreateChannelStep, DispatchCommand, ModalType, QueuedModal,
     TuiCommand,
@@ -840,7 +840,7 @@ proptest! {
         tui.send_enter();
         tui.state_mut().neighborhood.member_count = count;
         tui.state_mut().neighborhood.selected_member = start % count;
-        tui.state_mut().neighborhood.detail_focus = aura_terminal::tui::state_machine::DetailFocus::Members;
+        tui.state_mut().neighborhood.detail_focus = aura_terminal::tui::state::DetailFocus::Members;
 
         for event in events {
             tui.send(event);
@@ -962,8 +962,8 @@ proptest! {
         name in "[a-zA-Z0-9][a-zA-Z0-9 _-]{0,23}",
         events in prop::collection::vec(modal_safe_event_strategy(), 0..30)
     ) {
-        let mut state = aura_terminal::tui::state_machine::TuiState::new();
-        let mut modal_state = aura_terminal::tui::state_machine::CreateChannelModalState::new();
+        let mut state = aura_terminal::tui::state::TuiState::new();
+        let mut modal_state = aura_terminal::tui::state::CreateChannelModalState::new();
         modal_state.name = name.clone();
         state.modal_queue.enqueue(QueuedModal::ChatCreate(modal_state));
         let mut tui = TestTui::with_state(state);

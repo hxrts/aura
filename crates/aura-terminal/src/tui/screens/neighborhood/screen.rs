@@ -9,7 +9,7 @@ use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
-use crate::tui::state_machine::NeighborhoodMode;
+use crate::tui::state::NeighborhoodMode;
 use crate::tui::theme::Theme;
 use crate::tui::types::{short_id, AccessLevel, Contact, HomeBudget, HomeMember, HomeSummary};
 
@@ -355,7 +355,7 @@ fn convert_budget(storage: &aura_app::ui::types::HomeFlowBudget, member_count: u
 #[allow(clippy::trivially_copy_pass_by_ref)] // ChannelId is at the 32-byte limit boundary
 fn convert_neighbor_home(
     n: &aura_app::ui::types::NeighborHome,
-    home_home_id: &aura_core::identifiers::ChannelId,
+    home_home_id: &aura_core::types::identifiers::ChannelId,
 ) -> HomeSummary {
     HomeSummary {
         id: n.id.to_string(),

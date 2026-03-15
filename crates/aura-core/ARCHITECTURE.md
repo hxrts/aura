@@ -25,6 +25,17 @@ foundational algebraic types with zero dependencies on other Aura crates.
 - Semilattice laws: monotonic growth (facts), monotonic restriction (capabilities).
 - Context isolation prevents cross-context information flow.
 
+## Ownership Model
+
+- `aura-core` is primarily `Pure`.
+- It defines shared `MoveOwned` vocabulary for higher layers such as opaque
+  handles, owner tokens, and transfer records.
+- It must not own `ActorOwned` runtime state.
+- Capability-gated boundaries should be expressible in core types and traits,
+  not bypassed by helper conventions in higher layers.
+- Downstream `Observed` layers consume these contracts but must not mutate or
+  republish semantic truth through them.
+
 ### Detailed Specifications
 
 ### InvariantContextIsolation

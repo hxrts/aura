@@ -12,8 +12,8 @@ use aura_agent::{
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{ThresholdSigningEffects, TransportEffects};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

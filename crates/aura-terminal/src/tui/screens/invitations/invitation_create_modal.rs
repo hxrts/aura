@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::tui::components::{modal_header, status_message, ModalHeaderProps, ModalStatus};
 use crate::tui::layout::dim;
-use crate::tui::state_machine::CreateInvitationField;
+use crate::tui::state::CreateInvitationField;
 use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::InvitationType;
 

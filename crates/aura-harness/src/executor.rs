@@ -7,17 +7,21 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
+#[cfg(test)]
+use aura_app::scenario_contract::ActionPrecondition;
 use aura_app::scenario_contract::{
-    ActionPrecondition, ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind,
-    BarrierDeclaration, CanonicalTraceEvent, EnvironmentAction, Expectation, ExtractSource,
-    InputKey, IntentAction, ScenarioAction as SemanticAction, ScenarioStep as SemanticStep,
-    SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue, SharedActionContract,
-    SharedActionHandle, SharedActionId, SharedActionRequest, TerminalFailureFact,
-    TerminalSuccessFact, TerminalSuccessKind, UiAction,
+    ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind, BarrierDeclaration,
+    CanonicalTraceEvent, EnvironmentAction, Expectation, ExtractSource, InputKey, IntentAction,
+    ScenarioAction as SemanticAction, ScenarioStep as SemanticStep, SemanticCommandRequest,
+    SemanticCommandResponse, SemanticCommandValue, SharedActionContract, SharedActionHandle,
+    SharedActionId, SharedActionRequest, TerminalFailureFact, TerminalSuccessFact,
+    TerminalSuccessKind, UiAction,
 };
+#[cfg(test)]
+use aura_app::ui::contract::OperationId;
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind, ScreenId,
-    ToastKind, UiSnapshot,
+    ControlId, FieldId, ListId, ModalId, OperationState, RuntimeEventKind, ScreenId, ToastKind,
+    UiSnapshot,
 };
 use aura_app::ui_contract::{uncovered_ui_parity_mismatches, ProjectionRevision, RuntimeFact};
 use regex::Regex;
@@ -103,11 +107,8 @@ enum ExecutionLane {
 #[derive(Debug, Default, Clone)]
 struct ScenarioContext {
     vars: BTreeMap<String, String>,
-    last_request_id: Option<u64>,
-    last_chat_command: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
     current_channel_name: BTreeMap<String, String>,
-    current_channel_id: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
@@ -160,7 +161,7 @@ struct SharedTraceMetadata {
     handle: SharedActionHandle,
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 #[derive(Debug, Clone)]
 enum WaitContractRef<'a> {
     Modal(ModalId),
@@ -173,13 +174,6 @@ enum WaitContractRef<'a> {
         state: OperationState,
         label: &'a str,
     },
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FallbackObservationMode {
-    BoundedSecondary,
-    DiagnosticOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -451,7 +445,7 @@ impl ScenarioExecutor {
             .compatibility_steps()
             .expect("non-semantic scenarios must expose compatibility steps")
             .to_vec();
-        let machine = CompatibilityStateMachine::from_steps(&compatibility_steps);
+        let machine = SequentialStateMachine::from_steps(&compatibility_steps);
         let mut current = machine
             .start_state
             .clone()
@@ -526,12 +520,7 @@ impl ScenarioExecutor {
                 duration_ms: step_started.elapsed().as_millis() as u64,
             });
 
-            let next = match self.mode {
-                ExecutionMode::Compatibility => state.next_state.clone(),
-                // Agent mode currently reuses the same transition graph and chooses the next
-                // valid edge, making behavior deterministic until agent planning is added.
-                ExecutionMode::Agent => state.next_state.clone(),
-            };
+            let next = state.next_state.clone();
 
             transitions.push(StateTransitionEvent {
                 from_state: state.id.clone(),
@@ -564,7 +553,7 @@ impl ScenarioExecutor {
         tool_api: &mut ToolApi,
         budgets: ExecutionBudgets,
     ) -> Result<ScenarioReport> {
-        let machine = SemanticStateMachine::from_steps(semantic_steps);
+        let machine = SequentialStateMachine::from_steps(semantic_steps);
         let mut current = machine
             .start_state
             .clone()
@@ -671,10 +660,7 @@ impl ScenarioExecutor {
                 duration_ms: step_started.elapsed().as_millis() as u64,
             });
 
-            let next = match self.mode {
-                ExecutionMode::Compatibility => state.next_state.clone(),
-                ExecutionMode::Agent => state.next_state.clone(),
-            };
+            let next = state.next_state.clone();
 
             transitions.push(StateTransitionEvent {
                 from_state: state.id.clone(),
@@ -701,65 +687,48 @@ impl ScenarioExecutor {
     }
 }
 
-#[derive(Debug, Clone)]
-struct CompatibilityScenarioState {
-    id: String,
-    step: CompatibilityStep,
-    next_state: Option<String>,
+trait SequencedStep {
+    fn step_id(&self) -> &str;
 }
 
-#[derive(Debug, Clone)]
-struct CompatibilityStateMachine {
-    start_state: Option<String>,
-    states: BTreeMap<String, CompatibilityScenarioState>,
+impl SequencedStep for CompatibilityStep {
+    fn step_id(&self) -> &str {
+        &self.id
+    }
 }
 
-impl CompatibilityStateMachine {
-    fn from_steps(steps: &[CompatibilityStep]) -> Self {
-        let mut states = BTreeMap::new();
-
-        for (index, step) in steps.iter().enumerate() {
-            let next_state = steps.get(index + 1).map(|step| step.id.clone());
-            states.insert(
-                step.id.clone(),
-                CompatibilityScenarioState {
-                    id: step.id.clone(),
-                    step: step.clone(),
-                    next_state,
-                },
-            );
-        }
-
-        Self {
-            start_state: steps.first().map(|step| step.id.clone()),
-            states,
-        }
+impl SequencedStep for SemanticStep {
+    fn step_id(&self) -> &str {
+        &self.id
     }
 }
 
 #[derive(Debug, Clone)]
-struct SemanticScenarioState {
+struct SequentialScenarioState<T> {
     id: String,
-    step: SemanticStep,
+    step: T,
     next_state: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-struct SemanticStateMachine {
+struct SequentialStateMachine<T> {
     start_state: Option<String>,
-    states: BTreeMap<String, SemanticScenarioState>,
+    states: BTreeMap<String, SequentialScenarioState<T>>,
 }
 
-impl SemanticStateMachine {
-    fn from_steps(steps: &[SemanticStep]) -> Self {
+impl<T> SequentialStateMachine<T>
+where
+    T: Clone + SequencedStep,
+{
+    fn from_steps(steps: &[T]) -> Self {
         let mut states = BTreeMap::new();
 
         for (index, step) in steps.iter().enumerate() {
-            let next_state = steps.get(index + 1).map(|step| step.id.clone());
+            let next_state = steps.get(index + 1).map(|step| step.step_id().to_string());
             states.insert(
-                step.id.clone(),
-                SemanticScenarioState {
-                    id: step.id.clone(),
+                step.step_id().to_string(),
+                SequentialScenarioState {
+                    id: step.step_id().to_string(),
                     step: step.clone(),
                     next_state,
                 },
@@ -767,7 +736,7 @@ impl SemanticStateMachine {
         }
 
         Self {
-            start_state: steps.first().map(|step| step.id.clone()),
+            start_state: steps.first().map(|step| step.step_id().to_string()),
             states,
         }
     }
@@ -777,91 +746,12 @@ fn execute_compatibility_step(
     step: &CompatibilityStep,
     tool_api: &mut ToolApi,
     step_budget_ms: u64,
-    scenario_rng: &mut DeterministicRng,
+    _scenario_rng: &mut DeterministicRng,
     fault_rng: &mut DeterministicRng,
     context: &mut ScenarioContext,
 ) -> Result<()> {
-    enforce_request_order(step, context)?;
     match step.action {
         CompatibilityAction::LaunchInstances => Ok(()),
-        CompatibilityAction::SetVar => {
-            let var = step
-                .var
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let raw_value = step
-                .value
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing value", step.id))?;
-            let value = resolve_template(raw_value, context)?;
-            context.vars.insert(var.to_string(), value);
-            Ok(())
-        }
-        CompatibilityAction::CaptureSelection => {
-            let instance_id = resolve_required_instance(step, context)?;
-            let var = step
-                .var
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let list_id = step
-                .list_id
-                .ok_or_else(|| anyhow!("step {} missing list_id", step.id))?;
-            let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-            let selection = snapshot
-                .selections
-                .iter()
-                .find(|selection| selection.list == list_id)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "step {} capture_selection found no selection for list {:?}",
-                        step.id,
-                        list_id
-                    )
-                })?;
-            context
-                .vars
-                .insert(var.to_string(), selection.item_id.clone());
-            Ok(())
-        }
-        CompatibilityAction::ExtractVar => {
-            let instance_id = resolve_required_instance(step, context)?;
-            let var = step
-                .var
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
-            let regex_pattern =
-                resolve_required_field(step, "regex", step.regex.as_deref(), context)?;
-            let field = parse_screen_field(step.from.as_deref().unwrap_or("screen"))?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::Screen {
-                    instance_id,
-                    screen_source: step.screen_source.unwrap_or_default(),
-                },
-            )?;
-            let source = screen_field_value(&payload, field);
-            let regex = Regex::new(&regex_pattern)
-                .map_err(|error| anyhow!("step {} invalid regex: {error}", step.id))?;
-            let captures = regex.captures(source).ok_or_else(|| {
-                anyhow!(
-                    "step {} extract_var pattern did not match source field {}",
-                    step.id,
-                    screen_field_label(field)
-                )
-            })?;
-            let group = step.group.unwrap_or(1);
-            let capture = captures.get(group as usize).ok_or_else(|| {
-                anyhow!(
-                    "step {} extract_var missing capture group {}",
-                    step.id,
-                    group
-                )
-            })?;
-            context
-                .vars
-                .insert(var.to_string(), capture.as_str().to_string());
-            Ok(())
-        }
         CompatibilityAction::SendKeys => {
             let instance_id = resolve_required_instance(step, context)?;
             let keys = resolve_optional_field(step.keys.as_deref(), context)?
@@ -1026,16 +916,6 @@ fn execute_compatibility_step(
             )?;
             Ok(())
         }
-        CompatibilityAction::Restart => {
-            let instance_id = resolve_required_instance(step, context)?;
-            dispatch(tool_api, ToolRequest::Restart { instance_id })?;
-            Ok(())
-        }
-        CompatibilityAction::Kill => {
-            let instance_id = resolve_required_instance(step, context)?;
-            dispatch(tool_api, ToolRequest::Kill { instance_id })?;
-            Ok(())
-        }
         CompatibilityAction::FaultDelay => {
             let delay_ms = step
                 .timeout_ms
@@ -1043,26 +923,6 @@ fn execute_compatibility_step(
             let actor = resolve_required_instance(step, context)?;
             tool_api.apply_fault_delay(&actor, delay_ms)
         }
-        CompatibilityAction::FaultLoss => {
-            let actor = resolve_required_instance(step, context)?;
-            let _decision = scenario_rng.range_u64(0, 2);
-            let loss_percent = step
-                .value
-                .as_deref()
-                .and_then(|value| value.parse::<u8>().ok())
-                .unwrap_or(100);
-            tool_api.apply_fault_loss(&actor, loss_percent)
-        }
-        CompatibilityAction::FaultTunnelDrop => {
-            let actor = resolve_required_instance(step, context)?;
-            let _decision = scenario_rng.range_u64(0, 2);
-            tool_api.apply_fault_tunnel_drop(&actor)
-        }
-        _ => bail!(
-            "step {} uses compatibility-lane primitive {} outside the shared semantic executor",
-            step.id,
-            step.action
-        ),
     }
 }
 
@@ -1086,7 +946,6 @@ fn execute_semantic_step(
         SemanticAction::Intent(IntentAction::OpenScreen(screen_id)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let metadata_step = semantic_metadata_step(step);
-            enforce_request_order(&metadata_step, context)?;
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1114,7 +973,6 @@ fn execute_semantic_step(
         SemanticAction::Intent(IntentAction::OpenSettingsSection(section)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let metadata_step = semantic_metadata_step(step);
-            enforce_request_order(&metadata_step, context)?;
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1174,11 +1032,6 @@ fn execute_semantic_step(
             }
             aura_app::scenario_contract::VariableAction::CaptureSelection { name, list } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
-                let mut metadata_step = semantic_metadata_step(step);
-                metadata_step.action = CompatibilityAction::CaptureSelection;
-                metadata_step.list_id = Some(*list);
-                metadata_step.var = Some(name.clone());
-                enforce_request_order(&metadata_step, context)?;
                 let snapshot = fetch_ui_snapshot_in_lane(
                     tool_api,
                     ExecutionLane::SharedSemantic,
@@ -1205,10 +1058,6 @@ fn execute_semantic_step(
                 from,
             } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
-                let mut metadata_step = semantic_metadata_step(step);
-                metadata_step.action = CompatibilityAction::ExtractVar;
-                metadata_step.var = Some(name.clone());
-                enforce_request_order(&metadata_step, context)?;
                 let regex_pattern = resolve_template(regex, context)?;
                 let payload = dispatch_payload_in_lane(
                     tool_api,
@@ -1457,58 +1306,37 @@ fn semantic_metadata_step(step: &SemanticStep) -> CompatibilityStep {
 }
 
 fn execute_semantic_environment_action(
-    step: &SemanticStep,
+    _step: &SemanticStep,
     environment: &EnvironmentAction,
     tool_api: &mut ToolApi,
     scenario_rng: &mut DeterministicRng,
     fault_rng: &mut DeterministicRng,
-    context: &mut ScenarioContext,
+    _context: &mut ScenarioContext,
 ) -> Result<()> {
-    let mut metadata_step = semantic_metadata_step(step);
     match environment {
-        EnvironmentAction::LaunchActors => {
-            metadata_step.action = CompatibilityAction::LaunchInstances;
-            enforce_request_order(&metadata_step, context)?;
-            Ok(())
-        }
+        EnvironmentAction::LaunchActors => Ok(()),
         EnvironmentAction::RestartActor { actor } => {
-            metadata_step.action = CompatibilityAction::Restart;
-            metadata_step.instance = Some(actor.0.clone());
             let instance_id = actor.0.clone();
-            enforce_request_order(&metadata_step, context)?;
             dispatch(tool_api, ToolRequest::Restart { instance_id })
         }
         EnvironmentAction::KillActor { actor } => {
-            metadata_step.action = CompatibilityAction::Kill;
-            metadata_step.instance = Some(actor.0.clone());
             let instance_id = actor.0.clone();
-            enforce_request_order(&metadata_step, context)?;
             dispatch(tool_api, ToolRequest::Kill { instance_id })
         }
         EnvironmentAction::FaultDelay { actor, delay_ms } => {
-            metadata_step.action = CompatibilityAction::FaultDelay;
-            metadata_step.instance = Some(actor.0.clone());
-            metadata_step.timeout_ms = Some(*delay_ms);
             let instance_id = actor.0.clone();
-            enforce_request_order(&metadata_step, context)?;
             tool_api.apply_fault_delay(&instance_id, *delay_ms)
         }
         EnvironmentAction::FaultLoss {
             actor,
             loss_percent,
         } => {
-            metadata_step.action = CompatibilityAction::FaultLoss;
-            metadata_step.instance = Some(actor.0.clone());
             let instance_id = actor.0.clone();
-            enforce_request_order(&metadata_step, context)?;
             let _decision = scenario_rng.range_u64(0, 2);
             tool_api.apply_fault_loss(&instance_id, *loss_percent)
         }
         EnvironmentAction::FaultTunnelDrop { actor } => {
-            metadata_step.action = CompatibilityAction::FaultTunnelDrop;
-            metadata_step.instance = Some(actor.0.clone());
             let instance_id = actor.0.clone();
-            enforce_request_order(&metadata_step, context)?;
             let _decision = fault_rng.range_u64(0, 2);
             tool_api.apply_fault_tunnel_drop(&instance_id)
         }
@@ -1556,7 +1384,6 @@ fn execute_semantic_intent(
     let binding = semantic_binding_for_intent(&intent);
     let instance_id = resolve_required_semantic_instance(step)?;
     let metadata_step = semantic_metadata_step(step);
-    enforce_request_order(&metadata_step, context)?;
     ensure_shared_binding_prerequisites(binding, context, &instance_id)?;
     ensure_post_operation_convergence_satisfied_for_binding(
         &metadata_step.id,
@@ -1601,9 +1428,7 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
-            context
-                .current_channel_id
-                .insert(instance_id.clone(), channel_id);
+            let _ = channel_id;
             record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
@@ -1772,13 +1597,7 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
-            if let Some(channel_id) =
-                capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?
-            {
-                context
-                    .current_channel_id
-                    .insert(instance_id.clone(), channel_id);
-            }
+            let _ = capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?;
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
@@ -1792,13 +1611,16 @@ fn execute_semantic_intent(
                         "invite_actor_to_channel requires an authoritative current channel binding"
                     )
                 })?;
-            let explicit_channel_id =
-                capture_authoritative_channel_id(tool_api, &instance_id, &channel_name)?
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "invite_actor_to_channel could not resolve authoritative channel id for {channel_name}"
-                        )
-                    })?;
+            let explicit_channel_id = capture_authoritative_channel_id(
+                tool_api,
+                &instance_id,
+                &channel_name,
+            )?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "invite_actor_to_channel could not resolve authoritative channel id for {channel_name}"
+                    )
+                })?;
             let invite_intent = IntentAction::InviteActorToChannel {
                 authority_id: authority_id.clone(),
                 channel_id: Some(explicit_channel_id),
@@ -1835,6 +1657,7 @@ fn execute_semantic_intent(
             Ok(())
         }
         IntentAction::AcceptPendingChannelInvitation => {
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let contract = intent.contract();
             let response = submit_shared_intent(
                 &metadata_step,
@@ -1843,15 +1666,26 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            record_submission_handle(
-                context,
-                &instance_id,
-                require_semantic_unit_submission(
+            let operation_handle = require_semantic_unit_submission(
+                &metadata_step,
+                "accept_pending_channel_invitation",
+                response,
+            )?;
+            record_submission_handle(context, &instance_id, operation_handle.clone());
+            if let Some(handle) = operation_handle {
+                convergence_stage(
                     &metadata_step,
-                    "accept_pending_channel_invitation",
-                    response,
-                )?,
-            );
+                    "accept_pending_channel_invitation_operation",
+                    wait_for_operation_handle_state(
+                        &metadata_step,
+                        tool_api,
+                        &instance_id,
+                        timeout_ms,
+                        &handle,
+                        OperationState::Succeeded,
+                    ),
+                )?;
+            }
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
@@ -2007,12 +1841,11 @@ fn semantic_expectation_wait_step(
         Expectation::RuntimeEventOccurred {
             kind,
             detail_contains,
-            capture_name,
+            capture_name: _,
         } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.runtime_event_kind = Some(*kind);
             wait_step.contains = detail_contains.clone();
-            wait_step.var = capture_name.clone();
         }
         Expectation::OperationStateIs {
             operation_id,
@@ -2046,6 +1879,7 @@ fn format_toast_kind(value: ToastKind) -> String {
     .to_string()
 }
 
+#[cfg(test)]
 fn unsatisfied_action_preconditions(
     contract: &SharedActionContract,
     snapshot: &UiSnapshot,
@@ -2075,132 +1909,7 @@ fn unsatisfied_action_preconditions(
         .collect()
 }
 
-fn barrier_covers_precondition(
-    barrier: &BarrierDeclaration,
-    precondition: &ActionPrecondition,
-) -> bool {
-    match (barrier, precondition) {
-        (BarrierDeclaration::Readiness(left), ActionPrecondition::Readiness(right)) => {
-            left == right
-        }
-        (BarrierDeclaration::Quiescence(left), ActionPrecondition::Quiescence(right)) => {
-            left == right
-        }
-        (BarrierDeclaration::Screen(left), ActionPrecondition::Screen(right)) => left == right,
-        (BarrierDeclaration::RuntimeEvent(left), ActionPrecondition::RuntimeEvent(right)) => {
-            left == right
-        }
-        _ => false,
-    }
-}
-
-fn uncovered_action_preconditions(contract: &SharedActionContract) -> Vec<ActionPrecondition> {
-    contract
-        .preconditions
-        .iter()
-        .filter(|precondition| {
-            !contract
-                .barriers
-                .before_issue
-                .iter()
-                .any(|barrier| barrier_covers_precondition(barrier, precondition))
-        })
-        .cloned()
-        .collect()
-}
-
-fn enforce_action_preconditions(
-    step: &CompatibilityStep,
-    tool_api: &mut ToolApi,
-    context: &ScenarioContext,
-    intent: &IntentAction,
-) -> Result<()> {
-    let contract = intent.contract();
-    let uncovered = uncovered_action_preconditions(&contract);
-    if uncovered.is_empty() {
-        return Ok(());
-    }
-    let instance_id = resolve_required_instance(step, context)?;
-    let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-    let filtered_contract = SharedActionContract {
-        preconditions: uncovered,
-        ..contract
-    };
-    let failures = unsatisfied_action_preconditions(&filtered_contract, &snapshot);
-    if failures.is_empty() {
-        return Ok(());
-    }
-    bail!(
-        "step {} precondition failed before issuing {:?}: {}",
-        step.id,
-        intent.kind(),
-        failures.join(", ")
-    );
-}
-
-fn wait_for_declared_before_issue_barriers(
-    step: &CompatibilityStep,
-    tool_api: &mut ToolApi,
-    step_budget_ms: u64,
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    contract: &SharedActionContract,
-) -> Result<()> {
-    if contract.barriers.before_issue.is_empty() {
-        return Ok(());
-    }
-    let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    for barrier in &contract.barriers.before_issue {
-        let remaining_ms = deadline
-            .saturating_duration_since(Instant::now())
-            .as_millis()
-            .max(1) as u64;
-        convergence_stage(
-            step,
-            &format!("before_issue::{barrier:?}"),
-            wait_for_declared_barrier(step, tool_api, context, instance_id, remaining_ms, barrier),
-        )?;
-    }
-    Ok(())
-}
-
-fn wait_for_declared_barrier(
-    step: &CompatibilityStep,
-    tool_api: &mut ToolApi,
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    timeout_ms: u64,
-    barrier: &BarrierDeclaration,
-) -> Result<()> {
-    let mut wait_step = semantic_wait_step(step);
-    match barrier {
-        BarrierDeclaration::Readiness(readiness) => {
-            wait_step.readiness = Some(*readiness);
-        }
-        BarrierDeclaration::Quiescence(quiescence) => {
-            wait_step.quiescence = Some(quiescence.clone());
-        }
-        BarrierDeclaration::Screen(screen) => {
-            wait_step.screen_id = Some(*screen);
-        }
-        BarrierDeclaration::Modal(modal) => {
-            wait_step.modal_id = Some(*modal);
-        }
-        BarrierDeclaration::RuntimeEvent(kind) => {
-            wait_step.runtime_event_kind = Some(*kind);
-        }
-        BarrierDeclaration::OperationState {
-            operation_id,
-            state,
-        } => {
-            wait_step.operation_id = Some(operation_id.clone());
-            wait_step.operation_state = Some(*state);
-        }
-    }
-    wait_for_semantic_state(&wait_step, tool_api, context, instance_id, timeout_ms)
-}
-
+#[cfg(test)]
 #[cfg(test)]
 fn wait_contract_matches_barrier(
     contract: &WaitContractRef<'_>,
@@ -2631,13 +2340,7 @@ fn plan_dismiss_transient_request(instance_id: &str) -> ToolRequest {
 
 fn dispatch_send_keys(tool_api: &mut ToolApi, instance_id: &str, keys: &str) -> Result<()> {
     if should_escape_insert_before_send_keys(keys)
-        && diagnostic_screen_contains(
-            tool_api,
-            instance_id,
-            "mode: insert",
-            FallbackObservationMode::DiagnosticOnly,
-        )
-        .unwrap_or(false)
+        && diagnostic_screen_contains(tool_api, instance_id, "mode: insert").unwrap_or(false)
     {
         let _ = dispatch(
             tool_api,
@@ -2691,10 +2394,6 @@ fn execute_chat_command(
         format!("/{command}")
     };
     let command_body = command.trim_start_matches('/');
-    context.last_chat_command.insert(
-        instance_id.to_string(),
-        command_body.trim().to_ascii_lowercase(),
-    );
 
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
 
@@ -2985,24 +2684,6 @@ fn read_clipboard_value(
     }
 }
 
-fn enforce_request_order(step: &CompatibilityStep, context: &mut ScenarioContext) -> Result<()> {
-    let Some(request_id) = step.request_id else {
-        return Ok(());
-    };
-    if let Some(last) = context.last_request_id {
-        if request_id <= last {
-            bail!(
-                "step {} request_id={} is not strictly greater than prior request_id={}",
-                step.id,
-                request_id,
-                last
-            );
-        }
-    }
-    context.last_request_id = Some(request_id);
-    Ok(())
-}
-
 fn resolve_required_instance(
     step: &CompatibilityStep,
     context: &ScenarioContext,
@@ -3068,16 +2749,6 @@ fn parse_toast_level(value: &str) -> Result<ToastLevel> {
         "info" => Ok(ToastLevel::Info),
         "error" => Ok(ToastLevel::Error),
         other => bail!("unsupported toast level: {other}"),
-    }
-}
-
-fn parse_screen_field(value: &str) -> Result<ScreenField> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "screen" => Ok(ScreenField::Screen),
-        "raw_screen" => Ok(ScreenField::RawScreen),
-        "authoritative_screen" => Ok(ScreenField::AuthoritativeScreen),
-        "normalized_screen" => Ok(ScreenField::NormalizedScreen),
-        other => bail!("unsupported extract_var from field: {other}"),
     }
 }
 
@@ -3162,21 +2833,6 @@ fn capture_authoritative_channel_id(
     instance_id: &str,
     channel_name: &str,
 ) -> Result<Option<String>> {
-    let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    Ok(resolve_channel_id_for_shared_name(&snapshot, channel_name))
-}
-
-fn resolve_explicit_shared_channel_id(
-    tool_api: &mut ToolApi,
-    context: &ScenarioContext,
-    instance_id: &str,
-) -> Result<Option<String>> {
-    if let Some(channel_id) = context.current_channel_id.get(instance_id) {
-        return Ok(Some(channel_id.clone()));
-    }
-    let Some(channel_name) = context.current_channel_name.get(instance_id) else {
-        return Ok(None);
-    };
     let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
     Ok(resolve_channel_id_for_shared_name(&snapshot, channel_name))
 }
@@ -3825,12 +3481,7 @@ fn message_contains_authoritative_screen(
     let Some(expected_contains) = step.value.as_deref() else {
         return Ok(false);
     };
-    diagnostic_screen_contains(
-        tool_api,
-        instance_id,
-        expected_contains,
-        FallbackObservationMode::DiagnosticOnly,
-    )
+    diagnostic_screen_contains(tool_api, instance_id, expected_contains)
 }
 
 fn is_browser_ui_snapshot_transient(error: &anyhow::Error) -> bool {
@@ -3914,9 +3565,7 @@ fn diagnostic_screen_contains(
     tool_api: &mut ToolApi,
     instance_id: &str,
     needle: &str,
-    mode: FallbackObservationMode,
 ) -> Result<bool> {
-    debug_assert_eq!(mode, FallbackObservationMode::DiagnosticOnly);
     let payload = dispatch_payload(
         tool_api,
         ToolRequest::Screen {
@@ -4086,6 +3735,9 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
     use crate::config::{
         CompatibilityAction, CompatibilityStep, InstanceConfig, InstanceMode, RunConfig,
@@ -4098,6 +3750,18 @@ mod tests {
         UiReadiness, UiSnapshot,
     };
     use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot};
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "aura-harness-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|error| panic!("create temp test dir failed: {error}"));
+        root
+    }
 
     fn run_report_once(run: &RunConfig, scenario: &ScenarioConfig) -> ScenarioReport {
         let mut tool_api = ToolApi::new(
@@ -4677,8 +4341,7 @@ mod tests {
 
     #[test]
     fn compatibility_and_agent_modes_share_same_transition_path() {
-        let temp_root = std::env::temp_dir().join("aura-harness-executor-test");
-        let _ = std::fs::create_dir_all(&temp_root);
+        let temp_root = unique_test_dir("executor-test");
 
         let run = RunConfig {
             schema_version: 1,
@@ -4721,7 +4384,7 @@ mod tests {
             }],
         };
 
-        let mut scenario = test_scenario_config(
+        let scenario = test_scenario_config(
             "executor-smoke",
             "verify transitions",
             vec![CompatibilityStep {
@@ -4764,8 +4427,7 @@ mod tests {
 
     #[test]
     fn repeated_runs_with_same_seed_share_same_report_shape() {
-        let temp_root = std::env::temp_dir().join("aura-harness-determinism-test");
-        let _ = std::fs::create_dir_all(&temp_root);
+        let temp_root = unique_test_dir("determinism-test");
 
         let run = RunConfig {
             schema_version: 1,
@@ -4833,8 +4495,7 @@ mod tests {
 
     #[test]
     fn send_chat_command_dismisses_toast_then_sends_slash_command() {
-        let temp_root = std::env::temp_dir().join("aura-harness-executor-chat-command");
-        let _ = std::fs::create_dir_all(&temp_root);
+        let temp_root = unique_test_dir("executor-chat-command");
 
         let run = RunConfig {
             schema_version: 1,
@@ -5019,8 +4680,7 @@ mod tests {
 
     #[test]
     fn send_clipboard_retries_until_clipboard_file_is_written() {
-        let temp_root = std::env::temp_dir().join("aura-harness-executor-send-clipboard");
-        let _ = std::fs::create_dir_all(&temp_root);
+        let temp_root = unique_test_dir("executor-send-clipboard");
         let alice_data = temp_root.join("alice");
         let bob_data = temp_root.join("bob");
         let _ = std::fs::create_dir_all(&alice_data);
@@ -5145,8 +4805,7 @@ mod tests {
 
     #[test]
     fn send_clipboard_long_payload_is_chunked_and_reassembled() {
-        let temp_root = std::env::temp_dir().join("aura-harness-executor-send-clipboard-chunked");
-        let _ = std::fs::create_dir_all(&temp_root);
+        let temp_root = unique_test_dir("executor-send-clipboard-chunked");
         let alice_data = temp_root.join("alice");
         let bob_data = temp_root.join("bob");
         let _ = std::fs::create_dir_all(&alice_data);
@@ -5325,7 +4984,23 @@ mod tests {
         assert!(ensure_wait_contract_declared(
             &step,
             &start_device_contract,
-            WaitContractRef::Modal(ModalId::AddDevice),
+            WaitContractRef::Screen(ScreenId::Settings),
+        )
+        .is_ok());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &start_device_contract,
+            WaitContractRef::Readiness(aura_app::ui::contract::UiReadiness::Ready),
+        )
+        .is_ok());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &start_device_contract,
+            WaitContractRef::OperationState {
+                operation_id: OperationId::device_enrollment(),
+                state: OperationState::Succeeded,
+                label: "start_device_enrollment",
+            },
         )
         .is_ok());
         assert!(ensure_wait_contract_declared(
@@ -5338,6 +5013,12 @@ mod tests {
             &step,
             &start_device_contract,
             WaitContractRef::RuntimeEvent(RuntimeEventKind::MessageCommitted),
+        )
+        .is_err());
+        assert!(ensure_wait_contract_declared(
+            &step,
+            &start_device_contract,
+            WaitContractRef::Modal(ModalId::AddDevice),
         )
         .is_err());
 
@@ -5517,10 +5198,12 @@ mod tests {
     #[test]
     fn raw_text_fallbacks_are_explicitly_diagnostic_only() {
         let source = include_str!("executor.rs");
-        assert!(source.contains("enum FallbackObservationMode"));
-        assert!(source.contains("FallbackObservationMode::BoundedSecondary"));
-        assert!(source.contains("FallbackObservationMode::DiagnosticOnly"));
-        assert!(source.contains("fn diagnostic_screen_contains("));
-        assert!(source.contains("debug_assert_eq!(mode, FallbackObservationMode::DiagnosticOnly)"));
+        let start = source
+            .find("fn diagnostic_screen_contains(")
+            .unwrap_or_else(|| panic!("missing diagnostic_screen_contains helper"));
+        let tail = &source[start..];
+        let end = tail.find("\nfn ").unwrap_or(tail.len());
+        let body = &tail[..end];
+        assert!(!body.contains("FallbackObservationMode"));
     }
 }

@@ -8,8 +8,8 @@ use crate::{
     crypto::hash,
     domain::journal::Fact,
     tree::{policy::Policy, types::AttestedOp, types::TreeOpKind},
+    types::epochs::Epoch,
     types::identifiers::AuthorityId,
-    types::sessions::Epoch,
     Hash32, Result,
 };
 use async_trait::async_trait;

@@ -5,7 +5,7 @@
 //! This module intentionally contains **no** `tokio` or `std::net` usage.
 
 use crate::facts::{RendezvousDescriptor, TransportHint};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================

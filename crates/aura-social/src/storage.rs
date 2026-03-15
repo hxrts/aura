@@ -173,12 +173,12 @@ mod tests {
         let home_fact = HomeFact::new(home_id, test_timestamp());
         let members = vec![
             HomeMemberFact::new(
-                aura_core::identifiers::AuthorityId::new_from_entropy([1u8; 32]),
+                aura_core::types::identifiers::AuthorityId::new_from_entropy([1u8; 32]),
                 home_id,
                 test_timestamp(),
             ),
             HomeMemberFact::new(
-                aura_core::identifiers::AuthorityId::new_from_entropy([2u8; 32]),
+                aura_core::types::identifiers::AuthorityId::new_from_entropy([2u8; 32]),
                 home_id,
                 test_timestamp(),
             ),

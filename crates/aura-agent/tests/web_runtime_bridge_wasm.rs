@@ -8,7 +8,7 @@ use aura_agent::AgentBuilder;
 use aura_app::signal_defs::CHAT_SIGNAL;
 use aura_core::effects::{NetworkCoreEffects, ReactiveEffects};
 use aura_core::hash;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);

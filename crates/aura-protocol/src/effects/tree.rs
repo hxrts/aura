@@ -44,7 +44,7 @@ pub struct Cut {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Partial {
     pub signature_share: Vec<u8>,
-    pub participant_id: aura_core::identifiers::DeviceId,
+    pub participant_id: aura_core::types::identifiers::DeviceId,
 }
 
 /// Immutable snapshot containing compacted tree state

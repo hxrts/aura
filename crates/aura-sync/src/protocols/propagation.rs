@@ -39,8 +39,8 @@
 //! ```
 
 use aura_core::domain::Propagation;
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{OrderTime, PhysicalTime};
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 

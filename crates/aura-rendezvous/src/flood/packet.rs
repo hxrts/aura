@@ -20,7 +20,7 @@ use aura_core::{
         flood::{DecryptedRendezvous, FloodError, RendezvousPacket, RENDEZVOUS_PACKET_SIZE_BYTES},
         CryptoEffects,
     },
-    identifiers::AuthorityId,
+    types::AuthorityId,
 };
 use curve25519_dalek::{montgomery::MontgomeryPoint, scalar::Scalar};
 use hkdf::Hkdf;

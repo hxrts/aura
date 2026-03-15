@@ -69,9 +69,9 @@ use aura_core::relational::GuardianParameters;
 use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 use aura_core::{
     hash::hash,
-    identifiers::{AuthorityId, ContextId},
     relational::{GuardianBinding, RecoveryGrant},
     time::{OrderTime, TimeStamp},
+    types::{AuthorityId, ContextId},
     Hash32, Result,
 };
 use aura_journal::fact::{

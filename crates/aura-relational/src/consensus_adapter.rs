@@ -11,8 +11,8 @@ use aura_consensus::relational::{
     run_consensus_with_config_and_commit as run_relational_consensus_with_config_and_commit,
 };
 use aura_core::{
-    epochs::Epoch,
     frost::{PublicKeyPackage, Share},
+    types::Epoch,
 };
 use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, ContextId, Prestate, Result};
 use aura_effects::random::RealRandomHandler;

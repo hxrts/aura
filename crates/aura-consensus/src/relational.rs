@@ -10,9 +10,9 @@ use super::{
 };
 use aura_core::{
     effects::{PhysicalTimeEffects, RandomEffects},
-    epochs::Epoch,
     frost::{PublicKeyPackage, Share},
     relational::ConsensusProof,
+    types::Epoch,
     AuthorityId, ContextId, Prestate, Result,
 };
 use serde::Serialize;

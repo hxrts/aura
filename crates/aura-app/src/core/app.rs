@@ -26,9 +26,9 @@ use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
@@ -520,7 +520,7 @@ impl AppCore {
                 }
             }
             Intent::GrantModerator { home_id, target_id } => {
-                use aura_core::identifiers::AuthorityId;
+                use aura_core::types::identifiers::AuthorityId;
 
                 let snapshot = self.snapshot();
                 let target = target_id.parse::<AuthorityId>().map_err(|_| {
@@ -558,7 +558,7 @@ impl AppCore {
                 }
             }
             Intent::RevokeModerator { home_id, target_id } => {
-                use aura_core::identifiers::AuthorityId;
+                use aura_core::types::identifiers::AuthorityId;
 
                 let snapshot = self.snapshot();
                 let target = target_id.parse::<AuthorityId>().map_err(|_| {
@@ -1233,7 +1233,7 @@ mod tests {
         let mut app = AppCore::new(config).unwrap();
 
         let result = app.dispatch(Intent::SendMessage {
-            channel_id: aura_core::identifiers::ContextId::new_from_entropy([0u8; 32]),
+            channel_id: aura_core::types::identifiers::ContextId::new_from_entropy([0u8; 32]),
             content: "".to_string(),
             reply_to: None,
         });
@@ -1254,7 +1254,7 @@ mod tests {
     #[test]
     fn test_e2e_create_channel_and_send_message() {
         use crate::core::intent::ChannelType;
-        use aura_core::identifiers::ContextId;
+        use aura_core::types::identifiers::ContextId;
 
         let config = AppConfig::default();
         let mut app = AppCore::new(config).unwrap();

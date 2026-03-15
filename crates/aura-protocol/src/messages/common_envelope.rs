@@ -18,7 +18,7 @@
 //! let envelope: WireEnvelope<Signed<MyPayload>> = WireEnvelope::new(..., signed_msg);
 //! ```
 
-use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::types::identifiers::{DeviceId, SessionId};
 use aura_core::{AuthorityId, Ed25519Signature};
 use serde::{Deserialize, Serialize};
 

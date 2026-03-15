@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `new` found for struct `OpaqueOperationHandle<Kind, HandleId, InstanceId>` in the current scope
+ --> tests/ui/opaque_operation_handle_private_constructor.rs:6:52
+  |
+6 |     let _ = OpaqueOperationHandle::<Invite, _, _>::new("invitation_create", 7u64);
+  |                                                    ^^^ function or associated item not found in `OpaqueOperationHandle<Invite, _, _>`

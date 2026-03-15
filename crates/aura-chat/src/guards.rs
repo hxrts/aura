@@ -4,7 +4,7 @@
 //! Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`,
 //! producing an explicit list of `EffectCommand` values for an async interpreter.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 pub use aura_guards::types;
 

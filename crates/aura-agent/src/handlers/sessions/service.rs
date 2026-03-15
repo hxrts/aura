@@ -8,7 +8,7 @@ use super::shared::{SessionHandle, SessionStats};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::SessionType;
-use aura_core::identifiers::{AccountId, DeviceId};
+use aura_core::types::identifiers::{AccountId, DeviceId};
 use std::sync::Arc;
 
 /// Session management service API
@@ -151,7 +151,7 @@ impl SessionServiceApi {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_session_service_creation() {

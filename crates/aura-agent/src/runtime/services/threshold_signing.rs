@@ -32,13 +32,13 @@ use aura_core::effects::{
     SecureStorageEffects, SecureStorageLocation,
 };
 use aura_core::effects::{CapabilityKey, RuntimeCapabilityEffects};
-use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
     AgreementMode, ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext,
     ThresholdConfig, ThresholdSignature, ThresholdState,
 };
 use aura_core::tree::metadata::DeviceLeafMetadata;
 use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp};
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{
     effects::{PhysicalTimeEffects, ThresholdSigningEffects},
     threshold::{ConvergenceCert, ReversionFact},

@@ -1,7 +1,7 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::{FlowBudgetEffects, JournalEffects};
-use aura_core::scope::{AuthorizationOp, ContextOp, ResourceScope};
+use aura_core::types::scope::{AuthorizationOp, ContextOp, ResourceScope};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowCost, FlowNonce, Hash32, ReceiptSig};
 
 // Implementation of FlowBudgetEffects

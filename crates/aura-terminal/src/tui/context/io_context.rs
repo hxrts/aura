@@ -60,7 +60,7 @@ use crate::tui::hooks::{
 
 #[derive(Clone, Debug)]
 pub struct AuthoritySwitchRequest {
-    pub authority_id: aura_core::identifiers::AuthorityId,
+    pub authority_id: aura_core::types::identifiers::AuthorityId,
     pub nickname_suggestion: Option<String>,
 }
 
@@ -347,7 +347,7 @@ impl IoContext {
 
     pub fn request_authority_switch(
         &self,
-        authority_id: aura_core::identifiers::AuthorityId,
+        authority_id: aura_core::types::identifiers::AuthorityId,
         nickname_suggestion: Option<String>,
     ) {
         if let Ok(mut guard) = self.requested_authority_switch.lock() {
@@ -656,8 +656,8 @@ impl IoContext {
 
     pub async fn restore_recovered_account(
         &self,
-        recovered_authority_id: aura_core::identifiers::AuthorityId,
-        recovered_context_id: Option<aura_core::identifiers::ContextId>,
+        recovered_authority_id: aura_core::types::identifiers::AuthorityId,
+        recovered_context_id: Option<aura_core::types::identifiers::ContextId>,
     ) -> TerminalResult<()> {
         self.account_files
             .restore_recovered_account(recovered_authority_id, recovered_context_id)
@@ -755,7 +755,10 @@ impl IoContext {
         self.dispatch.dispatch(command).await
     }
 
-    pub async fn dispatch_with_response(&self, command: EffectCommand) -> TerminalResult<OpResponse> {
+    pub async fn dispatch_with_response(
+        &self,
+        command: EffectCommand,
+    ) -> TerminalResult<OpResponse> {
         cfg_if! {
             if #[cfg(feature = "development")] {
                 if let Some(bridge) = &self.demo_bridge {

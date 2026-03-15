@@ -27,8 +27,6 @@ use telltale_vm::SessionId;
 
 use super::subsystems::VmBridgeState;
 
-pub type PendingVmSend = VmBridgePendingSend;
-
 #[derive(Debug, thiserror::Error)]
 pub enum AuraVmConcurrencyEnvelopeError {
     #[error(
@@ -169,7 +167,7 @@ impl AuraQueuedVmBridgeHandler {
         self.bridge_effects.enqueue_outbound_payload(payload);
     }
 
-    pub fn drain_pending_sends(&self) -> Vec<PendingVmSend> {
+    pub fn drain_pending_sends(&self) -> Vec<VmBridgePendingSend> {
         self.bridge_effects.drain_pending_sends()
     }
 
@@ -212,12 +210,13 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
             .ok_or_else(|| {
                 format!("missing queued outbound payload for VM send {role}->{partner}:{label}")
             })?;
-        self.bridge_effects.record_pending_send(PendingVmSend {
-            from_role: role.to_string(),
-            to_role: partner.to_string(),
-            label: label.to_string(),
-            payload: payload_bytes.clone(),
-        });
+        self.bridge_effects
+            .record_pending_send(VmBridgePendingSend {
+                from_role: role.to_string(),
+                to_role: partner.to_string(),
+                label: label.to_string(),
+                payload: payload_bytes.clone(),
+            });
         Ok(Self::bytes_to_value(&payload_bytes))
     }
 

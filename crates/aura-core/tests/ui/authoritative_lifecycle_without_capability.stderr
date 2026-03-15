@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/authoritative_lifecycle_without_capability.rs:7:55
+  |
+7 |     let _ = AuthorizedLifecyclePublication::authorize(&raw, lifecycle);
+  |             ----------------------------------------- ^^^^ expected `&LifecyclePublicationCapability`, found `&CapabilityKey`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected reference `&LifecyclePublicationCapability`
+             found reference `&CapabilityKey`
+note: associated function defined here
+ --> src/ownership.rs
+  |
+  |     pub fn authorize(
+  |            ^^^^^^^^^

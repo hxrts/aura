@@ -6,7 +6,7 @@
 use aura_core::{
     effects::relay::{RelayCandidate, RelayContext, RelayRelationship},
     hash::hasher,
-    identifiers::AuthorityId,
+    types::identifiers::AuthorityId,
 };
 
 /// Domain separator for relay selection hashing.
@@ -211,7 +211,7 @@ fn select_multiple_from_tier(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

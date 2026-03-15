@@ -11,7 +11,7 @@
 //! - **Verification**: All received operations verified before storage
 
 use async_trait::async_trait;
-use aura_core::{identifiers::DeviceId, AttestedOp, Hash32};
+use aura_core::{types::identifiers::DeviceId, AttestedOp, Hash32};
 use aura_journal::algebra::OpLog;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

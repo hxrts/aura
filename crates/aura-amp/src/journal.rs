@@ -8,8 +8,8 @@
 
 use aura_core::effects::{JournalEffects, OrderClockEffects};
 use aura_core::hash::hash;
-use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, FactValue, Journal, Result};
 use aura_journal::{
     fact::{Fact, FactContent, JournalNamespace, RelationalFact},

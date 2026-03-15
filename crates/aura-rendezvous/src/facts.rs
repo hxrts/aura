@@ -3,7 +3,7 @@
 //! Fact types for peer discovery and channel establishment.
 //! These facts are stored in context journals and propagated via `aura-sync`.
 
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_journal::extensibility::FactReducer;
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::DomainFact;

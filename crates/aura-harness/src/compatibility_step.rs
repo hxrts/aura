@@ -18,20 +18,13 @@ use serde::{Deserialize, Serialize};
 pub enum CompatibilityAction {
     #[default]
     LaunchInstances,
-    SetVar,
-    CaptureSelection,
-    ExtractVar,
     SendKeys,
     SendChatCommand,
     SendClipboard,
     AssertParity,
     WaitFor,
     MessageContains,
-    Restart,
-    Kill,
     FaultDelay,
-    FaultLoss,
-    FaultTunnelDrop,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -46,20 +39,13 @@ impl fmt::Display for CompatibilityAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
             Self::LaunchInstances => "launch_instances",
-            Self::SetVar => "set_var",
-            Self::CaptureSelection => "capture_selection",
-            Self::ExtractVar => "extract_var",
             Self::SendKeys => "send_keys",
             Self::SendChatCommand => "send_chat_command",
             Self::SendClipboard => "send_clipboard",
             Self::AssertParity => "assert_parity",
             Self::WaitFor => "wait_for",
             Self::MessageContains => "message_contains",
-            Self::Restart => "restart",
-            Self::Kill => "kill",
             Self::FaultDelay => "fault_delay",
-            Self::FaultLoss => "fault_loss",
-            Self::FaultTunnelDrop => "fault_tunnel_drop",
         };
         f.write_str(value)
     }
@@ -72,7 +58,6 @@ pub struct CompatibilityStep {
     pub action: CompatibilityAction,
     pub instance: Option<String>,
     pub timeout_ms: Option<u64>,
-    pub request_id: Option<u64>,
     pub keys: Option<String>,
     pub screen_source: Option<ScreenSource>,
     pub command: Option<String>,
@@ -92,11 +77,7 @@ pub struct CompatibilityStep {
     pub confirmation: Option<ConfirmationState>,
     pub source_instance: Option<String>,
     pub peer_instance: Option<String>,
-    pub var: Option<String>,
     pub value: Option<String>,
-    pub regex: Option<String>,
-    pub group: Option<u32>,
-    pub from: Option<String>,
     pub contains: Option<String>,
     pub level: Option<String>,
 }

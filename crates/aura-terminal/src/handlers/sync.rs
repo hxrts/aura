@@ -10,17 +10,17 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
 use aura_agent::{
-    RuntimeService, RuntimeServiceContext, RuntimeTaskRegistry, ServiceHealth, SyncManagerConfig,
-    SyncServiceManager,
+    RuntimeService, RuntimeServiceContext, ServiceHealth, SyncManagerConfig, SyncServiceManager,
+    TaskSupervisor,
 };
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 
 fn sync_service_context(time_handler: Arc<PhysicalTimeHandler>) -> RuntimeServiceContext {
-    RuntimeServiceContext::new(Arc::new(RuntimeTaskRegistry::new()), time_handler)
+    RuntimeServiceContext::new(Arc::new(TaskSupervisor::new()), time_handler)
 }
 
 /// Handle sync operations through effects

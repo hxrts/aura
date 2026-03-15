@@ -279,8 +279,8 @@ impl ReactiveView for OrderTrackingView {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_scheduler_topological_update_order() {
     use aura_agent::reactive::FactSource;
-    use aura_core::identifiers::ContextId;
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::ContextId;
     use aura_journal::fact::{FactContent, RelationalFact};
 
     let update_order = Arc::new(RwLock::new(Vec::new()));

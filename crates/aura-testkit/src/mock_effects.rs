@@ -41,10 +41,10 @@ use aura_core::effects::{
     JournalEffects, NetworkCoreEffects, NetworkExtendedEffects, RandomCoreEffects,
     StorageCoreEffects, StorageExtendedEffects,
 };
-use aura_core::flow::{FlowBudget, Receipt};
-use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
+use aura_core::types::flow::{FlowBudget, Receipt};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
 use aura_core::types::Epoch;
 use aura_core::{AuraError, ChannelId, Hash32, Journal};
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};

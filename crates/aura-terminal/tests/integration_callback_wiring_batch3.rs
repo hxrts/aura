@@ -28,7 +28,7 @@ use aura_app::signal_defs::{
 use aura_app::views::RecoveryProcessStatus;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;

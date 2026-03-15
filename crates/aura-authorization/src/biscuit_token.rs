@@ -3,7 +3,7 @@
 //! Provides token issuance, attenuation, and serialization using the authority
 //! model where authorities are the cryptographic actors managing tokens.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
 

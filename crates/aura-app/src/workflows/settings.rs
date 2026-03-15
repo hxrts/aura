@@ -15,7 +15,7 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::identifiers::ChannelId;
+use aura_core::types::identifiers::ChannelId;
 use aura_core::AuraError;
 use std::sync::Arc;
 

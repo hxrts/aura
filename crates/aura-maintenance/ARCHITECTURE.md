@@ -28,6 +28,17 @@ snapshots, cache invalidation, OTA upgrades, and admin replacement.
 - Category B: Medium-risk (snapshot operations).
 - Category C: High-risk (upgrades, admin replacement).
 
+## Ownership Model
+
+- `aura-maintenance` is primarily `Pure`.
+- It defines maintenance facts, release identity, and policy scope rather than
+  `ActorOwned` staging or activation services.
+- Any exclusive cutover or replacement authority should be modeled as
+  `MoveOwned` higher-layer contracts.
+- Capability-gated publication of maintenance facts must remain explicit.
+- `Observed` layers may display maintenance state but must not author lifecycle
+  truth.
+
 ### Detailed Specifications
 
 ### InvariantMaintenanceReducerDeterminism

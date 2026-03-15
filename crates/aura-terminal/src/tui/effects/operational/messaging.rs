@@ -42,7 +42,7 @@ fn compact_send_error(error: &aura_core::AuraError) -> String {
 async fn resolve_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
     channel_ref: &str,
-) -> Option<aura_core::identifiers::ChannelId> {
+) -> Option<aura_core::types::identifiers::ChannelId> {
     let core = app_core.read().await;
     let chat_state = core.read(&*CHAT_SIGNAL).await.ok()?;
 
@@ -54,7 +54,7 @@ async fn resolve_channel_id(
     }
 
     channel_ref
-        .parse::<aura_core::identifiers::ChannelId>()
+        .parse::<aura_core::types::identifiers::ChannelId>()
         .ok()
 }
 
@@ -84,14 +84,12 @@ pub async fn handle_messaging(
             )
             .await
             {
-                Ok(created_channel) => {
-                    Some(Ok(OpResponse::ChannelCreated {
-                        channel_id: created_channel.channel_id.to_string(),
-                        context_id: created_channel
-                            .context_id
-                            .map(|context_id| context_id.to_string()),
-                    }))
-                }
+                Ok(created_channel) => Some(Ok(OpResponse::ChannelCreated {
+                    channel_id: created_channel.channel_id.to_string(),
+                    context_id: created_channel
+                        .context_id
+                        .map(|context_id| context_id.to_string()),
+                })),
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::CreateChannel,
                     format!("Failed to create channel: {e}"),
@@ -196,16 +194,17 @@ pub async fn handle_messaging(
             let channel = channel.clone();
             let operation_instance_id = operation_instance_id.clone();
             tokio::spawn(async move {
-                if let Err(error) = aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
-                    &app_core,
-                    &target,
-                    &channel,
-                    parsed_context_id,
-                    operation_instance_id,
-                    None,
-                    None,
-                )
-                .await
+                if let Err(error) =
+                    aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
+                        &app_core,
+                        &target,
+                        &channel,
+                        parsed_context_id,
+                        operation_instance_id,
+                        None,
+                        None,
+                    )
+                    .await
                 {
                     error!(target = %target, channel = %channel, error = %error, "tui invite_user_to_channel failed");
                 }

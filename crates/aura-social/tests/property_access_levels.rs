@@ -1,7 +1,7 @@
 //! Property tests for access-level mapping, override rules, and storage allocation bounds.
 
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::AuthorityId;
 use aura_social::{
     determine_default_access_level, AccessLevel, AccessOverrideFact, Home, HomeFact, HomeId,
     HomeMemberFact, HomeStorageBudget, Neighborhood, NeighborhoodId, NeighborhoodMemberFact,

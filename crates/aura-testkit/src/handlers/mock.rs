@@ -35,8 +35,6 @@ impl EffectType {
 #[derive(Clone, Debug, Default)]
 pub struct AuraContext;
 
-pub type AuraHandlerError = AuraError;
-
 #[async_trait]
 pub trait AuraHandler: Send + Sync {
     async fn execute_effect(
@@ -45,13 +43,13 @@ pub trait AuraHandler: Send + Sync {
         operation: &str,
         params: &[u8],
         context: &AuraContext,
-    ) -> Result<Vec<u8>, AuraHandlerError>;
+    ) -> Result<Vec<u8>, AuraError>;
 
     async fn execute_session(
         &self,
         session: LocalSessionType,
         ctx: &AuraContext,
-    ) -> Result<(), AuraHandlerError>;
+    ) -> Result<(), AuraError>;
 
     fn supports_effect(&self, effect_type: EffectType) -> bool;
 
@@ -119,7 +117,7 @@ impl AuraHandler for MockHandler {
         operation: &str,
         params: &[u8],
         _context: &AuraContext,
-    ) -> Result<Vec<u8>, AuraHandlerError> {
+    ) -> Result<Vec<u8>, AuraError> {
         // Record the call
         self.calls.lock().unwrap().push(MockCall {
             effect_type,
@@ -154,7 +152,7 @@ impl AuraHandler for MockHandler {
         &self,
         _session: LocalSessionType,
         _ctx: &AuraContext,
-    ) -> Result<(), AuraHandlerError> {
+    ) -> Result<(), AuraError> {
         Ok(()) // Mock implementation does nothing
     }
 

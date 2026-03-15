@@ -9,7 +9,7 @@ use super::state::with_state_mut_validated;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::AgentConfig;
 use async_trait::async_trait;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

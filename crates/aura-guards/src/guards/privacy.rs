@@ -7,7 +7,7 @@
 use super::{traits::GuardContextProvider, GuardEffects, LeakageBudget};
 use aura_core::{
     effects::PhysicalTimeEffects,
-    identifiers::{AuthorityId, ContextId},
+    types::identifiers::{AuthorityId, ContextId},
     AuraError, AuraResult, FactValue, Journal,
 };
 use aura_journal::fact::{FactContent, LeakageFact, LeakageObserverClass, RelationalFact};

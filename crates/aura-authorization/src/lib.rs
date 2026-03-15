@@ -71,7 +71,7 @@ pub use flow_budget::JournalBackedFlowBudgetHandler;
 pub use facts::{WotFact, WotFactDelta, WotFactReducer, WOT_FACT_TYPE_ID};
 
 // Authority-based resource scopes from core
-pub use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
+pub use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 // Biscuit authorization types
 pub use biscuit_authorization::{AuthorizationResult, BiscuitAuthorizationBridge};

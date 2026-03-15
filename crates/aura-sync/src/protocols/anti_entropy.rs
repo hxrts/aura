@@ -52,7 +52,7 @@ use crate::core::{
 use crate::infrastructure::RetryPolicy;
 use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
-use aura_core::scope::ResourceScope;
+use aura_core::types::scope::ResourceScope;
 use aura_core::types::Epoch;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
 use aura_guards::types::CapabilityId;
@@ -441,7 +441,7 @@ impl AntiEntropyProtocol {
             let token = token_manager.current_token();
             let resource = ResourceScope::Authority {
                 authority_id: effects.authority_id(),
-                operation: aura_core::scope::AuthorityOp::UpdateTree, // Sync requires authority access
+                operation: aura_core::types::scope::AuthorityOp::UpdateTree, // Sync requires authority access
             };
 
             let mut flow_budget = FlowBudget::new(1000, Epoch::new(0)); // Standard sync budget

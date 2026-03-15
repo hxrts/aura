@@ -20,6 +20,17 @@ storage with cryptographic chunk IDs.
 - Authority model: operations attributed to `AuthorityId`.
 - CRDT merge for distributed storage state.
 
+## Ownership Model
+
+- `aura-store` is primarily `Pure`.
+- It defines storage-domain semantics and capability shapes rather than
+  `ActorOwned` storage services.
+- Any exclusive access or transfer semantics should be modeled as `MoveOwned`
+  contracts in higher layers, not hidden mutable ownership here.
+- Capability-gated storage operations should remain explicit and typed.
+- `Observed` layers may inspect derived storage state but not mutate domain
+  truth.
+
 ### Detailed Specifications
 
 ### InvariantStoreContentAddressIntegrity
@@ -43,4 +54,3 @@ Contract alignment:
 - No actual storage I/O (use StorageEffects).
 - Authorization is metadata only (use aura-authorization for Biscuit).
 - Pure domain logic; I/O via effects.
-

@@ -21,9 +21,8 @@ use crate::{
 };
 use async_lock::RwLock;
 use aura_core::{
-    identifiers::{AuthorityId, CeremonyId},
-    types::FrostThreshold,
-    AuraError, Hash32,
+    types::{AuthorityId, FrostThreshold},
+    AuraError, CeremonyId, Hash32,
 };
 use aura_journal::fact::RelationalFact;
 use aura_journal::ProtocolRelationalFact;
@@ -398,7 +397,7 @@ mod tests {
         Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus,
     };
     use crate::AppConfig;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_get_recovery_status_default() {

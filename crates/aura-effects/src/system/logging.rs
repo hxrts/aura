@@ -9,7 +9,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use aura_core::SessionId;
 use serde_json::Value;
 use std::collections::HashMap;

@@ -143,7 +143,7 @@ pub async fn ensure_runtime_peer_connectivity(
 mod tests {
     use super::ensure_runtime_peer_connectivity;
     use crate::runtime_bridge::{OfflineRuntimeBridge, RuntimeBridge};
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
     use std::future::Future;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;

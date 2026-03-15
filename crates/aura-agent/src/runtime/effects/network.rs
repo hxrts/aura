@@ -7,7 +7,7 @@ use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
     TransportEffects, TransportError,
 };
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
 use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]

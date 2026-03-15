@@ -5,10 +5,10 @@
 //! This module provides effect handlers for meet semi-lattices that enable
 //! constraint satisfaction and capability restriction through meet operations.
 
-use aura_core::identifiers::DeviceId;
 use aura_core::semilattice::{
     ConsistencyProof, ConstraintMsg, ConstraintScope, MeetStateMsg, MvState, Top,
 };
+use aura_core::types::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

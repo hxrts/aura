@@ -3,14 +3,14 @@ use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::BiscuitAuthorizationEffects;
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
-use aura_core::flow::{FlowBudget, FlowCost};
-use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
+use aura_core::types::flow::{FlowBudget, FlowCost};
+use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
     hash::hash,
-    identifiers::{AuthorityId, ContextId},
     semilattice::JoinSemilattice,
+    types::identifiers::{AuthorityId, ContextId},
     AuraError, FactValue, Journal,
 };
 use serde::{Deserialize, Serialize};
@@ -431,8 +431,8 @@ impl JournalHandlerFactory {
 #[cfg(test)]
 mod tests {
     use aura_core::domain::content::Hash32;
-    use aura_core::identifiers::{AuthorityId, ContextId};
     use aura_core::types::flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
     use aura_core::types::Epoch;
 
     #[test]

@@ -21,6 +21,18 @@ builder, and lifecycle infrastructure for composing stateless handlers.
 - Effect registry is type-indexed for compile-time safety.
 - Handler composition is stateless.
 
+## Ownership Model
+
+- `aura-composition` is primarily `Pure` assembly and wiring.
+- It may coordinate construction and configuration, but it is not the
+  `ActorOwned` owner of parity-critical runtime state.
+- `MoveOwned` transfer semantics should be surfaced in higher-layer contracts,
+  not hidden in composition utilities.
+- Capability gating belongs in the assembled contract and owner modules rather
+  than in composition-local shortcuts.
+- `Observed` tooling may inspect assembled systems, but composition should not
+  author semantic lifecycle.
+
 ### Detailed Specifications
 
 ### InvariantCompositionTypeSafeRegistry
@@ -44,4 +56,3 @@ Contract alignment:
 - Depends only on aura-core and aura-effects.
 - No domain crates or higher layers.
 - Runtime lifecycle management belongs in aura-agent.
-

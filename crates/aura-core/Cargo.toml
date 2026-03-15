@@ -80,6 +80,7 @@ simulation = []
 [dev-dependencies]
 # For testing
 proptest = { workspace = true }
+trybuild = { workspace = true }
 # For benchmarking
 async-trait = { workspace = true }
 tracing-subscriber = { workspace = true }

@@ -3,7 +3,7 @@
 //! Type-safe recovery eligibility check ensuring threshold is configured.
 
 use super::ThresholdConfig;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use std::fmt;
 
 /// Error when checking recovery eligibility

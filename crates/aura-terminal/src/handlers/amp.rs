@@ -6,7 +6,7 @@ use crate::cli::amp::AmpAction;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_app::ui::workflows::amp;
-use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use std::str::FromStr;
 
 /// Handle AMP commands with effect system integration.

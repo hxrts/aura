@@ -15,7 +15,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianAuthRequest {
     /// Context ID for the guardian relationship
-    pub context_id: aura_core::identifiers::ContextId,
+    pub context_id: aura_core::types::identifiers::ContextId,
     /// Guardian authority requesting authentication
     pub guardian_id: AuthorityId,
     /// Account being guarded
@@ -48,7 +48,7 @@ pub enum GuardianOperation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianAuthProof {
     /// Context ID where guardian is registered
-    pub context_id: aura_core::identifiers::ContextId,
+    pub context_id: aura_core::types::identifiers::ContextId,
     /// Guardian authority ID
     pub guardian_id: AuthorityId,
     /// Guardian binding proof from context

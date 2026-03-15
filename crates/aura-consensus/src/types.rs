@@ -6,9 +6,9 @@ use crate::witness::NonEmptyWitnessSet;
 use aura_core::{
     byzantine::ByzantineSafetyAttestation,
     crypto::tree_signing::frost_verify_aggregate,
-    epochs::Epoch,
     frost::{PublicKeyPackage, ThresholdSignature},
     time::ProvenancedTime,
+    types::Epoch,
     AuraError, AuthorityId, Hash32, Result,
 };
 use frost_ed25519;

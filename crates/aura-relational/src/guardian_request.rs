@@ -5,8 +5,8 @@
 //! - encoded as `RelationalFact::Generic { binding_type: "guardian_request", .. }`
 //! - reduced via an optional `FactReducer` for query/view indexing
 
-use aura_core::identifiers::ContextId;
 use aura_core::relational::GuardianParameters;
+use aura_core::types::identifiers::ContextId;
 use aura_core::{hash, AuthorityId, Hash32, TimeStamp};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::{DomainFact, FactReducer};

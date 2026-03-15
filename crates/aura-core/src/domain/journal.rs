@@ -12,8 +12,8 @@
 //! The Journal serves as the pullback where growing facts and shrinking capabilities meet,
 //! providing the foundational abstraction for all replicated state in Aura.
 
-use crate::identifiers::{AuthorityId, DeviceId};
 use crate::semilattice::{Bottom, JoinSemilattice, MeetSemiLattice, Top};
+use crate::types::identifiers::{AuthorityId, DeviceId};
 use crate::{hash, AuraError};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;

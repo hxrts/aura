@@ -19,7 +19,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use aura_composition::{CompositeHandler, Handler, HandlerContext};
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_protocol::handlers::AuraContext;
 use aura_protocol::handlers::{
     core::erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry, EffectType,

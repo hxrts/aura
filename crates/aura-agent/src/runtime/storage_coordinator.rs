@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
-use aura_core::{identifiers::DeviceId, AuraResult};
+use aura_core::{types::identifiers::DeviceId, AuraResult};
 use aura_effects::FilesystemStorageHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -328,7 +328,7 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::types::identifiers::DeviceId;
 
     #[tokio::test]
     async fn test_coordinator_basic_operations() {

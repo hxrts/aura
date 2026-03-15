@@ -28,7 +28,7 @@ cfg_if! {
             WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
             WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
         };
-        use aura_core::{identifiers::AuthorityId, DeviceId};
+        use aura_core::{types::identifiers::AuthorityId, DeviceId};
         use aura_app::ui::contract::{
             ControlId, FieldId, ScreenId, UiReadiness,
         };

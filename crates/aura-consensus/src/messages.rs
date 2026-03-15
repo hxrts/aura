@@ -5,8 +5,8 @@
 use super::types::{CommitFact, ConsensusId};
 use crate::evidence::EvidenceDelta;
 use aura_core::{
-    epochs::Epoch,
     frost::{NonceCommitment, PartialSignature},
+    types::Epoch,
     Hash32,
 };
 use serde::{Deserialize, Serialize};

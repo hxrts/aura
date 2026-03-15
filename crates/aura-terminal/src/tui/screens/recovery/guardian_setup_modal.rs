@@ -14,7 +14,7 @@ use crate::tui::components::{
     ContactMultiSelectProps, ModalFooterProps, ModalHeaderProps, ThresholdSelectorProps,
 };
 use crate::tui::layout::dim;
-use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
+use crate::tui::state::{GuardianCeremonyResponse, GuardianSetupStep};
 use crate::tui::theme::{Borders, Icons, Spacing, Theme};
 use crate::tui::types::KeyHint;
 use aura_core::threshold::AgreementMode;

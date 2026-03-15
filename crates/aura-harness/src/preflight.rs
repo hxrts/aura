@@ -400,11 +400,25 @@ fn require_binary(binary: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
     use crate::config::{
         CompatibilityAction, CompatibilityStep, InstanceConfig, InstanceMode, RunSection,
         ScenarioConfig,
     };
+
+    fn unique_test_root(label: &str) -> std::path::PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "aura-harness-preflight-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|error| panic!("create preflight temp root failed: {error}"));
+        root
+    }
 
     fn test_scenario_config(
         id: &str,
@@ -461,7 +475,7 @@ mod tests {
     }
 
     fn local_only_run() -> RunConfig {
-        let temp_root = std::env::temp_dir().join("aura-harness-preflight");
+        let temp_root = unique_test_root("local-only");
         let local = InstanceConfig {
             id: "alice".to_string(),
             mode: InstanceMode::Local,

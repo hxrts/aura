@@ -85,6 +85,8 @@ pub mod effects;
 pub mod errors;
 /// Core message envelopes and versioning
 pub mod messages;
+/// Repo-wide ownership, transfer, and terminality primitives
+pub mod ownership;
 /// Query trait and Datalog types for unified query execution
 pub mod query;
 /// Reactive primitives for TUI and database subscriptions
@@ -117,19 +119,8 @@ pub mod prelude;
 /// Protocol types for version negotiation and capabilities
 pub mod protocol;
 
-// === Backwards-Compatible Module Re-exports ===
-// These re-exports maintain compatibility with code using aura_core::identifiers::X pattern
-// The canonical location is now aura_core::types::*, but we re-export modules
-// to avoid breaking existing consumers.
 pub use crypto::hash;
 pub use domain::journal;
-pub use types::authority;
-pub use types::epochs;
-pub use types::flow;
-pub use types::identifiers;
-pub use types::relationships;
-pub use types::scope;
-pub use util::context as context_derivation;
 
 // === Public API Re-exports ===
 
@@ -158,6 +149,14 @@ pub use conformance::{
     AURA_CONFORMANCE_SCHEMA_VERSION, AURA_EFFECT_ENVELOPE_CLASSIFICATIONS,
 };
 pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
+pub use ownership::{
+    ActorIngressMutationCapability, AuthorizedLifecyclePublication,
+    LifecyclePublicationCapability, OpaqueOperationHandle, OperationLifecycle,
+    OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain,
+    OwnershipResult, OwnershipTransfer, OwnershipTransferCapability, OwnerToken,
+    ReadinessPublicationCapability, Terminality, issue_operation_handle,
+    issue_owner_token, ownership_capability_token_request,
+};
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
 };
@@ -293,8 +292,7 @@ pub use query::{
 pub use crypto::{
     build_commitment_tree, build_merkle_root, ed25519_verify, verify_merkle_proof,
     Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey, HpkeKeyPair, HpkePrivateKey,
-    HpkePublicKey, IdentityKeyContext, KeyDerivationSpec, MerkleProof, PermissionKeyContext,
-    SimpleMerkleProof,
+    HpkePublicKey, IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext, SimpleMerkleProof,
 };
 
 // FROST threshold cryptography module (primitives live here; aura-frost deprecated)

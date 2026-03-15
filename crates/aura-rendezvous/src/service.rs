@@ -10,7 +10,7 @@ use crate::new_channel::{HandshakeConfig, Handshaker, SecureChannel};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::effects::noise::NoiseEffects;
 use aura_core::effects::CryptoEffects;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_core::{AuraError, AuraResult};
 use aura_guards::types;

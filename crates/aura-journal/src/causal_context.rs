@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 // Import unified time types from aura-core
 use aura_core::hash;
-use aura_core::identifiers::DeviceId;
 use aura_core::time::{LogicalTime, VectorClock};
+use aura_core::types::identifiers::DeviceId;
 
 /// Device/Actor identifier for vector clocks
 pub type ActorId = DeviceId;

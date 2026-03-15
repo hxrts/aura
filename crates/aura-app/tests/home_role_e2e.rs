@@ -1,7 +1,7 @@
 //! Integration tests for home role semantics and moderator behavior.
 
 use aura_app::views::{HomeMember, HomeRole, HomeState, KickRecord};
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 
 fn authority_id(seed: u8) -> AuthorityId {
     let mut bytes = [0u8; 32];

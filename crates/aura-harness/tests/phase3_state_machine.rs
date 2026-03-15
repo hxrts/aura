@@ -32,9 +32,9 @@ fn compatibility_state_machine_executes_mixed_topology_scenario() {
     }
     let report =
         match ScenarioExecutor::new(ExecutionMode::Compatibility).execute(&scenario, &mut api) {
-        Ok(report) => report,
-        Err(error) => panic!("compatibility execution failed: {error}"),
-    };
+            Ok(report) => report,
+            Err(error) => panic!("compatibility execution failed: {error}"),
+        };
     if let Err(error) = api.stop_all() {
         panic!("stop_all failed: {error}");
     }
@@ -48,7 +48,10 @@ fn compatibility_state_machine_executes_mixed_topology_scenario() {
         .states_visited
         .iter()
         .any(|state| state == "local-send"));
-    assert_eq!(report.step_metrics.len(), scenario.compatibility_steps.len());
+    assert_eq!(
+        report.step_metrics.len(),
+        scenario.compatibility_steps.len()
+    );
     assert!(report.total_duration_ms > 0);
 }
 

@@ -22,7 +22,7 @@
 //! ```
 
 use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 
 use crate::{ChatFact, CHAT_FACT_TYPE_ID};
@@ -417,7 +417,7 @@ mod tests {
     use super::*;
     use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])

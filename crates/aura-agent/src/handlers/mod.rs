@@ -8,7 +8,6 @@ pub mod auth_service;
 pub mod chat_service;
 pub mod invitation;
 pub mod invitation_service;
-pub mod logical_clock_service;
 pub mod ota;
 pub mod ota_activation_service;
 pub mod recovery;

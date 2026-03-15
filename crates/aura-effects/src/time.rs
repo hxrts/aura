@@ -164,7 +164,7 @@ impl LogicalClockHandler {
     pub fn advance_logical_time(
         current_vector: &VectorClock,
         current_scalar: u64,
-        authority: Option<aura_core::identifiers::DeviceId>,
+        authority: Option<aura_core::types::identifiers::DeviceId>,
         observed: Option<&VectorClock>,
     ) -> LogicalTime {
         let mut next_vector = current_vector.clone();

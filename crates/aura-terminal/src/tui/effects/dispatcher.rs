@@ -21,7 +21,7 @@
 //! let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::Custom(Box::new(checker)));
 //! ```
 
-use crate::tui::commands::{CommandCapability, IrcCommand};
+use crate::tui::commands::{ChatCommand, CommandCapability};
 
 use super::command_parser::EffectCommand;
 
@@ -178,7 +178,7 @@ impl CommandDispatcher {
     /// - `AllowAll`: Always permits (used when IoContext handles authorization)
     /// - `DenyNonPublic`: Denies commands requiring capabilities
     /// - `Custom(fn)`: Delegates to custom checker (for Biscuit integration)
-    pub fn check_capability(&self, command: &IrcCommand) -> Result<(), DispatchError> {
+    pub fn check_capability(&self, command: &ChatCommand) -> Result<(), DispatchError> {
         let capability = command.required_capability();
 
         // Commands with no capability requirement always pass
@@ -203,7 +203,7 @@ impl CommandDispatcher {
     }
 
     /// Dispatch an IRC command to an effect command
-    pub fn dispatch(&self, command: IrcCommand) -> Result<EffectCommand, DispatchError> {
+    pub fn dispatch(&self, command: ChatCommand) -> Result<EffectCommand, DispatchError> {
         // First check capability
         self.check_capability(&command)?;
 
@@ -213,19 +213,19 @@ impl CommandDispatcher {
 
     /// Map command to effect without capability checking (for testing)
     #[cfg(test)]
-    pub fn dispatch_unchecked(&self, command: IrcCommand) -> Result<EffectCommand, DispatchError> {
+    pub fn dispatch_unchecked(&self, command: ChatCommand) -> Result<EffectCommand, DispatchError> {
         self.map_command(command)
     }
 
     /// Internal mapping from command to effect
-    fn map_command(&self, command: IrcCommand) -> Result<EffectCommand, DispatchError> {
+    fn map_command(&self, command: ChatCommand) -> Result<EffectCommand, DispatchError> {
         match command {
-            IrcCommand::Msg { target, text } => Ok(EffectCommand::SendDirectMessage {
+            ChatCommand::Msg { target, text } => Ok(EffectCommand::SendDirectMessage {
                 target,
                 content: text,
             }),
 
-            IrcCommand::Me { action } => {
+            ChatCommand::Me { action } => {
                 let channel =
                     self.current_channel
                         .clone()
@@ -236,9 +236,9 @@ impl CommandDispatcher {
                 Ok(EffectCommand::SendAction { channel, action })
             }
 
-            IrcCommand::Nick { name } => Ok(EffectCommand::UpdateNickname { name }),
+            ChatCommand::Nick { name } => Ok(EffectCommand::UpdateNickname { name }),
 
-            IrcCommand::Who => {
+            ChatCommand::Who => {
                 let channel =
                     self.current_channel
                         .clone()
@@ -249,9 +249,9 @@ impl CommandDispatcher {
                 Ok(EffectCommand::ListParticipants { channel })
             }
 
-            IrcCommand::Whois { target } => Ok(EffectCommand::GetUserInfo { target }),
+            ChatCommand::Whois { target } => Ok(EffectCommand::GetUserInfo { target }),
 
-            IrcCommand::Leave => {
+            ChatCommand::Leave => {
                 let channel =
                     self.current_channel
                         .clone()
@@ -262,28 +262,28 @@ impl CommandDispatcher {
                 Ok(EffectCommand::LeaveChannel { channel })
             }
 
-            IrcCommand::Help { .. } => {
+            ChatCommand::Help { .. } => {
                 // Help is handled locally, not via effect system
                 Err(DispatchError::HandledLocally {
                     command: "help".to_string(),
                 })
             }
 
-            IrcCommand::Neighborhood { name } => Ok(EffectCommand::CreateNeighborhood { name }),
+            ChatCommand::Neighborhood { name } => Ok(EffectCommand::CreateNeighborhood { name }),
 
-            IrcCommand::NhAdd { home_id } => Ok(EffectCommand::AddHomeToNeighborhood { home_id }),
+            ChatCommand::NhAdd { home_id } => Ok(EffectCommand::AddHomeToNeighborhood { home_id }),
 
-            IrcCommand::NhLink { home_id } => Ok(EffectCommand::LinkHomeOneHopLink { home_id }),
+            ChatCommand::NhLink { home_id } => Ok(EffectCommand::LinkHomeOneHopLink { home_id }),
 
-            IrcCommand::HomeInvite { target } => {
+            ChatCommand::HomeInvite { target } => {
                 Ok(EffectCommand::SendHomeInvitation { contact_id: target })
             }
 
-            IrcCommand::HomeAccept => Ok(EffectCommand::AcceptPendingHomeInvitation),
+            ChatCommand::HomeAccept => Ok(EffectCommand::AcceptPendingHomeInvitation),
 
-            IrcCommand::Join { channel } => Ok(EffectCommand::JoinChannel { channel }),
+            ChatCommand::Join { channel } => Ok(EffectCommand::JoinChannel { channel }),
 
-            IrcCommand::Kick { target, reason } => {
+            ChatCommand::Kick { target, reason } => {
                 let channel =
                     self.current_channel
                         .clone()
@@ -298,29 +298,29 @@ impl CommandDispatcher {
                 })
             }
 
-            IrcCommand::Ban { target, reason } => Ok(EffectCommand::BanUser {
+            ChatCommand::Ban { target, reason } => Ok(EffectCommand::BanUser {
                 channel: self.current_channel.clone(),
                 target,
                 reason,
             }),
 
-            IrcCommand::Unban { target } => Ok(EffectCommand::UnbanUser {
+            ChatCommand::Unban { target } => Ok(EffectCommand::UnbanUser {
                 channel: self.current_channel.clone(),
                 target,
             }),
 
-            IrcCommand::Mute { target, duration } => Ok(EffectCommand::MuteUser {
+            ChatCommand::Mute { target, duration } => Ok(EffectCommand::MuteUser {
                 channel: self.current_channel.clone(),
                 target,
                 duration_secs: duration.map(|d| d.as_secs()),
             }),
 
-            IrcCommand::Unmute { target } => Ok(EffectCommand::UnmuteUser {
+            ChatCommand::Unmute { target } => Ok(EffectCommand::UnmuteUser {
                 channel: self.current_channel.clone(),
                 target,
             }),
 
-            IrcCommand::Invite { target } => {
+            ChatCommand::Invite { target } => {
                 let channel =
                     self.current_channel
                         .clone()
@@ -335,7 +335,7 @@ impl CommandDispatcher {
                 })
             }
 
-            IrcCommand::Topic { text } => {
+            ChatCommand::Topic { text } => {
                 let channel =
                     self.current_channel
                         .clone()
@@ -346,21 +346,21 @@ impl CommandDispatcher {
                 Ok(EffectCommand::SetTopic { channel, text })
             }
 
-            IrcCommand::Pin { message_id } => Ok(EffectCommand::PinMessage { message_id }),
+            ChatCommand::Pin { message_id } => Ok(EffectCommand::PinMessage { message_id }),
 
-            IrcCommand::Unpin { message_id } => Ok(EffectCommand::UnpinMessage { message_id }),
+            ChatCommand::Unpin { message_id } => Ok(EffectCommand::UnpinMessage { message_id }),
 
-            IrcCommand::Op { target } => Ok(EffectCommand::GrantModerator {
+            ChatCommand::Op { target } => Ok(EffectCommand::GrantModerator {
                 channel: self.current_channel.clone(),
                 target,
             }),
 
-            IrcCommand::Deop { target } => Ok(EffectCommand::RevokeModerator {
+            ChatCommand::Deop { target } => Ok(EffectCommand::RevokeModerator {
                 channel: self.current_channel.clone(),
                 target,
             }),
 
-            IrcCommand::Mode { channel, flags } => {
+            ChatCommand::Mode { channel, flags } => {
                 Ok(EffectCommand::SetChannelMode { channel, flags })
             }
         }
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn test_dispatch_msg() {
         let dispatcher = CommandDispatcher::new();
-        let cmd = IrcCommand::Msg {
+        let cmd = ChatCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_dispatch_nick() {
         let dispatcher = CommandDispatcher::new();
-        let cmd = IrcCommand::Nick {
+        let cmd = ChatCommand::Nick {
             name: "NewName".to_string(),
         };
 
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn test_dispatch_me_without_channel() {
         let dispatcher = CommandDispatcher::new();
-        let cmd = IrcCommand::Me {
+        let cmd = ChatCommand::Me {
             action: "waves".to_string(),
         };
 
@@ -437,7 +437,7 @@ mod tests {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.set_current_channel("general");
 
-        let cmd = IrcCommand::Me {
+        let cmd = ChatCommand::Me {
             action: "waves".to_string(),
         };
 
@@ -458,7 +458,7 @@ mod tests {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.set_current_channel("general");
 
-        let cmd = IrcCommand::Kick {
+        let cmd = ChatCommand::Kick {
             target: "spammer".to_string(),
             reason: Some("flooding".to_string()),
         };
@@ -483,7 +483,7 @@ mod tests {
     #[test]
     fn test_dispatch_mute_with_duration() {
         let dispatcher = CommandDispatcher::new();
-        let cmd = IrcCommand::Mute {
+        let cmd = ChatCommand::Mute {
             target: "alice".to_string(),
             duration: Some(Duration::from_secs(300)),
         };
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn test_dispatch_homeinvite() {
         let dispatcher = CommandDispatcher::new();
-        let cmd = IrcCommand::HomeInvite {
+        let cmd = ChatCommand::HomeInvite {
             target: "authority-abc".to_string(),
         };
 
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn test_dispatch_homeaccept() {
         let dispatcher = CommandDispatcher::new();
-        let cmd = IrcCommand::HomeAccept;
+        let cmd = ChatCommand::HomeAccept;
 
         let result = dispatcher.dispatch_unchecked(cmd);
         assert!(result.is_ok());
@@ -540,7 +540,7 @@ mod tests {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.set_current_channel("general");
 
-        let cmd = IrcCommand::Op {
+        let cmd = ChatCommand::Op {
             target: "alice".to_string(),
         };
         let result = match dispatcher.dispatch_unchecked(cmd) {
@@ -578,7 +578,7 @@ mod tests {
         let dispatcher = CommandDispatcher::new();
 
         // Default policy (DenyNonPublic) should deny commands requiring capabilities
-        let cmd = IrcCommand::Msg {
+        let cmd = ChatCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };
@@ -592,7 +592,7 @@ mod tests {
         let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::DenyNonPublic);
 
         // Commands requiring capabilities should be denied
-        let cmd = IrcCommand::Msg {
+        let cmd = ChatCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };
@@ -611,7 +611,7 @@ mod tests {
 
         // Help command has no capability requirement, even though the UI
         // handles it locally instead of routing it into the effect layer.
-        let cmd = IrcCommand::Help { command: None };
+        let cmd = ChatCommand::Help { command: None };
 
         let result = dispatcher.check_capability(&cmd);
         assert!(result.is_ok());
@@ -631,7 +631,7 @@ mod tests {
             CommandDispatcher::with_policy(CapabilityPolicy::Custom(Box::new(checker)));
 
         // SendDm should be allowed
-        let msg_cmd = IrcCommand::Msg {
+        let msg_cmd = ChatCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };
@@ -648,7 +648,7 @@ mod tests {
         ));
         dispatcher_with_channel.set_current_channel("general");
 
-        let kick_cmd = IrcCommand::Kick {
+        let kick_cmd = ChatCommand::Kick {
             target: "spammer".to_string(),
             reason: None,
         };
@@ -665,7 +665,7 @@ mod tests {
         let mut dispatcher = CommandDispatcher::new();
 
         // Start with DenyNonPublic
-        let cmd = IrcCommand::Msg {
+        let cmd = ChatCommand::Msg {
             target: "alice".to_string(),
             text: "hello".to_string(),
         };

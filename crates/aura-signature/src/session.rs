@@ -8,7 +8,7 @@
 //! represent cryptographic actors that hide their internal device structure.
 
 use crate::{AuthenticationError, Result};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 use uuid::Uuid;
 

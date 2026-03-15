@@ -376,7 +376,7 @@ impl TreeEffects for PersistentTreeHandler {
         let signature_share = proposal_id.0.to_vec();
         Ok(Partial {
             signature_share,
-            participant_id: aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
+            participant_id: aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
         })
     }
 

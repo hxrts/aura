@@ -558,11 +558,7 @@ fn ensure_shared_execution_is_strict(scenario: &ScenarioConfig, path: &Path) -> 
             path.display()
         );
     }
-    for step in scenario
-        .semantic_steps()
-        .unwrap_or(&[])
-        .iter()
-    {
+    for step in scenario.semantic_steps().unwrap_or(&[]).iter() {
         if matches!(step.action, SemanticAction::Ui(_)) {
             bail!(
                 "shared scenario {} contains raw ui mechanic action {:?}",
@@ -787,6 +783,16 @@ mod tests {
                     timeout_ms: Some(1000),
                     action: SemanticAction::Intent(IntentAction::JoinChannel {
                         channel_name: "shared".to_string(),
+                    }),
+                },
+                ScenarioStep {
+                    id: "join-wait".to_string(),
+                    actor: Some(ActorId("alice".to_string())),
+                    timeout_ms: Some(1000),
+                    action: SemanticAction::Expect(Expectation::RuntimeEventOccurred {
+                        kind: RuntimeEventKind::ChannelMembershipReady,
+                        detail_contains: None,
+                        capture_name: None,
                     }),
                 },
             ],

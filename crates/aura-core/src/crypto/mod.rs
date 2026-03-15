@@ -27,9 +27,3 @@ pub use hpke::{HpkeKeyPair, HpkePrivateKey, HpkePublicKey};
 
 // Single-signer types (for 1-of-1 scenarios)
 pub use single_signer::{SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage};
-
-/// Alias for Merkle proof re-export.
-pub type MerkleProof = SimpleMerkleProof;
-
-/// Opaque permission key context alias retained for compatibility.
-pub type PermissionKeyContextCompat = PermissionKeyContext;

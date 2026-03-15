@@ -41,8 +41,8 @@
 //! ```
 
 use aura_anti_entropy::FactAck;
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::OrderTime;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::AuraError;
 use aura_journal::AckStorage;
 use std::sync::Arc;

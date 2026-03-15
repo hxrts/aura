@@ -9,7 +9,7 @@ use super::pure;
 use async_lock::RwLock;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::TransportEffects;
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, FlowCost, Hash32};
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::traits::GuardContextProvider;
@@ -487,7 +487,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(1),
-                        aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
+                        aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
                         vec![1, 2, 3],
                     )
                     .expect("valid leaf"),

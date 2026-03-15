@@ -1,6 +1,6 @@
 //! Integration tests for hop-based access, capability enforcement, and deterministic views.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_social::{
     determine_access_level, minimum_hop_distance, resolve_access_capabilities, AccessLevel, Home,
     HomeId, Neighborhood, NeighborhoodId,

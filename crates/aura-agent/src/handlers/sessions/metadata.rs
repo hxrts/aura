@@ -9,7 +9,7 @@ use crate::fact_types::{
     SESSION_PARTICIPANT_REMOVED_FACT_TYPE_ID,
 };
 use crate::handlers::shared::HandlerUtilities;
-use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::types::identifiers::{DeviceId, SessionId};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -28,7 +28,7 @@ struct SessionMetadataFact {
 }
 
 mod session_id_serde {
-    use aura_core::identifiers::SessionId;
+    use aura_core::types::identifiers::SessionId;
     use serde::Serializer;
 
     pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
@@ -144,7 +144,7 @@ mod tests {
     use super::*;
     use crate::core::AuthorityContext;
     use aura_core::effects::SessionType;
-    use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
+    use aura_core::types::identifiers::{AccountId, AuthorityId, DeviceId};
     use std::sync::Arc;
 
     #[tokio::test]

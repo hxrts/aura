@@ -12,7 +12,7 @@ use aura_core::effects::{
     ConsoleEffects, CryptoCoreEffects, ExecutionMode, NetworkExtendedEffects, PhysicalTimeEffects,
     RandomCoreEffects, StorageCoreEffects, StorageExtendedEffects,
 };
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use aura_effects::{console::RealConsoleHandler, crypto::RealCryptoHandler};
 use aura_testkit::{stateful_effects::storage::MemoryStorageHandler, CompositeTestHandler};
 

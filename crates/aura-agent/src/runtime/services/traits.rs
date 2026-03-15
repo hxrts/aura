@@ -16,7 +16,7 @@ use aura_core::effects::PhysicalTimeEffects;
 use std::fmt;
 use std::sync::Arc;
 
-use super::RuntimeTaskRegistry;
+use crate::runtime::TaskSupervisor;
 
 /// Health status of a runtime service
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,14 +163,14 @@ impl std::error::Error for ServiceError {
 /// Shared runtime context provided to services during lifecycle operations.
 #[derive(Clone)]
 pub struct RuntimeServiceContext {
-    tasks: Arc<RuntimeTaskRegistry>,
+    tasks: Arc<TaskSupervisor>,
     time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
 }
 
 impl RuntimeServiceContext {
     /// Create one runtime service context from shared runtime dependencies.
     pub fn new(
-        tasks: Arc<RuntimeTaskRegistry>,
+        tasks: Arc<TaskSupervisor>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
     ) -> Self {
         Self {
@@ -180,7 +180,7 @@ impl RuntimeServiceContext {
     }
 
     /// Borrow the shared supervised task root for service-owned child groups.
-    pub fn tasks(&self) -> Arc<RuntimeTaskRegistry> {
+    pub fn tasks(&self) -> Arc<TaskSupervisor> {
         self.tasks.clone()
     }
 
@@ -263,7 +263,7 @@ pub trait RuntimeService: Send + Sync {
     /// 2. Complete or cancel in-progress operations
     /// 3. Release resources
     ///
-    /// Background tasks spawned via `RuntimeTaskRegistry` are automatically
+    /// Background tasks spawned via `TaskSupervisor` are automatically
     /// cancelled, but the service may need to perform additional cleanup.
     ///
     /// # Errors
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn runtime_service_context_exposes_shared_dependencies() {
-        let tasks = Arc::new(RuntimeTaskRegistry::new());
+        let tasks = Arc::new(TaskSupervisor::new());
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
             Arc::new(aura_effects::time::PhysicalTimeHandler::new());
         let context = RuntimeServiceContext::new(tasks.clone(), time_effects.clone());

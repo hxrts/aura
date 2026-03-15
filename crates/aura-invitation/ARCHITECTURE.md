@@ -23,6 +23,18 @@ invitation creation, redemption, and ceremony coordination.
 - Invitation identifiers are treated as stable binding keys.
 - Invitation redemption creates mutual relational context.
 
+## Ownership Model
+
+- `aura-invitation` is primarily `Pure` invitation-domain logic plus single-owner
+  workflow contracts.
+- Invitation lifecycle handles, acceptance ownership, and transfer surfaces
+  should be explicit and `MoveOwned`.
+- Long-lived invitation coordination should be single-owner and capability-gated.
+- Invitation operations must end with typed terminal success, failure, or
+  cancellation.
+- `Observed` layers may display invitation state but must not synthesize
+  semantic truth.
+
 ### Detailed Specifications
 
 ### InvariantInvitationRedemptionUniqueness
@@ -49,4 +61,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

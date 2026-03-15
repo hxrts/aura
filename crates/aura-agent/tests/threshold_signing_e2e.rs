@@ -11,12 +11,12 @@
 //! produces valid FROST signatures that can be verified.
 
 use aura_core::effects::CryptoExtendedEffects;
-use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
     ApprovalContext, GroupAction, SignableOperation, SigningContext, ThresholdConfig,
     ThresholdSignature,
 };
 use aura_core::tree::{TreeCommitment, TreeOp, TreeOpKind};
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::Epoch;
 use aura_testkit::mock_effects::MockEffects;
 

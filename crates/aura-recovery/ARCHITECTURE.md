@@ -22,6 +22,17 @@ relationships. Includes guardian setup, membership management, and recovery cere
 - Recovery and guardian membership transitions are consensus-gated (Category C).
 - Guardian threshold must be satisfied for successful recovery.
 
+## Ownership Model
+
+- `aura-recovery` is primarily `Pure` recovery-domain logic plus explicit
+  ceremony/workflow contracts.
+- Recovery grants, approvals, and handoffs that require exclusivity should use
+  `MoveOwned` surfaces.
+- Long-lived recovery coordination should be explicit and single-owner rather
+  than spread across wrappers and views.
+- Recovery publication and transitions must remain capability-gated and typed.
+- `Observed` recovery views are downstream of authoritative recovery semantics.
+
 ### Detailed Specifications
 
 ### InvariantRecoveryThresholdEnforcement
@@ -48,4 +59,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

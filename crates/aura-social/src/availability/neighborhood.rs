@@ -14,7 +14,7 @@ use aura_core::{
         network::{NetworkCoreEffects, NetworkEffects},
         storage::{StorageCoreEffects, StorageEffects},
     },
-    identifiers::AuthorityId,
+    types::identifiers::AuthorityId,
 };
 use std::collections::HashMap;
 use std::sync::Arc;

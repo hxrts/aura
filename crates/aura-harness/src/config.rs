@@ -591,9 +591,6 @@ impl ScenarioConfig {
             if !step_ids.insert(step.id.clone()) {
                 bail!("duplicate scenario step id: {}", step.id);
             }
-            if step.request_id == Some(0) {
-                bail!("scenario step {} request_id must be >= 1", step.id);
-            }
             if matches!(step.action, CompatibilityAction::WaitFor)
                 && step.pattern.is_none()
                 && step.selector.is_none()

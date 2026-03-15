@@ -3,7 +3,7 @@
 //! This module handles verifying that an authority signed a message.
 
 use crate::{AuthenticationError, Result};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
 /// Verify that an authority signed a message

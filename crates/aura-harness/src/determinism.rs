@@ -56,9 +56,22 @@ fn derive_seed(root: u64, scope: &str, key: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
     use crate::config::{InstanceConfig, InstanceMode, RunSection};
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "aura-harness-determinism-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|error| panic!("create determinism temp dir failed: {error}"));
+        root
+    }
 
     #[test]
     fn seed_bundle_is_deterministic_for_same_config() {
@@ -90,7 +103,7 @@ mod tests {
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
-                data_dir: PathBuf::from("/tmp/seed-test"),
+                data_dir: unique_test_dir("seed-test"),
                 device_id: None,
                 bind_address: "127.0.0.1:49001".to_string(),
                 demo_mode: false,

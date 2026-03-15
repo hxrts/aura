@@ -10,7 +10,7 @@
 
 use aura_app::ui::prelude::*;
 use aura_core::hash;
-use aura_core::identifiers::HomeId;
+use aura_core::types::identifiers::HomeId;
 
 fn home_id_from_label(label: &str) -> HomeId {
     HomeId::from_bytes(hash::hash(label.as_bytes()))

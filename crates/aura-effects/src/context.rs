@@ -21,7 +21,7 @@
 //! ```
 
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 
 // Re-export EffectContext from aura_core for convenience
@@ -83,7 +83,7 @@ impl Default for StandardContextHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
 
     #[test]
     fn test_effect_context_creation() {

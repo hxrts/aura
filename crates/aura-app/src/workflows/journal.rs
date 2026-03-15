@@ -2,7 +2,7 @@
 
 use super::error::{fact_encoding, journal_op};
 use aura_core::effects::JournalEffects;
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 use aura_core::{AuraError, FactValue, Journal};
 use aura_journal::fact::{FactContent, RelationalFact};
 use serde::Serialize;

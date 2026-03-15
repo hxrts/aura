@@ -4,8 +4,8 @@
 use aura_authorization::{
     BiscuitAuthorizationBridge, BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority,
 };
-use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::scope::AuthorizationOp;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::scope::AuthorizationOp;
 
 #[test]
 fn attenuated_read_token_blocks_write() {

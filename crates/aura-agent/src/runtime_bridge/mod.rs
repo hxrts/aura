@@ -11,7 +11,6 @@ use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
 use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
-use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_app::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
     RuntimeBridge, SettingsBridgeState, SyncStatus,
@@ -21,6 +20,7 @@ use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_autho
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
+use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::ceremony::SupersessionReason;
 use aura_core::effects::{
     amp::{
@@ -35,9 +35,9 @@ use aura_core::effects::{
     ThresholdSigningEffects, TransportEffects, TransportEnvelope,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
@@ -50,8 +50,8 @@ use aura_journal::fact::{Fact as TypedFact, FactContent};
 use aura_journal::DomainFact;
 use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::{
-    commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects,
-    ChannelMembershipFact, ChannelParticipantEvent,
+    commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects, ChannelMembershipFact,
+    ChannelParticipantEvent,
 };
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
@@ -102,7 +102,9 @@ async fn inspect_channel_context_facts(
     let journal = effects
         .fetch_context_journal(context)
         .await
-        .map_err(|error| IntentError::internal_error(format!("AMP context journal lookup failed: {error}")))?;
+        .map_err(|error| {
+            IntentError::internal_error(format!("AMP context journal lookup failed: {error}"))
+        })?;
 
     let mut inspection = ChannelFactInspection::default();
     for fact in journal.iter_facts() {
@@ -155,7 +157,8 @@ async fn resolve_channel_context_from_local_chat_facts(
             channel_id,
             creator_id,
             ..
-        }) = ChatFact::from_envelope(&envelope) else {
+        }) = ChatFact::from_envelope(&envelope)
+        else {
             continue;
         };
 
@@ -1872,7 +1875,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         threshold_k: FrostThreshold,
         total_n: u16,
         guardian_ids: &[AuthorityId],
-    ) -> Result<aura_core::identifiers::CeremonyId, IntentError> {
+    ) -> Result<aura_core::types::identifiers::CeremonyId, IntentError> {
         use aura_core::hash::hash;
         use aura_core::threshold::{
             policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
@@ -1988,7 +1991,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let nonce = CEREMONY_NONCE.fetch_add(1, Ordering::Relaxed);
         let ceremony_id_hash = GuardianCeremonyId::new(prestate_hash, operation_hash, nonce);
         let ceremony_id =
-            aura_core::identifiers::CeremonyId::new(hex::encode(ceremony_id_hash.0 .0));
+            aura_core::types::identifiers::CeremonyId::new(hex::encode(ceremony_id_hash.0 .0));
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -2170,7 +2173,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         threshold_k: FrostThreshold,
         total_n: u16,
         device_ids: &[String],
-    ) -> Result<aura_core::identifiers::CeremonyId, IntentError> {
+    ) -> Result<aura_core::types::identifiers::CeremonyId, IntentError> {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
             ThresholdSigningEffects,
@@ -2310,7 +2313,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ceremony_seed.extend_from_slice(op_hash.as_bytes());
         ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(format!(
+        let ceremony_id = aura_core::types::identifiers::CeremonyId::new(format!(
             "ceremony:{}",
             hex::encode(ceremony_hash.as_bytes())
         ));
@@ -2368,7 +2371,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             h.update(ceremony_id.as_str().as_bytes());
             h.finalize()
         };
-        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+        let ceremony_context =
+            aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
 
         use base64::Engine;
         let config_b64 = if threshold_config.is_empty() {
@@ -2657,7 +2661,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ceremony_seed.extend_from_slice(op_hash.as_bytes());
         ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(format!(
+        let ceremony_id = aura_core::types::identifiers::CeremonyId::new(format!(
             "ceremony:{}",
             hex::encode(ceremony_hash.as_bytes())
         ));
@@ -2742,7 +2746,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 h.finalize()
             };
             let ceremony_context =
-                aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+                aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
 
             for device_id in &other_device_ids {
                 let Some(key_package) = key_package_by_device.get(device_id).cloned() else {
@@ -2862,7 +2866,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn initiate_device_removal_ceremony(
         &self,
         device_id: String,
-    ) -> Result<aura_core::identifiers::CeremonyId, IntentError> {
+    ) -> Result<aura_core::types::identifiers::CeremonyId, IntentError> {
         use aura_core::effects::ThresholdSigningEffects;
         use aura_core::hash::hash;
         use aura_core::threshold::ParticipantIdentity;
@@ -3092,7 +3096,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ceremony_seed.extend_from_slice(op_hash.as_bytes());
         ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(format!(
+        let ceremony_id = aura_core::types::identifiers::CeremonyId::new(format!(
             "ceremony:{}",
             hex::encode(ceremony_hash.as_bytes())
         ));
@@ -3160,7 +3164,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             h.update(ceremony_id.as_str().as_bytes());
             h.finalize()
         };
-        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+        let ceremony_context =
+            aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
 
         for device_id in participant_device_ids.iter().copied() {
             if device_id == current_device_id {
@@ -3295,7 +3300,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
     async fn get_ceremony_status(
         &self,
-        ceremony_id: &aura_core::identifiers::CeremonyId,
+        ceremony_id: &aura_core::types::identifiers::CeremonyId,
     ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
         // Ensure ceremony progress is driven even when the caller only polls status.
         //
@@ -3344,7 +3349,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn get_key_rotation_ceremony_status(
         &self,
-        ceremony_id: &aura_core::identifiers::CeremonyId,
+        ceremony_id: &aura_core::types::identifiers::CeremonyId,
     ) -> Result<aura_app::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
         // Ensure acceptances are processed so polling drives progress in demo/simulation mode.
         if let Err(e) = self.agent.process_ceremony_acceptances().await {
@@ -3381,7 +3386,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn cancel_key_rotation_ceremony(
         &self,
-        ceremony_id: &aura_core::identifiers::CeremonyId,
+        ceremony_id: &aura_core::types::identifiers::CeremonyId,
     ) -> Result<(), IntentError> {
         // Ensure acceptances are processed so state is up-to-date.
         if let Err(e) = self.agent.process_ceremony_acceptances().await {
@@ -3417,7 +3422,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         // Export the invite code
-        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
+        let invitation_id =
+            aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
         invitation_service
             .export_code(&invitation_id)
             .await
@@ -3519,7 +3525,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                         "Failed to create channel invitation: {}",
                         e
                     ))
-                })?
+                })?,
             }
         };
 
@@ -3556,7 +3562,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
+        let invitation_id =
+            aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
         let result = invitation_service
             .accept(&invitation_id)
             .await
@@ -3579,7 +3586,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
+        let invitation_id =
+            aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
         let result = invitation_service
             .decline(&invitation_id)
             .await
@@ -3602,7 +3610,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
+        let invitation_id =
+            aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
         let result = invitation_service
             .cancel(&invitation_id)
             .await
@@ -3898,7 +3907,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn respond_to_guardian_ceremony(
         &self,
-        ceremony_id: &aura_core::identifiers::CeremonyId,
+        ceremony_id: &aura_core::types::identifiers::CeremonyId,
         accept: bool,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {
@@ -4080,5 +4089,4 @@ mod tests {
 
         assert_eq!(resolved, Some(context));
     }
-
 }

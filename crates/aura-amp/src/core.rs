@@ -53,8 +53,8 @@ mod tests {
     #[test]
     fn nonce_from_header_is_deterministic() {
         let header = aura_transport::amp::AmpHeader {
-            context: aura_core::identifiers::ContextId::new_from_entropy([4u8; 32]),
-            channel: aura_core::identifiers::ChannelId::from_bytes([5u8; 32]),
+            context: aura_core::types::identifiers::ContextId::new_from_entropy([4u8; 32]),
+            channel: aura_core::types::identifiers::ChannelId::from_bytes([5u8; 32]),
             chan_epoch: 2,
             ratchet_gen: 7,
         };

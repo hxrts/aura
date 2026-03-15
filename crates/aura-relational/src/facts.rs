@@ -33,9 +33,9 @@
 //! registry.register::<ContactFact>("contact", Box::new(ContactFactReducer));
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::relational::{GuardianBinding, RecoveryGrant};
 use aura_core::time::PhysicalTime;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{hash, Hash32};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},

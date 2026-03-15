@@ -26,7 +26,7 @@
 //! - `context_id("chat")` ≠ `guardian_id("chat")`
 
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId, GuardianId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId, GuardianId};
 use uuid::Uuid;
 
 /// Domain prefix for portable ID derivation.

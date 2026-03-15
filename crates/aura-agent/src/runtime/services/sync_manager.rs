@@ -3,7 +3,6 @@
 //! Wraps `aura_sync::SyncService` for integration with the agent runtime.
 //! Provides lifecycle management and configuration for automatic background sync.
 
-use super::runtime_tasks::TaskGroup;
 use super::service_actor::{validate_actor_transition, ActorLifecyclePhase, ServiceActorHandle};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::{ReconfigurationManager, ReconfigurationManagerError, SessionDelegationTransfer};
@@ -11,6 +10,7 @@ use crate::core::default_context_id_for_authority;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{
     open_owned_manifest_vm_session_admitted, AuraEffectSystem, RuntimeChoreographySessionId,
+    TaskGroup,
 };
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
@@ -1036,7 +1036,7 @@ mod tests {
 
     fn test_service_context() -> RuntimeServiceContext {
         RuntimeServiceContext::new(
-            Arc::new(crate::runtime::services::RuntimeTaskRegistry::new()),
+            Arc::new(crate::runtime::TaskSupervisor::new()),
             Arc::new(PhysicalTimeHandler::new()),
         )
     }

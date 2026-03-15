@@ -1,9 +1,9 @@
 //! Anti-entropy wire format helpers.
 
 use super::effects::SyncError;
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{OrderTime, PhysicalTime};
 use aura_core::tree::AttestedOp;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 pub const SYNC_WIRE_SCHEMA_VERSION: u16 = 2;

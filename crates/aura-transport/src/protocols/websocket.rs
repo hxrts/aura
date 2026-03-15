@@ -4,8 +4,8 @@
 //! Target: <100 lines (simple implementation).
 
 use aura_core::hash::{hash as core_hash, hasher};
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;

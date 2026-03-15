@@ -3,7 +3,7 @@
 //! This module contains authority record types and helper functions
 //! that are portable across all frontends.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================

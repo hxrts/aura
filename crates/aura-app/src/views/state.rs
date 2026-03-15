@@ -9,7 +9,7 @@ use super::{
 };
 use crate::core::StateSnapshot;
 #[cfg(feature = "signals")]
-use aura_core::identifiers::ChannelId;
+use aura_core::types::identifiers::ChannelId;
 use cfg_if::cfg_if;
 
 cfg_if! {

@@ -8,8 +8,8 @@ use aura_core::effects::noise::{
     HandshakeState as NoiseHandshakeState, NoiseEffects, NoiseParams, TransportState,
 };
 use aura_core::effects::CryptoEffects;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

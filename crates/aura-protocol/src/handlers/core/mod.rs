@@ -42,7 +42,7 @@ pub use traits::AuraHandlerFactory;
 mod tests {
     use super::*;
     use crate::handlers::ExecutionMode;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::types::identifiers::DeviceId;
 
     #[test]
     fn test_platform_detection() {

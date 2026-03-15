@@ -20,6 +20,18 @@ for cryptographically verifiable capability delegation.
 - Biscuit tokens for cryptographic delegation.
 - Policies are Datalog-based for flexible evaluation.
 
+## Ownership Model
+
+- `aura-authorization` is primarily `Pure`.
+- It defines capability and policy semantics rather than owning `ActorOwned`
+  runtime state.
+- Transfer or attenuation semantics should remain explicit and `MoveOwned`
+  rather than implicit shared mutation.
+- Capability evaluation here is authoritative input to higher-layer mutation and
+  publication gates.
+- `Observed` layers may inspect authorization results but must not invent their
+  own authority.
+
 ### Detailed Specifications
 
 ### InvariantCapabilityMeetMonotonicity
@@ -43,4 +55,3 @@ Contract alignment:
 - No cryptographic signing (use aura-signature).
 - No transport operations (use effect traits).
 - Policy evaluation is pure; I/O via effects.
-

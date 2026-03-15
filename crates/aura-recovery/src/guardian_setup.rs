@@ -71,8 +71,8 @@ use crate::{
 use async_trait::async_trait;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, SecureStorageLocation};
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,7 @@
 use super::{service_unavailable, AgentRuntimeBridge};
 use aura_app::runtime_bridge::{LanPeerInfo, RendezvousStatus};
 use aura_app::IntentError;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 pub(super) async fn get_discovered_peers(bridge: &AgentRuntimeBridge) -> Vec<AuthorityId> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {

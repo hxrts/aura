@@ -36,7 +36,7 @@ use aura_agent::{
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::{

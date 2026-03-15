@@ -26,7 +26,7 @@ use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RE
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::create_account;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::ids;

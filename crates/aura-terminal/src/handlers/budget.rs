@@ -173,7 +173,7 @@ pub fn check_can_pin(budget: &HomeFlowBudget, size_bytes: u64) -> Result<(), Str
 mod tests {
     use super::*;
     use aura_core::hash;
-    use aura_core::identifiers::HomeId;
+    use aura_core::types::identifiers::HomeId;
 
     fn test_home_id(label: &str) -> HomeId {
         HomeId::from_bytes(hash::hash(label.as_bytes()))

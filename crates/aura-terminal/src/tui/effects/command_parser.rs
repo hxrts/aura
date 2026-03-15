@@ -14,7 +14,7 @@
 
 use aura_app::ui::contract::OperationInstanceId;
 use aura_app::ui::types::chat::Channel;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use tokio::sync::broadcast;
 
 // Re-export portable authorization types from aura-app

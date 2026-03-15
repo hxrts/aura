@@ -2,7 +2,7 @@
 //!
 //! This module defines the invitations state with computed counts (no sync bugs).
 
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

@@ -6,7 +6,7 @@
 //! with aura-journal. Implementations can internally use richer types like AccountState.
 
 use async_trait::async_trait;
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 
 /// Effect API effects for account state management
 ///

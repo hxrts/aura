@@ -3,7 +3,7 @@
 //! This module contains message types for rendezvous protocols:
 //! - Rendezvous and peer discovery
 
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 
 // Re-export rendezvous message types

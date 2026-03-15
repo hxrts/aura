@@ -23,6 +23,18 @@ testing across all layers.
 - Mock effects behave consistently with production ones.
 - Mock handlers MAY be stateful (using `Arc<Mutex<>>`) for controllable testing.
 
+## Ownership Model
+
+- `aura-testkit` may use test-only `ActorOwned` mock state for deterministic
+  control.
+- It may also model `MoveOwned` transfer and capability behavior so tests can
+  exercise the production ownership contract faithfully.
+- Test helpers must not become a backdoor for parity-critical production
+  semantic authorship.
+- Capability-aware shortcuts should be narrow, explicit, and documented.
+- `Observed` diagnostics and fixtures remain downstream of the modeled semantic
+  truth.
+
 ### Detailed Specifications
 
 ### InvariantMockContractFidelity
@@ -46,4 +58,3 @@ Contract alignment:
 - Foundation layers should create internal test utilities instead.
 - Production handlers live in aura-effects (stateless).
 - Simulation runtime lives in aura-simulator.
-

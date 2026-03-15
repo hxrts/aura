@@ -18,7 +18,7 @@ use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use aura_terminal::demo::{DemoHints, DemoSimulator};

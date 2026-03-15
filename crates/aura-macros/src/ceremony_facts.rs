@@ -25,7 +25,7 @@ pub fn ceremony_facts_impl(
 
         impl #name {
             /// Extract the ceremony_id for ceremony-scoped facts.
-            pub fn ceremony_id(&self) -> Option<&aura_core::identifiers::CeremonyId> {
+            pub fn ceremony_id(&self) -> Option<&aura_core::types::identifiers::CeremonyId> {
                 match self {
                     Self::CeremonyInitiated { ceremony_id, .. }
                     | Self::CeremonyAcceptanceReceived { ceremony_id, .. }

@@ -26,7 +26,7 @@ use aura_app::views::{
 use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::{DomainFact, ProtocolRelationalFact};
 use aura_protocol::amp::{
@@ -92,6 +92,26 @@ impl InvitationsSignalView {
             DomainInvitationType::DeviceEnrollment { .. } => InvitationType::Home,
         }
     }
+
+    fn map_channel_metadata(
+        inv_type: &DomainInvitationType,
+    ) -> (Option<ChannelId>, Option<String>) {
+        match inv_type {
+            DomainInvitationType::Channel {
+                home_id,
+                nickname_suggestion,
+                ..
+            } => (
+                Some(*home_id),
+                Some(
+                    nickname_suggestion
+                        .clone()
+                        .unwrap_or_else(|| home_id.to_string()),
+                ),
+            ),
+            _ => (None, None),
+        }
+    }
 }
 
 impl ReactiveView for InvitationsSignalView {
@@ -139,6 +159,7 @@ impl ReactiveView for InvitationsSignalView {
                         } else {
                             InvitationDirection::Received
                         };
+                        let (home_id, home_name) = Self::map_channel_metadata(&invitation_type);
 
                         let invitation = Invitation {
                             id: invitation_id.to_string(),
@@ -153,8 +174,8 @@ impl ReactiveView for InvitationsSignalView {
                             created_at: sent_at.ts_ms,
                             expires_at: expires_at.map(|t| t.ts_ms),
                             message,
-                            home_id: None,
-                            home_name: None,
+                            home_id,
+                            home_name,
                         };
 
                         state.add_invitation(invitation);
@@ -1412,8 +1433,8 @@ mod tests {
     use super::*;
     use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL};
     use aura_core::effects::reactive::ReactiveEffects;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
     use aura_social::moderation::facts::{
         HomeGrantModeratorFact, HomePinFact, HomeRevokeModeratorFact, HomeUnpinFact,
@@ -1478,6 +1499,20 @@ mod tests {
         let selected = ChatSignalView::select_moderation_home(&homes, context_id, channel_home_id)
             .expect("channel-authoritative home should be selected");
         assert_eq!(selected.id, channel_home_id);
+    }
+
+    #[test]
+    fn invitation_signal_view_preserves_channel_metadata() {
+        let channel_id = ChannelId::from_bytes([41u8; 32]);
+        let (home_id, home_name) =
+            InvitationsSignalView::map_channel_metadata(&DomainInvitationType::Channel {
+                home_id: channel_id,
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+                bootstrap: None,
+            });
+
+        assert_eq!(home_id, Some(channel_id));
+        assert_eq!(home_name.as_deref(), Some("shared-parity-lab"));
     }
 
     #[test]

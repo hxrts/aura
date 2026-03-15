@@ -115,9 +115,22 @@ fn count_entries(path: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
     use crate::config::{InstanceConfig, InstanceMode, RunSection};
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "aura-harness-resource-guard-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|error| panic!("create resource-guard temp dir failed: {error}"));
+        root
+    }
 
     #[test]
     fn resource_guard_captures_samples_and_violation_messages() {
@@ -150,7 +163,7 @@ mod tests {
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
-                data_dir: PathBuf::from("/tmp/resource-guard"),
+                data_dir: unique_test_dir("alice"),
                 device_id: None,
                 bind_address: "127.0.0.1:49002".to_string(),
                 demo_mode: false,

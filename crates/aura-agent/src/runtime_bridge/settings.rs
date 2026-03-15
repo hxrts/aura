@@ -4,7 +4,7 @@ use aura_app::ui::workflows::authority::{
 };
 use aura_app::IntentError;
 use aura_core::effects::{PhysicalTimeEffects, StorageCoreEffects};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];

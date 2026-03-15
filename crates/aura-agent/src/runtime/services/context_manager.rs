@@ -5,7 +5,7 @@
 
 use super::state::with_state_mut_validated;
 use crate::core::AgentConfig;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

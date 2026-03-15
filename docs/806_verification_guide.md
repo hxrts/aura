@@ -338,11 +338,11 @@ This verifies that injected faults produce monitor-visible invariant violations 
 
 ### 4) `telltale-lean-bridge` integration status
 
-As of March 5, 2026, Aura includes `telltale-lean-bridge` as a workspace dependency and exposes it through `aura-quint`.
+As of March 5, 2026, Aura includes `telltale-lean-bridge` as a workspace dependency and integrates it through `aura-quint`.
 
 This adds direct access to upstream Lean runner and equivalence utilities from the Telltale project. It provides explicit schema and version linkage with upstream bridge contracts for cross-tool consistency. It also creates a cleaner path for future migration of local bridge helpers to upstream bridge APIs.
 
-The `aura-quint` crate re-exports the upstream crate as `upstream_telltale_lean_bridge`. Call `aura_quint::upstream_telltale_lean_bridge_schema_version()` to get the upstream schema version. CI lanes remain `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`.
+Call `aura_quint::upstream_telltale_lean_bridge_schema_version()` to get the upstream bridge schema version. CI lanes remain `just ci-lean-quint-bridge` and `just ci-simulator-telltale-parity`.
 
 ### 5) `aura-testkit` Lean verification API migration (March 5, 2026)
 

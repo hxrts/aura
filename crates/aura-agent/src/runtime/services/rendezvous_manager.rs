@@ -8,8 +8,8 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
-use super::runtime_tasks::TaskGroup;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +20,7 @@ use aura_core::effects::secure::{
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::AuraError;
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LocalInterfaces, RendezvousConfig, RendezvousDescriptor,
@@ -1551,7 +1551,7 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::services::RuntimeTaskRegistry;
+    use crate::runtime::TaskSupervisor;
     use async_trait::async_trait;
     use aura_core::effects::noise::{
         HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
@@ -1600,7 +1600,7 @@ mod tests {
     }
 
     fn test_service_context() -> RuntimeServiceContext {
-        RuntimeServiceContext::new(Arc::new(RuntimeTaskRegistry::new()), test_time())
+        RuntimeServiceContext::new(Arc::new(TaskSupervisor::new()), test_time())
     }
 
     // Mock for tests

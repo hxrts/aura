@@ -4,8 +4,8 @@
 //! Target: <180 lines (concise implementation).
 
 use aura_core::{
-    identifiers::{AuthorityId, ContextId},
     time::{PhysicalTime, TimeStamp},
+    types::identifiers::{AuthorityId, ContextId},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

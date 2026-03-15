@@ -6,7 +6,7 @@
 #![allow(clippy::expect_used, clippy::clone_on_copy)]
 
 use aura_anti_entropy::{AntiEntropyConfig, BloomDigest, SyncError};
-use aura_core::{identifiers::DeviceId, Hash32, ProtocolErrorCode};
+use aura_core::{types::identifiers::DeviceId, Hash32, ProtocolErrorCode};
 use std::collections::BTreeSet;
 
 // ============================================================================

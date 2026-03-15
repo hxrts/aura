@@ -21,6 +21,18 @@ Delegates to OS services for crypto, storage, networking, and time.
 - Handlers must be context-free (no assumptions about caller context).
 - No dependencies on domain crates or aura-protocol.
 
+## Ownership Model
+
+- `aura-effects` is primarily a stateless adapter layer, not an `ActorOwned`
+  semantic owner.
+- It should not grow long-lived mutable async ownership beyond narrow low-level
+  adapter mechanics.
+- `MoveOwned` authority transfer is not defined here; higher layers own those
+  contracts.
+- Capability-gated semantic mutation and publication remain upstream.
+- `Observed` and runtime layers consume handler behavior; handlers must not
+  silently redefine semantic ownership.
+
 ### Detailed Specifications
 
 ### InvariantStatelessHandlerBoundary
@@ -44,4 +56,3 @@ Contract alignment:
 - Stateful caches belong in Layer 6 services.
 - Multi-party coordination belongs in aura-protocol.
 - Application-specific handlers belong in domain crates.
-

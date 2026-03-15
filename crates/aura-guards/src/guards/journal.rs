@@ -729,7 +729,7 @@ impl Default for JournalCouplerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::types::identifiers::DeviceId;
     use aura_macros::aura_test;
     use aura_mpst::journal::JournalAnnotation;
     use aura_testkit::*;

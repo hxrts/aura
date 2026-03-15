@@ -31,7 +31,7 @@
 //! let peers = adapter.discover_context_peers(context_id, 1000);
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::facts::TransportHint;
 use aura_rendezvous::service::RendezvousService;
 use std::collections::HashMap;

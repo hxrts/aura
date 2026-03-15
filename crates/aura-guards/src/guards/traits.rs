@@ -5,7 +5,7 @@
 //! surface area to authority/metadata access.
 
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 /// Minimal context provider for guards (authority + metadata).
 pub trait GuardContextProvider {

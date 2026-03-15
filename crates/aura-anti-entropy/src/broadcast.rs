@@ -7,7 +7,7 @@ use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
-use aura_core::identifiers::{ContextId, DeviceId};
+use aura_core::types::identifiers::{ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
@@ -360,7 +360,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode::new_device(
                         LeafId(1),
-                        aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
+                        aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]),
                         vec![1, 2, 3],
                     )
                     .expect("valid leaf"),

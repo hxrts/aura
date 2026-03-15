@@ -18,6 +18,19 @@ orchestration glue, not single-party effect implementations.
 - Guard chain is enforced on every send.
 - Journal facts and budgets are coupled atomically before transport.
 
+## Ownership Model
+
+- `aura-protocol` uses `MoveOwned` for delegation, session transfer, and other
+  exclusive orchestration boundaries.
+- It should use `ActorOwned` state only for justified long-lived coordinators,
+  not as the default for protocol ownership.
+- Capability-gated publication and mutation must remain explicit in orchestration
+  paths.
+- Async orchestration flows must reach typed terminal outcomes rather than
+  relying on implicit success or silent timeout.
+- `Observed` layers consume protocol outputs downstream and must not co-author
+  protocol truth.
+
 ### Detailed Specifications
 
 ### InvariantProtocolGuardMediation
@@ -43,4 +56,3 @@ Contract alignment:
 
 ## Core + Orchestrator Rule
 - Any new protocol logic should be split into pure core and effectful orchestrator modules.
-

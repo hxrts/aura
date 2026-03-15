@@ -37,7 +37,7 @@ impl LifecycleManager {
         authority_context: crate::core::AuthorityContext,
     ) -> Result<(), crate::AgentError> {
         // Clean up any stale sessions from previous runs
-        let account_id = aura_core::identifiers::AccountId::new_from_entropy(
+        let account_id = aura_core::types::identifiers::AccountId::new_from_entropy(
             aura_core::hash::hash(&authority_context.authority_id().to_bytes()),
         );
 

@@ -6,7 +6,7 @@
 //!
 //! Note: DKD protocol messages removed - will be implemented in dedicated aura-dkd feature crate
 
-use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::types::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// Unified cryptographic protocol message envelope

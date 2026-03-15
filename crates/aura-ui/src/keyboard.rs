@@ -9,7 +9,7 @@ use crate::model::{
     CapabilityConfigModalState, CapabilityTier, ChannelRow, CreateChannelDetailsField,
     CreateChannelModalState, CreateChannelWizardStep, CreateInvitationModalState, ModalState,
     SelectDeviceModalState, SelectedHome, SettingsSection, TextModalState,
-    ThresholdWizardModalState, ThresholdWizardStep, ToastState, UiModel, UiScreen,
+    ThresholdWizardModalState, ThresholdWizardStep, ToastState, UiModel, ScreenId,
 };
 use aura_app::ui::types::parse_chat_command;
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
@@ -97,23 +97,23 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
             return;
         }
         '1' => {
-            model.set_screen(UiScreen::Neighborhood);
+            model.set_screen(ScreenId::Neighborhood);
             return;
         }
         '2' => {
-            model.set_screen(UiScreen::Chat);
+            model.set_screen(ScreenId::Chat);
             return;
         }
         '3' => {
-            model.set_screen(UiScreen::Contacts);
+            model.set_screen(ScreenId::Contacts);
             return;
         }
         '4' => {
-            model.set_screen(UiScreen::Notifications);
+            model.set_screen(ScreenId::Notifications);
             return;
         }
         '5' => {
-            model.set_screen(UiScreen::Settings);
+            model.set_screen(ScreenId::Settings);
             return;
         }
         'j' => {
@@ -143,12 +143,12 @@ fn apply_char(model: &mut UiModel, ch: char, clipboard: &dyn ClipboardPort) {
     }
 
     match model.screen {
-        UiScreen::Onboarding => {}
-        UiScreen::Chat => handle_chat_char(model, ch),
-        UiScreen::Contacts => handle_contacts_char(model, ch),
-        UiScreen::Neighborhood => handle_neighborhood_char(model, ch),
-        UiScreen::Settings => handle_settings_char(model, ch),
-        UiScreen::Notifications => {}
+        ScreenId::Onboarding => {}
+        ScreenId::Chat => handle_chat_char(model, ch),
+        ScreenId::Contacts => handle_contacts_char(model, ch),
+        ScreenId::Neighborhood => handle_neighborhood_char(model, ch),
+        ScreenId::Settings => handle_settings_char(model, ch),
+        ScreenId::Notifications => {}
     }
 }
 
@@ -214,7 +214,7 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
         }
         'c' => {
             if let Some(contact) = model.selected_contact_name().map(str::to_string) {
-                model.set_screen(UiScreen::Chat);
+                model.set_screen(ScreenId::Chat);
                 model.select_channel_by_name(&format!("DM: {contact}"));
             }
         }
@@ -369,18 +369,18 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
     }
 
     match model.screen {
-        UiScreen::Onboarding => {}
-        UiScreen::Neighborhood => {
+        ScreenId::Onboarding => {}
+        ScreenId::Neighborhood => {
             if matches!(model.neighborhood_mode, crate::model::NeighborhoodMode::Map) {
                 model.neighborhood_mode = crate::model::NeighborhoodMode::Detail;
             } else {
                 model.neighborhood_mode = crate::model::NeighborhoodMode::Map;
             }
         }
-        UiScreen::Contacts => {
+        ScreenId::Contacts => {
             model.contact_details = true;
         }
-        UiScreen::Settings => match model.settings_section {
+        ScreenId::Settings => match model.settings_section {
             SettingsSection::Profile => {
                 model.modal_hint = "Edit Nickname".to_string();
                 model.active_modal = Some(ActiveModal::EditNickname(TextModalState {
@@ -409,7 +409,7 @@ fn handle_enter(model: &mut UiModel, clipboard: &dyn ClipboardPort) {
             }
             SettingsSection::Appearance | SettingsSection::Info => {}
         },
-        UiScreen::Chat | UiScreen::Notifications => {}
+        ScreenId::Chat | ScreenId::Notifications => {}
     }
 }
 
@@ -522,7 +522,7 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                 Some(ActiveModal::EditNickname(state)) => state.value.trim().to_string(),
                 _ => String::new(),
             };
-            if model.screen == UiScreen::Settings {
+            if model.screen == ScreenId::Settings {
                 if !value.is_empty() {
                     model.profile_nickname = value;
                 }
@@ -989,11 +989,11 @@ fn handle_escape(model: &mut UiModel) {
         dismiss_modal(model);
         return;
     }
-    if model.screen == UiScreen::Contacts && model.contact_details {
+    if model.screen == ScreenId::Contacts && model.contact_details {
         model.contact_details = false;
         return;
     }
-    if model.screen == UiScreen::Neighborhood
+    if model.screen == ScreenId::Neighborhood
         && matches!(
             model.neighborhood_mode,
             crate::model::NeighborhoodMode::Detail
@@ -1586,32 +1586,32 @@ fn toggle_mfa_selection(model: &mut UiModel) {
 
 fn cycle_screen(model: &mut UiModel) {
     let next = match model.screen {
-        UiScreen::Onboarding => UiScreen::Neighborhood,
-        UiScreen::Neighborhood => UiScreen::Chat,
-        UiScreen::Chat => UiScreen::Contacts,
-        UiScreen::Contacts => UiScreen::Notifications,
-        UiScreen::Notifications => UiScreen::Settings,
-        UiScreen::Settings => UiScreen::Neighborhood,
+        ScreenId::Onboarding => ScreenId::Neighborhood,
+        ScreenId::Neighborhood => ScreenId::Chat,
+        ScreenId::Chat => ScreenId::Contacts,
+        ScreenId::Contacts => ScreenId::Notifications,
+        ScreenId::Notifications => ScreenId::Settings,
+        ScreenId::Settings => ScreenId::Neighborhood,
     };
     model.set_screen(next);
 }
 
 fn cycle_screen_prev(model: &mut UiModel) {
     let next = match model.screen {
-        UiScreen::Onboarding => UiScreen::Settings,
-        UiScreen::Neighborhood => UiScreen::Settings,
-        UiScreen::Chat => UiScreen::Neighborhood,
-        UiScreen::Contacts => UiScreen::Chat,
-        UiScreen::Notifications => UiScreen::Contacts,
-        UiScreen::Settings => UiScreen::Notifications,
+        ScreenId::Onboarding => ScreenId::Settings,
+        ScreenId::Neighborhood => ScreenId::Settings,
+        ScreenId::Chat => ScreenId::Neighborhood,
+        ScreenId::Contacts => ScreenId::Chat,
+        ScreenId::Notifications => ScreenId::Contacts,
+        ScreenId::Settings => ScreenId::Notifications,
     };
     model.set_screen(next);
 }
 
 fn move_selection(model: &mut UiModel, delta: i32) {
     match model.screen {
-        UiScreen::Onboarding => {}
-        UiScreen::Settings => {
+        ScreenId::Onboarding => {}
+        ScreenId::Settings => {
             let current = model.settings_section.index() as i32;
             let mut next = current + delta;
             if next < 0 {
@@ -1622,7 +1622,7 @@ fn move_selection(model: &mut UiModel, delta: i32) {
             }
             model.settings_section = SettingsSection::from_index(next as usize);
         }
-        UiScreen::Contacts => {
+        ScreenId::Contacts => {
             if model.contacts.is_empty() {
                 return;
             }
@@ -1636,10 +1636,10 @@ fn move_selection(model: &mut UiModel, delta: i32) {
             }
             model.set_selected_contact_index(next as usize);
         }
-        UiScreen::Chat => {
+        ScreenId::Chat => {
             model.move_channel_selection(delta);
         }
-        UiScreen::Notifications => {
+        ScreenId::Notifications => {
             if model.notifications.is_empty() {
                 model.selected_notification_id = None;
                 return;
@@ -1654,12 +1654,12 @@ fn move_selection(model: &mut UiModel, delta: i32) {
             }
             model.set_selected_notification_index(next as usize, model.notifications.len());
         }
-        UiScreen::Neighborhood => {}
+        ScreenId::Neighborhood => {}
     }
 }
 
 fn handle_horizontal(model: &mut UiModel, _delta: i32) {
-    if model.screen == UiScreen::Contacts {
+    if model.screen == ScreenId::Contacts {
         model.contact_details = !model.contact_details;
     }
 }
@@ -1684,7 +1684,7 @@ mod tests {
     use crate::model::{
         ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CreateChannelModalState,
         CreateChannelWizardStep, CreateInvitationModalState, ModalState, SettingsSection,
-        TextModalState, ThresholdWizardModalState, ThresholdWizardStep, UiModel, UiScreen,
+        TextModalState, ThresholdWizardModalState, ThresholdWizardStep, UiModel, ScreenId,
     };
 
     fn modal_state(model: &UiModel) -> Option<ModalState> {
@@ -1724,7 +1724,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Contacts);
+        model.set_screen(ScreenId::Contacts);
         apply_text_keys(&mut model, "n", &clipboard);
 
         assert!(matches!(
@@ -1775,7 +1775,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Neighborhood);
+        model.set_screen(ScreenId::Neighborhood);
         apply_text_keys(&mut model, "n", &clipboard);
 
         assert!(matches!(modal_state(&model), Some(ModalState::CreateHome)));
@@ -1786,7 +1786,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
 
         apply_text_keys(&mut model, "n", &clipboard);
         assert!(matches!(
@@ -1803,7 +1803,7 @@ mod tests {
     fn create_channel_modal_uses_multistep_wizard_flow() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.ensure_contact("Bob");
         model.ensure_contact("Carol");
 
@@ -1852,7 +1852,7 @@ mod tests {
     fn create_channel_enter_from_name_advances_to_members() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
 
         apply_text_keys(&mut model, "n", &clipboard);
         apply_text_keys(&mut model, "demo-trio-room", &clipboard);
@@ -1870,7 +1870,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.input_mode = true;
         model.input_buffer = "hello".to_string();
 
@@ -1886,7 +1886,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.input_mode = true;
         model.input_buffer = "/nhlink home".to_string();
 
@@ -1905,7 +1905,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.input_mode = true;
         model.input_buffer = "/pin msg-1".to_string();
 
@@ -1923,7 +1923,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.input_mode = true;
         model.input_buffer = "/mode slash-lab -m".to_string();
 
@@ -1941,7 +1941,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.select_channel_by_name("demo-trio-room");
         model.input_mode = true;
         model.input_buffer = "demo-e2e-trio-token".to_string();
@@ -1957,7 +1957,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.input_mode = true;
         model.input_buffer = "/unknowncmd".to_string();
 
@@ -1975,7 +1975,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
 
         model.settings_section = SettingsSection::Profile;
         apply_text_keys(&mut model, "e", &clipboard);
@@ -2039,7 +2039,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "r", &clipboard);
@@ -2068,7 +2068,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
 
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
         model.has_secondary_device = true;
         model.set_secondary_device_name(Some("Laptop".to_string()));
@@ -2096,7 +2096,7 @@ mod tests {
     fn guardian_setup_wizard_advances_through_steps() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::GuardianThreshold;
         model.ensure_contact("Alice");
         model.ensure_contact("Bob");
@@ -2129,7 +2129,7 @@ mod tests {
     fn mfa_setup_wizard_advances_through_steps() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Authority;
         model.has_secondary_device = true;
 
@@ -2155,7 +2155,7 @@ mod tests {
     fn settings_add_device_wizard_requires_name_then_generates_code() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "a", &clipboard);
@@ -2194,7 +2194,7 @@ mod tests {
     fn settings_add_device_wizard_can_copy_generated_code() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
 
         apply_text_keys(&mut model, "aPhone\n", &clipboard);
@@ -2212,7 +2212,7 @@ mod tests {
     fn request_recovery_requires_guardians_like_tui() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::RequestRecovery;
 
         apply_named_key(&mut model, "enter", 1, &clipboard);
@@ -2233,7 +2233,7 @@ mod tests {
     fn request_recovery_starts_when_guardians_available() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::RequestRecovery;
         model.ensure_contact("Alice");
         model.ensure_contact("Bob");
@@ -2251,7 +2251,7 @@ mod tests {
     fn create_channel_escape_steps_back_like_tui() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Chat);
+        model.set_screen(ScreenId::Chat);
         model.ensure_contact("Alice");
 
         apply_text_keys(&mut model, "nroom\n", &clipboard);
@@ -2277,7 +2277,7 @@ mod tests {
     fn guardian_setup_escape_from_threshold_returns_selection() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::GuardianThreshold;
         model.ensure_contact("Alice");
         model.ensure_contact("Bob");
@@ -2294,7 +2294,7 @@ mod tests {
     fn mfa_setup_escape_from_threshold_returns_selection() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Authority;
         model.has_secondary_device = true;
 

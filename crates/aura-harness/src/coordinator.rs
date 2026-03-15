@@ -1285,12 +1285,26 @@ impl Drop for HarnessCoordinator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::{
         clear_directory_contents, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
     use std::net::TcpListener;
     use std::path::PathBuf;
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "aura-harness-coordinator-{label}-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root)
+            .unwrap_or_else(|error| panic!("create coordinator temp dir failed: {error}"));
+        root
+    }
 
     #[test]
     fn normalize_key_stream_rewrites_newline_to_carriage_return() {
@@ -1435,7 +1449,7 @@ mod tests {
                 InstanceConfig {
                     id: "alpha".to_string(),
                     mode: InstanceMode::Ssh,
-                    data_dir: PathBuf::from("/tmp/aura-harness-alpha"),
+                    data_dir: unique_test_dir("alpha"),
                     device_id: None,
                     bind_address: "127.0.0.1:45001".to_string(),
                     demo_mode: false,
@@ -1447,7 +1461,7 @@ mod tests {
                     ssh_user: Some("dev".to_string()),
                     ssh_port: Some(22),
                     ssh_strict_host_key_checking: true,
-                    ssh_known_hosts_file: Some(PathBuf::from("/tmp/known_hosts")),
+                    ssh_known_hosts_file: Some(unique_test_dir("known-hosts").join("known_hosts")),
                     ssh_fingerprint: Some("SHA256:test".to_string()),
                     ssh_require_fingerprint: true,
                     ssh_dry_run: true,
@@ -1458,7 +1472,7 @@ mod tests {
                 InstanceConfig {
                     id: "beta".to_string(),
                     mode: InstanceMode::Ssh,
-                    data_dir: PathBuf::from("/tmp/aura-harness-beta"),
+                    data_dir: unique_test_dir("beta"),
                     device_id: None,
                     bind_address: "127.0.0.1:45002".to_string(),
                     demo_mode: false,
@@ -1470,7 +1484,7 @@ mod tests {
                     ssh_user: Some("dev".to_string()),
                     ssh_port: Some(22),
                     ssh_strict_host_key_checking: true,
-                    ssh_known_hosts_file: Some(PathBuf::from("/tmp/known_hosts")),
+                    ssh_known_hosts_file: Some(unique_test_dir("known-hosts").join("known_hosts")),
                     ssh_fingerprint: Some("SHA256:test".to_string()),
                     ssh_require_fingerprint: true,
                     ssh_dry_run: true,
@@ -1515,7 +1529,7 @@ mod tests {
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
                 mode: InstanceMode::Local,
-                data_dir: PathBuf::from("/tmp/aura-harness-busy-port"),
+                data_dir: unique_test_dir("busy-port"),
                 device_id: None,
                 bind_address,
                 demo_mode: false,

@@ -27,6 +27,8 @@ Semantic scenarios must not declare `execution_mode`. Compatibility-only executo
 
 Compatibility-only fixtures are renderer-mechanic coverage only. They must not encode product semantic intents such as account creation, contact acceptance, channel joins, or chat sends as compatibility actions.
 
+The remaining compatibility fixture surface is intentionally small. It is for frontend-conformance mechanics such as launch, send, wait, parity, clipboard, and fault-delay coverage. It is not a general-purpose second scenario language.
+
 Shared scenario governance depends on `scenarios/harness_inventory.toml`. The inventory classifies scenarios as shared, TUI conformance, or web conformance. Governance checks use that classification directly to enforce lane policy.
 
 ## 4. Backend Model

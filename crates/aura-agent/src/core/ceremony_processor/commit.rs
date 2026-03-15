@@ -60,7 +60,7 @@ impl<'a> CommitHandler<'a> {
         let ceremony_id = envelope
             .metadata
             .get("ceremony-id")
-            .map(|id| aura_core::identifiers::CeremonyId::new(id.clone()));
+            .map(|id| aura_core::types::identifiers::CeremonyId::new(id.clone()));
 
         let new_epoch: u64 = match new_epoch_str.parse() {
             Ok(v) => v,

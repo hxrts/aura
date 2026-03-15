@@ -149,8 +149,7 @@ pub mod platform;
 // =============================================================================
 
 pub use crate::core::{
-    AppConfig, AppCore, Intent, IntentChannelType, IntentError, InvitationType, Screen,
-    StateSnapshot,
+    AppConfig, AppCore, Intent, IntentError, InvitationType, Screen, StateSnapshot,
 };
 
 // Runtime bridge (for dependency inversion)
@@ -209,8 +208,8 @@ pub use crate::signal_defs::{
 // - signal_defs::SyncStatus (signal value type - different from runtime_bridge::SyncStatus)
 
 // Re-export commonly used types from aura-core
-pub use aura_core::identifiers::{AuthorityId, ContextId};
 pub use aura_core::time::TimeStamp;
+pub use aura_core::types::identifiers::{AuthorityId, ContextId};
 
 // Note: Agent types (AuraAgent, AgentBuilder, reactive types, services) are NOT
 // re-exported here. With the dependency inversion:

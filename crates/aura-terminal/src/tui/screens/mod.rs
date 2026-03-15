@@ -19,11 +19,10 @@ mod settings;
 
 // Re-export callback types from centralized callbacks module
 pub use crate::tui::callbacks::{
-    AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateChannelCallback,
-    ExportInvitationCallback, GoHomeCallback, GuardianSelectCallback, InvitationCallback,
-    RecoveryCallback, RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetTopicCallback,
-    StartChatCallback, UpdateNicknameCallback, UpdateNicknameSuggestionCallback,
-    UpdateThresholdCallback,
+    AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, ExportInvitationCallback,
+    GoHomeCallback, GuardianSelectCallback, InvitationCallback, RecoveryCallback,
+    RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetTopicCallback, StartChatCallback,
+    UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 
 // Screen-specific callback types (use specialized types not in callbacks module)

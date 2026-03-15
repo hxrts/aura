@@ -21,9 +21,9 @@ use aura_core::{
         FlowBudgetEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
         StorageEffects,
     },
-    identifiers::{AuthorityId, ContextId},
     journal::Journal,
     time::TimeStamp,
+    types::identifiers::{AuthorityId, ContextId},
     AuraError, AuraResult as Result, Cap, FlowCost, Receipt,
 };
 

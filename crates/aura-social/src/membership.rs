@@ -4,7 +4,7 @@
 
 use crate::facts::{HomeId, NeighborhoodId};
 use crate::{error::SocialError, home::Home, Neighborhood};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 
 /// Validates membership operations for blocks and neighborhoods.
 pub struct MembershipValidator;

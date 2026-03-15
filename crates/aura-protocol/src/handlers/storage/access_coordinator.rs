@@ -2,7 +2,7 @@
 //!
 //! Moved from aura-storage to provide Layer 4 coordination for storage access control.
 
-use aura_core::{identifiers::DeviceId, AccountId, ChunkId, ContentId};
+use aura_core::{types::identifiers::DeviceId, AccountId, ChunkId, ContentId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

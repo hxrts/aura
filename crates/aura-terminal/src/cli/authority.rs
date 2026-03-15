@@ -1,6 +1,6 @@
 //! Authority-level CLI commands.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use bpaf::{construct, long, pure, Parser};
 
 fn authority_id_arg(help: &'static str) -> impl Parser<AuthorityId> {

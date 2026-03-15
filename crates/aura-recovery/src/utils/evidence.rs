@@ -1,7 +1,7 @@
 //! Evidence creation utilities for recovery operations
 
 use crate::types::{RecoveryEvidence, RecoveryShare};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 
 /// Builder for creating recovery evidence.
 pub struct EvidenceBuilder;

@@ -35,7 +35,7 @@
 //! assert!(runtime.terminal().frame_contains("Chat"));
 //! ```
 
-use crate::tui::state_machine::{transition, TuiCommand, TuiState};
+use crate::tui::state::{transition, TuiCommand, TuiState};
 use aura_core::effects::terminal::{TerminalEffects, TerminalError, TerminalEvent, TerminalFrame};
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ use std::sync::Arc;
 ///
 /// The runtime doesn't know about app-level commands (like SendMessage),
 /// so it delegates to this callback.
-pub type DispatchCallback = Arc<dyn Fn(&crate::tui::state_machine::DispatchCommand) + Send + Sync>;
+pub type DispatchCallback = Arc<dyn Fn(&crate::tui::state::DispatchCommand) + Send + Sync>;
 
 /// Runtime that drives the TUI state machine.
 ///
@@ -143,7 +143,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
                 // Add toast to queue
                 let toast_id = self.state.next_toast_id;
                 self.state.next_toast_id += 1;
-                let toast = crate::tui::state_machine::QueuedToast {
+                let toast = crate::tui::state::QueuedToast {
                     id: toast_id,
                     message,
                     level,

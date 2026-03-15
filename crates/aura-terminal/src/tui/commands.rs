@@ -2,30 +2,13 @@
 //!
 //! Command parser and dispatcher for IRC-style slash commands.
 //!
-//! This module re-exports portable types from `aura_app::ui::workflows::chat_commands`
-//! and adds TUI-specific aliases for backwards compatibility.
+//! This module re-exports the portable command types from `aura-app`.
 
-// Re-export portable types from aura-app
 pub use aura_app::ui::types::{
     all_command_help, command_help, commands_in_category, is_command, normalize_channel_name,
     parse_chat_command, parse_duration, ChatCommand, CommandCapability, CommandCategory,
     CommandError, CommandHelp,
 };
-
-/// Type alias for backwards compatibility
-pub type IrcCommand = ChatCommand;
-
-/// Type alias for backwards compatibility
-pub type ParseError = CommandError;
-
-/// Parse an input string into an IRC command (backwards compatibility alias)
-#[inline]
-pub fn parse_command(input: &str) -> Result<IrcCommand, ParseError> {
-    parse_chat_command(input)
-}
-
-// All types (IrcCommand, CommandCapability, ParseError, etc.) are now re-exported from aura-app.
-// Tests remain here to verify the TUI integration works correctly.
 
 #[cfg(test)]
 mod tests {
@@ -34,10 +17,10 @@ mod tests {
 
     #[test]
     fn test_parse_msg() {
-        let cmd = parse_command("/msg alice hello there").unwrap();
+        let cmd = parse_chat_command("/msg alice hello there").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Msg {
+            ChatCommand::Msg {
                 target: "alice".to_string(),
                 text: "hello there".to_string()
             }
@@ -46,10 +29,10 @@ mod tests {
 
     #[test]
     fn test_parse_msg_alias() {
-        let cmd = parse_command("/m bob hi").unwrap();
+        let cmd = parse_chat_command("/m bob hi").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Msg {
+            ChatCommand::Msg {
                 target: "bob".to_string(),
                 text: "hi".to_string()
             }
@@ -58,10 +41,10 @@ mod tests {
 
     #[test]
     fn test_parse_me() {
-        let cmd = parse_command("/me waves hello").unwrap();
+        let cmd = parse_chat_command("/me waves hello").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Me {
+            ChatCommand::Me {
                 action: "waves hello".to_string()
             }
         );
@@ -69,10 +52,10 @@ mod tests {
 
     #[test]
     fn test_parse_nick() {
-        let cmd = parse_command("/nick NewName").unwrap();
+        let cmd = parse_chat_command("/nick NewName").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Nick {
+            ChatCommand::Nick {
                 name: "NewName".to_string()
             }
         );
@@ -80,16 +63,16 @@ mod tests {
 
     #[test]
     fn test_parse_who() {
-        let cmd = parse_command("/who").unwrap();
-        assert_eq!(cmd, IrcCommand::Who);
+        let cmd = parse_chat_command("/who").unwrap();
+        assert_eq!(cmd, ChatCommand::Who);
     }
 
     #[test]
     fn test_parse_whois() {
-        let cmd = parse_command("/whois alice").unwrap();
+        let cmd = parse_chat_command("/whois alice").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Whois {
+            ChatCommand::Whois {
                 target: "alice".to_string()
             }
         );
@@ -97,20 +80,20 @@ mod tests {
 
     #[test]
     fn test_parse_leave_variants() {
-        assert_eq!(parse_command("/leave").unwrap(), IrcCommand::Leave);
-        assert_eq!(parse_command("/part").unwrap(), IrcCommand::Leave);
-        assert_eq!(parse_command("/quit").unwrap(), IrcCommand::Leave);
+        assert_eq!(parse_chat_command("/leave").unwrap(), ChatCommand::Leave);
+        assert_eq!(parse_chat_command("/part").unwrap(), ChatCommand::Leave);
+        assert_eq!(parse_chat_command("/quit").unwrap(), ChatCommand::Leave);
     }
 
     #[test]
     fn test_parse_help() {
-        let cmd = parse_command("/help").unwrap();
-        assert_eq!(cmd, IrcCommand::Help { command: None });
+        let cmd = parse_chat_command("/help").unwrap();
+        assert_eq!(cmd, ChatCommand::Help { command: None });
 
-        let cmd = parse_command("/help kick").unwrap();
+        let cmd = parse_chat_command("/help kick").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Help {
+            ChatCommand::Help {
                 command: Some("kick".to_string())
             }
         );
@@ -118,19 +101,19 @@ mod tests {
 
     #[test]
     fn test_parse_kick() {
-        let cmd = parse_command("/kick alice").unwrap();
+        let cmd = parse_chat_command("/kick alice").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Kick {
+            ChatCommand::Kick {
                 target: "alice".to_string(),
                 reason: None
             }
         );
 
-        let cmd = parse_command("/kick alice spamming").unwrap();
+        let cmd = parse_chat_command("/kick alice spamming").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Kick {
+            ChatCommand::Kick {
                 target: "alice".to_string(),
                 reason: Some("spamming".to_string())
             }
@@ -139,19 +122,19 @@ mod tests {
 
     #[test]
     fn test_parse_mute_with_duration() {
-        let cmd = parse_command("/mute alice 5m").unwrap();
+        let cmd = parse_chat_command("/mute alice 5m").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Mute {
+            ChatCommand::Mute {
                 target: "alice".to_string(),
                 duration: Some(Duration::from_secs(300))
             }
         );
 
-        let cmd = parse_command("/mute bob 1h").unwrap();
+        let cmd = parse_chat_command("/mute bob 1h").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Mute {
+            ChatCommand::Mute {
                 target: "bob".to_string(),
                 duration: Some(Duration::from_secs(3600))
             }
@@ -160,18 +143,18 @@ mod tests {
 
     #[test]
     fn test_parse_op_deop() {
-        let cmd = parse_command("/op alice").unwrap();
+        let cmd = parse_chat_command("/op alice").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Op {
+            ChatCommand::Op {
                 target: "alice".to_string()
             }
         );
 
-        let cmd = parse_command("/deop alice").unwrap();
+        let cmd = parse_chat_command("/deop alice").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Deop {
+            ChatCommand::Deop {
                 target: "alice".to_string()
             }
         );
@@ -179,10 +162,10 @@ mod tests {
 
     #[test]
     fn test_parse_mode() {
-        let cmd = parse_command("/mode #general +i").unwrap();
+        let cmd = parse_chat_command("/mode #general +i").unwrap();
         assert_eq!(
             cmd,
-            IrcCommand::Mode {
+            ChatCommand::Mode {
                 channel: "general".to_string(),
                 flags: "+i".to_string()
             }
@@ -191,27 +174,21 @@ mod tests {
 
     #[test]
     fn test_parse_errors() {
-        // Not a command
         assert!(matches!(
-            parse_command("hello"),
-            Err(ParseError::NotACommand)
+            parse_chat_command("hello"),
+            Err(CommandError::NotACommand)
         ));
-
-        // Unknown command
         assert!(matches!(
-            parse_command("/unknown"),
-            Err(ParseError::UnknownCommand(_))
+            parse_chat_command("/unknown"),
+            Err(CommandError::UnknownCommand(_))
         ));
-
-        // Missing argument
         assert!(matches!(
-            parse_command("/msg alice"),
-            Err(ParseError::MissingArgument { .. })
+            parse_chat_command("/msg alice"),
+            Err(CommandError::MissingArgument { .. })
         ));
-
         assert!(matches!(
-            parse_command("/kick"),
-            Err(ParseError::MissingArgument { .. })
+            parse_chat_command("/kick"),
+            Err(CommandError::MissingArgument { .. })
         ));
     }
 
@@ -225,24 +202,24 @@ mod tests {
 
     #[test]
     fn test_command_capability() {
-        let cmd = parse_command("/kick alice").unwrap();
+        let cmd = parse_chat_command("/kick alice").unwrap();
         assert_eq!(cmd.required_capability(), CommandCapability::ModerateKick);
 
-        let cmd = parse_command("/help").unwrap();
+        let cmd = parse_chat_command("/help").unwrap();
         assert_eq!(cmd.required_capability(), CommandCapability::None);
     }
 
     #[test]
     fn test_command_categories() {
-        let cmd = parse_command("/msg alice hi").unwrap();
+        let cmd = parse_chat_command("/msg alice hi").unwrap();
         assert!(cmd.is_user_command());
         assert!(!cmd.is_moderator_command());
 
-        let cmd = parse_command("/kick alice").unwrap();
+        let cmd = parse_chat_command("/kick alice").unwrap();
         assert!(cmd.is_moderator_command());
         assert!(!cmd.is_user_command());
 
-        let cmd = parse_command("/op alice").unwrap();
+        let cmd = parse_chat_command("/op alice").unwrap();
         assert!(cmd.is_admin_command());
     }
 
@@ -252,7 +229,6 @@ mod tests {
         assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
         assert_eq!(parse_duration("2h").unwrap(), Duration::from_secs(7200));
         assert_eq!(parse_duration("1d").unwrap(), Duration::from_secs(86400));
-        // Default to minutes
         assert_eq!(parse_duration("10").unwrap(), Duration::from_secs(600));
     }
 
@@ -260,8 +236,6 @@ mod tests {
     fn test_all_command_help() {
         let help = all_command_help();
         assert!(!help.is_empty());
-
-        // Check we have all categories
         assert!(help.iter().any(|h| h.category == CommandCategory::User));
         assert!(help
             .iter()

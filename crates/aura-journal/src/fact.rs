@@ -14,9 +14,9 @@ pub use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::{
     byzantine::ByzantineSafetyAttestation,
     domain::{Acknowledgment, Agreement, Consistency, OperationCategory, Propagation},
-    identifiers::{AuthorityId, ChannelId, ContextId, SessionId},
     semilattice::JoinSemilattice,
     time::{OrderTime, PhysicalTime, TimeStamp},
+    types::identifiers::{AuthorityId, ChannelId, ContextId, SessionId},
     Hash32, Result,
 };
 use serde::{Deserialize, Serialize};

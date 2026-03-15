@@ -132,8 +132,8 @@ impl AccountFilesHelper {
 
     pub async fn restore_recovered_account(
         &self,
-        recovered_authority_id: aura_core::identifiers::AuthorityId,
-        recovered_context_id: Option<aura_core::identifiers::ContextId>,
+        recovered_authority_id: aura_core::types::identifiers::AuthorityId,
+        recovered_context_id: Option<aura_core::types::identifiers::ContextId>,
     ) -> TerminalResult<()> {
         match crate::handlers::tui::restore_recovered_account(
             &self.base_path,
@@ -280,7 +280,10 @@ impl DispatchHelper {
         }
     }
 
-    pub async fn dispatch_with_response(&self, command: EffectCommand) -> TerminalResult<OpResponse> {
+    pub async fn dispatch_with_response(
+        &self,
+        command: EffectCommand,
+    ) -> TerminalResult<OpResponse> {
         if let Err(error) = self.check_authorization(&command) {
             self.operational.emit_error(error.clone()).await;
             return Err(error);

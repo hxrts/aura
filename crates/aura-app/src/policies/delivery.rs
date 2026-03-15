@@ -34,7 +34,7 @@
 //! ```
 
 use aura_core::domain::{Acknowledgment, Consistency};
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::Fact;
 use std::sync::Arc;
 

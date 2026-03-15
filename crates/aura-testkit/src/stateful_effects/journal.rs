@@ -12,7 +12,7 @@
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::{
-    effects::JournalEffects, epochs::Epoch, AuraError, AuthorityId, ContextId, FlowBudget,
+    effects::JournalEffects, types::epochs::Epoch, AuraError, AuthorityId, ContextId, FlowBudget,
     FlowCost, Journal as CoreJournal,
 };
 use std::collections::HashMap;

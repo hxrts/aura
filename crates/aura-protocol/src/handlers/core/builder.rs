@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 
 use super::{AuraHandlerConfig, AuraHandlerFactory, FactoryError, SimulationConfig};
 use crate::handlers::{EffectType, ExecutionMode};

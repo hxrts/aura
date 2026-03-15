@@ -1,7 +1,7 @@
 use super::AgentRuntimeBridge;
 use aura_app::IntentError;
-use aura_core::identifiers::CeremonyId;
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::Hash32;
 use aura_recovery::guardian_ceremony::CeremonyResponse;
 

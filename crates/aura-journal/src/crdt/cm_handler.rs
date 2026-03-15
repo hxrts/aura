@@ -227,7 +227,7 @@ where
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::types::identifiers::DeviceId;
     use std::collections::HashSet;
 
     // Test operation type

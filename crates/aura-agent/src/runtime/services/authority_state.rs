@@ -1,6 +1,6 @@
 //! Authority state tracking for runtime services.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
 
 /// Authority lifecycle status within the runtime.

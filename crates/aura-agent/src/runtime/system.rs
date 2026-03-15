@@ -7,12 +7,12 @@ use super::services::{
     AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
     LanTransportListenerService, LanTransportService, ReactivePipelineService, ReceiptManager,
     ReconfigurationManager, RendezvousManager, RuntimeMaintenanceService, RuntimeService,
-    RuntimeServiceContext, RuntimeTaskRegistry, ServiceError, ServiceErrorKind, ServiceHealth,
-    SocialManager, SyncServiceManager, ThresholdSigningService,
+    RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SocialManager,
+    SyncServiceManager, ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
-    RuntimeShutdownEvent,
+    RuntimeShutdownEvent, TaskGroup, TaskSupervisor,
 };
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::RendezvousHandler;
@@ -25,7 +25,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::TransportEnvelope;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
@@ -203,7 +203,7 @@ pub struct RuntimeSystem {
     reconfiguration_manager: ReconfigurationManager,
 
     /// Runtime task registry for background work
-    runtime_tasks: Arc<RuntimeTaskRegistry>,
+    runtime_tasks: Arc<TaskSupervisor>,
 
     /// Shared runtime activity gate used to reject new public work during shutdown.
     activity_gate: Arc<RuntimeActivityGate>,
@@ -252,7 +252,7 @@ impl RuntimeSystem {
             None,
             None,
         );
-        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
+        let runtime_tasks = Arc::new(TaskSupervisor::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -312,7 +312,7 @@ impl RuntimeSystem {
             None,
             None,
         );
-        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
+        let runtime_tasks = Arc::new(TaskSupervisor::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -372,7 +372,7 @@ impl RuntimeSystem {
             None,
             None,
         );
-        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
+        let runtime_tasks = Arc::new(TaskSupervisor::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -438,7 +438,7 @@ impl RuntimeSystem {
             rendezvous_handler.clone(),
             lan_transport.clone(),
         );
-        let runtime_tasks = Arc::new(RuntimeTaskRegistry::with_diagnostics(diagnostics.clone()));
+        let runtime_tasks = Arc::new(TaskSupervisor::with_diagnostics(diagnostics.clone()));
         Self {
             effect_executor,
             effect_system,
@@ -486,7 +486,7 @@ impl RuntimeSystem {
     }
 
     /// Get the runtime task registry.
-    pub fn tasks(&self) -> Arc<RuntimeTaskRegistry> {
+    pub fn tasks(&self) -> Arc<TaskSupervisor> {
         self.runtime_tasks.clone()
     }
 
@@ -907,7 +907,7 @@ fn sort_runtime_services_by_dependencies(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn spawn_lan_transport_listener_tasks(
-    parent_tasks: crate::runtime::services::runtime_tasks::TaskGroup,
+    parent_tasks: TaskGroup,
     effects: Arc<AuraEffectSystem>,
     lan_transport: Arc<LanTransportService>,
 ) {

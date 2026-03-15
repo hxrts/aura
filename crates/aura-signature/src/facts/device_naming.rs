@@ -28,9 +28,9 @@
 
 #![forbid(unsafe_code)]
 
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::FactError;
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use serde::{Deserialize, Serialize};
 
 aura_core::define_fact_type_id!(

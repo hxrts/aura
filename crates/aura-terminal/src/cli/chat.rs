@@ -3,7 +3,7 @@
 //! This module defines the command-line interface for chat functionality,
 //! including group creation, messaging, history retrieval, and member management.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use bpaf::{construct, long, pure, short, Parser};
 use uuid::Uuid;
 

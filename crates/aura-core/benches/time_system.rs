@@ -54,7 +54,7 @@ impl LogicalClockEffects for BenchmarkTimeSource {
         &self,
     ) -> Result<aura_core::time::LogicalTime, aura_core::effects::time::TimeError> {
         let mut clock = aura_core::time::VectorClock::new();
-        let device_id = aura_core::identifiers::DeviceId::from_bytes([1u8; 32]);
+        let device_id = aura_core::types::identifiers::DeviceId::from_bytes([1u8; 32]);
         clock.insert(device_id, self.current_time);
 
         Ok(aura_core::time::LogicalTime {
@@ -178,7 +178,7 @@ fn bench_timestamp_comparison(c: &mut Criterion) {
         let mut timestamps = Vec::new();
         for i in 0..1000 {
             let mut clock = aura_core::time::VectorClock::new();
-            let device_id = aura_core::identifiers::DeviceId::from_bytes([1u8; 32]);
+            let device_id = aura_core::types::identifiers::DeviceId::from_bytes([1u8; 32]);
             clock.insert(device_id, 1000000 + i);
 
             let logical_time = aura_core::time::LogicalTime {
@@ -250,7 +250,7 @@ fn bench_timestamp_sorting(c: &mut Criterion) {
                     TimeStamp::PhysicalClock(physical_time)
                 } else {
                     let mut clock = aura_core::time::VectorClock::new();
-                    let device_id = aura_core::identifiers::DeviceId::from_bytes([1u8; 32]);
+                    let device_id = aura_core::types::identifiers::DeviceId::from_bytes([1u8; 32]);
                     clock.insert(device_id, 1000000 + i as u64);
 
                     let logical_time = aura_core::time::LogicalTime {
@@ -330,7 +330,7 @@ fn bench_time_utilities(c: &mut Criterion) {
 
     let logical_timestamp = {
         let mut clock = aura_core::time::VectorClock::new();
-        let device_id = aura_core::identifiers::DeviceId::from_bytes([1u8; 32]);
+        let device_id = aura_core::types::identifiers::DeviceId::from_bytes([1u8; 32]);
         clock.insert(device_id, 1000000);
 
         TimeStamp::LogicalClock(aura_core::time::LogicalTime {
@@ -384,7 +384,7 @@ fn bench_memory_usage(c: &mut Criterion) {
             let timestamps: Vec<TimeStamp> = (0..1000)
                 .map(|i| {
                     let mut clock = aura_core::time::VectorClock::new();
-                    let device_id = aura_core::identifiers::DeviceId::from_bytes([1u8; 32]);
+                    let device_id = aura_core::types::identifiers::DeviceId::from_bytes([1u8; 32]);
                     clock.insert(device_id, 1000000 + i);
 
                     let logical_time = aura_core::time::LogicalTime {
@@ -406,14 +406,14 @@ fn bench_vectorclock_optimization(c: &mut Criterion) {
     let mut group = c.benchmark_group("vectorclock_optimization");
 
     // Single device case (optimized path)
-    let single_device = aura_core::identifiers::DeviceId::from_bytes([1u8; 32]);
+    let single_device = aura_core::types::identifiers::DeviceId::from_bytes([1u8; 32]);
 
     // Multiple devices case (fallback path)
     let devices: Vec<_> = (0..10)
         .map(|i| {
             let mut bytes = [0u8; 32];
             bytes[0] = i as u8;
-            aura_core::identifiers::DeviceId::from_bytes(bytes)
+            aura_core::types::identifiers::DeviceId::from_bytes(bytes)
         })
         .collect();
 

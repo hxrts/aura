@@ -27,9 +27,7 @@
 
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
-use aura_terminal::tui::state_machine::{
-    transition, DispatchCommand, QueuedModal, TuiCommand, TuiState,
-};
+use aura_terminal::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 
 /// Test wrapper for the TUI state machine.
 ///

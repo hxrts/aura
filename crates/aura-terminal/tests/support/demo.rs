@@ -84,12 +84,12 @@ pub fn carol_invite_code() -> String {
 }
 
 /// Get Alice's authority ID for the default demo seed.
-pub fn alice_authority_id() -> aura_core::identifiers::AuthorityId {
+pub fn alice_authority_id() -> aura_core::types::identifiers::AuthorityId {
     ids::authority_id(&format!("demo:{DEFAULT_DEMO_SEED}:{ALICE}:authority"))
 }
 
 /// Get Carol's authority ID for the default demo seed.
-pub fn carol_authority_id() -> aura_core::identifiers::AuthorityId {
+pub fn carol_authority_id() -> aura_core::types::identifiers::AuthorityId {
     let seed = DEFAULT_DEMO_SEED + 1;
     ids::authority_id(&format!("demo:{seed}:{CAROL}:authority"))
 }

@@ -14,7 +14,7 @@
 //! The two modules produce DIFFERENT IDs for the same seed due to different domains.
 
 use aura_core::hash;
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId, GuardianId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId, GuardianId};
 use uuid::Uuid;
 
 fn digest(seed: &str, domain: &str) -> [u8; 32] {

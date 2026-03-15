@@ -33,9 +33,9 @@ use crate::{effects::RecoveryEffects, RecoveryError, RecoveryResult};
 use aura_core::{
     effects::{JournalEffects, PhysicalTimeEffects},
     hash,
-    identifiers::AuthorityId,
     threshold::{policy_for, AgreementMode, CeremonyFlow},
     time::PhysicalTime,
+    types::AuthorityId,
     Hash32,
 };
 use aura_macros::choreography;

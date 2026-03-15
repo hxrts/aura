@@ -21,6 +21,17 @@ EffectCommands; no guard performs I/O directly.
 - Leakage accounting is recorded as journal facts (RelationalFact::LeakageEvent).
 - Guards are pure and deterministic given the snapshot.
 
+## Ownership Model
+
+- `aura-guards` is primarily `Pure` guard evaluation.
+- Any effectful execution around guards should remain outside the pure decision
+  core and should not turn guards into `ActorOwned` semantic owners.
+- Capability requirements are first-class input here and must not be bypassed
+  by higher-layer shortcuts.
+- Guard execution outcomes should participate in typed terminal failure rather
+  than hidden fail-open or silent blocking behavior.
+- `Observed` consumers may inspect decisions and receipts but not redefine them.
+
 ### Detailed Specifications
 
 ### InvariantSentMessagesHaveFacts

@@ -3,7 +3,7 @@
 //! Common types and utilities used across all session management modules.
 
 use aura_core::effects::SessionType;
-use aura_core::identifiers::{AccountId, DeviceId, SessionId};
+use aura_core::types::identifiers::{AccountId, DeviceId, SessionId};
 use aura_protocol::effects::ChoreographicRole;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -47,7 +47,7 @@ pub struct SessionStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
     /// Authority identifier (public identity)
-    pub authority_id: aura_core::identifiers::AuthorityId,
+    pub authority_id: aura_core::types::identifiers::AuthorityId,
     /// Account this authority belongs to
     pub account_id: Option<AccountId>,
     /// Authority display name
@@ -228,7 +228,7 @@ pub fn session_type_suffix(session_type: &SessionType) -> &'static str {
 }
 
 mod session_id_serde {
-    use aura_core::identifiers::SessionId;
+    use aura_core::types::identifiers::SessionId;
     use serde::{de::Error, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
@@ -253,7 +253,7 @@ mod session_id_serde {
 mod tests {
     use super::{ParticipantChange, ParticipantOperation, SessionHandle};
     use aura_core::effects::SessionType;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::types::identifiers::DeviceId;
     use aura_protocol::effects::{ChoreographicRole, RoleIndex};
     use std::collections::HashMap;
 

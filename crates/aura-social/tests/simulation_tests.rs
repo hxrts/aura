@@ -7,8 +7,8 @@
 //! - Deterministic replay verification
 
 use aura_core::effects::relay::RelayRelationship;
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::AuthorityId;
 use aura_social::facts::{
     HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact, NeighborhoodId,
     NeighborhoodMemberFact, OneHopLinkFact,
@@ -266,7 +266,7 @@ fn test_partial_home_partition() {
     // Build candidates
     let builder = RelayCandidateBuilder::from_topology(topology);
     let context = aura_core::effects::relay::RelayContext::new(
-        aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
         moderator,
         test_authority(99),
         3,
@@ -292,7 +292,7 @@ fn test_complete_home_partition() {
 
     let builder = RelayCandidateBuilder::from_topology(topology);
     let context = aura_core::effects::relay::RelayContext::new(
-        aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
         moderator,
         test_authority(99),
         3,
@@ -322,7 +322,7 @@ fn test_guardian_fallback_during_partition() {
 
     let builder = RelayCandidateBuilder::from_topology(topology);
     let context = aura_core::effects::relay::RelayContext::new(
-        aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
         moderator,
         test_authority(99),
         3,
@@ -443,7 +443,7 @@ fn test_deterministic_relay_candidate_order() {
 
     let builder = RelayCandidateBuilder::from_topology(topology.clone());
     let context = aura_core::effects::relay::RelayContext::new(
-        aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
         moderator,
         test_authority(99),
         3,
@@ -523,7 +523,7 @@ fn test_isolated_node_behavior() {
     // Building relay candidates should return empty
     let builder = RelayCandidateBuilder::from_topology(topology);
     let context = aura_core::effects::relay::RelayContext::new(
-        aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
         authority,
         test_authority(99),
         3,
@@ -592,7 +592,7 @@ fn test_many_peers_performance() {
     // Total known peers: 7 home peers + 5 guardians = 12
     let builder = RelayCandidateBuilder::from_topology(topology);
     let context = aura_core::effects::relay::RelayContext::new(
-        aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]),
+        aura_core::types::identifiers::ContextId::new_from_entropy([1u8; 32]),
         moderator,
         test_authority(99),
         3,

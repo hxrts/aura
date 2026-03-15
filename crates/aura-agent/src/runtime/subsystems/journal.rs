@@ -119,7 +119,10 @@ impl JournalSubsystem {
     }
 
     /// Load the journal into the shared runtime cache if needed, then return it.
-    pub async fn get_or_load_journal<F, Fut>(&self, load: F) -> Result<aura_core::Journal, aura_core::AuraError>
+    pub async fn get_or_load_journal<F, Fut>(
+        &self,
+        load: F,
+    ) -> Result<aura_core::Journal, aura_core::AuraError>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<aura_core::Journal, aura_core::AuraError>>,

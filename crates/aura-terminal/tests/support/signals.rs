@@ -29,7 +29,7 @@ use aura_app::views::{
 };
 use aura_app::{AppCore, AppError};
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_terminal::ids;
 
 /// Default timeout for signal waits.

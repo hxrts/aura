@@ -47,8 +47,8 @@
 
 use aura_core::{
     hash,
-    identifiers::{AuthorityId, ContextId},
     time::PhysicalTime,
+    types::{AuthorityId, ContextId},
     Hash32,
 };
 use aura_journal::{

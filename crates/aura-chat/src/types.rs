@@ -1,7 +1,7 @@
 //! Chat data types and structures
 
-use aura_core::identifiers::AuthorityId;
 use aura_core::time::TimeStamp;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

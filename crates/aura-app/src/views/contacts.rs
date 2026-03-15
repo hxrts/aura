@@ -1,6 +1,6 @@
 //! # Contacts View State
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

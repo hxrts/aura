@@ -1,6 +1,6 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
-use aura_core::scope::{AuthorizationOp, ResourceScope};
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
 use aura_core::AuthorityId;
 use aura_protocol::effects::{AuthorizationEffects, LeakageEffects};
 
@@ -46,14 +46,14 @@ impl LeakageEffects for AuraEffectSystem {
 
     async fn get_leakage_budget(
         &self,
-        context_id: aura_core::identifiers::ContextId,
+        context_id: aura_core::types::identifiers::ContextId,
     ) -> aura_core::Result<aura_core::effects::LeakageBudget> {
         self.leakage_handler.get_leakage_budget(context_id).await
     }
 
     async fn check_leakage_budget(
         &self,
-        context_id: aura_core::identifiers::ContextId,
+        context_id: aura_core::types::identifiers::ContextId,
         observer: aura_core::effects::ObserverClass,
         amount: u64,
     ) -> aura_core::Result<bool> {
@@ -64,7 +64,7 @@ impl LeakageEffects for AuraEffectSystem {
 
     async fn get_leakage_history(
         &self,
-        context_id: aura_core::identifiers::ContextId,
+        context_id: aura_core::types::identifiers::ContextId,
         since_timestamp: Option<&aura_core::time::PhysicalTime>,
     ) -> aura_core::Result<Vec<aura_core::effects::LeakageEvent>> {
         self.leakage_handler

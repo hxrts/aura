@@ -5,8 +5,8 @@
 
 use aura_core::{
     hash::{hash as core_hash, hasher},
-    identifiers::{AuthorityId, ContextId},
     time::{OrderTime, PhysicalTime, TimeStamp},
+    types::identifiers::{AuthorityId, ContextId},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

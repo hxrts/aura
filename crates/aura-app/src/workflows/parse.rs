@@ -1,6 +1,6 @@
 //! Common parsing helpers for workflow inputs.
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 
 /// Parse an AuthorityId from user input.

@@ -5,7 +5,7 @@
 use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
 use aura_core::AuraError;
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::{AccessLevel, AccessLevelCapabilityConfig, SocialFact};

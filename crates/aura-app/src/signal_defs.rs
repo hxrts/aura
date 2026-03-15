@@ -43,7 +43,7 @@
 
 use aura_core::effects::query::QuerySignalEffects;
 use aura_core::effects::reactive::Signal;
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use std::sync::LazyLock;
 
 use crate::errors::AppError;

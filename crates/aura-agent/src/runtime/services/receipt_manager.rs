@@ -9,13 +9,13 @@
 //! `RuntimeService::start()`. When enabled, it periodically prunes expired
 //! receipts based on the configured retention period.
 
-use super::runtime_tasks::TaskGroup;
 use super::state::with_state_mut_validated;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::AgentConfig;
+use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;

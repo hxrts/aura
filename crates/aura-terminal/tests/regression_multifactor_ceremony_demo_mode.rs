@@ -35,7 +35,7 @@ use aura_agent::EffectContext;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
 use aura_core::hash::{self, hash};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::FrostThreshold;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;

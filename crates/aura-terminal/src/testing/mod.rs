@@ -49,7 +49,7 @@
 pub mod cli;
 use crate::tui::runtime::TuiRuntime;
 use crate::tui::screens::Screen;
-use crate::tui::state_machine::{TuiCommand, TuiState};
+use crate::tui::state::{TuiCommand, TuiState};
 use aura_core::effects::terminal::{
     events, CursorShape, TerminalError, TerminalEvent, TerminalFrame,
 };
@@ -111,7 +111,7 @@ impl TestTui {
 
     /// Send a single event and return generated commands.
     pub fn send_event(&mut self, event: TerminalEvent) -> Vec<TuiCommand> {
-        let (new_state, commands) = crate::tui::state_machine::transition(&self.state, event);
+        let (new_state, commands) = crate::tui::state::transition(&self.state, event);
         self.state = new_state;
         self.commands.extend(commands.clone());
         commands
@@ -190,7 +190,7 @@ impl TestTui {
     /// Check if a specific dispatch command was generated.
     pub fn has_dispatch(
         &self,
-        check: impl Fn(&crate::tui::state_machine::DispatchCommand) -> bool,
+        check: impl Fn(&crate::tui::state::DispatchCommand) -> bool,
     ) -> bool {
         self.commands
             .iter()

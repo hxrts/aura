@@ -43,9 +43,6 @@ pub mod properties;
 pub mod runner;
 pub mod types;
 
-/// Re-export of the upstream Telltale Lean bridge crate for direct integration.
-pub use telltale_lean_bridge as upstream_telltale_lean_bridge;
-
 pub use bridge_export::{
     export_quint_to_telltale_bundle, parse_quint_modules, validate_export_bundle,
     BridgeExportError, QuintModuleSummary,
@@ -64,13 +61,13 @@ pub use bridge_validate::{
     QuintModelCheckExecutor, StaticQuintExecutor,
 };
 pub use evaluator::{InvariantVerificationResult, QuintEvaluator, TemporalVerificationResult};
-pub use handler::{QuintEvaluator as QuintEffectHandler, QuintEvaluatorConfig};
+pub use handler::{QuintEffectHandler, QuintEvaluatorConfig};
 pub use properties::{PropertyKind, PropertySpec, PropertySuite};
 pub use runner::{QuintRunner, RunnerConfig};
 pub use types::VerificationResult;
 
 // Re-export quint evaluator types
-pub use quint_evaluator::ir::{QuintError as QuintIRError, QuintEx, QuintOutput};
+pub use quint_evaluator::ir::{QuintError, QuintEx, QuintOutput};
 
 // Re-export quint evaluator simulator types
 pub use quint_evaluator::simulator::{ParsedQuint, SimulationResult};

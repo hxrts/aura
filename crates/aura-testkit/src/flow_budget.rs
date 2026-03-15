@@ -5,9 +5,9 @@
 use async_trait::async_trait;
 use aura_authorization::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use aura_core::effects::FlowBudgetEffects;
-use aura_core::flow::{FlowBudget, FlowBudgetKey, FlowCost, FlowNonce, Receipt, ReceiptSig};
-use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::scope::AuthorizationOp;
+use aura_core::types::flow::{FlowBudget, FlowBudgetKey, FlowCost, FlowNonce, Receipt, ReceiptSig};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+use aura_core::types::scope::AuthorizationOp;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, Hash32};
 use biscuit_auth::Biscuit;

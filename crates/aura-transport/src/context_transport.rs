@@ -8,7 +8,7 @@
 
 use crate::types::endpoint::EndpointAddress;
 use crate::types::SequenceNumber;
-use aura_core::identifiers::ContextId;
+use aura_core::types::identifiers::ContextId;
 use aura_core::AuthorityId;
 use serde::{Deserialize, Serialize};
 

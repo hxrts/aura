@@ -253,7 +253,7 @@ impl std::fmt::Debug for TransportSubsystem {
 mod tests {
     use super::*;
     use aura_core::effects::transport::TransportEnvelope;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
     use std::collections::HashMap;
 
     fn test_envelope() -> TransportEnvelope {

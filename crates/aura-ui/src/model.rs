@@ -23,10 +23,10 @@ use aura_app::{
     },
     AppCore,
 };
-use aura_core::identifiers::{AuthorityId, CeremonyId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-pub use aura_app::ui::contract::ScreenId as UiScreen;
+pub use aura_app::ui::contract::ScreenId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NeighborhoodMode {
@@ -570,7 +570,7 @@ pub struct UiModel {
     pub account_ready: bool,
     pub account_setup_name: String,
     pub account_setup_error: Option<String>,
-    pub screen: UiScreen,
+    pub screen: ScreenId,
     pub settings_section: SettingsSection,
     pub channels: Vec<ChannelRow>,
     pub contacts: Vec<ContactRow>,
@@ -614,7 +614,7 @@ impl UiModel {
             account_ready: true,
             account_setup_name: String::new(),
             account_setup_error: None,
-            screen: UiScreen::Neighborhood,
+            screen: ScreenId::Neighborhood,
             settings_section: SettingsSection::Profile,
             channels: vec![ChannelRow {
                 name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
@@ -727,13 +727,13 @@ impl UiModel {
         }
     }
 
-    pub fn set_screen(&mut self, screen: UiScreen) {
+    pub fn set_screen(&mut self, screen: ScreenId) {
         self.screen = screen;
         // Screen changes should always exit chat insert mode so global actions
         // (including settings buttons) are not swallowed as hidden text input.
         self.input_mode = false;
         self.input_buffer.clear();
-        if matches!(screen, UiScreen::Neighborhood) {
+        if matches!(screen, ScreenId::Neighborhood) {
             self.neighborhood_mode = NeighborhoodMode::Map;
         }
         if matches!(self.modal_state(), Some(ModalState::Help)) {
@@ -1417,11 +1417,11 @@ impl UiModel {
         let mut selections = Vec::new();
 
         let navigation_items = [
-            UiScreen::Neighborhood,
-            UiScreen::Chat,
-            UiScreen::Contacts,
-            UiScreen::Notifications,
-            UiScreen::Settings,
+            ScreenId::Neighborhood,
+            ScreenId::Chat,
+            ScreenId::Contacts,
+            ScreenId::Notifications,
+            ScreenId::Settings,
         ]
         .into_iter()
         .map(|screen| ListItemSnapshot {
@@ -1582,7 +1582,7 @@ impl UiModel {
             screen: if self.account_ready {
                 self.screen
             } else {
-                UiScreen::Onboarding
+                ScreenId::Onboarding
             },
             focused_control,
             open_modal,
@@ -1721,7 +1721,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn set_screen(&self, screen: UiScreen) {
+    pub fn set_screen(&self, screen: ScreenId) {
         write_model(&self.model).set_screen(screen);
         self.request_rerender();
     }
@@ -2173,7 +2173,7 @@ impl UiController {
             .read()
             .ok()
             .map(|model| model.semantic_snapshot())
-            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood))
+            .unwrap_or_else(|| UiSnapshot::loading(ScreenId::Neighborhood))
     }
 
     pub fn semantic_model_snapshot(&self) -> UiSnapshot {
@@ -2182,7 +2182,7 @@ impl UiController {
             .read()
             .ok()
             .map(|model| model.semantic_snapshot())
-            .unwrap_or_else(|| UiSnapshot::loading(UiScreen::Neighborhood));
+            .unwrap_or_else(|| UiSnapshot::loading(ScreenId::Neighborhood));
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid semantic model snapshot export: {error}"));
@@ -2286,7 +2286,7 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NeighborhoodMode, UiModel, UiScreen};
+    use super::{NeighborhoodMode, UiModel, ScreenId};
     use aura_app::ui::contract::{OperationId, OperationState, RuntimeEventKind};
     use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
 
@@ -2296,11 +2296,11 @@ mod tests {
         model.input_mode = true;
         model.input_buffer = "pending text".to_string();
 
-        model.set_screen(UiScreen::Settings);
+        model.set_screen(ScreenId::Settings);
 
         assert!(!model.input_mode);
         assert!(model.input_buffer.is_empty());
-        assert!(matches!(model.screen, UiScreen::Settings));
+        assert!(matches!(model.screen, ScreenId::Settings));
     }
 
     #[test]
@@ -2308,7 +2308,7 @@ mod tests {
         let mut model = UiModel::new("authority-local".to_string());
         model.neighborhood_mode = NeighborhoodMode::Detail;
 
-        model.set_screen(UiScreen::Neighborhood);
+        model.set_screen(ScreenId::Neighborhood);
 
         assert!(matches!(model.neighborhood_mode, NeighborhoodMode::Map));
     }

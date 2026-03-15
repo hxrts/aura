@@ -13,16 +13,16 @@ use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::services::{
-    CeremonyTracker, ReconfigurationManager, RuntimeTaskRegistry, SessionDelegationTransfer,
+    CeremonyTracker, ReconfigurationManager, SessionDelegationTransfer,
 };
 use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
-use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId};
+use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
 use aura_core::hash::hash;
-use aura_core::identifiers::CeremonyId;
-use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::CeremonyId;
+use aura_core::types::identifiers::{AuthorityId, RecoveryId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::TimeEffects;
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
@@ -68,7 +68,7 @@ pub struct RecoveryServiceApi {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
     reconfiguration: ReconfigurationManager,
-    tasks: Arc<RuntimeTaskRegistry>,
+    tasks: Arc<TaskSupervisor>,
 }
 
 impl std::fmt::Debug for RecoveryServiceApi {
@@ -98,7 +98,7 @@ impl RecoveryServiceApi {
             effects,
             ceremony_runner,
             reconfiguration: ReconfigurationManager::new(),
-            tasks: Arc::new(RuntimeTaskRegistry::new()),
+            tasks: Arc::new(TaskSupervisor::new()),
         })
     }
 
@@ -108,7 +108,7 @@ impl RecoveryServiceApi {
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
         reconfiguration: ReconfigurationManager,
-        tasks: Arc<RuntimeTaskRegistry>,
+        tasks: Arc<TaskSupervisor>,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
         Ok(Self {
@@ -979,7 +979,7 @@ impl RecoveryServiceApi {
                 Err(error) => {
                     break Err(AgentError::internal(format!(
                         "guardian ceremony start failed: {error}"
-                    )))
+                    )));
                 }
             };
 
@@ -1143,7 +1143,7 @@ impl RecoveryServiceApi {
                 return Err(AgentError::invalid(format!(
                     "Invalid guardian role index: {} (must be 0 or 1)",
                     role_index
-                )))
+                )));
             }
         };
 
@@ -1200,7 +1200,7 @@ impl RecoveryServiceApi {
                 Err(error) => {
                     break Err(AgentError::internal(format!(
                         "guardian ceremony start failed: {error}"
-                    )))
+                    )));
                 }
             };
             session.queue_send_bytes(to_vec(&response_msg).map_err(|error| {
@@ -1391,7 +1391,7 @@ impl RecoveryServiceApi {
                             setup_id,
                             threshold,
                             acceptances.clone(),
-                        ))
+                        ));
                     }
                     StepResult::Continue => {}
                     StepResult::Stuck => {
@@ -1434,7 +1434,7 @@ impl RecoveryServiceApi {
             _ => {
                 return Err(AgentError::invalid(
                     "Guardian setup requires exactly three guardians".to_string(),
-                ))
+                ));
             }
         };
 
@@ -1801,7 +1801,7 @@ impl RecoveryServiceApi {
             _ => {
                 return Err(AgentError::invalid(
                     "Guardian index must be 0, 1, or 2".to_string(),
-                ))
+                ));
             }
         };
 

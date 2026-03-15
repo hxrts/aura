@@ -17,8 +17,8 @@ use aura_core::effects::{
     SecureStorageLocation,
 };
 use aura_core::frost::{PublicKeyPackage, Share};
-use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
+use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::{GuardEffects, GuardOperation, GuardOperationId};

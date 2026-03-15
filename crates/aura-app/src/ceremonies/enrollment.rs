@@ -2,7 +2,7 @@
 //!
 //! Type-safe enrollment context for device addition ceremonies.
 
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use std::fmt;
 
 /// Error when constructing an enrollment context

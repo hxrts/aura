@@ -15,7 +15,7 @@ use aura_authentication::guardian_auth_relational::{
 };
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_core::util::serialization::to_vec;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
 use aura_mpst::CompositionManifest;
@@ -524,7 +524,7 @@ fn guardian_auth_session_uuid(context_id: &ContextId, request: &GuardianAuthRequ
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_auth_service_creation() {

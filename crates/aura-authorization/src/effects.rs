@@ -8,7 +8,7 @@
 use crate::biscuit_authorization::BiscuitAuthorizationBridge;
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
-use aura_core::scope::{AuthorizationOp, ResourceScope};
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
 use aura_core::{AuraError, AuthorityId, Cap, MeetSemiLattice};
 use biscuit_auth::PublicKey;
 use std::marker::PhantomData;

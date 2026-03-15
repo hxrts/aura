@@ -33,7 +33,7 @@ use aura_core::effects::{
 };
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId, InvitationId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
@@ -526,14 +526,11 @@ impl InvitationHandler {
         let invitation_context = if let Some(context_id) = context_override {
             context_id
         } else {
-            timeout_prepare_invitation_stage(
-                "resolve_invitation_context",
-                async {
-                    Ok(self
-                        .resolve_invitation_context(effects.as_ref(), &invitation_type)
-                        .await)
-                },
-            )
+            timeout_prepare_invitation_stage("resolve_invitation_context", async {
+                Ok(self
+                    .resolve_invitation_context(effects.as_ref(), &invitation_type)
+                    .await)
+            })
             .await?
         };
         tracing::debug!(
@@ -915,7 +912,7 @@ impl InvitationHandler {
                         h.finalize()
                     };
                     let ceremony_context =
-                        aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+                        aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
 
                     let mut metadata = std::collections::HashMap::new();
                     metadata.insert(
@@ -2126,7 +2123,7 @@ struct DeviceEnrollmentInvitation {
     subject_authority: AuthorityId,
     initiator_device_id: aura_core::DeviceId,
     device_id: aura_core::DeviceId,
-    ceremony_id: aura_core::identifiers::CeremonyId,
+    ceremony_id: aura_core::types::identifiers::CeremonyId,
     pending_epoch: u64,
     key_package: Vec<u8>,
     threshold_config: Vec<u8>,
@@ -2733,7 +2730,9 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-    use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
+    use aura_core::types::identifiers::{
+        AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
+    };
     use aura_core::DeviceId;
     use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};

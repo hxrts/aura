@@ -4,7 +4,7 @@
 //! and transport probing for peer discovery.
 
 use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use sha2::{Digest, Sha256};
 

@@ -946,7 +946,7 @@ pub struct SoundnessReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{identifiers::DeviceId, FactValue};
+    use aura_core::{types::identifiers::DeviceId, FactValue};
     use std::collections::HashSet;
 
     fn create_test_capability_state() -> CapabilityState {

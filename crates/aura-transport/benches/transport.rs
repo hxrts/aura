@@ -6,7 +6,7 @@
 //! - Privacy level operations
 
 #![allow(missing_docs)]
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_transport::{Envelope, ScopedEnvelope};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 

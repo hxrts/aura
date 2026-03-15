@@ -19,8 +19,8 @@ use aura_agent::{
 };
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{ChannelId, ContextId, InvitationId};
 use aura_core::threshold::ParticipantIdentity;
+use aura_core::types::identifiers::{ChannelId, ContextId, InvitationId};
 use std::sync::Arc;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

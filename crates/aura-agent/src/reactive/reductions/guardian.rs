@@ -4,7 +4,7 @@
 //! Handles guardian network state changes (additions, removals, status changes).
 
 use crate::reactive::scheduler::ViewReduction;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
 /// Delta type for guardians view
@@ -69,8 +69,8 @@ impl ViewReduction<GuardianDelta> for GuardianReduction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::{AuthorityId, ContextId};
     use aura_core::Hash32;
 
     fn test_context_id() -> ContextId {

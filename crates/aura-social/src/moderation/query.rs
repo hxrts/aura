@@ -8,7 +8,7 @@ use super::facts::{
     HOME_UNMUTE_FACT_TYPE_ID,
 };
 use super::types::{BanStatus, KickRecord, MuteStatus};
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use std::collections::HashMap;
@@ -255,8 +255,8 @@ pub fn is_user_muted(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
     fn create_test_fact(content: RelationalFact, order_index: u64) -> Fact {

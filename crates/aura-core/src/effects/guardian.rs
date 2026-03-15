@@ -4,10 +4,10 @@
 //! via relational contexts. Implementations live in higher layers (protocol
 //! or feature crates) and must use consensus-backed GuardianBinding facts.
 
-use crate::epochs::Epoch;
 use crate::frost::{PublicKeyPackage, Share};
 use crate::relational::{GuardianBinding, GuardianParameters};
 use crate::time::PhysicalTime;
+use crate::types::epochs::Epoch;
 use crate::{AuthorityId, ContextId, Hash32, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;

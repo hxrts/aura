@@ -19,7 +19,7 @@ use aura_app::signal_defs::{
 use aura_app::views::{Message, MessageDeliveryStatus, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, CeremonyId, ChannelId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
 
 /// Helper to create a test AppCore with signals initialized
 async fn test_app_core() -> Arc<RwLock<AppCore>> {

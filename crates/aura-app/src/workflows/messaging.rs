@@ -54,16 +54,16 @@ use aura_core::{
         ChannelSendParams,
     },
     effects::task::TaskSpawner,
-    identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
-    AuraError,
+    types::{AuthorityId, ChannelId, ContextId},
+    AuraError, InvitationId,
 };
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
@@ -115,21 +115,16 @@ async fn timeout_workflow_stage_with_deadline<T>(
         }
         None => Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS),
     };
-    tokio::time::timeout(timeout, future)
-        .await
-        .map_err(|_| {
-            AuraError::from(super::error::WorkflowError::TimedOut {
-                operation,
-                stage,
-                timeout_ms: timeout.as_millis() as u64,
-            })
-        })?
+    tokio::time::timeout(timeout, future).await.map_err(|_| {
+        AuraError::from(super::error::WorkflowError::TimedOut {
+            operation,
+            stage,
+            timeout_ms: timeout.as_millis() as u64,
+        })
+    })?
 }
 
-fn update_invite_stage(
-    tracker: &Option<Arc<Mutex<&'static str>>>,
-    stage: &'static str,
-) {
+fn update_invite_stage(tracker: &Option<Arc<Mutex<&'static str>>>, stage: &'static str) {
     if let Some(tracker) = tracker {
         if let Ok(mut guard) = tracker.lock() {
             *guard = stage;
@@ -1811,18 +1806,16 @@ pub async fn create_channel(
     threshold_k: u8,
     timestamp_ms: u64,
 ) -> Result<ChannelId, AuraError> {
-    Ok(
-        create_channel_with_authoritative_binding(
-            app_core,
-            name,
-            topic,
-            members,
-            threshold_k,
-            timestamp_ms,
-        )
-        .await?
-        .channel_id,
+    Ok(create_channel_with_authoritative_binding(
+        app_core,
+        name,
+        topic,
+        members,
+        threshold_k,
+        timestamp_ms,
     )
+    .await?
+    .channel_id)
 }
 
 /// Create a channel and return its authoritative identity bundle.
@@ -2971,8 +2964,7 @@ pub async fn invite_user_to_channel_with_context(
             ttl_ms,
         )
         .await
-    }
-    )
+    })
     .await
     .map_err(|_| {
         let stage = stage_tracker
@@ -3115,18 +3107,18 @@ pub async fn invite_authority_to_channel_with_context(
             "local_projection",
             deadline,
             async {
-            project_channel_peer_membership_with_context(
-                app_core,
-                channel_id,
-                Some(context_id),
-                receiver,
-                None,
-            )
-            .await?;
-            warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
-            converge_runtime(&runtime).await;
-            Ok(())
-        },
+                project_channel_peer_membership_with_context(
+                    app_core,
+                    channel_id,
+                    Some(context_id),
+                    receiver,
+                    None,
+                )
+                .await?;
+                warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
+                converge_runtime(&runtime).await;
+                Ok(())
+            },
         )
         .await?;
     }

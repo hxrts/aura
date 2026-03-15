@@ -7,8 +7,8 @@
 //! - Social topology queries
 
 use aura_core::effects::relay::{RelayContext, RelayRelationship};
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_social::facts::{
     HomeConfigFact, HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact,
     NeighborhoodId, NeighborhoodMemberFact, OneHopLinkFact,

@@ -1749,7 +1749,7 @@ fn generate_aura_wrapper(
             // Note: The generated code expects these types to be available at runtime:
             // - biscuit_auth::Biscuit
             // - aura_core::FlowBudget
-            // - aura_core::scope::ResourceScope
+            // - aura_core::types::scope::ResourceScope
             // - aura_mpst::ast_extraction::AuraEffect (for annotation processing)
             // Users should provide their own BiscuitGuardEvaluator implementation
 

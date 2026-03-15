@@ -8,7 +8,7 @@
 
 use aura_core::{
     effects::{FlowBudgetEffects, FlowHint},
-    identifiers::{AuthorityId, ContextId},
+    types::identifiers::{AuthorityId, ContextId},
     AuraResult, FlowCost, Receipt,
 };
 

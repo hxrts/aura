@@ -22,6 +22,18 @@ management, device key derivation, and guardian-based recovery authorization.
 - Session and request identifiers are treated as stable binding keys.
 - Recovery and guardian approval flows are consensus-gated (Category C).
 
+## Ownership Model
+
+- `aura-authentication` is primarily `Pure` domain logic plus workflow
+  contracts.
+- Authentication ceremonies that transfer exclusive authority should expose
+  `MoveOwned` handles or handoff records rather than shared mutable owner
+  fields.
+- Long-lived ceremony coordination should be explicit and single-owner.
+- Capability-gated publication and typed terminal failure are required for
+  parity-critical authentication flows.
+- `Observed` consumers may render authentication state but not author it.
+
 ### Detailed Specifications
 
 ### InvariantAuthenticationContextBinding
@@ -48,4 +60,3 @@ Contract alignment:
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
-

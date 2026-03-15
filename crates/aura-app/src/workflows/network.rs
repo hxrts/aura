@@ -18,7 +18,7 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::AuraError;
 use std::{collections::HashSet, sync::Arc, time::Duration};
 

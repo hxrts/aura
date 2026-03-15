@@ -325,7 +325,7 @@ pub use ast_extraction::{
 ///
 /// Note: The choreography! macro is available in the aura-macros crate.
 /// Generated code uses types from this crate.
-pub use aura_core::{identifiers::DeviceId, AuraError, AuraResult, Cap, Journal, JournalEffects};
+pub use aura_core::{types::identifiers::DeviceId, AuraError, AuraResult, Cap, Journal, JournalEffects};
 pub use ids::{MessageTypeId, NonEmptyRoleList, RoleId, SessionTypeId};
 
 pub use journal::{JournalAnnotation, JournalCoupling};

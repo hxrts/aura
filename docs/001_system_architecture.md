@@ -261,6 +261,34 @@ async fn operation<E: PhysicalTimeEffects + RandomEffects>(
 
 The type signature makes dependencies explicit. Tests can inject mock handlers with controlled behavior. Simulations can replay exact sequences for debugging.
 
+### 4.5 Repo-wide ownership model
+
+Aura's effect and runtime architecture follows a repo-wide ownership taxonomy.
+See [Ownership Model](122_ownership_model.md) for the full contract.
+
+The four categories are:
+
+- `Pure`
+- `MoveOwned`
+- `ActorOwned`
+- `Observed`
+
+At the system level:
+
+- reducers, validators, and typed contracts are `Pure`
+- session, endpoint, and delegation transfer surfaces are `MoveOwned`
+- long-lived mutable async runtime state is `ActorOwned`
+- projections, UI, and harness reads are `Observed`
+
+Two rules follow from this:
+
+1. Parity-critical mutation and publication must be capability-gated.
+2. Parity-critical operations must terminate explicitly with typed success,
+   failure, or cancellation.
+
+This prevents multiple layers from co-owning the same semantic truth. Frontend,
+harness, and projection layers consume authoritative state but do not define it.
+
 ## 5. Guard Chain and Authorization
 
 All transport sends pass through a guard chain before any network effect. The chain enforces authorization, budget accounting, journal coupling, and leakage tracking in a fixed sequence:

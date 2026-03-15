@@ -203,7 +203,7 @@ impl Default for SharedTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::ContextId;
+    use aura_core::types::identifiers::ContextId;
     use std::collections::HashMap;
 
     fn envelope_for(destination: AuthorityId, source: AuthorityId) -> TransportEnvelope {

@@ -43,7 +43,8 @@ It remains thin and delegates shared UI state, routing, and snapshot rendering t
   real app workflows rather than selector-driving as the primary substrate.
 - DOM clicks and selector helpers are frontend-conformance-only and must not be
   the shared semantic execution path.
-- Published semantic state must support stale-state detection through shared
+- Published observed semantic projections must support stale-state detection
+  through shared
   revision/sequence and render-convergence semantics.
 - Onboarding uses the same semantic snapshot/publication path as every other
   screen.
@@ -86,8 +87,8 @@ The correct split is:
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
-The browser shell exports structured semantic UI state and render convergence
-signals for harness observation.
+The browser shell exports structured observed semantic UI projections and render
+convergence signals for harness observation.
 
 Enforcement locus:
 - `src/harness_bridge.rs` publishes `UiSnapshot` and `RenderHeartbeat`.

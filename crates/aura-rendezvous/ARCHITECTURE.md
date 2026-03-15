@@ -22,6 +22,18 @@ flood propagation, and LAN discovery for P2P connectivity.
 - Channel establishment requires valid, non-expired descriptors.
 - Flood packets use nonce-based replay protection.
 
+## Ownership Model
+
+- `aura-rendezvous` combines `Pure` descriptor semantics with explicit
+  `MoveOwned` channel-establishment authority where exclusivity matters.
+- Long-lived peer/discovery runtime ownership belongs in explicit `ActorOwned`
+  runtime services, not hidden in rendezvous helpers.
+- Descriptor and channel-establishment publication must remain capability-gated
+  and typed.
+- Retry/lifecycle outcomes should terminate explicitly rather than relying on
+  implicit background ownership.
+- `Observed` consumers may render rendezvous state but not author it.
+
 ### Detailed Specifications
 
 ### InvariantSecureChannelLifecycle

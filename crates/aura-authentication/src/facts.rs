@@ -24,7 +24,7 @@
 //! - `RecoveryCompleted`: Recovery operation completed successfully
 //! - `RecoveryFailed`: Recovery operation failed
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{ContextId, DeviceId};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::{DomainFact, FactReducer};

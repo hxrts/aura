@@ -5,6 +5,8 @@
 The Aura runtime assembles effect handlers into working systems. It manages lifecycle, executes the guard chain, schedules reactive updates, and exposes services through `AuraAgent`. The `AppCore` provides a unified interface for all frontends.
 
 This document covers runtime composition and execution. See [Effect System](103_effect_system.md) for trait definitions and handler design.
+See [Ownership Model](122_ownership_model.md) for the repo-wide ownership
+taxonomy.
 The `aura-agent` crate-level runtime contract, including structured concurrency,
 canonical ingress, ownership, typed errors, and CI policy gates, lives in
 `crates/aura-agent/ARCHITECTURE.md`.
@@ -15,6 +17,24 @@ That contract is intentionally opinionated about the split of responsibilities:
 - move semantics own session and endpoint ownership transfer
 
 Those are related concerns, but they are not the same abstraction boundary.
+
+## Ownership Categories In The Runtime
+
+The runtime is the main place where Aura's ownership categories become concrete:
+
+- long-lived runtime services, supervisors, readiness coordinators, and caches
+  are `ActorOwned`
+- session, endpoint, and delegation transfer surfaces are `MoveOwned`
+- runtime views, projections, and exported state are `Observed`
+- reducers, validators, and typed contracts remain `Pure`
+
+Two runtime rules follow from that split:
+
+1. Actor mailboxes are for mutation of actor-owned state, not as a substitute
+   for move-style ownership transfer.
+2. Runtime-facing lifecycle and readiness publication should be
+   capability-gated and should terminate explicitly with typed success, failure,
+   or cancellation.
 
 ## Structured Concurrency
 
@@ -408,7 +428,7 @@ Concrete implementations act as the engine for the session system. Each session 
 
 - `SessionId` for unique identification.
 - `SessionStatus` indicating the current phase.
-- `SessionEpoch` for coordinating state changes.
+- `Epoch` for coordinating state changes.
 - Participant list.
 
 Session creation and lifecycle are managed as choreographic protocols. The `SessionLifecycleChoreography` in `aura-protocol` ensures consistency across all participants.

@@ -39,16 +39,16 @@ pub(super) fn handle_channel_selection_change(
     }
     if let Ok(mut guard) = selected_channel_binding.write() {
         let previous = guard.clone();
-        *guard = channels.get(idx).map(|channel| {
-            SelectedChannelBinding::merged_from_channel(channel, previous.as_ref())
-        });
+        *guard = channels
+            .get(idx)
+            .map(|channel| SelectedChannelBinding::merged_from_channel(channel, previous.as_ref()));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::resolve_committed_selected_channel_id;
-    use crate::tui::state_machine::TuiState;
+    use crate::tui::state::TuiState;
     use crate::tui::types::Channel;
     use std::path::Path;
 

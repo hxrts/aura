@@ -123,7 +123,7 @@ impl EffectApiEffects for MemoryLedgerHandler {
 
     async fn is_device_authorized(
         &self,
-        _device_id: aura_core::identifiers::DeviceId,
+        _device_id: aura_core::types::identifiers::DeviceId,
         _operation: &str,
     ) -> Result<bool, EffectApiError> {
         Ok(true)
@@ -131,7 +131,7 @@ impl EffectApiEffects for MemoryLedgerHandler {
 
     async fn update_device_activity(
         &self,
-        _device_id: aura_core::identifiers::DeviceId,
+        _device_id: aura_core::types::identifiers::DeviceId,
     ) -> Result<(), EffectApiError> {
         Ok(())
     }
@@ -199,8 +199,8 @@ impl EffectApiEffects for MemoryLedgerHandler {
 
     async fn effect_api_device_id(
         &self,
-    ) -> Result<aura_core::identifiers::DeviceId, EffectApiError> {
-        Ok(aura_core::identifiers::DeviceId::new_from_entropy(
+    ) -> Result<aura_core::types::identifiers::DeviceId, EffectApiError> {
+        Ok(aura_core::types::identifiers::DeviceId::new_from_entropy(
             [3u8; 32],
         )) // Memory implementation returns a new device ID
     }

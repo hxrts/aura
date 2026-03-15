@@ -25,7 +25,8 @@ use std::io;
 use std::io::Write;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use parking_lot::Mutex;
+use std::sync::OnceLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
@@ -252,21 +253,11 @@ pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {
 }
 
 pub(crate) fn register_harness_command_sender(sender: HarnessCommandSender) {
-    match active_harness_command_sender().lock() {
-        Ok(mut guard) => *guard = Some(sender),
-        Err(error) => {
-            tracing::error!("harness command sender lock poisoned during register: {error}");
-        }
-    }
+    *active_harness_command_sender().lock() = Some(sender);
 }
 
 pub(crate) fn clear_harness_command_sender() {
-    match active_harness_command_sender().lock() {
-        Ok(mut guard) => *guard = None,
-        Err(error) => {
-            tracing::error!("harness command sender lock poisoned during clear: {error}");
-        }
-    }
+    *active_harness_command_sender().lock() = None;
 }
 
 async fn forward_harness_commands_from_listener(listener: UnixListener) {
@@ -336,13 +327,7 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
         .unwrap_or(50);
     let mut attempts = 0u32;
     let receipt = loop {
-        let command_tx = match active_harness_command_sender().lock() {
-            Ok(guard) => guard.clone(),
-            Err(error) => {
-                tracing::error!("harness command sender lock poisoned during dispatch: {error}");
-                None
-            }
-        };
+        let command_tx = active_harness_command_sender().lock().clone();
         let Some(command_tx) = command_tx else {
             attempts += 1;
             if attempts >= max_retries {
@@ -1072,9 +1057,7 @@ pub fn maybe_export_ui_snapshot(
     let snapshot_json = serde_json::to_string_pretty(&snapshot)
         .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
 
-    let mut last_written = last_written_snapshot()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut last_written = last_written_snapshot().lock();
     if last_written.as_deref() == Some(snapshot_json.as_str()) {
         return Ok(());
     }

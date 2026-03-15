@@ -18,7 +18,7 @@ use crate::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
 };
 use crate::AppCore;
-use aura_core::identifiers::{AuthorityId, CeremonyId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
 use aura_core::AuraError;
 use std::future::Future;

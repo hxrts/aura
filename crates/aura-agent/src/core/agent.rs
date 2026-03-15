@@ -7,11 +7,11 @@ use crate::handlers::{
     AuthServiceApi, ChatServiceApi, InvitationServiceApi, OtaActivationServiceApi,
     RecoveryServiceApi, SessionServiceApi,
 };
+use crate::runtime::services::ReconfigurationManager;
 use crate::runtime::services::ThresholdSigningService;
-use crate::runtime::services::{ReconfigurationManager, RuntimeTaskRegistry};
 use crate::runtime::system::{RuntimeActivityGate, RuntimePublicOperationError, RuntimeSystem};
-use crate::runtime::{AuraEffectSystem, EffectContext};
-use aura_core::identifiers::{AccountId, AuthorityId};
+use crate::runtime::{AuraEffectSystem, EffectContext, TaskSupervisor};
+use aura_core::types::identifiers::{AccountId, AuthorityId};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 
@@ -139,7 +139,7 @@ struct ServiceRegistry {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     reconfiguration_manager: ReconfigurationManager,
-    runtime_tasks: Arc<RuntimeTaskRegistry>,
+    runtime_tasks: Arc<TaskSupervisor>,
     runtime_activity: Arc<RuntimeActivityGate>,
     authority_context: AuthorityContext,
     account_id: AccountId,
@@ -156,7 +156,7 @@ impl ServiceRegistry {
         effects: Arc<AuraEffectSystem>,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
         reconfiguration_manager: ReconfigurationManager,
-        runtime_tasks: Arc<RuntimeTaskRegistry>,
+        runtime_tasks: Arc<TaskSupervisor>,
         runtime_activity: Arc<RuntimeActivityGate>,
         authority_context: AuthorityContext,
     ) -> Self {

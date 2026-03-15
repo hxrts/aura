@@ -193,7 +193,9 @@ impl<T> SubmittedAction<T> {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SemanticCommandValue {
     None,
-    ContactInvitationCode { code: String },
+    ContactInvitationCode {
+        code: String,
+    },
     ChannelBinding {
         channel_id: String,
         context_id: Option<String>,

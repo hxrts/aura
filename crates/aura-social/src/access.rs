@@ -8,7 +8,7 @@ use crate::facts::{
     HomeId, TraversalAllowedFact, TraversalPosition,
 };
 use crate::{error::SocialError, Home, Neighborhood};
-use aura_core::identifiers::AuthorityId;
+use aura_core::types::identifiers::AuthorityId;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Service for checking traversal permissions.

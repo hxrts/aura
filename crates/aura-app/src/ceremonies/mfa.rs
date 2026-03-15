@@ -2,7 +2,7 @@
 //!
 //! Type-safe MFA device set ensuring minimum device count for threshold signing.
 
-use aura_core::identifiers::DeviceId;
+use aura_core::types::identifiers::DeviceId;
 use std::fmt;
 
 /// Minimum number of devices required for MFA threshold signing

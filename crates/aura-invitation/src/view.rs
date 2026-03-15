@@ -22,8 +22,8 @@
 //! ```
 
 use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
-use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::threshold::AgreementMode;
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_journal::DomainFact;
 
 use crate::{
@@ -408,7 +408,7 @@ mod tests {
     use assert_matches::assert_matches;
     use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
-    use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
+    use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
