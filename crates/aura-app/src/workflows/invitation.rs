@@ -382,6 +382,29 @@ async fn fail_invitation_accept<T>(
     Err(error.into())
 }
 
+async fn fail_device_enrollment_accept<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    detail: impl Into<String>,
+) -> Result<T, AuraError> {
+    let error = crate::ui_contract::SemanticOperationError::new(
+        crate::ui_contract::SemanticFailureDomain::Invitation,
+        crate::ui_contract::SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    publish_authoritative_operation_failure(
+        app_core,
+        OperationId::device_enrollment(),
+        SemanticOperationKind::ImportDeviceEnrollmentCode,
+        error.clone(),
+    )
+    .await?;
+    Err(AuraError::agent(
+        error
+            .detail
+            .unwrap_or_else(|| "device enrollment acceptance failed".to_string()),
+    ))
+}
+
 async fn ensure_channel_invitation_context_and_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
@@ -597,12 +620,6 @@ pub async fn create_contact_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = require_runtime(app_core).await?;
-
-    let invitation = runtime
-        .create_contact_invitation(receiver, nickname, message, ttl_ms)
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
@@ -610,6 +627,12 @@ pub async fn create_contact_invitation(
         SemanticOperationPhase::WorkflowDispatched,
     )
     .await?;
+    let runtime = require_runtime(app_core).await?;
+
+    let invitation = runtime
+        .create_contact_invitation(receiver, nickname, message, ttl_ms)
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
     Ok(invitation)
 }
 
@@ -625,12 +648,6 @@ pub async fn create_guardian_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = require_runtime(app_core).await?;
-
-    let invitation = runtime
-        .create_guardian_invitation(receiver, subject, message, ttl_ms)
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?;
     publish_invitation_operation_status(
         app_core,
         OperationId::invitation_create(),
@@ -638,6 +655,12 @@ pub async fn create_guardian_invitation(
         SemanticOperationPhase::WorkflowDispatched,
     )
     .await?;
+    let runtime = require_runtime(app_core).await?;
+
+    let invitation = runtime
+        .create_guardian_invitation(receiver, subject, message, ttl_ms)
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?;
     Ok(invitation)
 }
 
@@ -1062,17 +1085,29 @@ pub async fn accept_device_enrollment_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &InvitationInfo,
 ) -> Result<(), AuraError> {
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::device_enrollment(),
+        SemanticOperationKind::ImportDeviceEnrollmentCode,
+        SemanticOperationPhase::WorkflowDispatched,
+    )
+    .await?;
     let InvitationBridgeType::DeviceEnrollment { .. } = &invitation.invitation_type else {
-        return Err(AuraError::invalid(
+        return fail_device_enrollment_accept(
+            app_core,
             "accept_device_enrollment_invitation requires a device enrollment invitation",
-        ));
+        )
+        .await;
     };
 
     let runtime = require_runtime(app_core).await?;
-    runtime
-        .accept_invitation(invitation.invitation_id.as_str())
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("accept invitation", e)))?;
+    if let Err(error) = runtime.accept_invitation(invitation.invitation_id.as_str()).await {
+        return fail_device_enrollment_accept(
+            app_core,
+            format!("accept invitation failed: {error}"),
+        )
+        .await;
+    }
     converge_runtime(&runtime).await;
 
     let expected_min_devices = 2_usize;
@@ -1117,6 +1152,13 @@ pub async fn accept_device_enrollment_invitation(
                 );
             }
 
+            publish_invitation_operation_status(
+                app_core,
+                OperationId::device_enrollment(),
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+                SemanticOperationPhase::Succeeded,
+            )
+            .await?;
             return Ok(());
         }
 
@@ -1129,6 +1171,13 @@ pub async fn accept_device_enrollment_invitation(
         expected_min_devices,
         "device enrollment acceptance completed before local device list convergence"
     );
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::device_enrollment(),
+        SemanticOperationKind::ImportDeviceEnrollmentCode,
+        SemanticOperationPhase::Succeeded,
+    )
+    .await?;
     Ok(())
 }
 

@@ -35,9 +35,10 @@ use aura_core::FlowCost;
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
 use aura_guards::LeakageBudget;
+#[cfg(not(target_arch = "wasm32"))]
+use aura_mpst::telltale_choreography::{ChoreoHandler, ChoreoHandlerExt, ChoreoResult};
 use aura_mpst::telltale_choreography::{
-    ChoreoHandler, ChoreoHandlerExt, ChoreoResult, ChoreographyError as TelltaleChoreographyError,
-    LabelId, RoleId,
+    ChoreographyError as TelltaleChoreographyError, LabelId, RoleId,
 };
 use aura_mpst::ChoreographicAdapterExt;
 use aura_protocol::effects::{
@@ -46,6 +47,7 @@ use aura_protocol::effects::{
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -877,6 +879,7 @@ where
 /// Public API alias for the choreography adapter.
 pub use AuraHandlerAdapter as ChoreographyAdapter;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn map_runtime_error(error: AuraChoreographyError) -> TelltaleChoreographyError {
     TelltaleChoreographyError::ExecutionError(error.to_string())
 }

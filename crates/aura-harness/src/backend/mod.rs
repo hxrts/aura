@@ -374,10 +374,7 @@ pub(crate) fn wait_for_operation_submission(
                 current.instance_id != previous.instance_id || current.state != previous.state
             });
             if changed {
-                return Ok(UiOperationHandle {
-                    id: operation_id,
-                    instance_id: current.instance_id,
-                });
+                return Ok(UiOperationHandle::new(operation_id, current.instance_id));
             }
         }
         if Instant::now() >= deadline {
@@ -714,10 +711,10 @@ mod tests {
     }
 
     fn operation_handle() -> UiOperationHandle {
-        UiOperationHandle {
-            id: OperationId::invitation_accept(),
-            instance_id: OperationInstanceId("test-op-1".to_string()),
-        }
+        UiOperationHandle::new(
+            OperationId::invitation_accept(),
+            OperationInstanceId("test-op-1".to_string()),
+        )
     }
 
     #[test]

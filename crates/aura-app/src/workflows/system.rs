@@ -504,6 +504,116 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
     Ok(())
 }
 
+/// Install background hooks that derive authoritative readiness from app-owned signals.
+#[cfg(feature = "signals")]
+pub async fn install_authoritative_readiness_hook(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let (reactive, spawner, should_install) = {
+        let mut core = app_core.write().await;
+        let should_install = core.mark_authoritative_readiness_hook_installed();
+        let reactive = core.reactive().clone();
+        let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
+        (reactive, spawner, should_install)
+    };
+
+    if !should_install {
+        return Ok(());
+    }
+
+    let Some(spawner) = spawner else {
+        return Ok(());
+    };
+
+    let contacts_app_core = Arc::clone(app_core);
+    let contacts_spawner = spawner.clone();
+    let contacts_reactive = reactive.clone();
+    let contacts_in_flight = Arc::new(AtomicBool::new(false));
+    let contacts_pending = Arc::new(AtomicBool::new(false));
+
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let mut stream = contacts_reactive.subscribe(&*CONTACTS_SIGNAL);
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
+
+            if contacts_in_flight.swap(true, Ordering::SeqCst) {
+                contacts_pending.store(true, Ordering::SeqCst);
+                continue;
+            }
+
+            let refresh_app_core = contacts_app_core.clone();
+            let refresh_in_flight = contacts_in_flight.clone();
+            let refresh_pending = contacts_pending.clone();
+            spawn_runtime_refresh_task(&contacts_spawner, async move {
+                loop {
+                    let _ = super::invitation::refresh_authoritative_contact_link_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
+
+    let chat_app_core = Arc::clone(app_core);
+    let chat_spawner = spawner.clone();
+    let chat_reactive = reactive.clone();
+    let chat_in_flight = Arc::new(AtomicBool::new(false));
+    let chat_pending = Arc::new(AtomicBool::new(false));
+
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let mut stream = chat_reactive.subscribe(&*CHAT_SIGNAL);
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
+
+            if chat_in_flight.swap(true, Ordering::SeqCst) {
+                chat_pending.store(true, Ordering::SeqCst);
+                continue;
+            }
+
+            let refresh_app_core = chat_app_core.clone();
+            let refresh_in_flight = chat_in_flight.clone();
+            let refresh_pending = chat_pending.clone();
+            spawn_runtime_refresh_task(&chat_spawner, async move {
+                loop {
+                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
+
+    Ok(())
+}
+
+#[cfg(not(feature = "signals"))]
+/// No-op when signal-backed authoritative readiness is unavailable.
+pub async fn install_authoritative_readiness_hook(
+    _app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    Ok(())
+}
+
 /// Check if app core is accessible
 ///
 /// **What it does**: Verifies AppCore can be accessed

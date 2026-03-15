@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use crate::tui::semantic_lifecycle::SubmittedOperationOwner;
 use crate::tui::state::DeviceId;
 use aura_core::AuthorityId;
 
@@ -91,5 +92,6 @@ pub type NeighborhoodHomeCallback = IdCallback;
 pub type SetModeratorCallback = Arc<dyn Fn(Option<String>, String, bool) + Send + Sync>;
 
 // --- App Screen ---
-pub type CreateAccountCallback = IdCallback;
+pub(crate) type CreateAccountCallback =
+    Arc<dyn Fn(String, SubmittedOperationOwner) + Send + Sync>;
 pub type GuardianSelectCallback = IdCallback;

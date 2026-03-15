@@ -9,6 +9,7 @@ use cfg_if::cfg_if;
 
 cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
+        mod error;
         mod harness_bridge;
         mod web_clipboard;
 
@@ -35,8 +36,8 @@ cfg_if! {
         use aura_ui::{AuraUiRoot, UiController};
         use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
+        use error::{log_web_error, WebUiError, WebUiOperation};
         use std::sync::Arc;
-        use wasm_bindgen_futures::spawn_local;
         use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
@@ -110,6 +111,16 @@ cfg_if! {
             WEB_STORAGE_PREFIX.to_string()
         }
 
+        fn logged_optional<T>(result: Result<Option<T>, WebUiError>) -> Option<T> {
+            match result {
+                Ok(value) => value,
+                Err(error) => {
+                    log_web_error("warn", &error);
+                    None
+                }
+            }
+        }
+
         fn apply_harness_mode_document_flags() {
             if harness_instance_id().is_none() {
                 return;
@@ -123,95 +134,296 @@ cfg_if! {
             let Some(root) = document.document_element() else {
                 return;
             };
-            let _ = root.set_attribute("data-aura-harness-mode", "1");
+            if let Err(error) = root.set_attribute("data-aura-harness-mode", "1") {
+                log_web_error(
+                    "warn",
+                    &WebUiError::config(
+                        WebUiOperation::ApplyHarnessModeDocumentFlags,
+                        "WEB_HARNESS_DOCUMENT_FLAG_SET_FAILED",
+                        format!("failed to apply harness mode document flag: {error:?}"),
+                    ),
+                );
+            }
         }
 
-        fn load_selected_authority(storage_key: &str) -> Option<AuthorityId> {
-            let window = web_sys::window()?;
-            let storage = window.local_storage().ok().flatten()?;
-            let raw = storage.get_item(storage_key).ok().flatten()?;
-            raw.parse::<AuthorityId>().ok()
+        fn load_selected_authority(storage_key: &str) -> Result<Option<AuthorityId>, WebUiError> {
+            let Some(window) = web_sys::window() else {
+                return Ok(None);
+            };
+            let Some(storage) = window.local_storage().map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedAuthority,
+                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
+                    format!("failed to access localStorage: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            let Some(raw) = storage.get_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedAuthority,
+                    "WEB_SELECTED_AUTHORITY_READ_FAILED",
+                    format!("failed to read selected authority: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            raw.parse::<AuthorityId>().map(Some).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedAuthority,
+                    "WEB_SELECTED_AUTHORITY_PARSE_FAILED",
+                    format!("failed to parse selected authority: {error}"),
+                )
+            })
         }
 
-        fn load_selected_device(storage_key: &str) -> Option<DeviceId> {
-            let window = web_sys::window()?;
-            let storage = window.local_storage().ok().flatten()?;
-            let raw = storage.get_item(storage_key).ok().flatten()?;
-            raw.parse::<DeviceId>().ok()
+        fn load_selected_device(storage_key: &str) -> Result<Option<DeviceId>, WebUiError> {
+            let Some(window) = web_sys::window() else {
+                return Ok(None);
+            };
+            let Some(storage) = window.local_storage().map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedDevice,
+                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
+                    format!("failed to access localStorage: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            let Some(raw) = storage.get_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedDevice,
+                    "WEB_SELECTED_DEVICE_READ_FAILED",
+                    format!("failed to read selected device: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            raw.parse::<DeviceId>().map(Some).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedDevice,
+                    "WEB_SELECTED_DEVICE_PARSE_FAILED",
+                    format!("failed to parse selected device: {error}"),
+                )
+            })
         }
 
         fn load_selected_runtime_identity(
             storage_key: &str,
             legacy_authority_key: &str,
             legacy_device_key: &str,
-        ) -> Option<BootstrapRuntimeIdentity> {
-            let window = web_sys::window()?;
-            let storage = window.local_storage().ok().flatten()?;
+        ) -> Result<Option<BootstrapRuntimeIdentity>, WebUiError> {
+            let Some(window) = web_sys::window() else {
+                return Ok(None);
+            };
+            let Some(storage) = window.local_storage().map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedRuntimeIdentity,
+                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
+                    format!("failed to access localStorage: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
 
-            if let Some(raw) = storage.get_item(storage_key).ok().flatten() {
-                if let Ok(identity) = serde_json::from_str::<BootstrapRuntimeIdentity>(&raw) {
-                    return Some(identity);
-                }
+            if let Some(raw) = storage.get_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadSelectedRuntimeIdentity,
+                    "WEB_RUNTIME_IDENTITY_READ_FAILED",
+                    format!("failed to read selected runtime identity: {:?}", error),
+                )
+            })? {
+                let identity =
+                    serde_json::from_str::<BootstrapRuntimeIdentity>(&raw).map_err(|error| {
+                        WebUiError::config(
+                            WebUiOperation::LoadSelectedRuntimeIdentity,
+                            "WEB_RUNTIME_IDENTITY_PARSE_FAILED",
+                            format!("failed to parse selected runtime identity: {error}"),
+                        )
+                    })?;
+                return Ok(Some(identity));
             }
 
             let authority_id = load_selected_authority(legacy_authority_key)?;
             let device_id = load_selected_device(legacy_device_key)?;
-            Some(BootstrapRuntimeIdentity::new(authority_id, device_id))
+            match (authority_id, device_id) {
+                (Some(authority_id), Some(device_id)) => {
+                    Ok(Some(BootstrapRuntimeIdentity::new(authority_id, device_id)))
+                }
+                (None, None) => Ok(None),
+                _ => Err(WebUiError::config(
+                    WebUiOperation::LoadSelectedRuntimeIdentity,
+                    "WEB_RUNTIME_IDENTITY_LEGACY_PARTIAL_STATE",
+                    "legacy selected authority/device state is incomplete",
+                )),
+            }
         }
 
         fn persist_selected_runtime_identity(
             storage_key: &str,
             identity: &BootstrapRuntimeIdentity,
-        ) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+        ) -> Result<(), WebUiError> {
+            let window = web_sys::window().ok_or_else(|| {
+                WebUiError::config(
+                    WebUiOperation::PersistSelectedRuntimeIdentity,
+                    "WEB_WINDOW_UNAVAILABLE",
+                    "window is not available",
+                )
+            })?;
             let storage = window
                 .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            let raw = serde_json::to_string(identity)
-                .map_err(|error| format!("failed to serialize runtime identity: {error}"))?;
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::PersistSelectedRuntimeIdentity,
+                        "WEB_LOCAL_STORAGE_UNAVAILABLE",
+                        format!("localStorage unavailable: {:?}", error),
+                    )
+                })?
+                .ok_or_else(|| {
+                    WebUiError::config(
+                        WebUiOperation::PersistSelectedRuntimeIdentity,
+                        "WEB_LOCAL_STORAGE_MISSING",
+                        "localStorage unavailable",
+                    )
+                })?;
+            let raw = serde_json::to_string(identity).map_err(|error| {
+                WebUiError::operation(
+                    WebUiOperation::PersistSelectedRuntimeIdentity,
+                    "WEB_RUNTIME_IDENTITY_SERIALIZE_FAILED",
+                    format!("failed to serialize runtime identity: {error}"),
+                )
+            })?;
             storage
                 .set_item(storage_key, &raw)
-                .map_err(|error| format!("failed to persist selected runtime identity: {:?}", error))
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::PersistSelectedRuntimeIdentity,
+                        "WEB_RUNTIME_IDENTITY_PERSIST_FAILED",
+                        format!("failed to persist selected runtime identity: {:?}", error),
+                    )
+                })
         }
 
-        fn clear_storage_key(storage_key: &str) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+        fn clear_storage_key(storage_key: &str) -> Result<(), WebUiError> {
+            let window = web_sys::window().ok_or_else(|| {
+                WebUiError::config(
+                    WebUiOperation::ClearStorageKey,
+                    "WEB_WINDOW_UNAVAILABLE",
+                    "window is not available",
+                )
+            })?;
             let storage = window
                 .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            storage
-                .remove_item(storage_key)
-                .map_err(|error| format!("failed to clear localStorage key {storage_key}: {:?}", error))
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::ClearStorageKey,
+                        "WEB_LOCAL_STORAGE_UNAVAILABLE",
+                        format!("localStorage unavailable: {:?}", error),
+                    )
+                })?
+                .ok_or_else(|| {
+                    WebUiError::config(
+                        WebUiOperation::ClearStorageKey,
+                        "WEB_LOCAL_STORAGE_MISSING",
+                        "localStorage unavailable",
+                    )
+                })?;
+            storage.remove_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::ClearStorageKey,
+                    "WEB_STORAGE_CLEAR_FAILED",
+                    format!("failed to clear localStorage key {storage_key}: {:?}", error),
+                )
+            })
         }
 
-        fn load_pending_account_bootstrap(storage_key: &str) -> Option<PendingAccountBootstrap> {
-            let window = web_sys::window()?;
-            let storage = window.local_storage().ok().flatten()?;
-            let raw = storage.get_item(storage_key).ok().flatten()?;
-            serde_json::from_str(&raw).ok()
+        fn load_pending_account_bootstrap(
+            storage_key: &str,
+        ) -> Result<Option<PendingAccountBootstrap>, WebUiError> {
+            let Some(window) = web_sys::window() else {
+                return Ok(None);
+            };
+            let Some(storage) = window.local_storage().map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadPendingAccountBootstrap,
+                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
+                    format!("failed to access localStorage: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            let Some(raw) = storage.get_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadPendingAccountBootstrap,
+                    "WEB_PENDING_BOOTSTRAP_READ_FAILED",
+                    format!("failed to read pending account bootstrap: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            serde_json::from_str(&raw).map(Some).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadPendingAccountBootstrap,
+                    "WEB_PENDING_BOOTSTRAP_PARSE_FAILED",
+                    format!("failed to parse pending account bootstrap: {error}"),
+                )
+            })
         }
 
         fn persist_pending_account_bootstrap(
             storage_key: &str,
             pending_bootstrap: &PendingAccountBootstrap,
-        ) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+        ) -> Result<(), WebUiError> {
+            let window = web_sys::window().ok_or_else(|| {
+                WebUiError::config(
+                    WebUiOperation::PersistPendingAccountBootstrap,
+                    "WEB_WINDOW_UNAVAILABLE",
+                    "window is not available",
+                )
+            })?;
             let storage = window
                 .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            let raw = serde_json::to_string(pending_bootstrap)
-                .map_err(|error| format!("failed to serialize pending account bootstrap: {error}"))?;
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::PersistPendingAccountBootstrap,
+                        "WEB_LOCAL_STORAGE_UNAVAILABLE",
+                        format!("localStorage unavailable: {:?}", error),
+                    )
+                })?
+                .ok_or_else(|| {
+                    WebUiError::config(
+                        WebUiOperation::PersistPendingAccountBootstrap,
+                        "WEB_LOCAL_STORAGE_MISSING",
+                        "localStorage unavailable",
+                    )
+                })?;
+            let raw = serde_json::to_string(pending_bootstrap).map_err(|error| {
+                WebUiError::operation(
+                    WebUiOperation::PersistPendingAccountBootstrap,
+                    "WEB_PENDING_BOOTSTRAP_SERIALIZE_FAILED",
+                    format!("failed to serialize pending account bootstrap: {error}"),
+                )
+            })?;
             storage
                 .set_item(storage_key, &raw)
-                .map_err(|error| format!("failed to persist pending account bootstrap: {:?}", error))
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::PersistPendingAccountBootstrap,
+                        "WEB_PENDING_BOOTSTRAP_PERSIST_FAILED",
+                        format!("failed to persist pending account bootstrap: {:?}", error),
+                    )
+                })
         }
 
-        async fn stage_initial_web_account_bootstrap(nickname: &str) -> Result<(), String> {
+        async fn stage_initial_web_account_bootstrap(nickname: &str) -> Result<(), WebUiError> {
             let pending_bootstrap = account_workflows::prepare_pending_account_bootstrap(nickname)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| {
+                    WebUiError::input(
+                        WebUiOperation::StageInitialAccountBootstrap,
+                        "WEB_PENDING_BOOTSTRAP_PREPARE_FAILED",
+                        error.to_string(),
+                    )
+                })?;
             let storage_prefix = active_storage_prefix();
             let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
             let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
@@ -248,49 +460,128 @@ cfg_if! {
 
             harness_bridge::set_controller(controller.clone());
             if let Err(error) = harness_bridge::install_window_harness_api(controller) {
-                web_sys::console::error_1(
-                    &format!("failed to install harness API: {error:?}").into(),
+                log_web_error(
+                    "error",
+                    &WebUiError::operation(
+                        WebUiOperation::InstallHarnessInstrumentation,
+                        "WEB_HARNESS_API_INSTALL_FAILED",
+                        format!("failed to install harness API: {error:?}"),
+                    ),
                 );
             }
         }
 
-        fn load_pending_device_enrollment_code(storage_key: &str) -> Option<String> {
-            let window = web_sys::window()?;
-            let storage = window.local_storage().ok().flatten()?;
-            storage.get_item(storage_key).ok().flatten()
+        fn load_pending_device_enrollment_code(
+            storage_key: &str,
+        ) -> Result<Option<String>, WebUiError> {
+            let Some(window) = web_sys::window() else {
+                return Ok(None);
+            };
+            let Some(storage) = window.local_storage().map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadPendingDeviceEnrollmentCode,
+                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
+                    format!("failed to access localStorage: {:?}", error),
+                )
+            })? else {
+                return Ok(None);
+            };
+            storage.get_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::LoadPendingDeviceEnrollmentCode,
+                    "WEB_PENDING_DEVICE_ENROLLMENT_CODE_READ_FAILED",
+                    format!("failed to read pending device enrollment code: {:?}", error),
+                )
+            })
         }
 
         fn persist_pending_device_enrollment_code(
             storage_key: &str,
             code: &str,
-        ) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+        ) -> Result<(), WebUiError> {
+            let window = web_sys::window().ok_or_else(|| {
+                WebUiError::config(
+                    WebUiOperation::PersistPendingDeviceEnrollmentCode,
+                    "WEB_WINDOW_UNAVAILABLE",
+                    "window is not available",
+                )
+            })?;
             let storage = window
                 .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            storage
-                .set_item(storage_key, code)
-                .map_err(|error| format!("failed to persist pending device enrollment code: {:?}", error))
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::PersistPendingDeviceEnrollmentCode,
+                        "WEB_LOCAL_STORAGE_UNAVAILABLE",
+                        format!("localStorage unavailable: {:?}", error),
+                    )
+                })?
+                .ok_or_else(|| {
+                    WebUiError::config(
+                        WebUiOperation::PersistPendingDeviceEnrollmentCode,
+                        "WEB_LOCAL_STORAGE_MISSING",
+                        "localStorage unavailable",
+                    )
+                })?;
+            storage.set_item(storage_key, code).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::PersistPendingDeviceEnrollmentCode,
+                    "WEB_PENDING_ENROLLMENT_PERSIST_FAILED",
+                    format!("failed to persist pending device enrollment code: {:?}", error),
+                )
+            })
         }
 
-        fn clear_pending_device_enrollment_code(storage_key: &str) -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+        fn clear_pending_device_enrollment_code(storage_key: &str) -> Result<(), WebUiError> {
+            let window = web_sys::window().ok_or_else(|| {
+                WebUiError::config(
+                    WebUiOperation::ClearPendingDeviceEnrollmentCode,
+                    "WEB_WINDOW_UNAVAILABLE",
+                    "window is not available",
+                )
+            })?;
             let storage = window
                 .local_storage()
-                .map_err(|error| format!("localStorage unavailable: {:?}", error))?
-                .ok_or_else(|| "localStorage unavailable".to_string())?;
-            storage
-                .remove_item(storage_key)
-                .map_err(|error| format!("failed to clear pending device enrollment code: {:?}", error))
+                .map_err(|error| {
+                    WebUiError::config(
+                        WebUiOperation::ClearPendingDeviceEnrollmentCode,
+                        "WEB_LOCAL_STORAGE_UNAVAILABLE",
+                        format!("localStorage unavailable: {:?}", error),
+                    )
+                })?
+                .ok_or_else(|| {
+                    WebUiError::config(
+                        WebUiOperation::ClearPendingDeviceEnrollmentCode,
+                        "WEB_LOCAL_STORAGE_MISSING",
+                        "localStorage unavailable",
+                    )
+                })?;
+            storage.remove_item(storage_key).map_err(|error| {
+                WebUiError::config(
+                    WebUiOperation::ClearPendingDeviceEnrollmentCode,
+                    "WEB_PENDING_ENROLLMENT_CLEAR_FAILED",
+                    format!("failed to clear pending device enrollment code: {:?}", error),
+                )
+            })
         }
 
-        fn reload_page() -> Result<(), String> {
-            let window = web_sys::window().ok_or_else(|| "window is not available".to_string())?;
+        fn reload_page() -> Result<(), WebUiError> {
+            let window = web_sys::window().ok_or_else(|| {
+                WebUiError::config(
+                    WebUiOperation::ReloadPage,
+                    "WEB_WINDOW_UNAVAILABLE",
+                    "window is not available",
+                )
+            })?;
             window
                 .location()
                 .reload()
-                .map_err(|error| format!("failed to reload page: {:?}", error))
+                .map_err(|error| {
+                    WebUiError::operation(
+                        WebUiOperation::ReloadPage,
+                        "WEB_RELOAD_FAILED",
+                        format!("failed to reload page: {:?}", error),
+                    )
+                })
         }
 
         #[derive(Clone, PartialEq)]
@@ -299,18 +590,19 @@ cfg_if! {
             account_ready: bool,
         }
 
-        async fn bootstrap_controller() -> Result<BootstrapState, String> {
+        async fn bootstrap_controller() -> Result<BootstrapState, WebUiError> {
             let storage_prefix = active_storage_prefix();
             let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
             let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
             let legacy_device_key = legacy_selected_device_key(&storage_prefix);
             let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
-            let selected_runtime_identity = load_selected_runtime_identity(
+            let selected_runtime_identity = logged_optional(load_selected_runtime_identity(
                 &runtime_identity_key,
                 &legacy_authority_key,
                 &legacy_device_key,
-            );
-            let pending_account_bootstrap = load_pending_account_bootstrap(&pending_account_key);
+            ));
+            let pending_account_bootstrap =
+                logged_optional(load_pending_account_bootstrap(&pending_account_key));
             web_sys::console::log_1(
                 &format!(
                     "[web-bootstrap] storage_prefix={storage_prefix};selected_runtime_identity={:?};pending_account_bootstrap={:?}",
@@ -334,7 +626,13 @@ cfg_if! {
                         .with_config(config)
                         .build()
                         .await
-                        .map_err(|error| format!("failed to build web runtime: {error}"))?,
+                        .map_err(|error| {
+                            WebUiError::operation(
+                                WebUiOperation::BootstrapController,
+                                "WEB_RUNTIME_BUILD_FAILED",
+                                format!("failed to build web runtime: {error}"),
+                            )
+                        })?,
                 );
                 web_sys::console::log_1(
                     &format!(
@@ -347,17 +645,40 @@ cfg_if! {
 
                 let app_core = Arc::new(RwLock::new(
                     AppCore::with_runtime(AppConfig::default(), agent.clone().as_runtime_bridge())
-                        .map_err(|error| format!("failed to initialize AppCore: {error}"))?,
+                        .map_err(|error| {
+                            WebUiError::operation(
+                                WebUiOperation::BootstrapController,
+                                "WEB_APP_CORE_INIT_FAILED",
+                                format!("failed to initialize AppCore: {error}"),
+                            )
+                        })?,
                 ));
 
                 let ceremony_agent = agent.clone();
                 let ceremony_app_core = app_core.clone();
                 spawn(async move {
                     loop {
-                        let _ = time_workflows::sleep_ms(&ceremony_app_core, 500).await;
+                        if let Err(error) =
+                            time_workflows::sleep_ms(&ceremony_app_core, 500).await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::ProcessCeremonyAcceptances,
+                                    "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                            break;
+                        }
                         if let Err(error) = ceremony_agent.process_ceremony_acceptances().await {
-                            web_sys::console::debug_1(
-                                &format!("process_ceremony_acceptances error: {error}").into(),
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::ProcessCeremonyAcceptances,
+                                    "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
+                                    error.to_string(),
+                                ),
                             );
                         }
                     }
@@ -365,16 +686,26 @@ cfg_if! {
 
                 AppCore::init_signals_with_hooks(&app_core)
                     .await
-                    .map_err(|error| format!("failed to initialize app signals: {error}"))?;
+                    .map_err(|error| {
+                        WebUiError::operation(
+                            WebUiOperation::BootstrapController,
+                            "WEB_SIGNAL_INIT_FAILED",
+                            format!("failed to initialize app signals: {error}"),
+                        )
+                    })?;
 
-                    let bootstrap_resolution =
+                let bootstrap_resolution =
                     account_workflows::reconcile_pending_runtime_account_bootstrap(
                         &app_core,
                         pending_account_bootstrap.clone(),
                     )
                     .await
                     .map_err(|error| {
-                        format!("failed to reconcile pending web account bootstrap: {error}")
+                        WebUiError::operation(
+                            WebUiOperation::BootstrapController,
+                            "WEB_PENDING_BOOTSTRAP_RECONCILE_FAILED",
+                            format!("failed to reconcile pending web account bootstrap: {error}"),
+                        )
                     })?;
                 let account_ready = bootstrap_resolution.account_ready;
 
@@ -397,12 +728,14 @@ cfg_if! {
                     &runtime_identity_key,
                     &current_runtime_identity,
                 ) {
-                    web_sys::console::warn_1(
-                        &format!("failed to persist selected runtime identity: {error}").into(),
-                    );
+                    log_web_error("warn", &error);
                 }
-                let _ = clear_storage_key(&legacy_authority_key);
-                let _ = clear_storage_key(&legacy_device_key);
+                if let Err(error) = clear_storage_key(&legacy_authority_key) {
+                    log_web_error("warn", &error);
+                }
+                if let Err(error) = clear_storage_key(&legacy_device_key) {
+                    log_web_error("warn", &error);
+                }
 
                 let current_device_id = current_runtime_identity.device_id;
                 let controller = Arc::new(UiController::with_authority_switcher(
@@ -417,10 +750,14 @@ cfg_if! {
                             &runtime_identity_key,
                             &legacy_authority_key,
                             &legacy_device_key,
-                        )
-                        .unwrap_or_else(|| {
-                            BootstrapRuntimeIdentity::new(authority_id, current_device_id.clone())
-                        });
+                        );
+                        let runtime_identity =
+                            logged_optional(runtime_identity).unwrap_or_else(|| {
+                                BootstrapRuntimeIdentity::new(
+                                    authority_id,
+                                    current_device_id.clone(),
+                                )
+                            });
                         let updated_identity = BootstrapRuntimeIdentity::new(
                             authority_id,
                             runtime_identity.device_id,
@@ -429,17 +766,17 @@ cfg_if! {
                             &runtime_identity_key,
                             &updated_identity,
                         ) {
-                            web_sys::console::error_1(
-                                &format!("failed to persist runtime identity switch: {error}").into(),
-                            );
+                            log_web_error("error", &error);
                             return;
                         }
-                        let _ = clear_storage_key(&legacy_authority_key);
-                        let _ = clear_storage_key(&legacy_device_key);
+                        if let Err(error) = clear_storage_key(&legacy_authority_key) {
+                            log_web_error("warn", &error);
+                        }
+                        if let Err(error) = clear_storage_key(&legacy_device_key) {
+                            log_web_error("warn", &error);
+                        }
                         if let Err(error) = reload_page() {
-                            web_sys::console::error_1(
-                                &format!("failed to reload after authority switch: {error}").into(),
-                            );
+                            log_web_error("error", &error);
                         }
                     })),
                 ));
@@ -452,9 +789,13 @@ cfg_if! {
                     )
                     .await
                     {
-                        web_sys::console::warn_1(
-                            &format!("failed to seed settings signal during bootstrap: {error}")
-                                .into(),
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::RefreshBootstrapSettings,
+                                "WEB_BOOTSTRAP_SETTINGS_REFRESH_FAILED",
+                                error.to_string(),
+                            ),
                         );
                     }
                     match runtime_workflows::require_runtime(controller.app_core()).await {
@@ -476,21 +817,29 @@ cfg_if! {
                                     )
                                     .into(),
                                 ),
-                                Err(error) => web_sys::console::warn_1(
-                                    &format!(
-                                        "[web-bootstrap] settings_seeded runtime_devices={:?};settings_error={error}",
-                                        runtime_devices
-                                            .iter()
-                                            .map(|device| device.id.to_string())
-                                            .collect::<Vec<_>>()
-                                    )
-                                    .into(),
+                                Err(error) => log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::InspectBootstrapRuntime,
+                                        "WEB_BOOTSTRAP_SETTINGS_INSPECT_FAILED",
+                                        format!(
+                                            "failed to inspect seeded settings for runtime devices {:?}: {error}",
+                                            runtime_devices
+                                                .iter()
+                                                .map(|device| device.id.to_string())
+                                                .collect::<Vec<_>>()
+                                        ),
+                                    ),
                                 ),
                             }
                         }
-                        Err(error) => web_sys::console::warn_1(
-                            &format!("[web-bootstrap] failed to inspect runtime devices: {error}")
-                                .into(),
+                        Err(error) => log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::InspectBootstrapRuntime,
+                                "WEB_BOOTSTRAP_RUNTIME_INSPECT_FAILED",
+                                error.to_string(),
+                            ),
                         ),
                     }
                 }
@@ -510,20 +859,37 @@ cfg_if! {
                     account_ready,
                 })
             } else {
-                if load_selected_authority(&legacy_authority_key).is_some()
-                    || load_selected_device(&legacy_device_key).is_some()
+                if logged_optional(load_selected_authority(&legacy_authority_key)).is_some()
+                    || logged_optional(load_selected_device(&legacy_device_key)).is_some()
                 {
-                    web_sys::console::warn_1(
-                        &"[web-bootstrap] incomplete persisted bootstrap identity; starting without runtime".into(),
+                    log_web_error(
+                        "warn",
+                        &WebUiError::config(
+                            WebUiOperation::BootstrapController,
+                            "WEB_BOOTSTRAP_LEGACY_IDENTITY_INCOMPLETE",
+                            "incomplete persisted bootstrap identity; starting without runtime",
+                        ),
                     );
                 }
                 let app_core = Arc::new(RwLock::new(
                     AppCore::new(AppConfig::default())
-                        .map_err(|error| format!("failed to initialize bootstrap AppCore: {error}"))?,
+                        .map_err(|error| {
+                            WebUiError::operation(
+                                WebUiOperation::BootstrapController,
+                                "WEB_BOOTSTRAP_APP_CORE_INIT_FAILED",
+                                format!("failed to initialize bootstrap AppCore: {error}"),
+                            )
+                        })?,
                 ));
                 AppCore::init_signals_with_hooks(&app_core)
                     .await
-                    .map_err(|error| format!("failed to initialize bootstrap app signals: {error}"))?;
+                    .map_err(|error| {
+                        WebUiError::operation(
+                            WebUiOperation::BootstrapController,
+                            "WEB_BOOTSTRAP_SIGNAL_INIT_FAILED",
+                            format!("failed to initialize bootstrap app signals: {error}"),
+                        )
+                    })?;
                 let controller = Arc::new(UiController::new(app_core, clipboard));
                 controller.set_account_setup_state(false, "", None);
                 install_harness_instrumentation(controller.clone());
@@ -581,7 +947,7 @@ cfg_if! {
                             class: "max-w-xl space-y-3 text-center",
                             h1 { class: "text-sm font-semibold uppercase tracking-[0.12em]", "Aura" }
                             p { class: "text-sm text-muted-foreground", "Web runtime bootstrap failed." }
-                            p { class: "text-xs text-muted-foreground break-words", "{error}" }
+                            p { class: "text-xs text-muted-foreground break-words", "{error.user_message()}" }
                         }
                     }
                 };
@@ -607,10 +973,10 @@ cfg_if! {
             let mut sync_loop_started = use_signal(|| false);
             let bootstrap_account_ready = use_signal(|| state.account_ready);
             let mut account_name = use_signal(String::new);
-            let mut account_error = use_signal(|| Option::<String>::None);
+            let mut account_error = use_signal(|| Option::<WebUiError>::None);
             let creating_account = use_signal(|| false);
             let mut import_code = use_signal(String::new);
-            let mut import_error = use_signal(|| Option::<String>::None);
+            let mut import_error = use_signal(|| Option::<WebUiError>::None);
             let importing_code = use_signal(|| false);
             let mut auto_import_started = use_signal(|| false);
             let controller_snapshot = controller.semantic_model_snapshot();
@@ -625,11 +991,50 @@ cfg_if! {
                     loop {
                         let runtime = { app_core.read().await.runtime().cloned() };
                         if let Some(runtime) = runtime {
-                            let _ = runtime.trigger_discovery().await;
-                            let _ = runtime.trigger_sync().await;
+                            if let Err(error) = runtime.trigger_discovery().await {
+                                log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::BackgroundSync,
+                                        "WEB_DISCOVERY_TRIGGER_FAILED",
+                                        error.to_string(),
+                                    ),
+                                );
+                            }
+                            if let Err(error) = runtime.trigger_sync().await {
+                                log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::BackgroundSync,
+                                        "WEB_SYNC_TRIGGER_FAILED",
+                                        error.to_string(),
+                                    ),
+                                );
+                            }
                         }
-                        let _ = network_workflows::refresh_discovered_peers(&app_core).await;
-                        let _ = time_workflows::sleep_ms(&app_core, 1_500).await;
+                        if let Err(error) =
+                            network_workflows::refresh_discovered_peers(&app_core).await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                        }
+                        if let Err(error) = time_workflows::sleep_ms(&app_core, 1_500).await {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                            break;
+                        }
                     }
                 });
             }
@@ -667,35 +1072,55 @@ cfg_if! {
                     let controller = controller.clone();
                     spawn(async move {
                         let app_core = controller.app_core().clone();
-                            let result = async {
-                                let mut requires_reload = false;
-                                let invitation =
-                                    invitation_workflows::import_invitation_details(&app_core, &code)
-                                        .await?;
+                        let result = async {
+                            let mut requires_reload = false;
+                            let invitation = invitation_workflows::import_invitation_details(
+                                &app_core, &code,
+                            )
+                            .await
+                            .map_err(|error| {
+                                WebUiError::operation(
+                                    WebUiOperation::ImportDeviceEnrollmentCode,
+                                    "WEB_DEVICE_ENROLLMENT_IMPORT_DETAILS_FAILED",
+                                    error.to_string(),
+                                )
+                            })?;
                             let InvitationBridgeType::DeviceEnrollment {
                                 subject_authority,
                                 device_id,
                                 ..
                             } = invitation.invitation_type.clone()
                             else {
-                                return Err(aura_core::AuraError::invalid(
+                                return Err(WebUiError::input(
+                                    WebUiOperation::ImportDeviceEnrollmentCode,
+                                    "WEB_DEVICE_ENROLLMENT_CODE_INVALID_KIND",
                                     "Code is not a device enrollment invitation",
                                 ));
                             };
 
-                            let runtime = runtime_workflows::require_runtime(&app_core).await?;
+                            let runtime = runtime_workflows::require_runtime(&app_core)
+                                .await
+                                .map_err(|error| {
+                                    WebUiError::operation(
+                                        WebUiOperation::ImportDeviceEnrollmentCode,
+                                        "WEB_RUNTIME_REQUIRED_FAILED",
+                                        error.to_string(),
+                                    )
+                                })?;
                             let current_authority = runtime.authority_id();
-                            let selected_runtime_identity = load_selected_runtime_identity(
-                                &runtime_identity_key,
-                                &legacy_authority_key,
-                                &legacy_device_key,
+                            let selected_runtime_identity = logged_optional(
+                                load_selected_runtime_identity(
+                                    &runtime_identity_key,
+                                    &legacy_authority_key,
+                                    &legacy_device_key,
+                                ),
                             );
-                                if current_authority != subject_authority
-                                    || selected_runtime_identity
-                                        .as_ref()
-                                        .map(|identity| identity.device_id)
-                                        != Some(device_id)
-                                {
+                            if current_authority != subject_authority
+                                || selected_runtime_identity
+                                    .as_ref()
+                                    .map(|identity| identity.device_id)
+                                    != Some(device_id)
+                            {
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staging_reload current_authority={};subject_authority={};selected_runtime_identity={:?};invited_device={}",
@@ -710,14 +1135,26 @@ cfg_if! {
                                     &pending_code_storage_key,
                                     &code,
                                 )
-                                .map_err(aura_core::AuraError::agent)?;
+                                .map_err(|error| {
+                                    error.with_operation(
+                                        WebUiOperation::ImportDeviceEnrollmentCode,
+                                    )
+                                })?;
                                 persist_selected_runtime_identity(
                                     &runtime_identity_key,
                                     &BootstrapRuntimeIdentity::new(subject_authority, device_id),
                                 )
-                                .map_err(aura_core::AuraError::agent)?;
-                                let _ = clear_storage_key(&legacy_authority_key);
-                                let _ = clear_storage_key(&legacy_device_key);
+                                .map_err(|error| {
+                                    error.with_operation(
+                                        WebUiOperation::ImportDeviceEnrollmentCode,
+                                    )
+                                })?;
+                                if let Err(error) = clear_storage_key(&legacy_authority_key) {
+                                    log_web_error("warn", &error);
+                                }
+                                if let Err(error) = clear_storage_key(&legacy_device_key) {
+                                    log_web_error("warn", &error);
+                                }
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staged_reload subject_authority={};device_id={}",
@@ -726,11 +1163,19 @@ cfg_if! {
                                     .into(),
                                 );
                                 requires_reload = true;
-                                reload_page().map_err(aura_core::AuraError::agent)?;
+                                reload_page().map_err(|error| {
+                                    error.with_operation(
+                                        WebUiOperation::ImportDeviceEnrollmentCode,
+                                    )
+                                })?;
                                 return Ok(requires_reload);
                             }
 
-                            let _ = clear_pending_device_enrollment_code(&pending_code_storage_key);
+                            if let Err(error) =
+                                clear_pending_device_enrollment_code(&pending_code_storage_key)
+                            {
+                                log_web_error("warn", &error);
+                            }
                             web_sys::console::log_1(
                                 &format!(
                                     "[web-import-device] accepting_on_bound_runtime authority={};selected_runtime_identity={:?};invited_device={}",
@@ -752,14 +1197,29 @@ cfg_if! {
                                 {
                                     break;
                                 }
-                                time_workflows::sleep_ms(&app_core, 250).await?;
+                                time_workflows::sleep_ms(&app_core, 250)
+                                    .await
+                                    .map_err(|error| {
+                                        WebUiError::operation(
+                                            WebUiOperation::ImportDeviceEnrollmentCode,
+                                            "WEB_DEVICE_ENROLLMENT_SLEEP_FAILED",
+                                            error.to_string(),
+                                        )
+                                    })?;
                             }
 
                             invitation_workflows::accept_device_enrollment_invitation(
                                 &app_core,
                                 &invitation,
                             )
-                            .await?;
+                            .await
+                            .map_err(|error| {
+                                WebUiError::operation(
+                                    WebUiOperation::ImportDeviceEnrollmentCode,
+                                    "WEB_DEVICE_ENROLLMENT_ACCEPT_FAILED",
+                                    error.to_string(),
+                                )
+                            })?;
                             let runtime_devices_after_accept = runtime.list_devices().await;
                             web_sys::console::log_1(
                                 &format!(
@@ -771,7 +1231,15 @@ cfg_if! {
                                 )
                                 .into(),
                             );
-                            let settings = settings_workflows::get_settings(&app_core).await?;
+                            let settings = settings_workflows::get_settings(&app_core)
+                                .await
+                                .map_err(|error| {
+                                    WebUiError::operation(
+                                        WebUiOperation::ImportDeviceEnrollmentCode,
+                                        "WEB_DEVICE_ENROLLMENT_SETTINGS_FETCH_FAILED",
+                                        error.to_string(),
+                                    )
+                                })?;
                             web_sys::console::log_1(
                                 &format!(
                                     "[web-import-device] accepted settings_devices={:?}",
@@ -793,7 +1261,14 @@ cfg_if! {
                                 &app_core,
                                 bootstrap_name,
                             )
-                            .await?;
+                            .await
+                            .map_err(|error| {
+                                WebUiError::operation(
+                                    WebUiOperation::ImportDeviceEnrollmentCode,
+                                    "WEB_DEVICE_ENROLLMENT_ACCOUNT_INIT_FAILED",
+                                    error.to_string(),
+                                )
+                            })?;
                             Ok(requires_reload)
                         }
                         .await;
@@ -814,20 +1289,22 @@ cfg_if! {
                                 importing_code.set(false);
                             }
                             Err(error) => {
-                                let _ = clear_pending_device_enrollment_code(
-                                    &pending_code_storage_key,
-                                );
+                                if let Err(clear_error) =
+                                    clear_pending_device_enrollment_code(&pending_code_storage_key)
+                                {
+                                    log_web_error("warn", &clear_error);
+                                }
                                 controller.finish_runtime_operation(
                                     OperationId::device_enrollment(),
                                     OperationState::Failed,
                                 );
-                                let message = error.to_string();
+                                let message = error.user_message();
                                 controller.set_account_setup_state(
                                     false,
                                     "",
                                     Some(message.clone()),
                                 );
-                                import_error.set(Some(message));
+                                import_error.set(Some(error));
                                 importing_code.set(false);
                             }
                         }
@@ -838,8 +1315,9 @@ cfg_if! {
             let pending_code_storage_key =
                 pending_device_enrollment_code_key(&active_storage_prefix());
             if !auto_import_started() {
-                if let Some(pending_code) =
-                    load_pending_device_enrollment_code(&pending_code_storage_key)
+                if let Some(pending_code) = logged_optional(
+                    load_pending_device_enrollment_code(&pending_code_storage_key),
+                )
                 {
                     if !pending_code.is_empty() {
                         auto_import_started.set(true);
@@ -884,7 +1362,13 @@ cfg_if! {
                                 nickname.clone(),
                             )
                             .await
-                            .map_err(|error| error.to_string())
+                            .map_err(|error| {
+                                WebUiError::operation(
+                                    WebUiOperation::CreateAccount,
+                                    "WEB_CREATE_ACCOUNT_INIT_FAILED",
+                                    error.to_string(),
+                                )
+                            })
                         } else {
                             match stage_initial_web_account_bootstrap(&nickname).await {
                                 Ok(()) => reload_page(),
@@ -906,19 +1390,14 @@ cfg_if! {
                                 creating_account.set(false);
                             }
                             Err(error) => {
-                                let message = error.to_string();
-                                web_sys::console::error_1(
-                                    &format!(
-                                        "[web-onboarding] submit_account error {message}"
-                                    )
-                                    .into(),
-                                );
+                                log_web_error("error", &error);
+                                let message = error.user_message();
                                 controller.set_account_setup_state(
                                     false,
                                     nickname.clone(),
                                     Some(message.clone()),
                                 );
-                                account_error.set(Some(message));
+                                account_error.set(Some(error));
                                 creating_account.set(false);
                             }
                         }
@@ -976,7 +1455,7 @@ cfg_if! {
                                     }
                                 }
                                 if let Some(error) = account_error() {
-                                    p { class: "text-sm text-destructive", "{error}" }
+                                    p { class: "text-sm text-destructive", "{error.user_message()}" }
                                 }
                                 button {
                                     id: ControlId::OnboardingCreateAccountButton
@@ -1013,7 +1492,7 @@ cfg_if! {
                                     }
                                 }
                                 if let Some(error) = import_error() {
-                                    p { class: "text-sm text-destructive", "{error}" }
+                                    p { class: "text-sm text-destructive", "{error.user_message()}" }
                                 }
                                 button {
                                     id: ControlId::OnboardingImportDeviceButton

@@ -67,6 +67,7 @@ pub mod flow_budget;
 pub mod keymap;
 pub mod local_store;
 pub mod navigation;
+pub(crate) mod semantic_lifecycle;
 
 // Public surface area
 //

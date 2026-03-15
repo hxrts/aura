@@ -58,6 +58,35 @@ By default it is intended to validate the real Aura runtime and real user interf
   separate from state reads.
 - Parity-critical export and observation paths must not rely on placeholder
   identifiers, override caches, or heuristic success/event synthesis.
+- The harness is an `Observed` plus orchestration crate for shared semantic
+  flows. It may submit commands, wait on typed handles/readiness, and read
+  projections, but it must not author semantic lifecycle truth.
+
+## Ownership Model
+
+For shared semantic flows, `aura-harness` should use:
+
+- `Observed`
+  - typed projection reads
+  - typed readiness waits
+  - handle observation
+  - timeout diagnostics
+- narrow `ActorOwned` orchestration only where necessary
+  - executor/coordinator processes may own multi-instance orchestration state
+
+It must not use:
+
+- harness-local semantic ownership for parity-critical operations
+- fallback mutation or repair of semantic state during observation
+- raw renderer I/O as a substitute for missing semantic ownership
+
+The correct split is:
+
+- the harness may own orchestration of test instances and wait logic
+- authoritative operation lifecycle and readiness remain in product
+  coordinators
+- the harness consumes typed move-owned handles/tokens but does not create or
+  advance them outside approved command-plane surfaces
 
 ### Detailed Specifications
 

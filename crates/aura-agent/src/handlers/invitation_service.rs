@@ -196,6 +196,41 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_invitation_ceremony_registration(&self, invitation: &Invitation) {
+        if !Self::should_track_ceremony(&invitation.invitation_type) {
+            return;
+        }
+
+        let invitation = invitation.clone();
+        let service = self.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.ceremony_registration.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let sender_id = invitation.sender_id;
+        let receiver_id = invitation.receiver_id;
+        let fut = async move {
+            if let Err(error) = service.ensure_invitation_ceremony(&invitation).await {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    sender_id = %sender_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "Invitation ceremony registration failed"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                tasks.spawn_local_named("register", fut);
+            } else {
+                tasks.spawn_named("register", fut);
+            }
+        }
+    }
+
     fn should_track_ceremony(invitation_type: &InvitationType) -> bool {
         matches!(
             invitation_type,
@@ -281,7 +316,7 @@ impl InvitationServiceApi {
             )
             .await?;
         let invitation = prepared.invitation;
-        let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_invitation_ceremony_registration(&invitation);
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
@@ -316,7 +351,7 @@ impl InvitationServiceApi {
             )
             .await?;
         let invitation = prepared.invitation;
-        let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_invitation_ceremony_registration(&invitation);
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         Ok(invitation)
     }
@@ -350,7 +385,7 @@ impl InvitationServiceApi {
             )
             .await?;
         let invitation = prepared.invitation;
-        let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        self.spawn_invitation_ceremony_registration(&invitation);
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         Ok(invitation)
     }

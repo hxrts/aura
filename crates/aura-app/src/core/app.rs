@@ -134,6 +134,9 @@ pub struct AppCore {
     contacts_refresh_hook_installed: bool,
     /// Whether the chat refresh hook has been installed.
     chat_refresh_hook_installed: bool,
+    /// Whether the authoritative readiness hook has been installed.
+    #[cfg(feature = "signals")]
+    authoritative_readiness_hook_installed: bool,
 }
 
 impl AppCore {
@@ -162,6 +165,8 @@ impl AppCore {
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
             contacts_refresh_hook_installed: false,
             chat_refresh_hook_installed: false,
+            #[cfg(feature = "signals")]
+            authoritative_readiness_hook_installed: false,
         })
     }
 
@@ -226,6 +231,8 @@ impl AppCore {
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
             contacts_refresh_hook_installed: false,
             chat_refresh_hook_installed: false,
+            #[cfg(feature = "signals")]
+            authoritative_readiness_hook_installed: false,
         })
     }
 
@@ -248,6 +255,16 @@ impl AppCore {
             false
         } else {
             self.chat_refresh_hook_installed = true;
+            true
+        }
+    }
+
+    #[cfg(feature = "signals")]
+    pub(crate) fn mark_authoritative_readiness_hook_installed(&mut self) -> bool {
+        if self.authoritative_readiness_hook_installed {
+            false
+        } else {
+            self.authoritative_readiness_hook_installed = true;
             true
         }
     }
@@ -350,6 +367,9 @@ impl AppCore {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
         crate::workflows::system::install_chat_refresh_hook(app_core)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
+        crate::workflows::system::install_authoritative_readiness_hook(app_core)
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
 

@@ -41,7 +41,7 @@ use aura_app::ui::workflows::ceremonies::{
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
-use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
+use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
@@ -83,6 +83,7 @@ use crate::tui::props::{
     extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
     extract_notifications_view_props, extract_settings_view_props,
 };
+use crate::tui::semantic_lifecycle::SubmittedOperationOwner;
 use crate::tui::state_machine::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
     harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiOperation,
@@ -194,27 +195,36 @@ fn execute_harness_followup_command(
     state: &mut TuiState,
     command: TuiCommand,
     callbacks: &Option<CallbackRegistry>,
+    app_ctx: &AppCoreContext,
+    update_tx: &Option<UiUpdateSender>,
     shared_contacts: &SharedContacts,
     shared_channels: &SharedChannels,
     shared_devices: &SharedDevices,
     shared_messages: &SharedMessages,
     selected_channel: &std::sync::Arc<std::sync::RwLock<Option<String>>>,
-) {
+) -> Result<(), String> {
     match command {
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("App callbacks are unavailable");
-                return;
+                return Err("App callbacks are unavailable".to_string());
             };
             state.set_operation_state(OperationId::account_create(), OperationState::Submitting);
-            (cb.app.on_create_account)(name);
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = SubmittedOperationOwner::submit_from_parts(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::account_create(),
+                SemanticOperationKind::CreateAccount,
+            );
+            (cb.app.on_create_account)(name, operation);
         }
         TuiCommand::Dispatch(DispatchCommand::CreateHome { name, description }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Neighborhood callbacks are unavailable");
-                return;
+                return Err("Neighborhood callbacks are unavailable".to_string());
             };
-            state.set_operation_state(OperationId::create_home(), OperationState::Submitting);
             (cb.neighborhood.on_create_home)(name, description);
         }
         TuiCommand::Dispatch(DispatchCommand::SelectChannel { channel_id }) => {
@@ -229,13 +239,12 @@ fn execute_harness_followup_command(
                     *guard = Some(channel_id.to_string());
                 }
             } else {
-                state.toast_error("Selected channel is no longer visible");
+                return Err("Selected channel is no longer visible".to_string());
             }
         }
         TuiCommand::Dispatch(DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("App callbacks are unavailable");
-                return;
+                return Err("App callbacks are unavailable".to_string());
             };
             state.set_operation_state(OperationId::device_enrollment(), OperationState::Submitting);
             (cb.app.on_import_device_enrollment_during_onboarding)(code);
@@ -247,10 +256,8 @@ fn execute_harness_followup_command(
             ttl_secs,
         }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Invitation callbacks are unavailable");
-                return;
+                return Err("Invitation callbacks are unavailable".to_string());
             };
-            state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
             state.clear_runtime_fact_kind(RuntimeEventKind::InvitationCodeReady);
             (cb.invitations.on_create)(
                 receiver_id,
@@ -261,33 +268,28 @@ fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::ImportInvitation { code }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Invitation callbacks are unavailable");
-                return;
+                return Err("Invitation callbacks are unavailable".to_string());
             };
-            state.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_import)(code);
         }
         TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Chat callbacks are unavailable");
-                return;
+                return Err("Chat callbacks are unavailable".to_string());
             };
             state.router.go_to(Screen::Chat);
             (cb.chat.on_join_channel)(channel_name);
         }
         TuiCommand::Dispatch(DispatchCommand::AcceptPendingHomeInvitation) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Chat callbacks are unavailable");
-                return;
+                return Err("Chat callbacks are unavailable".to_string());
             };
             state.router.go_to(Screen::Chat);
             (cb.chat.on_accept_pending_channel_invitation)();
         }
         TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Chat callbacks are unavailable");
-                return;
+                return Err("Chat callbacks are unavailable".to_string());
             };
             let channels = match shared_channels.read() {
                 Ok(guard) => guard.clone(),
@@ -313,7 +315,7 @@ fn execute_harness_followup_command(
             {
                 (cb.chat.on_send)(channel_id, content);
             } else {
-                state.toast_error(format!(
+                return Err(format!(
                     "No committed channel selected (channels={} selected_index={} visible_messages={})",
                     channels.len(),
                     state.chat.selected_channel,
@@ -323,8 +325,7 @@ fn execute_harness_followup_command(
         }
         TuiCommand::Dispatch(DispatchCommand::InviteSelectedContactToChannel) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Contact callbacks are unavailable");
-                return;
+                return Err("Contact callbacks are unavailable".to_string());
             };
             let contact_idx = state.contacts.selected_index;
             let channel_idx = state.chat.selected_channel;
@@ -337,14 +338,11 @@ fn execute_harness_followup_command(
                 Err(poisoned) => poisoned.into_inner().clone(),
             };
             let Some(contact) = contacts.get(contact_idx) else {
-                state.toast_error("No contact selected");
-                return;
+                return Err("No contact selected".to_string());
             };
             let Some(channel) = channels.get(channel_idx) else {
-                state.toast_error("No channel selected");
-                return;
+                return Err("No channel selected".to_string());
             };
-            state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(contact.id.clone(), channel.name.clone());
         }
@@ -353,8 +351,7 @@ fn execute_harness_followup_command(
             channel_id,
         }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Contact callbacks are unavailable");
-                return;
+                return Err("Contact callbacks are unavailable".to_string());
             };
             let channels = match shared_channels.read() {
                 Ok(guard) => guard.clone(),
@@ -365,12 +362,10 @@ fn execute_harness_followup_command(
                 .iter()
                 .find(|channel| channel.id == channel_id_string)
             else {
-                state.toast_error(format!(
+                return Err(format!(
                     "Selected channel is stale or unavailable: {channel_id}"
                 ));
-                return;
             };
-            state.set_operation_state(OperationId::invitation_create(), OperationState::Submitting);
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(authority_id.to_string(), channel.id.clone());
         }
@@ -379,16 +374,14 @@ fn execute_harness_followup_command(
             invitee_authority_id,
         }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Settings callbacks are unavailable");
-                return;
+                return Err("Settings callbacks are unavailable".to_string());
             };
             state.set_operation_state(OperationId::device_enrollment(), OperationState::Submitting);
             (cb.settings.on_add_device)(name, invitee_authority_id);
         }
         TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id }) => {
             let Some(cb) = callbacks.as_ref() else {
-                state.toast_error("Settings callbacks are unavailable");
-                return;
+                return Err("Settings callbacks are unavailable".to_string());
             };
             (cb.settings.on_remove_device)(device_id);
         }
@@ -399,14 +392,12 @@ fn execute_harness_followup_command(
                 .unwrap_or_default();
 
             if current_devices.is_empty() {
-                state.toast_info("No devices to remove");
-                return;
+                return Err("No devices to remove".to_string());
             }
 
             let has_removable = current_devices.iter().any(|device| !device.is_current);
             if !has_removable {
-                state.toast_info("Cannot remove the current device");
-                return;
+                return Err("Cannot remove the current device".to_string());
             }
 
             let devices = current_devices
@@ -432,6 +423,7 @@ fn execute_harness_followup_command(
         }
         _ => {}
     }
+    Ok(())
 }
 
 /// Props for IoApp
@@ -564,6 +556,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let update_rx_holder = props.update_rx.clone();
     let harness_command_rx_holder = props.harness_command_rx.clone();
     let update_tx_holder = props.update_tx.clone();
+    let update_tx_for_commands = update_tx_holder.clone();
+    let update_tx_for_events = update_tx_holder.clone();
 
     // Nickname suggestion state - State<T> automatically triggers re-renders on .set()
     let nickname_suggestion_state = hooks.use_state({
@@ -574,6 +568,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Get AppCoreContext for IoContext access
     let app_ctx = hooks.use_context::<AppCoreContext>();
     let tasks = app_ctx.tasks();
+    let app_core_for_events = app_ctx.app_core.raw().clone();
 
     // =========================================================================
     // NavBar status: derive from reactive signals (no blocking awaits at startup).
@@ -923,12 +918,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 state,
                                 command,
                                 &callbacks_for_commands,
+                                &app_ctx_for_commands,
+                                &update_tx_for_commands,
                                 &shared_contacts_for_commands,
                                 &shared_channels_for_commands,
                                 &shared_devices_for_commands,
                                 &shared_messages_for_commands,
                                 &tui_selected_for_commands,
-                            );
+                            )?;
                         }
                         Ok::<_, String>(state.screen())
                     });
@@ -2202,7 +2199,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             OperationId::account_create(),
                                             OperationState::Submitting,
                                         );
-                                        (cb.app.on_create_account)(name);
+                                        if let Some(update_tx) = update_tx_for_events.clone() {
+                                            let operation = SubmittedOperationOwner::submit_from_parts(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::account_create(),
+                                                SemanticOperationKind::CreateAccount,
+                                            );
+                                            (cb.app.on_create_account)(name, operation);
+                                        }
                                     }
                                     DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
                                         code,

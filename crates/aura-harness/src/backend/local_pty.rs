@@ -1386,13 +1386,13 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let issue_deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snapshot = self.ui_snapshot()?;
-            if snapshot.operation_state_for_instance(&handle.id, &handle.instance_id)
+            if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
                 == Some(aura_app::ui::contract::OperationState::Failed)
             {
                 anyhow::bail!("submit_create_account: account creation failed");
             }
             if snapshot
-                .operation_state_for_instance(&handle.id, &handle.instance_id)
+                .operation_state_for_instance(handle.id(), handle.instance_id())
                 .is_some_and(|state| {
                     matches!(
                         state,
@@ -1629,7 +1629,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 }
                 return Ok(SubmittedAction::with_ui_operation((), handle));
             }
-            if snapshot.operation_state_for_instance(&handle.id, &handle.instance_id)
+            if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
                 == Some(OperationState::Failed)
             {
                 anyhow::bail!("submit_accept_pending_channel_invitation: invitation_accept failed");
@@ -1729,7 +1729,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let first_deadline = Instant::now() + Duration::from_millis(1500);
         loop {
             let snapshot = self.ui_snapshot()?;
-            match snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) {
+            match snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) {
                 Some(OperationState::Failed) => {
                     anyhow::bail!("submit_send_chat_message: runtime send failed");
                 }
@@ -1753,7 +1753,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let retry_deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let snapshot = self.ui_snapshot()?;
-            match snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) {
+            match snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) {
                 Some(OperationState::Failed) => {
                     anyhow::bail!("submit_send_chat_message: runtime send failed");
                 }

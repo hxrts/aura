@@ -47,6 +47,34 @@ It remains thin and delegates shared UI state, routing, and snapshot rendering t
   revision/sequence and render-convergence semantics.
 - Onboarding uses the same semantic snapshot/publication path as every other
   screen.
+- The browser shell is an `Observed` plus bridge crate for shared semantic
+  flows. It may submit commands and expose projections, but it must not own
+  terminal semantic lifecycle truth for parity-critical operations.
+
+## Ownership Model
+
+For shared semantic flows, `aura-web` should use:
+
+- `Observed`
+  - browser-side projection publication
+  - render-convergence publication
+  - compatibility/version metadata for the harness bridge
+- narrow `ActorOwned` bridge ownership only where necessary
+  - browser bridge installation and command ingress may be long-lived mutable
+    async browser surfaces
+
+It must not use:
+
+- browser-local semantic lifecycle ownership
+- selector/DOM-driven readiness authorship
+- browser-only owner fields that shadow authoritative operation ownership
+
+The correct split is:
+
+- browser bridge code is allowed to own bridge mechanics
+- authoritative semantic lifecycle remains in shared workflow/runtime
+  coordinators
+- DOM helpers stay conformance-only and downstream of semantic ownership
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
 The browser shell exports structured semantic UI state and render convergence

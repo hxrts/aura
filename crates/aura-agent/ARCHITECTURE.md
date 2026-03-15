@@ -36,6 +36,9 @@ ownership, effect registry, builder infrastructure, and choreography adapters.
 - Authority-first design: all operations scoped to specific authorities.
 - Lazy composition: effects assembled on-demand.
 - Mode-aware execution: production, testing, and simulation use same API.
+- For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It
+  may own long-lived mutable async runtime state, but it must not leak that
+  ownership into frontend-local semantic lifecycle authorship.
 
 ## Structured Concurrency Model
 

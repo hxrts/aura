@@ -936,6 +936,77 @@ impl AuthoritativeSemanticFact {
             ),
         }
     }
+
+    #[must_use]
+    pub fn runtime_fact_bridge(&self) -> Option<(RuntimeEventKind, RuntimeFact)> {
+        match self {
+            Self::ContactLinkReady {
+                authority_id,
+                contact_count,
+            } => Some((
+                RuntimeEventKind::ContactLinkReady,
+                RuntimeFact::ContactLinkReady {
+                    authority_id: Some(authority_id.clone()),
+                    contact_count: Some(*contact_count as usize),
+                },
+            )),
+            Self::PendingHomeInvitationReady => Some((
+                RuntimeEventKind::PendingHomeInvitationReady,
+                RuntimeFact::PendingHomeInvitationReady,
+            )),
+            Self::ChannelMembershipReady {
+                channel,
+                member_count,
+            } => Some((
+                RuntimeEventKind::ChannelMembershipReady,
+                RuntimeFact::ChannelMembershipReady {
+                    channel: channel.clone(),
+                    member_count: Some(*member_count),
+                },
+            )),
+            Self::RecipientPeersResolved {
+                channel,
+                member_count,
+            } => Some((
+                RuntimeEventKind::RecipientPeersResolved,
+                RuntimeFact::RecipientPeersResolved {
+                    channel: channel.clone(),
+                    member_count: *member_count,
+                },
+            )),
+            Self::MessageCommitted { channel, content } => Some((
+                RuntimeEventKind::MessageCommitted,
+                RuntimeFact::MessageCommitted {
+                    channel: channel.clone(),
+                    content: content.clone(),
+                },
+            )),
+            Self::MessageDeliveryReady {
+                channel,
+                member_count,
+            } => Some((
+                RuntimeEventKind::MessageDeliveryReady,
+                RuntimeFact::MessageDeliveryReady {
+                    channel: channel.clone(),
+                    member_count: *member_count,
+                },
+            )),
+            Self::OperationStatus { .. } | Self::PeerChannelReady { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn operation_status_bridge(&self) -> Option<(OperationId, SemanticOperationStatus)> {
+        match self {
+            Self::OperationStatus {
+                operation_id,
+                status,
+                ..
+            } => Some((operation_id.clone(), status.clone())),
+            _ => None,
+        }
+    }
+
 }
 
 impl OperationId {
@@ -1281,6 +1352,7 @@ impl RuntimeFact {
             }
         }
     }
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3048,8 +3120,8 @@ mod tests {
         HarnessShellStructureSnapshot, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
         ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
         ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId,
-        RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot, SemanticFailureCode,
-        SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
+        RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot,
+        SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
         SemanticOperationPhase, SemanticOperationStatus, SettingsSectionSurfaceId,
         SharedSettingsSectionId, ToastId, ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness,
         UiSnapshot, ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
@@ -3304,6 +3376,48 @@ mod tests {
         };
 
         assert_eq!(fact.kind(), AuthoritativeSemanticFactKind::PeerChannelReady);
+    }
+
+    #[test]
+    fn authoritative_semantic_fact_runtime_fact_bridge_maps_delivery_readiness() {
+        let fact = AuthoritativeSemanticFact::MessageDeliveryReady {
+            channel: ChannelFactKey::named("shared"),
+            member_count: 2,
+        };
+
+        assert_eq!(
+            fact.runtime_fact_bridge(),
+            Some((
+                RuntimeEventKind::MessageDeliveryReady,
+                RuntimeFact::MessageDeliveryReady {
+                    channel: ChannelFactKey::named("shared"),
+                    member_count: 2,
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn authoritative_semantic_fact_operation_status_bridge_extracts_status() {
+        let fact = AuthoritativeSemanticFact::OperationStatus {
+            operation_id: OperationId::invitation_accept(),
+            instance_id: Some(OperationInstanceId("accept-1".to_string())),
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::AcceptContactInvitation,
+                SemanticOperationPhase::Succeeded,
+            ),
+        };
+
+        assert_eq!(
+            fact.operation_status_bridge(),
+            Some((
+                OperationId::invitation_accept(),
+                SemanticOperationStatus::new(
+                    SemanticOperationKind::AcceptContactInvitation,
+                    SemanticOperationPhase::Succeeded,
+                ),
+            ))
+        );
     }
 
     #[test]

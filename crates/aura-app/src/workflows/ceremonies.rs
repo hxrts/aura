@@ -9,6 +9,13 @@ use std::sync::Arc;
 use async_lock::RwLock;
 
 use super::error::{ceremony_op, WorkflowError};
+use crate::ui_contract::{
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase,
+};
+use crate::workflows::semantic_facts::{
+    publish_authoritative_operation_failure, publish_authoritative_operation_phase,
+};
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::AppCore;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
@@ -16,6 +23,29 @@ use aura_core::types::FrostThreshold;
 use aura_core::AuraError;
 use std::future::Future;
 use std::time::Duration;
+
+async fn fail_start_device_enrollment<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    detail: impl Into<String>,
+) -> Result<T, AuraError> {
+    let error = SemanticOperationError::new(
+        SemanticFailureDomain::Internal,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    publish_authoritative_operation_failure(
+        app_core,
+        OperationId::device_enrollment(),
+        SemanticOperationKind::StartDeviceEnrollment,
+        error.clone(),
+    )
+    .await?;
+    Err(AuraError::agent(
+        error
+            .detail
+            .unwrap_or_else(|| "start device enrollment failed".to_string()),
+    ))
+}
 
 /// Start a guardian key-rotation ceremony.
 pub async fn start_guardian_ceremony(
@@ -59,16 +89,40 @@ pub async fn start_device_enrollment_ceremony(
     nickname_suggestion: String,
     invitee_authority_id: Option<AuthorityId>,
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
+    publish_authoritative_operation_phase(
+        app_core,
+        OperationId::device_enrollment(),
+        SemanticOperationKind::StartDeviceEnrollment,
+        SemanticOperationPhase::WorkflowDispatched,
+    )
+    .await?;
     let runtime = {
         let core = app_core.read().await;
         core.runtime().cloned().ok_or_else(|| {
             AuraError::from(WorkflowError::RuntimeUnavailable)
         })?
     };
-    runtime
+    let start = match runtime
         .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
         .await
-        .map_err(|e| ceremony_op("start device enrollment", e).into())
+    {
+        Ok(start) => start,
+        Err(error) => {
+            return fail_start_device_enrollment(
+                app_core,
+                ceremony_op("start device enrollment", error).to_string(),
+            )
+            .await;
+        }
+    };
+    publish_authoritative_operation_phase(
+        app_core,
+        OperationId::device_enrollment(),
+        SemanticOperationKind::StartDeviceEnrollment,
+        SemanticOperationPhase::Succeeded,
+    )
+    .await?;
+    Ok(start)
 }
 /// Start a device removal ("remove device") ceremony.
 pub async fn start_device_removal_ceremony(

@@ -613,6 +613,16 @@ ci-user-flow-coverage:
 ci-user-flow-policy:
     scripts/check/user-flow-policy-guardrails.sh
     scripts/check/user-flow-guidance-sync.sh
+    just ci-harness-ownership-policy
+
+ci-harness-ownership-policy:
+    bash scripts/check/harness-ownership-category-contract.sh
+    bash scripts/check/harness-actor-vs-move-ownership.sh
+    bash scripts/check/harness-semantic-lifecycle-ownership.sh
+    bash scripts/check/harness-readiness-ownership.sh
+    bash scripts/check/harness-typed-semantic-errors.sh
+    bash scripts/check/harness-move-ownership-boundary.sh
+    bash scripts/check/harness-authoritative-fact-boundary.sh
 
 # Choreography wiring lint
 ci-choreo:
@@ -638,6 +648,27 @@ ci-async-service-actor-ownership:
 
 ci-runtime-instrumentation-schema:
     bash scripts/check/runtime-instrumentation-schema.sh
+
+ci-harness-semantic-lifecycle-ownership:
+    bash scripts/check/harness-semantic-lifecycle-ownership.sh
+
+ci-harness-readiness-ownership:
+    bash scripts/check/harness-readiness-ownership.sh
+
+ci-harness-typed-semantic-errors:
+    bash scripts/check/harness-typed-semantic-errors.sh
+
+ci-harness-move-ownership-boundary:
+    bash scripts/check/harness-move-ownership-boundary.sh
+
+ci-harness-authoritative-fact-boundary:
+    bash scripts/check/harness-authoritative-fact-boundary.sh
+
+ci-harness-actor-vs-move-ownership:
+    bash scripts/check/harness-actor-vs-move-ownership.sh
+
+ci-harness-ownership-category-contract:
+    bash scripts/check/harness-ownership-category-contract.sh
 
 # Quint typecheck
 ci-quint-typecheck:

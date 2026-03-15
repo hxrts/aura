@@ -29,6 +29,38 @@ inversion through the `RuntimeBridge` trait.
 - Shared-flow contract authority: semantic UI ids, flow support declarations,
   typed semantic command-plane metadata, and typed UI diagnostics are defined
   here rather than in frontend-specific crates.
+- Shared semantic ownership authority: parity-critical semantic operation
+  categories, typed terminal lifecycle, and owner-routed handles/tokens are
+  defined here rather than in frontend-local crates.
+
+## Ownership Model
+
+For shared semantic flows, `aura-app` is primarily a `Pure` plus `MoveOwned`
+crate.
+
+- `Pure`
+  - typed workflow/domain transitions
+  - readiness derivation rules
+  - snapshot/projection shaping
+- `MoveOwned`
+  - opaque operation handles
+  - owner tokens / handoff objects
+  - typed semantic lifecycle and failure contracts
+- not `ActorOwned`
+  - long-lived mutable async service/runtime state belongs in `aura-agent`
+- not `Observed`
+  - frontend render crates consume these contracts downstream
+
+If `aura-app` coordinates a parity-critical operation across async boundaries,
+one authoritative coordinator must own:
+
+- submission
+- phase advancement
+- terminal success/failure publication
+- cancellation / owner-drop failure
+
+Frontend crates may not invent parallel lifecycle ownership for those
+operations.
 
 ### Detailed Specifications
 

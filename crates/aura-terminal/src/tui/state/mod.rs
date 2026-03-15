@@ -564,7 +564,10 @@ mod tests {
     #[test]
     fn operation_tracker_preserves_instance_id_for_authoritative_updates() {
         let mut state = TuiState::new();
-        state.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        state.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Submitting,
+        );
         let first = state.exported_operation_snapshots();
         let first_instance = first[0].instance_id.clone();
 

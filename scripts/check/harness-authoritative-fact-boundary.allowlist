@@ -1,0 +1,3 @@
+# Temporary baseline for frontend observation modules that still pattern-match on
+# authoritative semantic facts while downstreaming them into UI state.
+^crates/aura-terminal/src/tui/screens/app/subscriptions\.rs:

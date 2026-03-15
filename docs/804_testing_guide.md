@@ -77,6 +77,59 @@ For parity-critical shared-flow execution:
 - unsupported semantic commands must fail closed and diagnostically
 - command submission must enter the frontend through its real update/event path, not render-coupled polling or ad hoc harness shims
 
+### Shared Semantic Ownership Model
+
+Parity-critical shared semantic flows must use one explicit ownership category.
+Do not mix categories casually inside the same flow.
+
+- `Pure`
+  - deterministic reducers, validators, typed domain transitions, and value
+    transformations
+  - no long-lived async ownership
+  - no ambient mutable state
+- `MoveOwned`
+  - exclusive right-to-act surfaces such as operation handles, owner tokens, and
+    consumed handoff records
+  - use when stale-owner invalidation or transfer of authority is the hard
+    problem
+  - ownership transfer should consume the old right to act rather than mutate a
+    shared owner field in place
+- `ActorOwned`
+  - long-lived mutable async state with lifecycle, supervision, and
+    multi-caller contention
+  - use for readiness coordinators, command ingress loops, runtime-facing
+    lifecycle coordinators, and other state that must stay under one live owner
+- `Observed`
+  - projections, snapshots, render state, and harness observation surfaces
+  - read-only and downstream of authoritative ownership
+
+Use the categories this way:
+
+- use actors for who runs long-lived mutable async state
+- use move semantics for who is allowed to act and how ownership is transferred
+- keep pure domain/state transitions free of actor state
+- keep observed surfaces unable to author semantic truth
+
+For shared semantic flows, the default expectation is:
+
+- `aura-app` owns authoritative semantic operation coordination and typed
+  lifecycle/error publication
+- `aura-agent` owns long-lived runtime/service actors and other actor-owned
+  async state
+- `aura-terminal` and `aura-web` submit commands and observe lifecycle; they do
+  not own terminal semantic truth
+- `aura-harness` consumes typed handles, readiness, and projections; it does
+  not mutate semantic lifecycle directly
+
+If a migrated parity-critical flow needs both actor and move semantics, the
+split must stay explicit:
+
+- the actor owns mutable lifecycle state
+- move-owned handles/tokens define which caller may advance or transfer it
+
+If that split is not explicit, the flow is not considered correct by
+construction.
+
 For parity-critical observation:
 
 - `UiSnapshot` and render-convergence data are authoritative
@@ -105,6 +158,14 @@ For migration and cleanup discipline:
 
 The authoritative written update map for these surfaces lives in
 `scripts/check/user-flow-guidance-sync.sh` and is enforced by `just ci-user-flow-policy`.
+Ownership-model policy for the shared semantic lane is enforced by the existing
+policy structure as well:
+
+- individual thin wrappers under `scripts/check/`
+- the aggregate `just ci-harness-ownership-policy` lane
+- inclusion in `just ci-user-flow-policy`, which is already part of the local
+  and CI dry-run policy path
+
 The authoritative frontend matrix for converted shared scenarios comes from
 `scenarios/harness_inventory.toml` and is enforced by
 `just ci-harness-matrix-inventory`.
@@ -115,6 +176,34 @@ must update both `crates/aura-web/ARCHITECTURE.md` and this guide so
 compatibility expectations stay explicit.
 Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a
 reason code, scope, affected surface, and authoritative doc reference.
+
+### Shared Semantic Ownership Inventory
+
+Use this as the authoritative ownership map for the migrated shared semantic
+stack. If code does not match this table, treat it as migration debt rather
+than as an acceptable alternate pattern.
+
+| Subsystem | Crate / locus | Ownership category | Authoritative owner | May mutate | May observe only |
+|-----------|----------------|--------------------|---------------------|------------|------------------|
+| Semantic command / handle contract | `aura-app::ui_contract`, `aura-app::scenario_contract` | `Pure` + `MoveOwned` | `aura-app` contract surfaces | `aura-app` contract/workflow modules | `aura-terminal`, `aura-web`, `aura-harness` |
+| Semantic operation lifecycle | `aura-app::workflows::*`, authoritative semantic facts | `MoveOwned` | authoritative workflow coordinator per operation | workflow/coordinator modules in `aura-app` | frontend render crates, harness |
+| Channel / invitation / delivery readiness | `aura-app::workflows::*`, runtime-backed readiness coordinators | `ActorOwned` | single-owner readiness coordinator | coordinator modules and their sanctioned runtime hooks | shell/subscription/render code, harness |
+| Runtime-facing async service state | `aura-agent::runtime::*`, `aura-agent::handlers::*` | `ActorOwned` | runtime service / coordinator actor | actor/service owner and sanctioned commands | `aura-app`, frontends, harness |
+| TUI command ingress | `aura-terminal::tui::harness_state`, update loop, dispatch path | `ActorOwned` ingress + `Observed` rendering | TUI update/event loop | ingress/update-loop code only | shell render code, harness reads |
+| TUI shell / callbacks / subscriptions | `aura-terminal::tui::screens`, `callbacks`, `subscriptions` | `Observed` | downstream of authoritative workflow/runtime state | local UI state only, never semantic terminal truth | harness, user-visible rendering |
+| Browser harness bridge | `aura-web::harness_bridge` | `ActorOwned` bridge mechanics + `Observed` publication | browser bridge installation / ingress | bridge module only | Playwright/harness, browser render layer |
+| Harness executor / wait model | `aura-harness::executor`, `backend::*`, `tool_api` | `Observed` + orchestration-local `ActorOwned` state | harness coordinator for test orchestration | harness orchestration state only, never product semantic truth | scenario authors, CI, diagnostics |
+| Ownership transfer / stale-owner invalidation | operation handles, owner tokens, consumed handoff records | `MoveOwned` | the current token/record holder | sanctioned transfer APIs only | projections, render, harness diagnostics |
+
+The required split is:
+
+- actor-owned subsystems own long-lived mutable async state and lifecycle
+- move-owned surfaces own exclusive right-to-act and ownership transfer
+- observed surfaces render, wait, and diagnose without authoring semantic truth
+
+Do not use this table to justify ambient shared ownership. If a subsystem needs
+both actor and move semantics, the actor owns mutable lifecycle state while the
+move-owned handle or token defines who may advance or transfer it.
 
 ### Release And Update Matrix Expectations
 

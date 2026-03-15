@@ -3,6 +3,7 @@
 //! Implements the ClipboardPort trait using the browser's Clipboard API,
 //! with a synchronous mirror for read operations that can't await async results.
 
+use crate::error::{log_web_error, WebUiError, WebUiOperation};
 use aura_ui::ClipboardPort;
 use js_sys::Reflect;
 use std::sync::RwLock;
@@ -17,22 +18,52 @@ pub struct WebClipboardAdapter {
 
 impl ClipboardPort for WebClipboardAdapter {
     fn write(&self, text: &str) {
-        if let Ok(mut guard) = self.mirror.write() {
-            *guard = text.to_string();
+        match self.mirror.write() {
+            Ok(mut guard) => {
+                *guard = text.to_string();
+            }
+            Err(error) => {
+                log_web_error(
+                    "warn",
+                    &WebUiError::operation(
+                        WebUiOperation::WriteSystemClipboard,
+                        "WEB_CLIPBOARD_MIRROR_WRITE_LOCK_FAILED",
+                        format!("failed to lock clipboard mirror for write: {error}"),
+                    ),
+                );
+            }
         }
 
         if let Some(window) = web_sys::window() {
-            let _ = Reflect::set(
+            if let Err(error) = Reflect::set(
                 window.as_ref(),
                 &JsValue::from_str("__AURA_HARNESS_CLIPBOARD__"),
                 &JsValue::from_str(text),
-            );
+            ) {
+                log_web_error(
+                    "warn",
+                    &WebUiError::operation(
+                        WebUiOperation::MirrorClipboardToHarness,
+                        "WEB_HARNESS_CLIPBOARD_MIRROR_FAILED",
+                        format!("failed to mirror clipboard into harness window state: {error:?}"),
+                    ),
+                );
+            }
             if let Ok(push) = Reflect::get(
                 window.as_ref(),
                 &JsValue::from_str("__AURA_DRIVER_PUSH_CLIPBOARD"),
             ) {
                 if let Some(function) = push.dyn_ref::<js_sys::Function>() {
-                    let _ = function.call1(window.as_ref(), &JsValue::from_str(text));
+                    if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(text)) {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::NotifyHarnessClipboardDriver,
+                                "WEB_HARNESS_CLIPBOARD_DRIVER_NOTIFY_FAILED",
+                                format!("failed to notify harness clipboard driver: {error:?}"),
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -43,15 +74,36 @@ impl ClipboardPort for WebClipboardAdapter {
             let text = text.to_string();
             spawn_local(async move {
                 let promise = clipboard.write_text(&text);
-                let _ = JsFuture::from(promise).await;
+                if let Err(error) = JsFuture::from(promise).await {
+                    log_web_error(
+                        "warn",
+                        &WebUiError::operation(
+                            WebUiOperation::WriteSystemClipboard,
+                            "WEB_SYSTEM_CLIPBOARD_WRITE_FAILED",
+                            format!("failed to write system clipboard: {error:?}"),
+                        ),
+                    );
+                }
             });
         }
     }
 
     fn read(&self) -> String {
-        if let Ok(guard) = self.mirror.read() {
-            if !guard.is_empty() {
-                return guard.clone();
+        match self.mirror.read() {
+            Ok(guard) => {
+                if !guard.is_empty() {
+                    return guard.clone();
+                }
+            }
+            Err(error) => {
+                log_web_error(
+                    "warn",
+                    &WebUiError::operation(
+                        WebUiOperation::WriteSystemClipboard,
+                        "WEB_CLIPBOARD_MIRROR_READ_LOCK_FAILED",
+                        format!("failed to lock clipboard mirror for read: {error}"),
+                    ),
+                );
             }
         }
         if let Some(window) = web_sys::window() {

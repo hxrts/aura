@@ -35,6 +35,37 @@ platform-agnostic.
   the primary shared-flow execution path.
 - Parity-critical semantic export must not depend on placeholder IDs,
   override-backed lists, or heuristic runtime-event inference.
+- The TUI is an `Observed` plus command-ingress surface for shared semantic
+  flows. It may submit commands and render lifecycle, but it must not own
+  terminal semantic truth for parity-critical operations.
+
+## Ownership Model
+
+For shared semantic flows, `aura-terminal` should use:
+
+- `Observed`
+  - render state
+  - projections
+  - snapshots
+  - user-visible progress/status
+- narrow `ActorOwned` ingress only where necessary
+  - the TUI command/update loop may own command application mechanics because it
+    is a long-lived mutable async frontend loop
+
+It must not use:
+
+- frontend-local `MoveOwned` semantic ownership for parity-critical operation
+  truth
+- callback-owned terminal success/failure
+- shell-owned readiness synthesis
+
+The correct split is:
+
+- the TUI ingress loop is allowed to be actor-like because it is a real
+  long-lived mutable event loop
+- semantic operation ownership remains upstream in authoritative workflow/runtime
+  coordinators
+- the shell observes and renders lifecycle but does not decide it
 
 ### Detailed Specifications
 

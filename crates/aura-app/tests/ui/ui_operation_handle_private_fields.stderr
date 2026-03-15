@@ -1,0 +1,9 @@
+error[E0451]: fields `id` and `instance_id` of struct `UiOperationHandle` are private
+ --> tests/ui/ui_operation_handle_private_fields.rs:6:9
+  |
+5 |     let _handle = UiOperationHandle {
+  |                   ----------------- in this type
+6 |         id: OperationId::send_message(),
+  |         ^^ private field
+7 |         instance_id: OperationInstanceId("instance-1".to_string()),
+  |         ^^^^^^^^^^^ private field

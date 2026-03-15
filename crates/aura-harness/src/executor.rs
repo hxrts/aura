@@ -1637,7 +1637,7 @@ fn execute_step(
                     if let Some(handle) = context
                         .last_operation_handle
                         .get(&instance_id)
-                        .filter(|handle| &handle.id == operation_id)
+                        .filter(|handle| handle.id() == operation_id)
                         .cloned()
                     {
                         convergence_stage(
@@ -3719,8 +3719,8 @@ fn wait_for_operation_handle_state(
         "step {} operation-handle wait timed out on instance {} (operation={} instance_id={} state={state:?}) last_snapshot={:?}",
         step.id,
         instance_id,
-        handle.id.0,
-        handle.instance_id.0,
+        handle.id().0,
+        handle.instance_id().0,
         Some(last_snapshot)
     )
 }
@@ -4064,11 +4064,11 @@ fn semantic_wait_matches_for_instance(
     let Some(handle) = context.last_operation_handle.get(instance_id) else {
         return true;
     };
-    if handle.id != *operation_id {
+    if handle.id() != operation_id {
         return true;
     }
 
-    snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) == Some(operation_state)
+    snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) == Some(operation_state)
 }
 
 fn operation_handle_matches(
@@ -4076,7 +4076,7 @@ fn operation_handle_matches(
     handle: &UiOperationHandle,
     state: OperationState,
 ) -> bool {
-    snapshot.operation_state_for_instance(&handle.id, &handle.instance_id) == Some(state)
+    snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) == Some(state)
 }
 
 fn semantic_wait_description(step: &ScenarioStep) -> String {
@@ -5662,10 +5662,10 @@ mod tests {
         let mut context = ScenarioContext::default();
         context.last_operation_handle.insert(
             "alice".to_string(),
-            UiOperationHandle {
-                id: OperationId::invitation_accept(),
-                instance_id: OperationInstanceId("fresh-instance".to_string()),
-            },
+            UiOperationHandle::new(
+                OperationId::invitation_accept(),
+                OperationInstanceId("fresh-instance".to_string()),
+            ),
         );
 
         assert!(
@@ -5680,10 +5680,10 @@ mod tests {
 
     #[test]
     fn operation_handle_match_requires_matching_instance_and_state() {
-        let handle = UiOperationHandle {
-            id: OperationId::invitation_accept(),
-            instance_id: OperationInstanceId("handle-instance".to_string()),
-        };
+        let handle = UiOperationHandle::new(
+            OperationId::invitation_accept(),
+            OperationInstanceId("handle-instance".to_string()),
+        );
         let matching_snapshot = UiSnapshot {
             screen: ScreenId::Contacts,
             focused_control: None,

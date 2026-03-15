@@ -5,12 +5,19 @@
 
 use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME},
+    ui_contract::{
+        OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+        SemanticOperationKind, SemanticOperationPhase,
+    },
     views::{
         home::{HomeState, HomesState},
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
     workflows::harness_determinism,
+    workflows::semantic_facts::{
+        publish_authoritative_operation_failure, publish_authoritative_operation_phase,
+    },
     workflows::signals::read_signal,
     AppCore,
 };
@@ -478,21 +485,68 @@ async fn create_home_with_creator(
     Ok(home_id)
 }
 
+async fn fail_create_home<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    detail: impl Into<String>,
+) -> Result<T, AuraError> {
+    let error = SemanticOperationError::new(
+        SemanticFailureDomain::Internal,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    publish_authoritative_operation_failure(
+        app_core,
+        OperationId::create_home(),
+        SemanticOperationKind::CreateHome,
+        error.clone(),
+    )
+    .await?;
+    Err(AuraError::agent(
+        error
+            .detail
+            .unwrap_or_else(|| "create home failed".to_string()),
+    ))
+}
+
 /// Create a home for the active authority and return its channel id.
 pub async fn create_home(
     app_core: &Arc<RwLock<AppCore>>,
     name: Option<String>,
     description: Option<String>,
 ) -> Result<ChannelId, AuraError> {
+    publish_authoritative_operation_phase(
+        app_core,
+        OperationId::create_home(),
+        SemanticOperationKind::CreateHome,
+        SemanticOperationPhase::WorkflowDispatched,
+    )
+    .await?;
     let creator = {
         let core = app_core.read().await;
         core.runtime()
             .map(|r| r.authority_id())
             .or_else(|| core.authority().copied())
     }
-    .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
+    .ok_or_else(|| AuraError::permission_denied("Authority not set"));
 
-    create_home_with_creator(app_core, creator, name, description).await
+    let creator = match creator {
+        Ok(creator) => creator,
+        Err(error) => return fail_create_home(app_core, error.to_string()).await,
+    };
+
+    let home_id = match create_home_with_creator(app_core, creator, name, description).await {
+        Ok(home_id) => home_id,
+        Err(error) => return fail_create_home(app_core, error.to_string()).await,
+    };
+
+    publish_authoritative_operation_phase(
+        app_core,
+        OperationId::create_home(),
+        SemanticOperationKind::CreateHome,
+        SemanticOperationPhase::Succeeded,
+    )
+    .await?;
+    Ok(home_id)
 }
 
 /// Create a home for a specific authority and return its channel id.

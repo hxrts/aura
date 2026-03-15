@@ -2,6 +2,7 @@ use super::runtime_tasks::TaskGroup;
 use super::service_actor::{validate_actor_transition, ActorLifecyclePhase};
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::LanTransportService;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::system::spawn_lan_transport_listener_tasks;
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
@@ -32,7 +33,9 @@ impl LanListenerServiceState {
 
 #[derive(Clone)]
 pub struct LanTransportListenerService {
+    #[cfg(not(target_arch = "wasm32"))]
     effects: Arc<AuraEffectSystem>,
+    #[cfg(not(target_arch = "wasm32"))]
     lan_transport: Arc<LanTransportService>,
     tasks: Arc<RwLock<Option<TaskGroup>>>,
     state: Arc<RwLock<LanListenerServiceState>>,
@@ -41,8 +44,13 @@ pub struct LanTransportListenerService {
 
 impl LanTransportListenerService {
     pub fn new(effects: Arc<AuraEffectSystem>, lan_transport: Arc<LanTransportService>) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let _ = (&effects, &lan_transport);
+
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             effects,
+            #[cfg(not(target_arch = "wasm32"))]
             lan_transport,
             tasks: Arc::new(RwLock::new(None)),
             state: Arc::new(RwLock::new(LanListenerServiceState::Stopped)),

@@ -126,8 +126,25 @@ impl SemanticCommandRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiOperationHandle {
-    pub id: OperationId,
-    pub instance_id: OperationInstanceId,
+    id: OperationId,
+    instance_id: OperationInstanceId,
+}
+
+impl UiOperationHandle {
+    #[must_use]
+    pub const fn new(id: OperationId, instance_id: OperationInstanceId) -> Self {
+        Self { id, instance_id }
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> &OperationId {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn instance_id(&self) -> &OperationInstanceId {
+        &self.instance_id
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -2158,14 +2175,24 @@ mod tests {
 
     #[test]
     fn submitted_action_with_ui_operation_preserves_handle() {
-        let handle = UiOperationHandle {
-            id: OperationId::create_home(),
-            instance_id: OperationInstanceId("op-1".to_string()),
-        };
+        let handle = UiOperationHandle::new(
+            OperationId::create_home(),
+            OperationInstanceId("op-1".to_string()),
+        );
         let submitted = SubmittedAction::with_ui_operation((), handle.clone());
 
         assert_eq!(submitted.submission, SubmissionState::Accepted);
         assert_eq!(submitted.handle.ui_operation, Some(handle));
+    }
+
+    #[test]
+    fn ui_operation_handle_accessors_round_trip() {
+        let id = OperationId::invitation_accept();
+        let instance_id = OperationInstanceId("opaque-op-1".to_string());
+        let handle = UiOperationHandle::new(id.clone(), instance_id.clone());
+
+        assert_eq!(handle.id(), &id);
+        assert_eq!(handle.instance_id(), &instance_id);
     }
 
     #[test]

@@ -1,0 +1,8 @@
+# Approved move-owned handle / receipt / instance-ownership boundary modules.
+^crates/aura-app/src/scenario_contract\.rs:
+^crates/aura-app/src/workflows/harness_determinism\.rs:
+^crates/aura-harness/src/backend/local_pty\.rs:
+^crates/aura-harness/src/backend/mod\.rs:
+^crates/aura-harness/src/executor\.rs:
+^crates/aura-terminal/src/tui/harness_state\.rs:
+^crates/aura-terminal/src/tui/screens/app/shell\.rs:

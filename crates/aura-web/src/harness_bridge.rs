@@ -103,7 +103,7 @@ fn install_pending_harness_command_loop(controller: Arc<UiController>) {
                 let core = controller.app_core().read().await;
                 core.runtime().is_some()
             };
-            let result = if has_runtime {
+            let result: Result<(), String> = if has_runtime {
                 account_workflows::initialize_runtime_account(
                     controller.app_core(),
                     nickname.clone(),
@@ -111,10 +111,10 @@ fn install_pending_harness_command_loop(controller: Arc<UiController>) {
                 .await
                 .map_err(|error| error.to_string())
             } else {
-                match super::stage_initial_web_account_bootstrap(&nickname).await {
-                    Ok(()) => super::reload_page(),
-                    Err(error) => Err(error),
-                }
+                super::stage_initial_web_account_bootstrap(&nickname)
+                    .await
+                    .and_then(|()| super::reload_page())
+                    .map_err(|error| error.to_string())
             };
 
             match result {
@@ -386,10 +386,6 @@ async fn submit_semantic_command(
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
-        other => Err(JsValue::from_str(&format!(
-            "unsupported semantic browser command: {:?}",
-            other.kind()
-        ))),
     }
 }
 

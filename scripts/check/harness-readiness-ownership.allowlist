@@ -1,0 +1,3 @@
+# Temporary baseline for frontend-side readiness refresh triggers that must move
+# behind approved single-owner coordinators.
+^crates/aura-terminal/src/tui/screens/app/subscriptions\.rs:

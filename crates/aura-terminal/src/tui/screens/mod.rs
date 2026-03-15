@@ -19,10 +19,10 @@ mod settings;
 
 // Re-export callback types from centralized callbacks module
 pub use crate::tui::callbacks::{
-    AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateAccountCallback,
-    CreateChannelCallback, CreateInvitationCallback, ExportInvitationCallback, GoHomeCallback,
-    GuardianSelectCallback, ImportInvitationCallback, InvitationCallback, RecoveryCallback,
-    RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetTopicCallback, StartChatCallback,
+    AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateChannelCallback,
+    CreateInvitationCallback, ExportInvitationCallback, GoHomeCallback, GuardianSelectCallback,
+    ImportInvitationCallback, InvitationCallback, RecoveryCallback, RemoveDeviceCallback,
+    RetryMessageCallback, SendCallback, SetTopicCallback, StartChatCallback,
     UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 
