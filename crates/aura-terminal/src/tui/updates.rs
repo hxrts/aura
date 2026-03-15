@@ -67,6 +67,22 @@ pub type HarnessCommandSender = tokio::sync::mpsc::Sender<HarnessCommandSubmissi
 /// Channel receiver type for typed harness UI commands.
 pub type HarnessCommandReceiver = tokio::sync::mpsc::Receiver<HarnessCommandSubmission>;
 
+/// Send a UI update, trying non-blocking first and falling back to async.
+///
+/// Prefers `try_send` to avoid blocking the caller. Falls back to `send().await`
+/// if the channel buffer is full. If both fail (channel closed), the update is
+/// silently dropped — the UI is shutting down.
+pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
+    if tx.try_send(update.clone()).is_err() {
+        let _ = tx.send(update).await;
+    }
+}
+
+/// Send a UI update without blocking. Returns `true` if sent.
+pub fn send_ui_update_lossy(tx: &UiUpdateSender, update: UiUpdate) -> bool {
+    tx.try_send(update).is_ok()
+}
+
 /// Create a new UI update channel pair
 #[must_use]
 pub fn ui_update_channel() -> (UiUpdateSender, UiUpdateReceiver) {

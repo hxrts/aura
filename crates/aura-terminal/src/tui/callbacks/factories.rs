@@ -16,14 +16,18 @@ use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
+use aura_app::ui::workflows::semantic_facts::publish_authoritative_operation_failure_with_instance;
 use aura_app::ui_contract::{
-    ChannelFactKey, InvitationFactKind, OperationState, RuntimeEventKind, RuntimeFact,
+    ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
+    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
 };
-use aura_core::identifiers::CeremonyId;
+use aura_core::types::identifiers::CeremonyId;
 use aura_core::AuthorityId;
 use futures::FutureExt;
 
 use super::types::*;
+
+const ACCEPT_PENDING_CHANNEL_INVITATION_CALLBACK_TIMEOUT_MS: u64 = 4_000;
 
 #[allow(clippy::needless_pass_by_value)] // Arc clone pattern for task spawning
 fn spawn_ctx<F>(ctx: Arc<IoContext>, fut: F)
@@ -33,18 +37,10 @@ where
     ctx.tasks().spawn(fut);
 }
 
-async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
-    if tx.try_send(update.clone()).is_err() {
-        let _ = tx.send(update).await;
-    }
-}
+use super::updates::{send_ui_update_lossy, send_ui_update_required};
 
 async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
     send_ui_update_required(tx, update).await;
-}
-
-fn send_ui_update_lossy(tx: &UiUpdateSender, update: UiUpdate) -> bool {
-    tx.try_send(update).is_ok()
 }
 
 fn enqueue_ui_update_required(ctx: Arc<IoContext>, tx: UiUpdateSender, update: UiUpdate) {
@@ -281,10 +277,10 @@ fn command_outcome_message(
 #[derive(Clone)]
 pub struct ChatCallbacks {
     pub on_send: SendCallback,
-    pub on_accept_pending_channel_invitation: NoArgOwnedCallback,
+    pub(crate) on_accept_pending_channel_invitation: NoArgOwnedCallback,
     pub on_join_channel: JoinChannelCallback,
     pub on_retry_message: RetryMessageCallback,
-    pub on_create_channel: CreateChannelCallback,
+    pub(crate) on_create_channel: CreateChannelCallback,
     pub on_set_topic: SetTopicCallback,
     pub on_close_channel: IdCallback,
     pub on_list_participants: IdCallback,
@@ -318,24 +314,88 @@ impl ChatCallbacks {
         Arc::new(move |operation| {
             let ctx = ctx.clone();
             let tx = tx.clone();
+            let app_core = ctx.app_core_raw().clone();
+            let operation_instance_id = operation.harness_handle().instance_id.clone();
             spawn_ctx(ctx.clone(), async move {
-                match ctx
-                    .dispatch(EffectCommand::AcceptPendingHomeInvitation)
-                    .await
+                let _ = operation.relinquish_to_workflow(
+                    SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+                );
+                let accept = std::panic::AssertUnwindSafe(
+                    aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_instance(
+                        &app_core,
+                        Some(operation_instance_id.clone()),
+                    ),
+                )
+                .catch_unwind();
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(
+                        ACCEPT_PENDING_CHANNEL_INVITATION_CALLBACK_TIMEOUT_MS,
+                    ),
+                    accept,
+                )
+                .await
                 {
-                    Ok(_) => {
-                        let _ = operation.relinquish_to_workflow(
-                            SemanticOperationTransferScope::AcceptPendingChannelInvitation,
-                        );
-                    }
-                    Err(error) => {
-                        operation.fail(error.to_string()).await;
+                    Ok(Ok(Ok(_))) => {}
+                    Ok(Ok(Err(error))) => {
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error(
                                 "invitation",
                                 format!("Accept pending invitation failed: {error}"),
                             )),
+                        )
+                        .await;
+                    }
+                    Ok(Err(panic)) => {
+                        let detail = if let Some(message) = panic.downcast_ref::<&str>() {
+                            format!(
+                                "accept_pending_channel_invitation callback panicked: {message}"
+                            )
+                        } else if let Some(message) = panic.downcast_ref::<String>() {
+                            format!(
+                                "accept_pending_channel_invitation callback panicked: {message}"
+                            )
+                        } else {
+                            "accept_pending_channel_invitation callback panicked".to_string()
+                        };
+                        let _ = publish_authoritative_operation_failure_with_instance(
+                            &app_core,
+                            OperationId::invitation_accept(),
+                            Some(operation_instance_id.clone()),
+                            SemanticOperationKind::AcceptPendingChannelInvitation,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(detail.clone()),
+                        )
+                        .await;
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),
+                        )
+                        .await;
+                    }
+                    Err(_) => {
+                        let detail = format!(
+                            "accept_pending_channel_invitation callback timed out after {}ms",
+                            ACCEPT_PENDING_CHANNEL_INVITATION_CALLBACK_TIMEOUT_MS
+                        );
+                        let _ = publish_authoritative_operation_failure_with_instance(
+                            &app_core,
+                            OperationId::invitation_accept(),
+                            Some(operation_instance_id),
+                            SemanticOperationKind::AcceptPendingChannelInvitation,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Invitation,
+                                SemanticFailureCode::OperationTimedOut,
+                            )
+                            .with_detail(detail.clone()),
+                        )
+                        .await;
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),
                         )
                         .await;
                     }

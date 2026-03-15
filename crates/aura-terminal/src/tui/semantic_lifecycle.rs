@@ -44,11 +44,7 @@ pub(crate) struct SemanticOperationTransfer {
     result: SemanticOperationTransferResult,
 }
 
-async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
-    if tx.try_send(update.clone()).is_err() {
-        let _ = tx.send(update).await;
-    }
-}
+use super::updates::send_ui_update_required;
 
 fn send_ui_update_now_or_spawn(tasks: &Arc<UiTaskRegistry>, tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_ok() {
