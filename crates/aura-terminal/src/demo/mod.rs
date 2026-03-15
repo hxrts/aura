@@ -447,7 +447,10 @@ impl SimulatedAgent {
                                 };
 
                                 // Serialize ceremony acceptance data for transport
-                                let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+                                let payload = serde_json::to_vec(&acceptance).unwrap_or_else(|e| {
+                                    tracing::warn!(error = %e, "demo: failed to serialize ceremony acceptance");
+                                    Vec::new()
+                                });
 
                                 let response_envelope = aura_core::effects::TransportEnvelope {
                                     destination: envelope.source, // Send back to initiator (Bob)

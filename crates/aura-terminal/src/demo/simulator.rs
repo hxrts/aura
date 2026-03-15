@@ -22,8 +22,8 @@ use aura_core::effects::{
     AmpChannelEffects, ChannelCreateParams, ChannelJoinParams, ChannelSendParams, ExecutionMode,
     PhysicalTimeEffects, TimeEffects, TransportEffects,
 };
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_invitation::{DeviceEnrollmentAccept, DeviceEnrollmentRequest};
@@ -602,7 +602,10 @@ async fn process_peer_transport_messages(
                             }),
                         };
 
-                        let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+                        let payload = serde_json::to_vec(&acceptance).unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "demo: failed to serialize acceptance");
+                            Vec::new()
+                        });
 
                         let response = aura_core::effects::TransportEnvelope {
                             destination: envelope.source,
