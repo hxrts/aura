@@ -52,6 +52,8 @@ The documents below cover theory, technical components, implementation guidance,
 
 [User Flow Harness](121_user_flow_harness.md) defines the shared UX contract, authoritative observation rules, and browser freshness model for parity-critical harness flows.
 
+[Ownership Model](122_ownership_model.md) defines the four ownership categories, capability-gated authority, terminality rules, and the workspace crate inventory.
+
 [Consensus](108_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
 
 [Operation Categories](109_operation_categories.md) defines A/B/C operation tiers, K1/K2/K3 key generation, and agreement levels.
