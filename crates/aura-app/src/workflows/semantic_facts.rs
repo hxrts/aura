@@ -161,6 +161,7 @@ mod tests {
             &app_core,
             AuthoritativeSemanticFact::ContactLinkReady {
                 authority_id: "owner-a".into(),
+                contact_count: 1,
             },
         );
 
@@ -168,14 +169,12 @@ mod tests {
         first_result.unwrap_or_else(|error| panic!("{error}"));
         second_result.unwrap_or_else(|error| panic!("{error}"));
 
-        let facts = {
-            let core = app_core.read().await;
-            read_signal_or_default(&core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await
-        };
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
 
         assert!(facts.contains(&AuthoritativeSemanticFact::PendingHomeInvitationReady));
         assert!(facts.contains(&AuthoritativeSemanticFact::ContactLinkReady {
             authority_id: "owner-a".into(),
+            contact_count: 1,
         }));
         assert_eq!(facts.len(), 2);
     }
