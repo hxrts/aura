@@ -156,50 +156,40 @@ async fn send_optional_ui_update_required(tx: &Option<UiUpdateSender>, update: U
 
 fn read_selected_notification(
     selected_index: usize,
-    invitations: &std::sync::Arc<std::sync::RwLock<Vec<Invitation>>>,
-    pending_requests: &std::sync::Arc<std::sync::RwLock<Vec<crate::tui::types::PendingRequest>>>,
+    invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
+    pending_requests: &std::sync::Arc<parking_lot::RwLock<Vec<crate::tui::types::PendingRequest>>>,
 ) -> Option<NotificationSelection> {
     let invitation_items = invitations
         .read()
-        .ok()
-        .map(|guard| {
-            guard
-                .iter()
-                .filter_map(|invitation| {
-                    let selection = match (invitation.direction, invitation.status) {
-                        (
-                            crate::tui::types::InvitationDirection::Inbound,
-                            crate::tui::types::InvitationStatus::Pending,
-                        ) => Some(NotificationSelection::ReceivedInvitation(
-                            invitation.id.clone(),
-                        )),
-                        (
-                            crate::tui::types::InvitationDirection::Outbound,
-                            crate::tui::types::InvitationStatus::Pending,
-                        ) => Some(NotificationSelection::SentInvitation(invitation.id.clone())),
-                        _ => None,
-                    }?;
-                    Some((invitation.created_at, selection))
-                })
-                .collect::<Vec<_>>()
+        .iter()
+        .filter_map(|invitation| {
+            let selection = match (invitation.direction, invitation.status) {
+                (
+                    crate::tui::types::InvitationDirection::Inbound,
+                    crate::tui::types::InvitationStatus::Pending,
+                ) => Some(NotificationSelection::ReceivedInvitation(
+                    invitation.id.clone(),
+                )),
+                (
+                    crate::tui::types::InvitationDirection::Outbound,
+                    crate::tui::types::InvitationStatus::Pending,
+                ) => Some(NotificationSelection::SentInvitation(invitation.id.clone())),
+                _ => None,
+            }?;
+            Some((invitation.created_at, selection))
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
 
     let recovery_items = pending_requests
         .read()
-        .ok()
-        .map(|guard| {
-            guard
-                .iter()
-                .map(|request| {
-                    (
-                        request.initiated_at,
-                        NotificationSelection::RecoveryRequest(request.id.clone()),
-                    )
-                })
-                .collect::<Vec<_>>()
+        .iter()
+        .map(|request| {
+            (
+                request.initiated_at,
+                NotificationSelection::RecoveryRequest(request.id.clone()),
+            )
         })
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
 
     let mut notifications = invitation_items;
     notifications.extend(recovery_items);
@@ -220,8 +210,8 @@ fn execute_harness_followup_command(
     shared_channels: &SharedChannels,
     shared_devices: &SharedDevices,
     shared_messages: &SharedMessages,
-    selected_channel: &std::sync::Arc<std::sync::RwLock<Option<String>>>,
-    selected_channel_binding: &std::sync::Arc<std::sync::RwLock<Option<SelectedChannelBinding>>>,
+    selected_channel: &std::sync::Arc<parking_lot::RwLock<Option<String>>>,
+    selected_channel_binding: &std::sync::Arc<parking_lot::RwLock<Option<SelectedChannelBinding>>>,
 ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>, String> {
     match command {
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
@@ -280,17 +270,13 @@ fn execute_harness_followup_command(
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::SelectChannel { channel_id }) => {
-            let channels = match shared_channels.read() {
-                Ok(guard) => guard.clone(),
-                Err(poisoned) => poisoned.into_inner().clone(),
-            };
+            let channels = shared_channels.read().clone();
             if let Some(idx) = channels.iter().position(|channel| channel.id == channel_id) {
                 state.router.go_to(Screen::Chat);
                 state.chat.selected_channel = idx;
-                if let Ok(mut guard) = selected_channel.write() {
-                    *guard = Some(channel_id.to_string());
-                }
-                if let Ok(mut guard) = selected_channel_binding.write() {
+                *selected_channel.write() = Some(channel_id.to_string());
+                {
+                    let mut guard = selected_channel_binding.write();
                     let previous = guard.clone();
                     *guard = channels.get(idx).map(|channel| {
                         SelectedChannelBinding::merged_from_channel(channel, previous.as_ref())
@@ -391,21 +377,17 @@ fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Chat callbacks are unavailable".to_string());
             };
-            let channels = match shared_channels.read() {
-                Ok(guard) => guard.clone(),
-                Err(poisoned) => poisoned.into_inner().clone(),
-            };
+            let channels = shared_channels.read().clone();
             let committed_channel_id = selected_channel
                 .read()
-                .ok()
-                .and_then(|guard| guard.clone())
+                .clone()
                 .filter(|channel_id| {
                     channels.is_empty() || channels.iter().any(|channel| channel.id == *channel_id)
                 });
             let visible_message_channel_id = shared_messages
                 .read()
-                .ok()
-                .and_then(|messages| messages.last().map(|message| message.channel_id.clone()))
+                .last()
+                .map(|message| message.channel_id.clone())
                 .filter(|channel_id| {
                     channels.is_empty() || channels.iter().any(|channel| channel.id == *channel_id)
                 });
@@ -419,7 +401,7 @@ fn execute_harness_followup_command(
                     "No committed channel selected (channels={} selected_index={} visible_messages={})",
                     channels.len(),
                     state.chat.selected_channel,
-                    shared_messages.read().ok().map_or(0, |messages| messages.len())
+                    shared_messages.read().len()
                 ));
             }
             Ok(None)
@@ -430,14 +412,8 @@ fn execute_harness_followup_command(
             };
             let contact_idx = state.contacts.selected_index;
             let channel_idx = state.chat.selected_channel;
-            let contacts = match shared_contacts.read() {
-                Ok(guard) => guard.clone(),
-                Err(poisoned) => poisoned.into_inner().clone(),
-            };
-            let channels = match shared_channels.read() {
-                Ok(guard) => guard.clone(),
-                Err(poisoned) => poisoned.into_inner().clone(),
-            };
+            let contacts = shared_contacts.read().clone();
+            let channels = shared_channels.read().clone();
             let Some(contact) = contacts.get(contact_idx) else {
                 return Err("No contact selected".to_string());
             };
@@ -446,8 +422,7 @@ fn execute_harness_followup_command(
             };
             let selected_binding = selected_channel_binding
                 .read()
-                .ok()
-                .and_then(|guard| guard.clone())
+                .clone()
                 .filter(|binding| binding.channel_id == channel.id);
             let context_id = selected_binding
                 .and_then(|binding| binding.context_id)
@@ -489,10 +464,7 @@ fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Contact callbacks are unavailable".to_string());
             };
-            let channels = match shared_channels.read() {
-                Ok(guard) => guard.clone(),
-                Err(poisoned) => poisoned.into_inner().clone(),
-            };
+            let channels = shared_channels.read().clone();
             let channel_id_string = channel_id.to_string();
             let Some(channel) = channels
                 .iter()
@@ -504,8 +476,7 @@ fn execute_harness_followup_command(
             };
             let selected_binding = selected_channel_binding
                 .read()
-                .ok()
-                .and_then(|guard| guard.clone())
+                .clone()
                 .filter(|binding| binding.channel_id == channel.id);
             let context_id = selected_binding
                 .and_then(|binding| binding.context_id)
@@ -568,10 +539,7 @@ fn execute_harness_followup_command(
             Ok(None)
         }
         TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal) => {
-            let current_devices = shared_devices
-                .read()
-                .map(|guard| guard.clone())
-                .unwrap_or_default();
+            let current_devices = shared_devices.read().clone();
 
             if current_devices.is_empty() {
                 return Err("No devices to remove".to_string());
@@ -789,13 +757,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Shared selected channel identity for subscriptions and dispatch
     // =========================================================================
     let tui_selected_ref =
-        hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<String>)));
-    let tui_selected: std::sync::Arc<std::sync::RwLock<Option<String>>> =
+        hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(None::<String>)));
+    let tui_selected: std::sync::Arc<parking_lot::RwLock<Option<String>>> =
         tui_selected_ref.read().clone();
     let selected_channel_binding_ref = hooks
-        .use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None::<SelectedChannelBinding>)));
+        .use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(None::<SelectedChannelBinding>)));
     let selected_channel_binding: std::sync::Arc<
-        std::sync::RwLock<Option<SelectedChannelBinding>>,
+        parking_lot::RwLock<Option<SelectedChannelBinding>>,
     > = selected_channel_binding_ref.read().clone();
 
     // =========================================================================
@@ -825,11 +793,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
     let shared_devices = use_devices_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
-    let callbacks_ref = hooks.use_ref(|| Arc::new(std::sync::RwLock::new(props.callbacks.clone())));
+    let callbacks_ref = hooks.use_ref(|| Arc::new(parking_lot::RwLock::new(props.callbacks.clone())));
     let shared_callbacks = callbacks_ref.read().clone();
-    if let Ok(mut guard) = shared_callbacks.write() {
-        *guard = props.callbacks.clone();
-    }
+    *shared_callbacks.write() = props.callbacks.clone();
 
     // =========================================================================
     // Invitations subscription: SharedInvitations for notification action dispatch
@@ -1099,32 +1065,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 while let Some(submission) = rx.recv().await {
                     let app_snapshot_for_command = app_ctx_for_commands.snapshot();
-                    let harness_contacts_for_command = shared_contacts_for_commands
-                        .read()
-                        .ok()
-                        .map(|contacts| contacts.clone())
-                        .unwrap_or_default();
-                    let harness_channels_for_command = shared_channels_for_commands
-                        .read()
-                        .ok()
-                        .map(|channels| channels.clone())
-                        .unwrap_or_default();
-                    let harness_devices_for_command = shared_devices_for_commands
-                        .read()
-                        .ok()
-                        .map(|devices| devices.clone())
-                        .unwrap_or_default();
-                    let harness_messages_for_command = shared_messages_for_commands
-                        .read()
-                        .ok()
-                        .map(|messages| messages.clone())
-                        .unwrap_or_default();
+                    let harness_contacts_for_command = shared_contacts_for_commands.read().clone();
+                    let harness_channels_for_command = shared_channels_for_commands.read().clone();
+                    let harness_devices_for_command = shared_devices_for_commands.read().clone();
+                    let harness_messages_for_command = shared_messages_for_commands.read().clone();
 
                     let apply_result = tui.with_mut(|state| {
-                        let callbacks_for_commands = shared_callbacks_for_commands
-                            .read()
-                            .ok()
-                            .and_then(|guard| guard.clone());
+                        let callbacks_for_commands = shared_callbacks_for_commands.read().clone();
                         let mut operation_handle = None;
                         let followup = apply_harness_command(
                             state,
@@ -1178,26 +1125,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
 
                     let app_snapshot = app_ctx_for_commands.snapshot();
-                    let harness_contacts = shared_contacts_for_commands
-                        .read()
-                        .ok()
-                        .map(|contacts| contacts.clone())
-                        .unwrap_or_default();
-                    let harness_devices = shared_devices_for_commands
-                        .read()
-                        .ok()
-                        .map(|devices| devices.clone())
-                        .unwrap_or_default();
-                    let harness_channels = shared_channels_for_commands
-                        .read()
-                        .ok()
-                        .map(|channels| channels.clone())
-                        .unwrap_or_default();
-                    let harness_messages = shared_messages_for_commands
-                        .read()
-                        .ok()
-                        .map(|messages| messages.clone())
-                        .unwrap_or_default();
+                    let harness_contacts = shared_contacts_for_commands.read().clone();
+                    let harness_devices = shared_devices_for_commands.read().clone();
+                    let harness_channels = shared_channels_for_commands.read().clone();
+                    let harness_messages = shared_messages_for_commands.read().clone();
                     let export_result = maybe_export_ui_snapshot(
                         &updated_state,
                         TuiSemanticInputs {
@@ -1604,19 +1535,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         UiUpdate::MessageSent { channel, content } => {
                             let mut appended = false;
-                            let selected_channel = tui_selected_for_updates
-                                .read()
-                                .ok()
-                                .and_then(|guard| guard.clone());
+                            let selected_channel = tui_selected_for_updates.read().clone();
                             let state_selected_channel = shared_channels_for_updates
                                 .read()
-                                .ok()
-                                .and_then(|channels| {
-                                    channels
-                                        .get(tui.read_clone().chat.selected_channel)
-                                        .map(|candidate| candidate.id.clone())
-                                });
-                            if let Ok(mut messages) = shared_messages_for_updates.write() {
+                                .get(tui.read_clone().chat.selected_channel)
+                                .map(|candidate| candidate.id.clone());
+                            {
+                                let mut messages = shared_messages_for_updates.write();
                                 let visible_message_channel = messages
                                     .last()
                                     .map(|message| message.channel_id.clone());
@@ -1662,16 +1587,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::ChannelSelected(channel_id) => {
                             let selected_channel = shared_channels_for_updates
                                 .read()
-                                .ok()
-                                .and_then(|channels| {
-                                    channels.iter().enumerate().find_map(|(idx, channel)| {
-                                        (channel.id == channel_id).then_some((idx, channel.clone()))
-                                    })
+                                .iter()
+                                .enumerate()
+                                .find_map(|(idx, channel)| {
+                                    (channel.id == channel_id).then_some((idx, channel.clone()))
                                 });
-                            if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                *guard = Some(channel_id.clone());
-                            }
-                            if let Ok(mut guard) = selected_channel_binding_for_updates.write() {
+                            *tui_selected_for_updates.write() = Some(channel_id.clone());
+                            {
+                                let mut guard = selected_channel_binding_for_updates.write();
                                 let previous = guard.clone();
                                 *guard = selected_channel.as_ref().map(|(_, channel)| {
                                     SelectedChannelBinding::merged_from_channel(
@@ -1693,16 +1616,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             context_id,
                             name,
                         } => {
-                            if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                *guard = Some(channel_id.clone());
-                            }
-                            if let Ok(mut guard) = selected_channel_binding_for_updates.write() {
-                                *guard = Some(SelectedChannelBinding {
-                                    channel_id: channel_id.clone(),
-                                    context_id: context_id.clone(),
-                                });
-                            }
-                            if let Ok(mut channels) = shared_channels_for_updates.write() {
+                            *tui_selected_for_updates.write() = Some(channel_id.clone());
+                            *selected_channel_binding_for_updates.write() = Some(SelectedChannelBinding {
+                                channel_id: channel_id.clone(),
+                                context_id: context_id.clone(),
+                            });
+                            {
+                                let mut channels = shared_channels_for_updates.write();
                                 if let Some(channel) =
                                     channels.iter_mut().find(|channel| channel.id == channel_id)
                                 {
@@ -1716,11 +1636,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     channels.push(channel);
                                 }
                             }
-                            let selected = shared_channels_for_updates.read().ok().and_then(|channels| {
-                                channels
-                                    .iter()
-                                    .position(|channel| channel.id == channel_id)
-                            });
+                            let selected = shared_channels_for_updates.read()
+                                .iter()
+                                .position(|channel| channel.id == channel_id);
                             if let Some(idx) = selected {
                                 tui.with_mut(|state| {
                                     state.chat.selected_channel = idx;
@@ -1749,19 +1667,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     return;
                                 }
 
-                                let committed_selection = tui_selected_for_updates
-                                    .read()
-                                    .ok()
-                                    .and_then(|guard| guard.clone());
+                                let committed_selection = tui_selected_for_updates.read().clone();
                                 let committed_index = committed_selection.as_ref().and_then(|selected_id| {
                                     shared_channels_for_updates
                                         .read()
-                                        .ok()
-                                        .and_then(|channels| {
-                                            channels
-                                                .iter()
-                                                .position(|channel| channel.id == *selected_id)
-                                        })
+                                        .iter()
+                                        .position(|channel| channel.id == *selected_id)
                                 });
 
                                 if let Some(idx) = committed_index {
@@ -1775,30 +1686,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.message_scroll = 0;
                                 }
 
-                                if let Ok(mut guard) = tui_selected_for_updates.write() {
-                                    *guard = shared_channels_for_updates.read().ok().and_then(
-                                        |channels| {
-                                            channels
-                                                .get(state.chat.selected_channel)
-                                                .map(|channel| channel.id.clone())
-                                        },
-                                    );
-                                }
-                                if let Ok(mut guard) = selected_channel_binding_for_updates.write()
+                                *tui_selected_for_updates.write() = shared_channels_for_updates
+                                    .read()
+                                    .get(state.chat.selected_channel)
+                                    .map(|channel| channel.id.clone());
                                 {
+                                    let mut guard = selected_channel_binding_for_updates.write();
                                     let previous = guard.clone();
-                                    *guard = shared_channels_for_updates.read().ok().and_then(
-                                        |channels| {
-                                            channels
-                                                .get(state.chat.selected_channel)
-                                                .map(|channel| {
-                                                    SelectedChannelBinding::merged_from_channel(
-                                                        channel,
-                                                        previous.as_ref(),
-                                                    )
-                                                })
-                                        },
-                                    );
+                                    *guard = shared_channels_for_updates
+                                        .read()
+                                        .get(state.chat.selected_channel)
+                                        .map(|channel| {
+                                            SelectedChannelBinding::merged_from_channel(
+                                                channel,
+                                                previous.as_ref(),
+                                            )
+                                        });
                                 }
 
                                 // Auto-scroll to bottom when new messages arrive, but only if
@@ -1846,9 +1749,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             channel_id,
                             participants,
                         } => {
-                            let mapped_participants = if let Ok(contacts) =
-                                shared_contacts_for_updates.read()
-                            {
+                            let mapped_participants = {
+                                let contacts = shared_contacts_for_updates.read();
                                 participants
                                     .iter()
                                     .map(|entry| {
@@ -1868,8 +1770,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         entry.clone()
                                     })
                                     .collect::<Vec<_>>()
-                            } else {
-                                participants.clone()
                             };
                             tui.with_mut(|state| {
                                 state.modal_queue.update_active(|modal| {
@@ -1985,26 +1885,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             }
                             let export_state = tui.read_clone();
                             let app_snapshot = app_ctx_for_updates.snapshot();
-                            let harness_contacts = shared_contacts_for_updates
-                                .read()
-                                .ok()
-                                .map(|contacts| contacts.clone())
-                                .unwrap_or_default();
-                            let harness_channels = shared_channels_for_updates
-                                .read()
-                                .ok()
-                                .map(|channels| channels.clone())
-                                .unwrap_or_default();
-                            let harness_devices = shared_devices_for_updates
-                                .read()
-                                .ok()
-                                .map(|devices| devices.clone())
-                                .unwrap_or_default();
-                            let harness_messages = shared_messages_for_updates
-                                .read()
-                                .ok()
-                                .map(|messages| messages.clone())
-                                .unwrap_or_default();
+                            let harness_contacts = shared_contacts_for_updates.read().clone();
+                            let harness_channels = shared_channels_for_updates.read().clone();
+                            let harness_devices = shared_devices_for_updates.read().clone();
+                            let harness_messages = shared_messages_for_updates.read().clone();
                             if let Err(error) = maybe_export_ui_snapshot(
                                 &export_state,
                                 TuiSemanticInputs {
@@ -2339,26 +2223,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
     let app_snapshot = app_ctx.snapshot();
-    let harness_devices = shared_devices
-        .read()
-        .ok()
-        .map(|devices| devices.clone())
-        .unwrap_or_default();
-    let harness_contacts = shared_contacts
-        .read()
-        .ok()
-        .map(|contacts| contacts.clone())
-        .unwrap_or_default();
-    let harness_channels = shared_channels
-        .read()
-        .ok()
-        .map(|channels| channels.clone())
-        .unwrap_or_default();
-    let harness_messages = shared_messages
-        .read()
-        .ok()
-        .map(|messages| messages.clone())
-        .unwrap_or_default();
+    let harness_devices = shared_devices.read().clone();
+    let harness_contacts = shared_contacts.read().clone();
+    let harness_channels = shared_channels.read().clone();
+    let harness_messages = shared_messages.read().clone();
     if let Err(error) = maybe_export_ui_snapshot(
         &tui_snapshot,
         TuiSemanticInputs {
@@ -2530,21 +2398,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                     // === Chat Screen Commands ===
                                     DispatchCommand::SelectChannel { channel_id } => {
-                                        let channels = match shared_channels_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
+                                        let channels = shared_channels_for_dispatch.read().clone();
                                         if let Some(idx) = channels
                                             .iter()
                                             .position(|channel| channel.id == channel_id)
                                         {
                                             new_state.chat.selected_channel = idx;
-                                            if let Ok(mut guard) = tui_selected_for_events.write() {
-                                                *guard = Some(channel_id.to_string());
-                                            }
-                                            if let Ok(mut guard) =
-                                                selected_channel_binding_for_events.write()
+                                            *tui_selected_for_events.write() = Some(channel_id.to_string());
                                             {
+                                                let mut guard = selected_channel_binding_for_events.write();
                                                 let previous = guard.clone();
                                                 *guard = channels.get(idx).map(|channel| {
                                                     SelectedChannelBinding::merged_from_channel(
@@ -2578,14 +2440,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.chat.on_accept_pending_channel_invitation)(operation);
                                     }
                                     DispatchCommand::SendChatMessage { content } => {
-                                        let channels = match shared_channels_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
+                                        let channels = shared_channels_for_dispatch.read().clone();
                                         let committed_channel_id = tui_selected_for_events
                                             .read()
-                                            .ok()
-                                            .and_then(|guard| guard.clone())
+                                            .clone()
                                             .filter(|channel_id| {
                                                 channels.is_empty()
                                                     || channels
@@ -2595,12 +2453,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let visible_message_channel_id =
                                             shared_messages_for_dispatch
                                                 .read()
-                                                .ok()
-                                                .and_then(|messages| {
-                                                    messages
-                                                        .last()
-                                                        .map(|message| message.channel_id.clone())
-                                                })
+                                                .last()
+                                                .map(|message| message.channel_id.clone())
                                                 .filter(|channel_id| {
                                                     channels.is_empty()
                                                         || channels
@@ -2619,34 +2473,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 "No committed channel selected (channels={} selected_index={} visible_messages={})",
                                                 channels.len(),
                                                 new_state.chat.selected_channel,
-                                                shared_messages_for_dispatch
-                                                    .read()
-                                                    .ok()
-                                                    .map_or(0, |messages| messages.len())
+                                                shared_messages_for_dispatch.read().len()
                                             ));
                                         }
                                     }
                                     DispatchCommand::RetryMessage => {
                                         let idx = new_state.chat.message_scroll;
-                                        if let Ok(guard) = shared_messages_for_dispatch.read() {
-                                            if let Some(msg) = guard.get(idx) {
-                                                (cb.chat.on_retry_message)(
-                                                    msg.id.clone(),
-                                                    msg.channel_id.clone(),
-                                                    msg.content.clone(),
-                                                );
-                                            } else {
-                                                new_state.toast_error("No message selected");
-                                            }
+                                        let guard = shared_messages_for_dispatch.read();
+                                        if let Some(msg) = guard.get(idx) {
+                                            (cb.chat.on_retry_message)(
+                                                msg.id.clone(),
+                                                msg.channel_id.clone(),
+                                                msg.content.clone(),
+                                            );
                                         } else {
-                                            new_state.toast_error("Failed to read messages");
+                                            new_state.toast_error("No message selected");
                                         }
                                     }
                                     DispatchCommand::OpenChatTopicModal => {
                                         let idx = new_state.chat.selected_channel;
-                                        let channels = match shared_channels_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
+                                        let channels = shared_channels_for_dispatch.read().clone();
                                         };
                                         if let Some(channel) = channels.get(idx) {
                                             let modal_state = crate::tui::state::TopicModalState::for_channel(
@@ -2664,10 +2510,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::OpenChatInfoModal => {
                                         let idx = new_state.chat.selected_channel;
-                                        let channels = match shared_channels_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
+                                        let channels = shared_channels_for_dispatch.read().clone();
                                         if let Some(channel) = channels.get(idx) {
                                             let mut modal_state = crate::tui::state::ChannelInfoModalState::for_channel(
                                                 &channel.id,
@@ -2699,10 +2542,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::OpenChatCreateWizard => {
-                                        let current_contacts = match shared_contacts_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
+                                        let current_contacts = shared_contacts_for_dispatch.read().clone();
 
                                         // Validate: need at least 1 contact (+ self = 2 participants)
                                         if current_contacts.is_empty() {
@@ -2796,10 +2636,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Demo safeguard: keep the canonical trio room aligned with
                                         // Alice+Carol participation even if picker timing drifts.
                                         if name.eq_ignore_ascii_case("demo-trio-room") {
-                                            let contacts = match shared_contacts_for_dispatch.read() {
-                                                Ok(guard) => guard.clone(),
-                                                Err(poisoned) => poisoned.into_inner().clone(),
-                                            };
+                                            let contacts = shared_contacts_for_dispatch.read().clone();
                                             let mut demo_members = Vec::new();
                                             let expected_demo_ids = [
                                                 crate::ids::authority_id(&format!(
@@ -2985,14 +2822,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::InviteSelectedContactToChannel => {
                                         let contact_idx = new_state.contacts.selected_index;
                                         let channel_idx = new_state.chat.selected_channel;
-                                        let contacts = match shared_contacts_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
-                                        let channels = match shared_channels_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
+                                        let contacts = shared_contacts_for_dispatch.read().clone();
+                                        let channels = shared_channels_for_dispatch.read().clone();
                                         let Some(contact) = contacts.get(contact_idx) else {
                                             new_state.toast_error("No contact selected");
                                             continue;
@@ -3003,8 +2834,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         };
                                         let selected_binding = selected_channel_binding_for_events
                                             .read()
-                                            .ok()
-                                            .and_then(|guard| guard.clone())
+                                            .clone()
                                             .filter(|binding| binding.channel_id == channel.id);
                                         let context_id = selected_binding
                                             .and_then(|binding| binding.context_id)
@@ -3045,10 +2875,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         authority_id,
                                         channel_id,
                                     } => {
-                                        let channels = match shared_channels_for_dispatch.read() {
-                                            Ok(guard) => guard.clone(),
-                                            Err(poisoned) => poisoned.into_inner().clone(),
-                                        };
+                                        let channels = shared_channels_for_dispatch.read().clone();
                                         let channel_id_string = channel_id.to_string();
                                         let Some(channel) =
                                             channels.iter().find(|channel| channel.id == channel_id_string)

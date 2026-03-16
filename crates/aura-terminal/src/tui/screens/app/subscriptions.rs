@@ -682,33 +682,15 @@ pub fn use_channels_subscription(
                     .join(" ; ");
                 tracing::debug!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
 
-                match latest_chat_state.write() {
-                    Ok(mut guard) => *guard = stabilized.clone(),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *latest_chat_state.write() = stabilized.clone();
 
-                let scope = active_scope.read().ok().and_then(|g| g.clone());
-                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
-                let contacts_state = latest_contacts_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
+                let scope = active_scope.read().clone();
+                let authority_id = *shared_authority_id.read();
+                let contacts_state = latest_contacts_state.read().clone();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let homes_state = latest_homes_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let selected_channel = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let discovered_peer_ids = latest_discovered_peers.read().clone();
+                let homes_state = latest_homes_state.read().clone();
+                let selected_channel = selected_channel_id.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -747,46 +729,21 @@ pub fn use_channels_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
-                match shared_authority_id.write() {
-                    Ok(mut guard) => *guard = authority_id,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *shared_authority_id.write() = authority_id;
 
                 let Some(authority_id) = authority_id else {
                     return;
                 };
 
-                let mut chat_state = latest_chat_state
-                    .read()
-                    .ok()
-                    .map(|g| g.clone())
-                    .unwrap_or_default();
+                let mut chat_state = latest_chat_state.read().clone();
                 chat_state.ensure_note_to_self_channel(authority_id);
-                match latest_chat_state.write() {
-                    Ok(mut guard) => *guard = chat_state.clone(),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
-                let scope = active_scope.read().ok().and_then(|g| g.clone());
-                let contacts_state = latest_contacts_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
+                *latest_chat_state.write() = chat_state.clone();
+                let scope = active_scope.read().clone();
+                let contacts_state = latest_contacts_state.read().clone();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let homes_state = latest_homes_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let selected_channel = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let discovered_peer_ids = latest_discovered_peers.read().clone();
+                let homes_state = latest_homes_state.read().clone();
+                let selected_channel = selected_channel_id.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -825,37 +782,15 @@ pub fn use_channels_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
-                match active_scope.write() {
-                    Ok(mut guard) => *guard = Some(scope.clone()),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *active_scope.write() = Some(scope.clone());
 
-                let chat_state = latest_chat_state
-                    .read()
-                    .ok()
-                    .map(|g| g.clone())
-                    .unwrap_or_default();
-                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
-                let contacts_state = latest_contacts_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
+                let chat_state = latest_chat_state.read().clone();
+                let authority_id = *shared_authority_id.read();
+                let contacts_state = latest_contacts_state.read().clone();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let homes_state = latest_homes_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let selected_channel = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let discovered_peer_ids = latest_discovered_peers.read().clone();
+                let homes_state = latest_homes_state.read().clone();
+                let selected_channel = selected_channel_id.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -893,32 +828,14 @@ pub fn use_channels_subscription(
         let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
-                match latest_contacts_state.write() {
-                    Ok(mut guard) => *guard = contacts_state.clone(),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
-                let chat_state = latest_chat_state
-                    .read()
-                    .ok()
-                    .map(|g| g.clone())
-                    .unwrap_or_default();
-                let scope = active_scope.read().ok().and_then(|g| g.clone());
-                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
+                *latest_contacts_state.write() = contacts_state.clone();
+                let chat_state = latest_chat_state.read().clone();
+                let scope = active_scope.read().clone();
+                let authority_id = *shared_authority_id.read();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let homes_state = latest_homes_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let selected_channel = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let discovered_peer_ids = latest_discovered_peers.read().clone();
+                let homes_state = latest_homes_state.read().clone();
+                let selected_channel = selected_channel_id.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -956,36 +873,15 @@ pub fn use_channels_subscription(
         let selected_channel_id_handle = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
-                match latest_homes_state_handle.write() {
-                    Ok(mut guard) => *guard = homes_state.clone(),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
-                let chat_state = latest_chat_state_handle
-                    .read()
-                    .ok()
-                    .map(|g| g.clone())
-                    .unwrap_or_default();
-                let scope = active_scope_handle.read().ok().and_then(|g| g.clone());
-                let authority_id = shared_authority_id_handle
-                    .read()
-                    .ok()
-                    .and_then(|guard| *guard);
+                *latest_homes_state_handle.write() = homes_state.clone();
+                let chat_state = latest_chat_state_handle.read().clone();
+                let scope = active_scope_handle.read().clone();
+                let authority_id = *shared_authority_id_handle.read();
                 let transport_peer_count =
                     latest_transport_peer_count_handle.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers_handle
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let contacts_state = latest_contacts_state_handle
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let selected_channel = selected_channel_id_handle
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let discovered_peer_ids = latest_discovered_peers_handle.read().clone();
+                let contacts_state = latest_contacts_state_handle.read().clone();
+                let selected_channel = selected_channel_id_handle.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -1024,32 +920,13 @@ pub fn use_channels_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
                 latest_transport_peer_count.store(count, Ordering::Relaxed);
-                let chat_state = latest_chat_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let scope = active_scope.read().ok().and_then(|guard| guard.clone());
-                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
-                let contacts_state = latest_contacts_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let homes_state = latest_homes_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let discovered_peer_ids = latest_discovered_peers
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let selected_channel = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let chat_state = latest_chat_state.read().clone();
+                let scope = active_scope.read().clone();
+                let authority_id = *shared_authority_id.read();
+                let contacts_state = latest_contacts_state.read().clone();
+                let homes_state = latest_homes_state.read().clone();
+                let discovered_peer_ids = latest_discovered_peers.read().clone();
+                let selected_channel = selected_channel_id.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -1092,33 +969,15 @@ pub fn use_channels_subscription(
                     .iter()
                     .map(|peer| peer.authority_id)
                     .collect::<Vec<_>>();
-                match latest_discovered_peers.write() {
-                    Ok(mut guard) => *guard = discovered_peer_ids.clone(),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *latest_discovered_peers.write() = discovered_peer_ids.clone();
 
-                let chat_state = latest_chat_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let scope = active_scope.read().ok().and_then(|guard| guard.clone());
-                let authority_id = shared_authority_id.read().ok().and_then(|guard| *guard);
-                let contacts_state = latest_contacts_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
-                let homes_state = latest_homes_state
-                    .read()
-                    .ok()
-                    .map(|guard| guard.clone())
-                    .unwrap_or_default();
+                let chat_state = latest_chat_state.read().clone();
+                let scope = active_scope.read().clone();
+                let authority_id = *shared_authority_id.read();
+                let contacts_state = latest_contacts_state.read().clone();
+                let homes_state = latest_homes_state.read().clone();
                 let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let selected_channel = selected_channel_id
-                    .read()
-                    .ok()
-                    .and_then(|guard| guard.clone());
+                let selected_channel = selected_channel_id.read().clone();
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
@@ -1169,10 +1028,7 @@ pub fn use_invitations_subscription(
                     .map(Invitation::from)
                     .collect();
 
-                match invitations.write() {
-                    Ok(mut guard) => *guard = all,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *invitations.write() = all;
             })
             .await;
         }
@@ -1247,10 +1103,7 @@ pub fn use_neighborhood_homes_subscription(
                         .filter(|b| b.id != n.home_home_id)
                         .map(|b| b.id.to_string()),
                 );
-                match homes.write() {
-                    Ok(mut guard) => *guard = ids,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *homes.write() = ids;
             })
             .await;
         }
@@ -1288,10 +1141,7 @@ pub fn use_neighborhood_home_meta_subscription(
                         moderator_actions_enabled: home.is_admin(),
                     })
                     .unwrap_or_default();
-                match meta.write() {
-                    Ok(mut guard) => *guard = snapshot,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *meta.write() = snapshot;
             })
             .await;
         }
@@ -1323,10 +1173,7 @@ pub fn use_pending_requests_subscription(
                     .iter()
                     .map(PendingRequest::from)
                     .collect();
-                match requests.write() {
-                    Ok(mut guard) => *guard = pending,
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *requests.write() = pending;
             })
             .await;
         }
@@ -1406,10 +1253,7 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
         let threshold = shared_threshold.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                match threshold.write() {
-                    Ok(mut guard) => *guard = (settings_state.threshold_k, settings_state.threshold_n),
-                    Err(e) => tracing::debug!(error = %e, "lock poisoned in subscription update"),
-                }
+                *threshold.write() = (settings_state.threshold_k, settings_state.threshold_n);
             })
             .await;
         }

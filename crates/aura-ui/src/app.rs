@@ -19,7 +19,7 @@ use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
     ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-    OperationState, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
+    OperationState, SelectionSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL,
@@ -5424,7 +5424,7 @@ fn render_screen_content(
     match model.screen {
         ScreenId::Onboarding => rsx! {
             div {
-                id: ControlId::Screen(ScreenId::Onboarding)
+                id: ControlId::Screen(aura_app::ui::contract::ScreenId::Onboarding)
                     .web_dom_id()
                     .required_dom_id("Screen(Onboarding) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
@@ -5433,7 +5433,7 @@ fn render_screen_content(
         },
         ScreenId::Neighborhood => rsx! {
             div {
-                id: ControlId::Screen(ScreenId::Neighborhood)
+                id: ControlId::Screen(aura_app::ui::contract::ScreenId::Neighborhood)
                     .web_dom_id()
                     .required_dom_id("Screen(Neighborhood) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
@@ -5442,7 +5442,7 @@ fn render_screen_content(
         },
         ScreenId::Chat => rsx! {
             div {
-                id: ControlId::Screen(ScreenId::Chat)
+                id: ControlId::Screen(aura_app::ui::contract::ScreenId::Chat)
                     .web_dom_id()
                     .required_dom_id("Screen(Chat) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
@@ -5451,7 +5451,7 @@ fn render_screen_content(
         },
         ScreenId::Contacts => rsx! {
             div {
-                id: ControlId::Screen(ScreenId::Contacts)
+                id: ControlId::Screen(aura_app::ui::contract::ScreenId::Contacts)
                     .web_dom_id()
                     .required_dom_id("Screen(Contacts) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
@@ -5460,7 +5460,7 @@ fn render_screen_content(
         },
         ScreenId::Notifications => rsx! {
             div {
-                id: ControlId::Screen(ScreenId::Notifications)
+                id: ControlId::Screen(aura_app::ui::contract::ScreenId::Notifications)
                     .web_dom_id()
                     .required_dom_id("Screen(Notifications) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
@@ -5469,7 +5469,7 @@ fn render_screen_content(
         },
         ScreenId::Settings => rsx! {
             div {
-                id: ControlId::Screen(ScreenId::Settings)
+                id: ControlId::Screen(aura_app::ui::contract::ScreenId::Settings)
                     .web_dom_id()
                     .required_dom_id("Screen(Settings) must define a web DOM id"),
                 class: "w-full lg:h-full lg:min-h-0",
