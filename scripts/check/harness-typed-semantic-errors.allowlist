@@ -1,5 +1,10 @@
 # Temporary baseline for parity-critical shared semantic paths that still use
 # stringly frontend error wrappers instead of typed error mapping.
+# Owner: architecture
+# Reason: shared semantic error migration is in progress; these frontend
+# operational paths still wrap primary failures in stringly error surfaces.
+# Doc: work/ownership.md
+
 ^crates/aura-terminal/src/tui/context/io_context\.rs:
 ^crates/aura-terminal/src/tui/context/dispatch\.rs:
 ^crates/aura-terminal/src/tui/effects/operational/context\.rs:

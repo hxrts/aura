@@ -238,6 +238,49 @@ fn classify_command_error(error: &aura_core::AuraError) -> (CommandOutcomeStatus
     }
 }
 
+fn classify_chat_command_error(
+    error: &aura_app::ui::workflows::chat_commands::CommandError,
+) -> (CommandOutcomeStatus, CommandReasonCode) {
+    use aura_app::ui::workflows::chat_commands::CommandError;
+
+    match error {
+        CommandError::NotACommand => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+        }
+        CommandError::UnknownCommand(_) => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
+        }
+        CommandError::MissingArgument { .. } | CommandError::InvalidArgument { .. } => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+        }
+    }
+}
+
+fn classify_command_resolver_error(
+    error: &aura_app::ui::workflows::strong_command::CommandResolverError,
+) -> (CommandOutcomeStatus, CommandReasonCode) {
+    use aura_app::ui::workflows::strong_command::CommandResolverError;
+
+    match error {
+        CommandResolverError::UnknownTarget { .. } => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
+        }
+        CommandResolverError::AmbiguousTarget { .. } => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+        }
+        CommandResolverError::StaleSnapshot { .. } => {
+            (CommandOutcomeStatus::Failed, CommandReasonCode::InvalidState)
+        }
+        CommandResolverError::ParseError { .. } => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+        }
+        CommandResolverError::MissingCurrentChannel { .. } => (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::MissingActiveContext,
+        ),
+    }
+}
+
 fn command_outcome_message(
     message: impl Into<String>,
     status: CommandOutcomeStatus,
@@ -416,7 +459,7 @@ impl ChatCallbacks {
                     ) {
                         Ok(command) => command,
                         Err(e) => {
-                            let (status, reason) = classify_command_error(&e);
+                            let (status, reason) = classify_chat_command_error(&e);
                             let message =
                                 command_outcome_message(e.to_string(), status, reason, None);
                             send_ui_update_reliable(
@@ -498,7 +541,7 @@ impl ChatCallbacks {
                             let resolved = match strong_resolver.resolve(parsed, &snapshot) {
                                 Ok(value) => value,
                                 Err(e) => {
-                                    let (status, reason) = classify_command_error(&e);
+                                    let (status, reason) = classify_command_resolver_error(&e);
                                     let message = command_outcome_message(
                                         e.to_string(),
                                         status,
@@ -523,7 +566,7 @@ impl ChatCallbacks {
                             ) {
                                 Ok(value) => value,
                                 Err(e) => {
-                                    let (status, reason) = classify_command_error(&e);
+                                    let (status, reason) = classify_command_resolver_error(&e);
                                     let message = command_outcome_message(
                                         e.to_string(),
                                         status,

@@ -620,6 +620,39 @@ ci-harness-ownership-policy:
     bash scripts/check/harness-move-ownership-boundary.sh
     bash scripts/check/harness-authoritative-fact-boundary.sh
 
+ci-ownership-categories:
+    bash scripts/check/ownership-category-declarations.sh
+
+ci-actor-lifecycle:
+    bash scripts/check/actor-owned-task-spawn.sh
+
+ci-move-semantics:
+    bash scripts/check/move-owned-transfer-only.sh
+
+ci-authoritative-fact-boundary:
+    bash scripts/check/authoritative-fact-authorship.sh
+
+ci-capability-boundaries:
+    bash scripts/check/capability-gated-mutation.sh
+
+ci-typed-errors:
+    bash scripts/check/typed-error-boundary.sh
+
+ci-operation-terminality:
+    bash scripts/check/operation-terminality.sh
+
+ci-observed-layer-boundaries:
+    bash scripts/check/observed-layer-authorship.sh
+
+ci-timeout-policy:
+    bash scripts/check/timeout-policy-boundary.sh
+
+ci-timeout-time-domains:
+    bash scripts/check/timeout-time-domain-usage.sh
+
+ci-timeout-backoff:
+    bash scripts/check/timeout-backoff-discipline.sh
+
 # Choreography wiring lint
 ci-choreo:
     scripts/check/choreo-wiring.sh

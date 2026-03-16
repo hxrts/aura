@@ -137,3 +137,46 @@ pub async fn publish_authoritative_operation_cancellation(
     )
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
+    use crate::{AppConfig, AppCore};
+
+    #[tokio::test]
+    async fn concurrent_authoritative_fact_updates_do_not_lose_entries() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let first = publish_authoritative_semantic_fact(
+            &app_core,
+            AuthoritativeSemanticFact::PendingHomeInvitationReady,
+        );
+        let second = publish_authoritative_semantic_fact(
+            &app_core,
+            AuthoritativeSemanticFact::ContactLinkReady {
+                authority_id: "owner-a".into(),
+            },
+        );
+
+        let (first_result, second_result) = tokio::join!(first, second);
+        first_result.unwrap_or_else(|error| panic!("{error}"));
+        second_result.unwrap_or_else(|error| panic!("{error}"));
+
+        let facts = {
+            let core = app_core.read().await;
+            read_signal_or_default(&core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await
+        };
+
+        assert!(facts.contains(&AuthoritativeSemanticFact::PendingHomeInvitationReady));
+        assert!(facts.contains(&AuthoritativeSemanticFact::ContactLinkReady {
+            authority_id: "owner-a".into(),
+        }));
+        assert_eq!(facts.len(), 2);
+    }
+}

@@ -1,3 +1,9 @@
 # Temporary baseline for frontend-side readiness refresh triggers that must move
 # behind approved single-owner coordinators.
+# Owner: architecture
+# Reason: shared semantic readiness migration is in progress; this downstream
+# subscription surface still mirrors readiness outside the canonical
+# coordinator-owned publication path.
+# Doc: work/ownership.md
+
 ^crates/aura-terminal/src/tui/screens/app/subscriptions\.rs:

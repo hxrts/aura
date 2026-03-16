@@ -71,8 +71,21 @@ struct OperationTracker {
 }
 
 impl OperationTracker {
+    fn terminal_transition_requires_new_instance(
+        existing: OperationState,
+        next: OperationState,
+    ) -> bool {
+        matches!(existing, OperationState::Succeeded | OperationState::Failed) && existing != next
+    }
+
     fn set_state(&mut self, operation_id: OperationId, state: OperationState) {
-        let needs_new_instance = matches!(state, OperationState::Submitting)
+        let needs_new_instance = self
+            .entries
+            .get(&operation_id)
+            .is_some_and(|entry| {
+                Self::terminal_transition_requires_new_instance(entry.state, state)
+            })
+            || matches!(state, OperationState::Submitting)
             || !self.entries.contains_key(&operation_id);
         if needs_new_instance {
             let instance_id = self.next_instance_id(&operation_id);
@@ -95,6 +108,9 @@ impl OperationTracker {
         if let Some(instance_id) = instance_id {
             match self.entries.get_mut(&operation_id) {
                 Some(entry) if entry.instance_id == instance_id => {
+                    if Self::terminal_transition_requires_new_instance(entry.state, state) {
+                        return;
+                    }
                     entry.state = state;
                     return;
                 }
@@ -105,13 +121,9 @@ impl OperationTracker {
                 }
             }
         }
-        let needs_new_instance = matches!(state, OperationState::Submitting)
-            && self.entries.get(&operation_id).is_some_and(|entry| {
-                matches!(
-                    entry.state,
-                    OperationState::Succeeded | OperationState::Failed
-                )
-            });
+        let needs_new_instance = self.entries.get(&operation_id).is_some_and(|entry| {
+            Self::terminal_transition_requires_new_instance(entry.state, state)
+        });
         if needs_new_instance {
             self.set_state(operation_id, state);
             return;
@@ -642,5 +654,62 @@ mod tests {
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Submitting);
         assert_ne!(snapshots[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn local_terminal_regression_allocates_new_instance() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_create();
+        state.set_operation_state(operation_id.clone(), OperationState::Succeeded);
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_operation_state(operation_id, OperationState::Failed);
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots[0].state, OperationState::Failed);
+        assert_ne!(snapshots[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn authoritative_terminal_regression_without_instance_allocates_new_instance() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_accept();
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            None,
+            OperationState::Succeeded,
+        );
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_authoritative_operation_state(operation_id, None, OperationState::Failed);
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots[0].state, OperationState::Failed);
+        assert_ne!(snapshots[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn authoritative_terminal_regression_for_same_instance_is_ignored() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_accept();
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            None,
+            OperationState::Succeeded,
+        );
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_authoritative_operation_state(
+            operation_id,
+            Some(first_instance.clone()),
+            OperationState::Failed,
+        );
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots[0].state, OperationState::Succeeded);
+        assert_eq!(snapshots[0].instance_id, first_instance);
     }
 }

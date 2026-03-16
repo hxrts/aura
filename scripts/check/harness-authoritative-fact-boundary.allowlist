@@ -1,3 +1,8 @@
 # Temporary baseline for frontend observation modules that still pattern-match on
 # authoritative semantic facts while downstreaming them into UI state.
+# Owner: architecture
+# Reason: observed-layer cleanup is in progress; this frontend subscription path
+# still mirrors authoritative facts while the remaining bridge logic is removed.
+# Doc: work/ownership.md
+
 ^crates/aura-terminal/src/tui/screens/app/subscriptions\.rs:
