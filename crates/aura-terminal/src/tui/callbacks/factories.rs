@@ -183,70 +183,59 @@ impl CommandReasonCode {
     }
 }
 
-fn classify_command_error(message: &str) -> (CommandOutcomeStatus, CommandReasonCode) {
-    let lower = message.to_ascii_lowercase();
+fn classify_command_error(error: &aura_core::AuraError) -> (CommandOutcomeStatus, CommandReasonCode) {
+    use aura_core::AuraError;
 
-    if lower.contains("no active home selected")
-        || lower.contains("missing current channel")
-        || lower.contains("missing channel scope")
-    {
-        return (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::MissingActiveContext,
-        );
+    // Primary classification: match on the typed error variant.
+    match error {
+        AuraError::Invalid { .. } => {
+            let msg = error.to_string().to_ascii_lowercase();
+            if msg.contains("no active home")
+                || msg.contains("missing current channel")
+                || msg.contains("missing channel scope")
+            {
+                (CommandOutcomeStatus::Invalid, CommandReasonCode::MissingActiveContext)
+            } else if msg.contains("parse error")
+                || msg.contains("missing required argument")
+            {
+                (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+            } else if msg.contains("stale snapshot") || msg.contains("invalid state") {
+                (CommandOutcomeStatus::Failed, CommandReasonCode::InvalidState)
+            } else {
+                (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+            }
+        }
+        AuraError::NotFound { .. } => {
+            (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
+        }
+        AuraError::PermissionDenied { .. } => {
+            let msg = error.to_string().to_ascii_lowercase();
+            if msg.contains("not a member") {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::NotMember)
+            } else if msg.contains("muted") {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::Muted)
+            } else if msg.contains("banned") || msg.contains("ban ") {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::Banned)
+            } else {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::PermissionDenied)
+            }
+        }
+        _ => {
+            // Fallback: string match for errors that don't use typed variants yet.
+            let msg = error.to_string().to_ascii_lowercase();
+            if msg.contains("permission denied") || msg.contains("only moderators") {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::PermissionDenied)
+            } else if msg.contains("not found") || msg.contains("unknown") {
+                (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
+            } else if msg.contains("muted") {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::Muted)
+            } else if msg.contains("banned") {
+                (CommandOutcomeStatus::Denied, CommandReasonCode::Banned)
+            } else {
+                (CommandOutcomeStatus::Failed, CommandReasonCode::Internal)
+            }
+        }
     }
-    if lower.contains("permission denied")
-        || (lower.contains("requires") && lower.contains("capability"))
-    {
-        return (
-            CommandOutcomeStatus::Denied,
-            CommandReasonCode::PermissionDenied,
-        );
-    }
-    if lower.contains("cannot create one_hop_link from home")
-        || lower.contains("only members can be designated as moderators")
-        || lower.contains("only moderators")
-        || lower.contains("requires a moderator home")
-    {
-        return (
-            CommandOutcomeStatus::Denied,
-            CommandReasonCode::PermissionDenied,
-        );
-    }
-    if lower.contains("not a member") {
-        return (CommandOutcomeStatus::Denied, CommandReasonCode::NotMember);
-    }
-    if lower.contains("muted") {
-        return (CommandOutcomeStatus::Denied, CommandReasonCode::Muted);
-    }
-    if lower.contains("banned") || lower.contains("ban ") {
-        return (CommandOutcomeStatus::Denied, CommandReasonCode::Banned);
-    }
-    if lower.contains("unknown")
-        || lower.contains("not found")
-        || lower.contains("missing target")
-        || lower.contains("unknown channel scope")
-    {
-        return (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound);
-    }
-    if lower.contains("parse error")
-        || lower.contains("invalid argument")
-        || lower.contains("missing required argument")
-        || lower.contains("invalid ")
-    {
-        return (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::InvalidArgument,
-        );
-    }
-    if lower.contains("stale snapshot") || lower.contains("invalid state") {
-        return (
-            CommandOutcomeStatus::Failed,
-            CommandReasonCode::InvalidState,
-        );
-    }
-
-    (CommandOutcomeStatus::Failed, CommandReasonCode::Internal)
 }
 
 fn command_outcome_message(
@@ -427,7 +416,7 @@ impl ChatCallbacks {
                     ) {
                         Ok(command) => command,
                         Err(e) => {
-                            let (status, reason) = classify_command_error(&e.to_string());
+                            let (status, reason) = classify_command_error(&e);
                             let message =
                                 command_outcome_message(e.to_string(), status, reason, None);
                             send_ui_update_reliable(
@@ -509,7 +498,7 @@ impl ChatCallbacks {
                             let resolved = match strong_resolver.resolve(parsed, &snapshot) {
                                 Ok(value) => value,
                                 Err(e) => {
-                                    let (status, reason) = classify_command_error(&e.to_string());
+                                    let (status, reason) = classify_command_error(&e);
                                     let message = command_outcome_message(
                                         e.to_string(),
                                         status,
@@ -534,7 +523,7 @@ impl ChatCallbacks {
                             ) {
                                 Ok(value) => value,
                                 Err(e) => {
-                                    let (status, reason) = classify_command_error(&e.to_string());
+                                    let (status, reason) = classify_command_error(&e);
                                     let message = command_outcome_message(
                                         e.to_string(),
                                         status,
@@ -644,7 +633,7 @@ impl ChatCallbacks {
                                     }
                                 }
                                 Err(e) => {
-                                    let (status, reason) = classify_command_error(&e.to_string());
+                                    let (status, reason) = classify_command_error(&e);
                                     let message = command_outcome_message(
                                         format!("/{irc_name}: {e}"),
                                         status,
