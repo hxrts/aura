@@ -2493,7 +2493,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::OpenChatTopicModal => {
                                         let idx = new_state.chat.selected_channel;
                                         let channels = shared_channels_for_dispatch.read().clone();
-                                        };
                                         if let Some(channel) = channels.get(idx) {
                                             let modal_state = crate::tui::state::TopicModalState::for_channel(
                                                 &channel.id,
@@ -2743,7 +2742,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::OpenContactNicknameModal => {
                                         let idx = new_state.contacts.selected_index;
-                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                        {
+                                            let guard = shared_contacts_for_dispatch.read();
                                             if let Some(contact) = guard.get(idx) {
                                                 // nickname is already populated with nickname_suggestion if empty (see Contact::from)
                                                 let modal_state = crate::tui::state::NicknameModalState::for_contact(
@@ -2758,13 +2758,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 new_state.toast_error("No contact selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read contacts");
                                         }
                                     }
                                     DispatchCommand::OpenCreateInvitationModal => {
                                         let idx = new_state.contacts.selected_index;
-                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                        {
+                                            let guard = shared_contacts_for_dispatch.read();
                                             let mut modal_state = if let Some(contact) = guard.get(idx) {
                                                 crate::tui::state::CreateInvitationModalState::for_receiver(
                                                     contact.id.clone(),
@@ -2779,14 +2778,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 .enqueue(crate::tui::state::QueuedModal::ContactsCreate(
                                                     modal_state,
                                                 ));
-                                        } else {
-                                            new_state.toast_error("Failed to read contacts");
                                         }
                                     }
                                     DispatchCommand::InviteLanPeer => {
                                         let idx = new_state.contacts.lan_selected_index;
-                                        if let Ok(guard) = shared_discovered_peers_for_dispatch.read()
                                         {
+                                            let guard = shared_discovered_peers_for_dispatch.read();
                                             if let Some(peer) = guard.get(idx) {
                                                 let authority_id = peer.authority_id.to_string();
                                                 let address = peer.address.clone();
@@ -2803,20 +2800,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 new_state.toast_error("No LAN peer selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read LAN peers");
                                         }
                                     }
                                     DispatchCommand::StartChat => {
                                         let idx = new_state.contacts.selected_index;
-                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                        {
+                                            let guard = shared_contacts_for_dispatch.read();
                                             if let Some(contact) = guard.get(idx) {
                                                 (cb.contacts.on_start_chat)(contact.id.clone());
                                             } else {
                                                 new_state.toast_error("No contact selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read contacts");
                                         }
                                     }
                                     DispatchCommand::InviteSelectedContactToChannel => {
@@ -2887,8 +2881,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         };
                                         let selected_binding = selected_channel_binding_for_events
                                             .read()
-                                            .ok()
-                                            .and_then(|guard| guard.clone())
+                                            .clone()
                                             .filter(|binding| binding.channel_id == channel.id);
                                         let context_id = selected_binding
                                             .and_then(|binding| binding.context_id)
@@ -2930,7 +2923,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::OpenRemoveContactModal => {
                                         let idx = new_state.contacts.selected_index;
-                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                        {
+                                            let guard = shared_contacts_for_dispatch.read();
                                             if let Some(contact) = guard.get(idx) {
                                                 // Get display name for confirmation message
                                                 let display_name = if !contact.nickname.is_empty() {
@@ -2959,8 +2953,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 new_state.toast_error("No contact selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read contacts");
                                         }
                                     }
                                     DispatchCommand::SelectContactByIndex { index } => {
@@ -3067,10 +3059,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     // === Recovery Commands ===
                                     DispatchCommand::StartRecovery => {
                                         // Check recovery eligibility before starting
-                                        let (threshold_k, _threshold_n) = shared_threshold_for_dispatch
-                                            .read()
-                                            .map(|guard| *guard)
-                                            .unwrap_or((0, 0));
+                                        let (threshold_k, _threshold_n) = *shared_threshold_for_dispatch.read();
 
                                         // Check if threshold is configured
                                         if threshold_k == 0 {
@@ -3083,8 +3072,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Check if we have enough guardians
                                         let guardian_count = shared_contacts_for_dispatch
                                             .read()
-                                            .map(|guard| guard.iter().filter(|c| c.is_guardian).count())
-                                            .unwrap_or(0);
+                                            .iter()
+                                            .filter(|c| c.is_guardian)
+                                            .count();
 
                                         if guardian_count < threshold_k as usize {
                                             new_state.toast_error(
@@ -3108,16 +3098,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             )
                                         {
                                             (cb.recovery.on_submit_approval)(req_id);
-                                        } else if let Ok(guard) =
-                                            shared_pending_requests_for_dispatch.read()
-                                        {
+                                        } else {
+                                            let guard = shared_pending_requests_for_dispatch.read();
                                             if let Some(req) = guard.first() {
                                                 (cb.recovery.on_submit_approval)(req.id.clone());
                                             } else {
                                                 new_state.toast_error("No pending recovery requests");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read requests");
                                         }
                                     }
 
@@ -3128,8 +3115,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // by a separate reactive subscription (not stale props)
                                         let current_contacts = shared_contacts_for_dispatch
                                             .read()
-                                            .map(|guard| guard.clone())
-                                            .unwrap_or_default();
+                                            .clone();
 
                                         // Validate using type-safe ceremony error
                                         if current_contacts.is_empty() {
@@ -3168,8 +3154,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::OpenMfaSetup => {
                                         let current_devices = shared_devices_for_dispatch
                                             .read()
-                                            .map(|guard| guard.clone())
-                                            .unwrap_or_default();
+                                            .clone();
 
                                         // Validate using type-safe ceremony error
                                         if current_devices.len() < MIN_MFA_DEVICES {
@@ -3567,8 +3552,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::OpenDeviceSelectModal => {
                                         let current_devices = shared_devices_for_dispatch
                                             .read()
-                                            .map(|guard| guard.clone())
-                                            .unwrap_or_default();
+                                            .clone();
 
                                         if current_devices.is_empty() {
                                             new_state.toast_info("No devices to remove");
@@ -3661,7 +3645,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     // === Neighborhood Screen Commands ===
                                     DispatchCommand::EnterHome => {
                                         let idx = new_state.neighborhood.grid.current();
-                                        if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
+                                        {
+                                            let guard = shared_neighborhood_homes_for_dispatch.read();
                                             if let Some(home_id) = guard.get(idx) {
                                                 // Keep entered_home_id authoritative as a real home ID.
                                                 // The state-machine layer sets an index sentinel first.
@@ -3674,8 +3659,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 new_state.toast_error("No home selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
                                     DispatchCommand::GoHome => {
@@ -3695,8 +3678,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::OpenModeratorAssignmentModal => {
                                         let contacts = shared_contacts_for_dispatch
                                             .read()
-                                            .map(|guard| guard.clone())
-                                            .unwrap_or_default();
+                                            .clone();
                                         new_state.modal_queue.enqueue(
                                             crate::tui::state::QueuedModal::NeighborhoodModeratorAssignment(
                                                 crate::tui::state::ModeratorAssignmentModalState::new(
@@ -3716,8 +3698,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::OpenAccessOverrideModal => {
                                         let contacts = shared_contacts_for_dispatch
                                             .read()
-                                            .map(|guard| guard.clone())
-                                            .unwrap_or_default();
+                                            .clone();
                                         new_state.modal_queue.enqueue(
                                             crate::tui::state::QueuedModal::NeighborhoodAccessOverride(
                                                 crate::tui::state::AccessOverrideModalState::new(
@@ -3831,7 +3812,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::AddSelectedHomeToNeighborhood => {
                                         let idx = new_state.neighborhood.grid.current();
-                                        if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
+                                        {
+                                            let guard = shared_neighborhood_homes_for_dispatch.read();
                                             if let Some(home_id) = guard.get(idx) {
                                                 (cb.neighborhood.on_add_home_to_neighborhood)(
                                                     home_id.clone(),
@@ -3839,8 +3821,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 new_state.toast_error("No home selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
                                     DispatchCommand::AddHomeToNeighborhood { target } => {
@@ -3850,7 +3830,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::LinkSelectedHomeOneHopLink => {
                                         let idx = new_state.neighborhood.grid.current();
-                                        if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
+                                        {
+                                            let guard = shared_neighborhood_homes_for_dispatch.read();
                                             if let Some(home_id) = guard.get(idx) {
                                                 (cb.neighborhood.on_link_home_one_hop_link)(
                                                     home_id.clone(),
@@ -3858,8 +3839,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 new_state.toast_error("No home selected");
                                             }
-                                        } else {
-                                            new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
                                     DispatchCommand::LinkHomeOneHopLink { target } => {
