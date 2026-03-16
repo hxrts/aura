@@ -1,0 +1,9 @@
+# Temporary exemptions for direct move-owned owner/instance rewrites.
+# Owner: architecture
+# Reason: repo-wide ownership migration is still converting legacy mutable
+# rewrites onto sanctioned handoff / transfer surfaces.
+# Doc: work/ownership.md
+
+^crates/aura-agent/src/runtime/session_ingress\.rs:
+^crates/aura-app/src/ui_contract\.rs:
+^crates/aura-ui/src/model\.rs:

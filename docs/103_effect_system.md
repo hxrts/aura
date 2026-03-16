@@ -84,6 +84,32 @@ Callers select the domain appropriate to their semantics. Guards and transport u
 
 Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`. Total ordering across domains must use `OrderTime` or consensus sequencing. Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations.
 
+### Timeout And Backoff Guidance
+
+Wall clock time is a local choice in Aura. It is appropriate for:
+
+- local owner deadlines
+- retry and backoff policy
+- expiration and cooldowns
+- coordination with external systems
+
+Wall clock time is not, by itself, distributed semantic truth.
+
+Rules:
+
+- use `PhysicalTimeEffects` for local timeout budgeting and retry policy
+- use logical, order, or provenanced time when the concern is semantic
+  ordering, causality, or attestation
+- do not treat a local timeout as proof of protocol completion, causal order,
+  or consensus finality
+- nested workflows should consume remaining timeout budget rather than stacking
+  unrelated per-stage wall-clock literals
+- parity-critical timeout handling should surface typed timeout failure instead
+  of silent hangs or ad hoc `tokio::time::timeout` wrappers at call sites
+
+The shared timeout/backoff vocabulary lives in `aura-core::time::timeout` and
+should be preferred over duplicated timeout arithmetic or raw sleep loops.
+
 ## Threshold Signing
 
 Aura provides a unified `ThresholdSigningEffects` trait in `aura-core/src/effects/threshold.rs` for all threshold signing scenarios. The trait supports multi-device personal signing, guardian recovery approvals, and group operation approvals.

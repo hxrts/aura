@@ -121,19 +121,14 @@ impl std::ops::Deref for TuiRenderState {
 
 pub(super) fn sync_neighborhood_navigation_state(
     state: &mut TuiState,
-    shared_homes: &Arc<std::sync::RwLock<Vec<String>>>,
-    shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
+    shared_homes: &Arc<parking_lot::RwLock<Vec<String>>>,
+    shared_channels: &Arc<parking_lot::RwLock<Vec<Channel>>>,
     shared_home_meta: &SharedNeighborhoodHomeMeta,
 ) {
-    let (home_count, selected_home_id, local_home_id) = shared_homes
-        .read()
-        .map(|guard| {
-            let count = guard.len();
-            let selected = guard.get(state.neighborhood.grid.current()).cloned();
-            let local = guard.first().cloned();
-            (count, selected, local)
-        })
-        .unwrap_or((0, None, None));
+    let home_guard = shared_homes.read();
+    let home_count = home_guard.len();
+    let selected_home_id = home_guard.get(state.neighborhood.grid.current()).cloned();
+    let local_home_id = home_guard.first().cloned();
     state.neighborhood.home_count = home_count;
     // Neighborhood map is currently rendered as a single-column list.
     // Keep GridNav columns non-zero so map navigation works.
@@ -156,7 +151,7 @@ pub(super) fn sync_neighborhood_navigation_state(
     let expose_home_details = is_local_home_selected || expose_remote_home_details;
 
     let channel_count = if expose_home_details {
-        shared_channels.read().map(|guard| guard.len()).unwrap_or(0)
+        shared_channels.read().len()
     } else {
         0
     };
@@ -164,10 +159,7 @@ pub(super) fn sync_neighborhood_navigation_state(
     state.neighborhood.selected_channel =
         clamp_list_index(state.neighborhood.selected_channel, channel_count);
 
-    let home_meta = shared_home_meta
-        .read()
-        .map(|guard| *guard)
-        .unwrap_or_default();
+    let home_meta = *shared_home_meta.read();
     let member_count = if expose_home_details {
         home_meta.member_count
     } else {

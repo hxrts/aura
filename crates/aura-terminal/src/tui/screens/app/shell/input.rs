@@ -9,8 +9,8 @@ pub(super) struct InputTransition {
 pub(super) fn transition_from_terminal_event(
     event: iocraft::prelude::TerminalEvent,
     tui: &TuiStateHandle,
-    shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
-    shared_homes: &Arc<std::sync::RwLock<Vec<String>>>,
+    shared_channels: &Arc<parking_lot::RwLock<Vec<Channel>>>,
+    shared_homes: &Arc<parking_lot::RwLock<Vec<String>>>,
     shared_home_meta: &SharedNeighborhoodHomeMeta,
 ) -> Option<InputTransition> {
     let core_event = convert_iocraft_event(event)?;

@@ -309,7 +309,7 @@ mod tests {
     use crate::AppConfig;
     use aura_core::{
         crypto::hash::hash,
-        identifiers::{AuthorityId, ChannelId, ContextId},
+        AuthorityId, ChannelId, ContextId,
     };
 
     #[tokio::test]

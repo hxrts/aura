@@ -12,21 +12,15 @@ pub(super) fn resolve_committed_selected_channel_id(
 pub(super) fn handle_channel_selection_change(
     current: &TuiState,
     new_state: &TuiState,
-    shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
-    selected_channel_id: &Arc<std::sync::RwLock<Option<String>>>,
-    selected_channel_binding: &Arc<std::sync::RwLock<Option<SelectedChannelBinding>>>,
+    shared_channels: &Arc<parking_lot::RwLock<Vec<Channel>>>,
+    selected_channel_id: &Arc<parking_lot::RwLock<Option<String>>>,
+    selected_channel_binding: &Arc<parking_lot::RwLock<Option<SelectedChannelBinding>>>,
 ) {
     let idx = new_state.chat.selected_channel;
 
-    let channels = match shared_channels.read() {
-        Ok(guard) => guard.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    };
+    let channels = shared_channels.read().clone();
     let next_selected = channels.get(idx).map(|channel| channel.id.clone());
-    let current_selected = selected_channel_id
-        .read()
-        .ok()
-        .and_then(|guard| guard.clone());
+    let current_selected = selected_channel_id.read().clone();
 
     if new_state.chat.selected_channel == current.chat.selected_channel
         && next_selected == current_selected
@@ -34,10 +28,12 @@ pub(super) fn handle_channel_selection_change(
         return;
     }
 
-    if let Ok(mut guard) = selected_channel_id.write() {
+    {
+        let mut guard = selected_channel_id.write();
         *guard = next_selected;
     }
-    if let Ok(mut guard) = selected_channel_binding.write() {
+    {
+        let mut guard = selected_channel_binding.write();
         let previous = guard.clone();
         *guard = channels
             .get(idx)

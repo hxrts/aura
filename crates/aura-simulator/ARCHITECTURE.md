@@ -25,6 +25,34 @@ delays or inherent failures.
 - Must NOT create persistent effect handlers (use aura-effects).
 - Must NOT implement multi-party coordination (use aura-protocol).
 
+## Ownership Model
+
+`aura-simulator` is primarily an `ActorOwned` plus `Observed` crate.
+
+- `ActorOwned`
+  - simulation runtime coordination
+  - deterministic event scheduling
+  - fault-injection orchestration
+- `Observed`
+  - artifact comparison
+  - parity reporting
+  - replay diagnostics
+- not product-semantic `MoveOwned`
+  - simulation may model transfer surfaces, but it must not invent alternate
+    ownership contracts for production parity-critical flows
+- not a semantic-truth source for frontend/runtime ownership
+  - simulator reports and comparisons observe product contracts rather than
+    redefining them
+
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Simulation scheduler, clocks, and runtime coordination | `ActorOwned` | simulator runtime / scheduler owner | simulator orchestration code | tests, reports, diagnostics |
+| Fault injection and deterministic environment state | `ActorOwned` | owning simulator service/task | simulator control paths | reports, bridges |
+| Differential/parity artifact comparison | `Observed` | upstream artifacts and comparison contracts | local comparison state only | verification outputs, diagnostics |
+| Quint / external verification bridge inputs | `Observed` | external artifact/schema producers | bridge adaptation only | simulator comparison/reporting |
+
 ### Detailed Specifications
 
 ### InvariantSimulationDeterministicReplay

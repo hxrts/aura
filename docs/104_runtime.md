@@ -147,6 +147,25 @@ impl ServiceActor {
 
 This approach keeps time-based policy in the runtime layer and preserves deterministic testing. The simulator controls time directly. Layer 4 and 5 crates remain decoupled from runtime concerns.
 
+### Runtime Timeout Policy
+
+Runtime timeout behavior must preserve Aura's time-system contract:
+
+- physical time drives local waiting, retry, and backoff policy
+- logical, order, and provenanced time remain semantic ordering tools
+- runtime owners publish typed timeout failure when local waiting is exhausted
+- harness and simulation may scale timeout policy, but they should not invent a
+  different semantic model
+
+In practice this means:
+
+- long-lived owners should consume a remaining timeout budget across nested
+  stages instead of resetting fresh wall-clock literals at each call site
+- retry loops should use shared backoff policy rather than duplicated sleeps
+- timeout policy belongs to owner/coordinator code, not UI observation layers
+- reducing timeout duration in tests or harness mode is acceptable; changing
+  what timeout means is not
+
 ## Guard Chain Execution
 
 The runtime enforces guard chain sequencing defined in [Authorization](106_authorization.md). Each projected choreography message expands to three phases. First, snapshot preparation gathers capability frontier, budget headroom, and metadata. Second, pure guard evaluation runs synchronously over the snapshot. Third, command interpretation executes the resulting effect commands.

@@ -1,0 +1,9 @@
+# Temporary exemptions for authoritative-fact-authorship.sh.
+# Owner: architecture
+# Reason: repo-wide ownership migration is in progress; these modules still
+# bridge or mirror authoritative semantic lifecycle outside the canonical
+# aura-app workflow coordinator boundary.
+# Doc: work/ownership.md
+
+^crates/aura-terminal/src/tui/semantic_lifecycle\.rs:
+^crates/aura-terminal/src/tui/callbacks/factories\.rs:

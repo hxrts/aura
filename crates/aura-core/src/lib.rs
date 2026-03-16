@@ -125,6 +125,12 @@ pub use domain::journal;
 // === Public API Re-exports ===
 
 pub use time::TimeDomain;
+pub use time::timeout::{
+    AttemptBudget, ExponentialBackoffPolicy, RetryBudgetPolicy, TimeoutBudget,
+    TimeoutBudgetError, TimeoutBudgetResult, TimeoutExecutionClass,
+    TimeoutExecutionProfile, TimeoutRunError, TimeoutTimeSemantics,
+    RetryRunError, execute_with_retry_budget, execute_with_timeout_budget,
+};
 
 // Core algebraic types
 pub use byzantine::{

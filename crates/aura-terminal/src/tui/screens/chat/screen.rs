@@ -31,6 +31,8 @@ use crate::tui::props::ChatViewProps;
 use crate::tui::theme::{list_item_colors, Spacing, Theme};
 use crate::tui::types::{format_contact_name, Channel, Contact, Message};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// Which panel is focused
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -102,8 +104,8 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 }
 
 /// Shared selected channel identity for cross-component communication.
-pub type SharedSelectedChannel = std::sync::Arc<std::sync::RwLock<Option<String>>>;
-pub type SharedMessages = std::sync::Arc<std::sync::RwLock<Vec<Message>>>;
+pub type SharedSelectedChannel = Arc<RwLock<Option<String>>>;
+pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 
 /// Props for ChatScreen
 ///
@@ -128,7 +130,7 @@ pub struct ChatScreenProps {
     /// Shared selected channel identity - allows subscriptions to resolve messages against channel IDs
     pub selected_channel: Option<SharedSelectedChannel>,
     /// Shared scoped channels snapshot for dispatch-time channel resolution.
-    pub shared_channels: Option<std::sync::Arc<std::sync::RwLock<Vec<Channel>>>>,
+    pub shared_channels: Option<Arc<RwLock<Vec<Channel>>>>,
     /// Shared selected-channel messages from the shell-owned CHAT_SIGNAL subscription.
     pub shared_messages: Option<SharedMessages>,
 
@@ -168,9 +170,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let reactive_chat_state = hooks.use_state(ChatState::default);
     let reactive_contacts: State<Vec<Contact>> = hooks.use_state(Vec::new);
     let reactive_active_scope = hooks.use_state(|| None::<String>);
-    let active_scope_ref = hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None)));
-    let active_scope: std::sync::Arc<std::sync::RwLock<Option<String>>> =
-        active_scope_ref.read().clone();
+    let active_scope_ref = hooks.use_ref(|| Arc::new(RwLock::new(None)));
+    let active_scope: Arc<RwLock<Option<String>>> = active_scope_ref.read().clone();
 
     // Subscribe to contacts signal for nickname lookup
     hooks.use_future({
@@ -197,9 +198,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
                 reactive_active_scope.set(Some(scope.clone()));
-                if let Ok(mut guard) = active_scope.write() {
-                    *guard = Some(scope);
-                }
+                *active_scope.write() = Some(scope);
             })
             .await;
         }
@@ -220,10 +219,10 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // This ensures channel_count is updated when channels change
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
-                    let scope = active_scope.read().ok().and_then(|g| g.clone());
+                    let scope = active_scope.read().clone();
                     let selected_channel_id = shared_selected
                         .as_ref()
-                        .and_then(|selected| selected.read().ok().and_then(|guard| guard.clone()));
+                        .and_then(|selected| selected.read().clone());
                     let effective_scope = effective_home_scope_id(
                         &chat_state,
                         scope.as_deref(),
@@ -246,10 +245,9 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                             .cloned()
                             .map(Channel::from)
                             .collect::<Vec<_>>();
-                        if let Ok(mut guard) = channels_ref.write() {
-                            if !next_channels.is_empty() || guard.is_empty() {
-                                *guard = next_channels;
-                            }
+                        let mut guard = channels_ref.write();
+                        if !next_channels.is_empty() || guard.is_empty() {
+                            *guard = next_channels;
                         }
                     }
 
@@ -269,10 +267,9 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                     })
                             })
                             .unwrap_or_default();
-                        if let Ok(mut guard) = messages_ref.write() {
-                            if !selected_messages.is_empty() || guard.is_empty() {
-                                *guard = selected_messages;
-                            }
+                        let mut guard = messages_ref.write();
+                        if !selected_messages.is_empty() || guard.is_empty() {
+                            *guard = selected_messages;
                         }
                     }
 
@@ -311,7 +308,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let committed_selected_channel_id = props
         .selected_channel
         .as_ref()
-        .and_then(|selected| selected.read().ok().and_then(|guard| guard.clone()));
+        .and_then(|selected| selected.read().clone());
     let effective_scope = effective_home_scope_id(
         &chat_state,
         active_scope.as_deref(),
@@ -320,7 +317,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let channels: Vec<Channel> = props
         .shared_channels
         .as_ref()
-        .and_then(|channels_ref| channels_ref.read().ok().map(|guard| guard.clone()))
+        .map(|channels_ref| channels_ref.read().clone())
         .filter(|channels| !channels.is_empty())
         .unwrap_or_else(|| {
             scoped_channels(&chat_state, effective_scope.as_deref())
@@ -329,16 +326,15 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 .collect()
         });
     if let Some(shared_channels) = props.shared_channels.as_ref() {
-        if let Ok(mut guard) = shared_channels.write() {
-            if guard.is_empty() && !channels.is_empty() {
-                *guard = channels.clone();
-            }
+        let mut guard = shared_channels.write();
+        if guard.is_empty() && !channels.is_empty() {
+            *guard = channels.clone();
         }
     }
     let selected_channel_index = props
         .selected_channel
         .as_ref()
-        .and_then(|selected| selected.read().ok().and_then(|guard| guard.clone()))
+        .and_then(|selected| selected.read().clone())
         .and_then(|selected_id| {
             channels
                 .iter()
@@ -356,16 +352,15 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         });
     let selected_channel_id = channels.get(selected_channel_index).map(|ch| ch.id.clone());
     if let Some(shared_selected) = props.selected_channel.as_ref() {
-        if let Ok(mut guard) = shared_selected.write() {
-            if *guard != selected_channel_id {
-                *guard = selected_channel_id.clone();
-            }
+        let mut guard = shared_selected.write();
+        if *guard != selected_channel_id {
+            *guard = selected_channel_id.clone();
         }
     }
     let messages: Vec<Message> = props
         .shared_messages
         .as_ref()
-        .and_then(|messages_ref| messages_ref.read().ok().map(|guard| guard.clone()))
+        .map(|messages_ref| messages_ref.read().clone())
         .filter(|messages| !messages.is_empty())
         .unwrap_or_else(|| {
             selected_channel_id

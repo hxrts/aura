@@ -10,6 +10,7 @@ use std::fmt;
 
 // Pure functions for Aeneas translation (formal verification)
 pub mod pure;
+pub mod timeout;
 
 use crate::{
     crypto::Ed25519Signature,
