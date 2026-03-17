@@ -30,7 +30,12 @@ use tokio::sync::Notify;
 /// - `online`: set of authorities currently instantiated in this shared network
 #[derive(Clone, Debug)]
 pub struct SharedTransport {
-    state: Arc<RwLock<SharedTransportState>>,
+    shared: Arc<SharedTransportShared>,
+}
+
+#[derive(Debug)]
+struct SharedTransportShared {
+    state: RwLock<SharedTransportState>,
 }
 
 #[derive(Debug, Default)]
@@ -69,7 +74,9 @@ impl SharedTransport {
     /// Create a new empty shared transport network.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(SharedTransportState::default())),
+            shared: Arc::new(SharedTransportShared {
+                state: RwLock::new(SharedTransportState::default()),
+            }),
         }
     }
 
@@ -85,21 +92,23 @@ impl SharedTransport {
         let mut online = HashSet::new();
         online.insert(authority_id);
         Self {
-            state: Arc::new(RwLock::new(SharedTransportState {
-                inboxes,
-                inbox_notifiers,
-                online,
-            })),
+            shared: Arc::new(SharedTransportShared {
+                state: RwLock::new(SharedTransportState {
+                    inboxes,
+                    inbox_notifiers,
+                    online,
+                }),
+            }),
         }
     }
 
     fn with_state<R>(&self, op: impl FnOnce(&SharedTransportState) -> R) -> R {
-        let guard = self.state.read();
+        let guard = self.shared.state.read();
         op(&guard)
     }
 
     fn with_state_mut<R>(&self, op: impl FnOnce(&mut SharedTransportState) -> R) -> R {
-        let mut guard = self.state.write();
+        let mut guard = self.shared.state.write();
         let result = op(&mut guard);
         #[cfg(debug_assertions)]
         {
@@ -203,6 +212,7 @@ impl Default for SharedTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::PhysicalTimeEffects;
     use aura_core::types::identifiers::ContextId;
     use std::collections::HashMap;
 
@@ -262,7 +272,6 @@ mod tests {
             Ok::<(), ()>(())
         })
         .await
-        .expect("shared transport should notify promptly")
-        .expect("notification future should succeed");
+        .expect("shared transport should notify promptly");
     }
 }

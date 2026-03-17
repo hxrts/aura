@@ -68,6 +68,23 @@ Rules:
 | Runtime-facing readiness and lifecycle state consumed by shared semantic flows | `ActorOwned` | runtime readiness/lifecycle coordinator | owning runtime coordinator and sanctioned hooks | `aura-app`, frontends, harness |
 | Frontend-visible projections and facts | `Observed` | downstream of runtime/workflow ownership | projection reducers/exporters only | frontends, harness |
 
+### Capability-Gated Points
+
+- runtime-owned readiness and lifecycle publication must flow through sanctioned
+  coordinator APIs and capability checks rather than arbitrary handlers
+- session and endpoint mutation must validate both current owner record and
+  current owner capability
+- runtime helper modules may stage work, but they may not author frontend- or
+  harness-visible semantic truth without the owning capability
+
+### Verification Hooks
+
+- `cargo check -p aura-agent`
+- `just ci-actor-lifecycle`
+- `just ci-move-semantics`
+- `just ci-capability-boundaries`
+- targeted runtime/service tests in `cargo test -p aura-agent ...`
+
 ### Required Ownership Tests
 
 Changes to `aura-agent` ownership boundaries should ship with:

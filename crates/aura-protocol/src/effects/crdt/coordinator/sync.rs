@@ -40,39 +40,34 @@ where
 
         let sync_data = match request.crdt_type {
             CrdtType::Convergent => {
-                let handler = self.cv_handler.as_ref().ok_or_else(|| {
-                    CrdtCoordinatorError::UnsupportedOperation(
-                        "CvRDT handler not registered".to_string(),
-                    )
+                let handler = self.cv_handler.as_ref().ok_or(CrdtCoordinatorError::MissingHandler {
+                    crdt_type: CrdtType::Convergent,
                 })?;
                 let state_bytes = self.serialize_state(handler.get_state())?;
                 CrdtSyncData::FullState(state_bytes)
             }
             CrdtType::Commutative => {
-                let handler = self.cm_handler.as_ref().ok_or_else(|| {
-                    CrdtCoordinatorError::UnsupportedOperation(
-                        "CmRDT handler not registered".to_string(),
-                    )
+                let handler = self.cm_handler.as_ref().ok_or(CrdtCoordinatorError::MissingHandler {
+                    crdt_type: CrdtType::Commutative,
                 })?;
                 // Buffered operations not exposed by current handler; return empty set.
                 let _ = handler;
                 CrdtSyncData::Operations(Vec::new())
             }
             CrdtType::Delta => {
-                let handler = self.delta_handler.as_ref().ok_or_else(|| {
-                    CrdtCoordinatorError::UnsupportedOperation(
-                        "Delta CRDT handler not registered".to_string(),
-                    )
-                })?;
+                let handler =
+                    self.delta_handler
+                        .as_ref()
+                        .ok_or(CrdtCoordinatorError::MissingHandler {
+                            crdt_type: CrdtType::Delta,
+                        })?;
                 // Deltas not buffered; return empty list.
                 let _ = handler;
                 CrdtSyncData::Deltas(Vec::new())
             }
             CrdtType::Meet => {
-                let handler = self.mv_handler.as_ref().ok_or_else(|| {
-                    CrdtCoordinatorError::UnsupportedOperation(
-                        "MvRDT handler not registered".to_string(),
-                    )
+                let handler = self.mv_handler.as_ref().ok_or(CrdtCoordinatorError::MissingHandler {
+                    crdt_type: CrdtType::Meet,
                 })?;
                 let state_bytes = self.serialize_state(handler.get_state())?;
                 CrdtSyncData::Constraints(state_bytes)
@@ -101,16 +96,17 @@ where
                     let peer_state: CvS = {
                         let bytes = &state_bytes;
                         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-                            CrdtCoordinatorError::Deserialization(format!(
-                                "Failed to deserialize state: {e}"
-                            ))
+                            CrdtCoordinatorError::DeserializationFailed {
+                                target: "convergent_state",
+                                detail: e.to_string(),
+                            }
                         })?
                     };
                     handler.update_state(peer_state);
                 } else {
-                    return Err(CrdtCoordinatorError::UnsupportedOperation(
-                        "CvRDT handler not registered".to_string(),
-                    ));
+                    return Err(CrdtCoordinatorError::MissingHandler {
+                        crdt_type: CrdtType::Convergent,
+                    });
                 }
             }
             (CrdtType::Commutative, CrdtSyncData::Operations(operations)) => {
@@ -121,16 +117,18 @@ where
                         let op: Op =
                             aura_core::util::serialization::from_slice(&crdt_op.operation_data)
                                 .map_err(|e| {
-                                    CrdtCoordinatorError::Deserialization(format!(
-                                        "Failed to deserialize operation: {e}"
-                                    ))
+                                    CrdtCoordinatorError::DeserializationFailed {
+                                        target: "commutative_operation",
+                                        detail: e.to_string(),
+                                    }
                                 })?;
                         let ctx: CausalContext =
                             aura_core::util::serialization::from_slice(&crdt_op.causal_context)
                                 .map_err(|e| {
-                                    CrdtCoordinatorError::Deserialization(format!(
-                                        "Failed to deserialize causal context: {e}"
-                                    ))
+                                    CrdtCoordinatorError::DeserializationFailed {
+                                        target: "causal_context",
+                                        detail: e.to_string(),
+                                    }
                                 })?;
                         ops_with_ctx.push(OpWithCtx::new(op, ctx));
                     }
@@ -140,9 +138,9 @@ where
                         handler.on_recv(op_with_ctx);
                     }
                 } else {
-                    return Err(CrdtCoordinatorError::UnsupportedOperation(
-                        "CmRDT handler not registered".to_string(),
-                    ));
+                    return Err(CrdtCoordinatorError::MissingHandler {
+                        crdt_type: CrdtType::Commutative,
+                    });
                 }
             }
             (CrdtType::Delta, CrdtSyncData::Deltas(delta_bytes_vec)) => {
@@ -154,9 +152,10 @@ where
                             &delta_bytes,
                         )
                         .map_err(|e| {
-                            CrdtCoordinatorError::Deserialization(format!(
-                                "Failed to deserialize delta: {e}"
-                            ))
+                            CrdtCoordinatorError::DeserializationFailed {
+                                target: "delta_state",
+                                detail: e.to_string(),
+                            }
                         })?;
                         deltas.push(delta);
                     }
@@ -167,9 +166,9 @@ where
                         handler.on_recv(delta_msg);
                     }
                 } else {
-                    return Err(CrdtCoordinatorError::UnsupportedOperation(
-                        "Delta CRDT handler not registered".to_string(),
-                    ));
+                    return Err(CrdtCoordinatorError::MissingHandler {
+                        crdt_type: CrdtType::Delta,
+                    });
                 }
             }
             (CrdtType::Meet, CrdtSyncData::Constraints(constraint_bytes)) => {
@@ -178,16 +177,17 @@ where
                     let peer_state: MvS = {
                         let bytes = &constraint_bytes;
                         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-                            CrdtCoordinatorError::Deserialization(format!(
-                                "Failed to deserialize state: {e}"
-                            ))
+                            CrdtCoordinatorError::DeserializationFailed {
+                                target: "meet_constraints",
+                                detail: e.to_string(),
+                            }
                         })?
                     };
                     handler.on_constraint(peer_state);
                 } else {
-                    return Err(CrdtCoordinatorError::UnsupportedOperation(
-                        "MvRDT handler not registered".to_string(),
-                    ));
+                    return Err(CrdtCoordinatorError::MissingHandler {
+                        crdt_type: CrdtType::Meet,
+                    });
                 }
             }
             (crdt_type, sync_data) => {

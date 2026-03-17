@@ -4,7 +4,6 @@ use super::state::with_state_mut_validated;
 use crate::handlers::recovery::{ActiveRecovery, RecoveryState};
 use aura_core::types::identifiers::RecoveryId;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
@@ -19,16 +18,16 @@ impl RecoveryStateCache {
 }
 
 /// Manages active recovery ceremonies for the recovery handler.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct RecoveryManager {
-    state: Arc<RwLock<RecoveryStateCache>>,
+    state: RwLock<RecoveryStateCache>,
 }
 
 impl RecoveryManager {
     /// Create a new recovery manager.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(RecoveryStateCache::default())),
+            state: RwLock::new(RecoveryStateCache::default()),
         }
     }
 

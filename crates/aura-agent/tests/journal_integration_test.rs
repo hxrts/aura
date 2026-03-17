@@ -15,9 +15,8 @@
 use aura_agent::fact_registry::build_fact_registry;
 use aura_agent::reactive::{FactSource, ReactiveScheduler, ReactiveView, SchedulerConfig};
 use aura_core::{
-    identifiers::{AuthorityId, ContextId},
     time::{OrderTime, PhysicalTime, TimeStamp},
-    Hash32,
+    AuthorityId, ContextId, Hash32,
 };
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use std::future::Future;

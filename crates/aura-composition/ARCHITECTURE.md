@@ -42,6 +42,27 @@ assembly, but it must not introduce background tasks, internal mutable
 registries with semantic meaning, or lifecycle ownership of the assembled
 system.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/registry.rs`, `src/builder.rs`, `src/composite.rs` | `Pure` assembly | Type-safe handler registry and composition wiring only. |
+| `src/adapters/*` | allowed assembly mechanics | Shared `Arc<dyn ...>` references to already-owned handlers; not semantic owner state. |
+| `src/view_delta.rs` and related reduction infrastructure | `Pure` | View reduction and typed assembly-time adaptation only. |
+| Actor-owned runtime state | none | Lifecycle ownership of the assembled system belongs in higher layers. |
+| Observed-only surfaces | none | Composition may be inspected, but not treated as a semantic owner. |
+
+### Capability-Gated Points
+
+- none local; capability gating belongs in the assembled contracts and owner
+  modules that consume composition output
+
+### Verification Hooks
+
+- `cargo check -p aura-composition`
+- `just check-arch`
+- `cargo test -p aura-composition -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantCompositionTypeSafeRegistry

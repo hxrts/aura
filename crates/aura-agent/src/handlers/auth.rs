@@ -17,6 +17,7 @@ use aura_guards::chain::create_send_guard;
 use aura_guards::types::CapabilityId;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Extract the group public key (32 bytes) from a serialized FROST PublicKeyPackage
 fn extract_group_public_key(public_key_package: &[u8]) -> AgentResult<Vec<u8>> {
@@ -102,7 +103,7 @@ struct AuthenticatedFact {
 pub struct AuthHandler {
     context: HandlerContext,
     /// Challenge manager (shared cache)
-    challenge_manager: AuthManager,
+    challenge_manager: Arc<AuthManager>,
 }
 
 impl AuthHandler {
@@ -112,7 +113,7 @@ impl AuthHandler {
 
         Ok(Self {
             context: HandlerContext::new(authority),
-            challenge_manager: AuthManager::new(),
+            challenge_manager: Arc::new(AuthManager::new()),
         })
     }
 

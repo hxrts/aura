@@ -37,6 +37,28 @@ invitation creation, redemption, and ceremony coordination.
 - `Observed` layers may display invitation state but must not synthesize
   semantic truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/domain types | `Pure` | Deterministic invitation fact reduction and relationship-binding semantics. |
+| invitation lifecycle handles, acceptance/redemption flows, ceremony/protocol state | `MoveOwned` | Exclusive invitation authority and lifecycle ownership remain explicit. |
+| long-lived invitation coordination | selective single-owner | Ongoing invitation coordination must stay single-owner and capability-gated. |
+| capability-gated publication | typed workflow boundary | Invitation creation/acceptance/redemption publication stays explicit and terminally typed. |
+| Observed-only surfaces | invitation view consumers only | UI/runtime observation remains downstream. |
+
+### Capability-Gated Points
+
+- invitation creation, acceptance, redemption, and relationship-establishment
+  boundaries
+- ceremony/protocol publication consumed by higher-layer runtime and interface
+  flows
+
+### Verification Hooks
+
+- `cargo check -p aura-invitation`
+- `cargo test -p aura-invitation -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantInvitationRedemptionUniqueness

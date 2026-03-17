@@ -168,7 +168,10 @@ impl SyncEffects for PersistentSyncHandler {
     async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
         self.ensure_initialized()
             .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+            .map_err(|e| SyncError::NetworkError {
+                operation: "load_cached_digest",
+                detail: e.to_string(),
+            })?;
 
         let ops = self.ops_cache.read().await;
 
@@ -187,7 +190,10 @@ impl SyncEffects for PersistentSyncHandler {
     ) -> Result<Vec<AttestedOp>, SyncError> {
         self.ensure_initialized()
             .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+            .map_err(|e| SyncError::NetworkError {
+                operation: "load_missing_ops",
+                detail: e.to_string(),
+            })?;
 
         // Return full oplog; guard chain filters where needed
         let ops = self.ops_cache.read().await;
@@ -206,11 +212,17 @@ impl SyncEffects for PersistentSyncHandler {
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
         self.ensure_initialized()
             .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+            .map_err(|e| SyncError::NetworkError {
+                operation: "merge_remote_ops",
+                detail: e.to_string(),
+            })?;
 
         for op in ops {
             let op_hash = tree_storage::op_hash(&op)
-                .map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
+                .map_err(|e| SyncError::VerificationFailed {
+                    target: "persisted_op_hash",
+                    detail: e.to_string(),
+                })?;
 
             // Check for duplicate
             let already = {
@@ -232,7 +244,10 @@ impl SyncEffects for PersistentSyncHandler {
                 // Persist to storage
                 self.persist_op(&op, op_hash)
                     .await
-                    .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+                    .map_err(|e| SyncError::NetworkError {
+                        operation: "persist_op",
+                        detail: e.to_string(),
+                    })?;
             }
         }
         Ok(())
@@ -245,7 +260,10 @@ impl SyncEffects for PersistentSyncHandler {
     async fn request_op(&self, _peer_id: DeviceId, cid: Hash32) -> Result<AttestedOp, SyncError> {
         self.ensure_initialized()
             .await
-            .map_err(|e| SyncError::NetworkError(e.to_string()))?;
+            .map_err(|e| SyncError::NetworkError {
+                operation: "request_op",
+                detail: e.to_string(),
+            })?;
 
         let store = self.ops_cache.read().await;
 

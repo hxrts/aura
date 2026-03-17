@@ -31,6 +31,27 @@ storage with cryptographic chunk IDs.
 - `Observed` layers may inspect derived storage state but not mutate domain
   truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/chunking.rs`, `src/manifest.rs`, `src/search.rs` | `Pure` | Content addressing, manifests, and query/value semantics. |
+| `src/crdt.rs`, `src/facts.rs`, `src/state.rs` | `Pure`, `MoveOwned` | Fact-backed storage transitions and explicit op-log/state transfer values. |
+| Capability-gated storage admission types | `MoveOwned` | Higher layers consume these as explicit authority-bearing records rather than implicit mutable ownership. |
+| Actor-owned runtime state | none | Storage services and caches belong in higher layers, not Layer 2. |
+| Observed-only surfaces | none | Observation of derived storage state belongs in higher layers. |
+
+### Capability-Gated Points
+
+- typed storage operation admission and authority-attributed storage facts
+- content/state transitions consumed by higher-layer journal and authorization
+  gates
+
+### Verification Hooks
+
+- `cargo check -p aura-store`
+- `cargo test -p aura-store -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantStoreContentAddressIntegrity

@@ -99,15 +99,24 @@ fn sync_error_codes_are_unique() {
     let device = DeviceId::new_from_entropy([0u8; 32]);
     let errors = vec![
         SyncError::PeerUnreachable(device.clone()),
-        SyncError::VerificationFailed("test".to_string()),
-        SyncError::NetworkError("test".to_string()),
+        SyncError::VerificationFailed {
+            target: "test",
+            detail: "test".to_string(),
+        },
+        SyncError::NetworkError {
+            operation: "test",
+            detail: "test".to_string(),
+        },
         SyncError::RateLimitExceeded(device.clone()),
         SyncError::InvalidDigest(device),
         SyncError::OperationNotFound,
         SyncError::BackPressure,
         SyncError::TimeError,
         SyncError::AuthorizationFailed,
-        SyncError::GuardChainFailure("test".to_string()),
+        SyncError::GuardChainFailure {
+            operation: "test",
+            detail: "test".to_string(),
+        },
     ];
 
     let codes: std::collections::HashSet<_> = errors.iter().map(|e| e.code()).collect();
@@ -122,7 +131,10 @@ fn sync_error_codes_are_unique() {
 
 #[test]
 fn sync_error_display_is_meaningful() {
-    let err = SyncError::VerificationFailed("invalid signature".to_string());
+    let err = SyncError::VerificationFailed {
+        target: "test",
+        detail: "invalid signature".to_string(),
+    };
     let msg = format!("{err}");
 
     assert!(msg.contains("verification"));

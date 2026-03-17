@@ -463,9 +463,9 @@ impl AntiEntropyProtocol {
                     Err(sync_biscuit_guard_error(
                         "sync_journal",
                         peer,
-                        GuardError::AuthorizationFailed(
-                            "Token does not grant sync permission".to_string(),
-                        ),
+                        GuardError::MissingCapability {
+                            capability: "sync.permission".to_string(),
+                        },
                     ))
                 }
                 Err(e) => {

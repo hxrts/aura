@@ -29,6 +29,27 @@ with explicit guard chain enforcement on network operations.
 - Guarded sync publication must remain capability-aware and typed.
 - `Observed` tooling may inspect reconciliation outcomes but not define them.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `pure.rs` and digest/reconciliation helpers | `Pure` | Deterministic anti-entropy decisions and digest math. |
+| sync-session and request/response orchestration | `MoveOwned` | Reconciliation/session authority remains explicit and value-oriented. |
+| `anti_entropy.rs`, `broadcast.rs`, `persistent.rs` | orchestration with typed errors | Effectful sync/broadcast orchestration stays explicit and does not become a hidden long-lived owner. |
+| long-lived background reconciliation | none local | Ongoing reconciliation ownership belongs in higher-layer runtime services. |
+| Observed-only surfaces | none | Observation of reconciliation results belongs downstream. |
+
+### Capability-Gated Points
+
+- guard-approved digest/op request publication
+- typed sync/broadcast outcomes consumed by higher-layer runtime and testing
+  lanes
+
+### Verification Hooks
+
+- `cargo check -p aura-anti-entropy`
+- `cargo test -p aura-anti-entropy -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantAntiEntropyReconciliationPurity

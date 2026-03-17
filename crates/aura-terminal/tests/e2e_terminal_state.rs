@@ -3697,7 +3697,7 @@ async fn test_journal_compaction_primitives() {
             signer_count: 2,
         };
 
-        op_log.append(attested_op);
+        op_log.add_operation(attested_op);
     }
 
     let initial_count = op_log.len();

@@ -31,6 +31,29 @@ orchestration glue, not single-party effect implementations.
 - `Observed` layers consume protocol outputs downstream and must not co-author
   protocol truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| protocol/session handlers and core builder/config modules | `MoveOwned` | Session transfer, delegation, and typed orchestration boundaries. |
+| long-lived coordinators such as `transport_coordinator` and peer-connection retry actors | `ActorOwned` | Justified orchestration coordinators only; not the default model for protocol logic. |
+| guard-chain and effect integration surfaces | capability-gated orchestration | Capability, flow, and journal coupling remain explicit on send paths. |
+| observed-only surfaces | none local | Observation belongs in higher layers consuming protocol outputs. |
+
+### Current Debt
+
+- `transport_coordinator` now uses structured terminal transport failures, but
+  other protocol-local error surfaces still need the same typed treatment
+  before the crate pass is complete.
+- coordinator ownership must remain explicit and single-owner; no drift back to
+  shared lock registries or shell-driven lifecycle.
+
+### Verification Hooks
+
+- `cargo check -p aura-protocol`
+- `cargo test -p aura-protocol --test transport_coordinator -- --nocapture`
+- `just check-arch`
+
 ### Detailed Specifications
 
 ### InvariantProtocolGuardMediation

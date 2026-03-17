@@ -6,19 +6,17 @@ use aura_core::AuraError;
 /// Error types for CRDT coordination
 #[derive(Debug, thiserror::Error)]
 pub enum CrdtCoordinatorError {
-    #[error("Serialization error: {0}")]
-    Serialization(String),
-    #[error("Deserialization error: {0}")]
-    Deserialization(String),
+    #[error("serialization failed for {target}: {detail}")]
+    SerializationFailed { target: &'static str, detail: String },
+    #[error("deserialization failed for {target}: {detail}")]
+    DeserializationFailed { target: &'static str, detail: String },
     #[error("CRDT type mismatch: expected {expected:?}, got {actual:?}")]
     TypeMismatch {
         expected: CrdtType,
         actual: CrdtType,
     },
-    #[error("Unsupported operation: {0}")]
-    UnsupportedOperation(String),
-    #[error("Handler error: {0}")]
-    HandlerError(String),
+    #[error("missing handler for {crdt_type:?}")]
+    MissingHandler { crdt_type: CrdtType },
 }
 
 impl From<CrdtCoordinatorError> for AuraError {
@@ -30,11 +28,10 @@ impl From<CrdtCoordinatorError> for AuraError {
 impl aura_core::ProtocolErrorCode for CrdtCoordinatorError {
     fn code(&self) -> &'static str {
         match self {
-            CrdtCoordinatorError::Serialization(_) => "crdt_serialization",
-            CrdtCoordinatorError::Deserialization(_) => "crdt_deserialization",
+            CrdtCoordinatorError::SerializationFailed { .. } => "crdt_serialization",
+            CrdtCoordinatorError::DeserializationFailed { .. } => "crdt_deserialization",
             CrdtCoordinatorError::TypeMismatch { .. } => "crdt_type_mismatch",
-            CrdtCoordinatorError::UnsupportedOperation(_) => "crdt_unsupported_operation",
-            CrdtCoordinatorError::HandlerError(_) => "crdt_handler_error",
+            CrdtCoordinatorError::MissingHandler { .. } => "crdt_missing_handler",
         }
     }
 }

@@ -11,7 +11,6 @@ use aura_sync::services::{
     ScopedUpgradeState, SessionCompatibilityPlan,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Update status for the agent.
@@ -154,9 +153,9 @@ impl OtaState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct OtaManager {
-    state: Arc<RwLock<OtaState>>,
+    state: RwLock<OtaState>,
 }
 
 impl OtaManager {

@@ -476,7 +476,7 @@ mod tests {
     use tokio::sync::Barrier;
     use uuid::Uuid;
 
-    async fn assert_completes_within<T, E>(
+    async fn assert_completes_within<T, E: std::fmt::Debug>(
         future: impl std::future::Future<Output = Result<T, E>>,
         timeout: Duration,
         message: &str,
@@ -488,9 +488,9 @@ mod tests {
             .expect("physical time should be available");
         let budget = aura_core::TimeoutBudget::from_start_and_timeout(&started_at, timeout)
             .expect("timeout budget should fit");
-        aura_core::execute_with_timeout_budget(&time, &budget, || future)
+        Ok(aura_core::execute_with_timeout_budget(&time, &budget, || future)
             .await
-            .expect(message)
+            .expect(message))
     }
 
     fn test_effects(authority_id: AuthorityId) -> Arc<AuraEffectSystem> {

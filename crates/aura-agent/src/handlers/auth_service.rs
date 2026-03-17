@@ -535,7 +535,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
-        let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
+        let service = AuthServiceApi::new(effects.clone(), authority_context, account_id).unwrap();
 
         assert!(!service.device_id().0.is_nil());
     }
@@ -549,7 +549,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
 
-        let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
+        let service = AuthServiceApi::new(effects.clone(), authority_context, account_id).unwrap();
 
         // Guard + journal pipelines can settle asynchronously under workspace load.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
@@ -557,7 +557,7 @@ mod tests {
             if service.is_authenticated().await {
                 return;
             }
-            effects.sleep_ms(20).await;
+            let _ = effects.sleep_ms(20).await;
         }
         panic!("expected auth service to report authenticated within timeout");
     }

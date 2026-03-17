@@ -31,15 +31,19 @@ impl LanListenerServiceState {
     }
 }
 
+struct LanListenerShared {
+    tasks: RwLock<Option<TaskGroup>>,
+    state: RwLock<LanListenerServiceState>,
+    lifecycle: Mutex<()>,
+}
+
 #[derive(Clone)]
 pub struct LanTransportListenerService {
     #[cfg(not(target_arch = "wasm32"))]
     effects: Arc<AuraEffectSystem>,
     #[cfg(not(target_arch = "wasm32"))]
     lan_transport: Arc<LanTransportService>,
-    tasks: Arc<RwLock<Option<TaskGroup>>>,
-    state: Arc<RwLock<LanListenerServiceState>>,
-    lifecycle: Arc<Mutex<()>>,
+    shared: Arc<LanListenerShared>,
 }
 
 impl LanTransportListenerService {
@@ -52,19 +56,21 @@ impl LanTransportListenerService {
             effects,
             #[cfg(not(target_arch = "wasm32"))]
             lan_transport,
-            tasks: Arc::new(RwLock::new(None)),
-            state: Arc::new(RwLock::new(LanListenerServiceState::Stopped)),
-            lifecycle: Arc::new(Mutex::new(())),
+            shared: Arc::new(LanListenerShared {
+                tasks: RwLock::new(None),
+                state: RwLock::new(LanListenerServiceState::Stopped),
+                lifecycle: Mutex::new(()),
+            }),
         }
     }
 
     async fn mark_state(&self, next: LanListenerServiceState) {
-        *self.state.write().await = next;
+        *self.shared.state.write().await = next;
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        let _guard = self.lifecycle.lock().await;
-        let current = *self.state.read().await;
+        let _guard = self.shared.lifecycle.lock().await;
+        let current = *self.shared.state.read().await;
         if current == LanListenerServiceState::Running {
             return Ok(());
         }
@@ -86,22 +92,22 @@ impl LanTransportListenerService {
                 self.effects.clone(),
                 self.lan_transport.clone(),
             );
-            *self.tasks.write().await = Some(tasks);
+            *self.shared.tasks.write().await = Some(tasks);
             self.mark_state(LanListenerServiceState::Running).await;
             Ok(())
         }
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _guard = self.lifecycle.lock().await;
-        let current = *self.state.read().await;
+        let _guard = self.shared.lifecycle.lock().await;
+        let current = *self.shared.state.read().await;
         if current == LanListenerServiceState::Stopped {
             return Ok(());
         }
         validate_actor_transition(self.name(), current.phase(), ActorLifecyclePhase::Stopping)?;
         self.mark_state(LanListenerServiceState::Stopping).await;
 
-        let shutdown_error = if let Some(tasks) = self.tasks.write().await.take() {
+        let shutdown_error = if let Some(tasks) = self.shared.tasks.write().await.take() {
             tasks
                 .shutdown_with_timeout(Duration::from_secs(2))
                 .await
@@ -149,7 +155,7 @@ impl RuntimeService for LanTransportListenerService {
     }
 
     async fn health(&self) -> ServiceHealth {
-        match *self.state.read().await {
+        match *self.shared.state.read().await {
             LanListenerServiceState::Stopped => ServiceHealth::Stopped,
             LanListenerServiceState::Starting => ServiceHealth::Starting,
             LanListenerServiceState::Stopping => ServiceHealth::Stopping,
@@ -164,7 +170,7 @@ impl RuntimeService for LanTransportListenerService {
 
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    if self.tasks.read().await.is_some() {
+                    if self.shared.tasks.read().await.is_some() {
                         ServiceHealth::Healthy
                     } else {
                         ServiceHealth::Unhealthy {

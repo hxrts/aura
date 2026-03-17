@@ -49,6 +49,29 @@ These surfaces are allowed only as handler-local mechanics. They must not grow
 product-semantic lifecycle, readiness ownership, or unsupervised business-flow
 coordination.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| core handler modules (`crypto.rs`, `storage*.rs`, `transport/*.rs`, `time.rs`, `leakage.rs`) | `Pure` adapter layer | Stateless or low-level effect adapters only; transport timeout wrappers remain infrastructure-local, not product-semantic ownership. |
+| `reactive/*` | allowed adapter-local mechanics | Signal graph subscriptions, registries, and task plumbing are permitted only as handler-local effect machinery. |
+| `query/handler.rs` | allowed adapter-local mechanics | Query-side caches and pending-consensus tracking are effect-boundary mechanics, not product-semantic coordinators. |
+| `encrypted_storage.rs` | allowed adapter-local mechanics | Local key cache and initialization guard are adapter-local only. |
+| Actor-owned runtime state | none | Any product-semantic lifecycle, readiness, or long-lived owner task belongs in higher layers. |
+| Observed-only surfaces | none | Observation belongs in higher layers; handlers implement effects only. |
+
+### Capability-Gated Points
+
+- upstream capability-gated effect entrypoints consumed through handler
+  implementations
+- no handler-local semantic lifecycle or readiness publication
+
+### Verification Hooks
+
+- `cargo check -p aura-effects`
+- `just check-arch`
+- `cargo test -p aura-effects -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantStatelessHandlerBoundary

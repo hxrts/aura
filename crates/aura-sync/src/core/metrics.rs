@@ -21,15 +21,15 @@ pub struct MetricsCollector {
 #[derive(Debug)]
 struct MetricsRegistry {
     /// Operational counters for sync activities
-    operational: Arc<Mutex<OperationalMetrics>>,
+    operational: Mutex<OperationalMetrics>,
     /// Performance measurements with timing data
-    performance: Arc<Mutex<PerformanceMetrics>>,
+    performance: Mutex<PerformanceMetrics>,
     /// Resource utilization tracking
-    resources: Arc<Mutex<ResourceMetrics>>,
+    resources: Mutex<ResourceMetrics>,
     /// Error tracking with categorization
-    errors: Arc<Mutex<ErrorMetrics>>,
+    errors: Mutex<ErrorMetrics>,
     /// Active timing measurements
-    active_timers: Arc<Mutex<HashMap<String, u64>>>,
+    active_timers: Mutex<HashMap<String, u64>>,
     /// Last successful sync timestamp (ms since Unix epoch)
     last_sync_timestamp_ms: AtomicU64,
     /// Last operation timestamp (ms since Unix epoch)
@@ -118,7 +118,7 @@ pub struct ErrorMetrics {
 #[derive(Debug)]
 pub struct HistogramMetric {
     /// Histogram buckets with upper bounds and counts
-    buckets: Arc<Mutex<Vec<HistogramBucket>>>,
+    buckets: Mutex<Vec<HistogramBucket>>,
     /// Total sum of all observed values
     sum: AtomicU64,
     /// Total count of all observations
@@ -128,7 +128,7 @@ pub struct HistogramMetric {
 impl Default for HistogramMetric {
     fn default() -> Self {
         Self {
-            buckets: Arc::new(Mutex::new(Self::default_buckets())),
+            buckets: Mutex::new(Self::default_buckets()),
             sum: AtomicU64::new(0),
             count: AtomicU64::new(0),
         }
@@ -363,11 +363,11 @@ impl MetricsCollector {
     pub fn new() -> Self {
         Self {
             registry: Arc::new(MetricsRegistry {
-                operational: Arc::new(Mutex::new(OperationalMetrics::default())),
-                performance: Arc::new(Mutex::new(PerformanceMetrics::default())),
-                resources: Arc::new(Mutex::new(ResourceMetrics::default())),
-                errors: Arc::new(Mutex::new(ErrorMetrics::default())),
-                active_timers: Arc::new(Mutex::new(HashMap::new())),
+                operational: Mutex::new(OperationalMetrics::default()),
+                performance: Mutex::new(PerformanceMetrics::default()),
+                resources: Mutex::new(ResourceMetrics::default()),
+                errors: Mutex::new(ErrorMetrics::default()),
+                active_timers: Mutex::new(HashMap::new()),
                 last_sync_timestamp_ms: AtomicU64::new(0),
                 last_operation_timestamp_ms: AtomicU64::new(0),
             }),

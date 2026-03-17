@@ -160,6 +160,14 @@ struct SyncState {
     peers: Vec<DeviceId>,
 }
 
+struct SyncManagerShared {
+    lifecycle_state: Mutex<SyncManagerState>,
+    configured_peers: Mutex<Vec<DeviceId>>,
+    maintenance_tasks: Mutex<Option<TaskGroup>>,
+    commands: Mutex<Option<ServiceActorHandle<SyncCommand>>>,
+    lifecycle: Mutex<()>,
+}
+
 #[derive(Clone)]
 struct SyncStateSnapshot {
     service: Option<Arc<SyncService>>,
@@ -210,27 +218,17 @@ impl SyncManagerState {
 pub struct SyncServiceManager {
     /// Configuration
     config: SyncManagerConfig,
-
-    /// Lifecycle state outside the actor for startup/shutdown/health fallback.
-    lifecycle_state: Arc<Mutex<SyncManagerState>>,
-    /// Peer list persisted across service restarts.
-    configured_peers: Arc<Mutex<Vec<DeviceId>>>,
-
     /// Optional Merkle verifier for fact sync (requires indexed journal)
     merkle_verifier: Option<Arc<MerkleVerifier>>,
-    /// Owned maintenance task group for service-local loops.
-    maintenance_tasks: Arc<Mutex<Option<TaskGroup>>>,
-    /// Typed command ingress for sync-owned mutable state.
-    commands: Arc<Mutex<Option<ServiceActorHandle<SyncCommand>>>>,
-    /// Serializes lifecycle transitions.
-    lifecycle: Arc<Mutex<()>>,
+    /// Shared lifecycle boundary for service-local mutable state.
+    shared: Arc<SyncManagerShared>,
     /// Reconfiguration/session-footprint state for sync choreography delegation.
     reconfiguration: ReconfigurationManager,
 }
 
 impl SyncServiceManager {
     async fn command_handle(&self) -> Result<ServiceActorHandle<SyncCommand>, ServiceError> {
-        self.commands.lock().await.clone().ok_or_else(|| {
+        self.shared.commands.lock().await.clone().ok_or_else(|| {
             ServiceError::unavailable(
                 self.name(),
                 "sync command actor unavailable; service is not fully started",
@@ -283,22 +281,28 @@ impl SyncServiceManager {
             }
             Err(_) => Ok(SyncStateSnapshot {
                 service: None,
-                status: *self.lifecycle_state.lock().await,
-                peers: self.configured_peers.lock().await.clone(),
+                status: *self.shared.lifecycle_state.lock().await,
+                peers: self.shared.configured_peers.lock().await.clone(),
             }),
         }
+    }
+
+    fn shared_for_config(config: &SyncManagerConfig) -> Arc<SyncManagerShared> {
+        Arc::new(SyncManagerShared {
+            lifecycle_state: Mutex::new(SyncManagerState::Stopped),
+            configured_peers: Mutex::new(config.initial_peers.clone()),
+            maintenance_tasks: Mutex::new(None),
+            commands: Mutex::new(None),
+            lifecycle: Mutex::new(()),
+        })
     }
 
     /// Create a new sync service manager
     pub fn new(config: SyncManagerConfig) -> Self {
         Self {
             config: config.clone(),
-            lifecycle_state: Arc::new(Mutex::new(SyncManagerState::Stopped)),
-            configured_peers: Arc::new(Mutex::new(config.initial_peers)),
             merkle_verifier: None,
-            maintenance_tasks: Arc::new(Mutex::new(None)),
-            commands: Arc::new(Mutex::new(None)),
-            lifecycle: Arc::new(Mutex::new(())),
+            shared: Self::shared_for_config(&config),
             reconfiguration: ReconfigurationManager::new(),
         }
     }
@@ -314,12 +318,8 @@ impl SyncServiceManager {
     ) -> Self {
         Self {
             config: config.clone(),
-            lifecycle_state: Arc::new(Mutex::new(SyncManagerState::Stopped)),
-            configured_peers: Arc::new(Mutex::new(config.initial_peers)),
             merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal, time))),
-            maintenance_tasks: Arc::new(Mutex::new(None)),
-            commands: Arc::new(Mutex::new(None)),
-            lifecycle: Arc::new(Mutex::new(())),
+            shared: Self::shared_for_config(&config),
             reconfiguration: ReconfigurationManager::new(),
         }
     }
@@ -334,7 +334,7 @@ impl SyncServiceManager {
         self.state_snapshot()
             .await
             .map(|snapshot| snapshot.status)
-            .unwrap_or(*self.lifecycle_state.lock().await)
+            .unwrap_or(*self.shared.lifecycle_state.lock().await)
     }
 
     /// Check if the service is running
@@ -343,8 +343,8 @@ impl SyncServiceManager {
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        let _lifecycle_guard = self.lifecycle.lock().await;
-        let current_state = *self.lifecycle_state.lock().await;
+        let _lifecycle_guard = self.shared.lifecycle.lock().await;
+        let current_state = *self.shared.lifecycle_state.lock().await;
         if current_state == SyncManagerState::Running {
             return Ok(());
         }
@@ -354,7 +354,7 @@ impl SyncServiceManager {
             ActorLifecyclePhase::Starting,
         )?;
 
-        *self.lifecycle_state.lock().await = SyncManagerState::Starting;
+        *self.shared.lifecycle_state.lock().await = SyncManagerState::Starting;
 
         // Build aura-sync service config from our config
         let sync_config = SyncServiceConfig {
@@ -370,7 +370,7 @@ impl SyncServiceManager {
         {
             Ok(service) => service,
             Err(error) => {
-                *self.lifecycle_state.lock().await = SyncManagerState::Failed;
+                *self.shared.lifecycle_state.lock().await = SyncManagerState::Failed;
                 return Err(ServiceError::startup_failed(
                     "sync_service",
                     error.to_string(),
@@ -380,23 +380,23 @@ impl SyncServiceManager {
 
         // Start the service
         if let Err(error) = service.start(now_instant).await {
-            *self.lifecycle_state.lock().await = SyncManagerState::Failed;
+            *self.shared.lifecycle_state.lock().await = SyncManagerState::Failed;
             return Err(ServiceError::startup_failed(
                 "sync_service",
                 error.to_string(),
             ));
         }
 
-        let initial_peers = self.configured_peers.lock().await.clone();
+        let initial_peers = self.shared.configured_peers.lock().await.clone();
         let maintenance_group = context.tasks().group(self.name());
         let command_handle = self.spawn_command_actor(
             &maintenance_group,
             SyncState::new_running(Arc::new(service), initial_peers),
         );
-        *self.commands.lock().await = Some(command_handle);
+        *self.shared.commands.lock().await = Some(command_handle);
         self.spawn_maintenance_task(maintenance_group.clone(), context.time_effects());
-        *self.lifecycle_state.lock().await = SyncManagerState::Running;
-        *self.maintenance_tasks.lock().await = Some(maintenance_group);
+        *self.shared.lifecycle_state.lock().await = SyncManagerState::Running;
+        *self.shared.maintenance_tasks.lock().await = Some(maintenance_group);
 
         tracing::info!(
             event = "runtime.service.sync.started",
@@ -407,8 +407,8 @@ impl SyncServiceManager {
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _lifecycle_guard = self.lifecycle.lock().await;
-        let current_state = *self.lifecycle_state.lock().await;
+        let _lifecycle_guard = self.shared.lifecycle.lock().await;
+        let current_state = *self.shared.lifecycle_state.lock().await;
         if current_state == SyncManagerState::Stopped {
             return Ok(());
         }
@@ -418,35 +418,45 @@ impl SyncServiceManager {
             ActorLifecyclePhase::Stopping,
         )?;
 
-        *self.lifecycle_state.lock().await = SyncManagerState::Stopping;
+        *self.shared.lifecycle_state.lock().await = SyncManagerState::Stopping;
 
-        let maintenance_shutdown_error =
-            if let Some(task_group) = self.maintenance_tasks.lock().await.take() {
-                task_group
-                    .shutdown_with_timeout(Duration::from_secs(2))
-                    .await
-                    .err()
-                    .map(|error| {
-                        ServiceError::shutdown_failed(
-                            self.name(),
-                            format!("failed to stop maintenance task group: {error}"),
-                        )
-                    })
-            } else {
-                None
-            };
-
-        // Stop the underlying service
         let snapshot = self.state_snapshot().await.ok();
         if let Some(snapshot) = snapshot.as_ref() {
-            *self.configured_peers.lock().await = snapshot.peers.clone();
+            *self.shared.configured_peers.lock().await = snapshot.peers.clone();
         }
         let service = snapshot.and_then(|snapshot| snapshot.service);
-        self.commands.lock().await.take();
+        self.shared.commands.lock().await.take();
+
+        let maintenance_shutdown_error = if let Some(task_group) =
+            self.shared.maintenance_tasks.lock().await.take()
+        {
+            match task_group.shutdown_with_timeout(Duration::from_secs(2)).await {
+                Ok(()) => None,
+                Err(crate::task_registry::TaskSupervisionError::ForcedAbort {
+                    aborted_tasks,
+                    ..
+                }) => {
+                    tracing::warn!(
+                        service = self.name(),
+                        aborted_tasks = ?aborted_tasks,
+                        "Sync service stop force-aborted owned background tasks"
+                    );
+                    None
+                }
+                Err(error) => Some(ServiceError::shutdown_failed(
+                    self.name(),
+                    format!("failed to stop maintenance task group: {error}"),
+                )),
+            }
+        } else {
+            None
+        };
+
+        // Stop the underlying service
         if let Some(service) = service.as_ref() {
             let now_instant = SyncService::monotonic_now();
             if let Err(error) = service.stop(now_instant).await {
-                *self.lifecycle_state.lock().await = SyncManagerState::Failed;
+                *self.shared.lifecycle_state.lock().await = SyncManagerState::Failed;
                 return Err(ServiceError::shutdown_failed(
                     self.name(),
                     error.to_string(),
@@ -454,7 +464,7 @@ impl SyncServiceManager {
             }
         }
 
-        *self.lifecycle_state.lock().await = SyncManagerState::Stopped;
+        *self.shared.lifecycle_state.lock().await = SyncManagerState::Stopped;
 
         tracing::info!(
             event = "runtime.service.sync.stopped",
@@ -463,7 +473,7 @@ impl SyncServiceManager {
         );
         match maintenance_shutdown_error {
             Some(error) => {
-                *self.lifecycle_state.lock().await = SyncManagerState::Failed;
+                *self.shared.lifecycle_state.lock().await = SyncManagerState::Failed;
                 Err(error)
             }
             None => Ok(()),
@@ -501,7 +511,7 @@ impl SyncServiceManager {
                                 error = %error,
                                 "Sync maintenance skipped because command actor is unavailable"
                             );
-                            return true;
+                            return false;
                         }
                     };
                     let status = snapshot.status;
@@ -511,7 +521,7 @@ impl SyncServiceManager {
                             | SyncManagerState::Stopping
                             | SyncManagerState::Failed
                     ) {
-                        return true;
+                        return false;
                     }
 
                     let now_ms = match time_effects.physical_time().await {
@@ -581,7 +591,7 @@ impl SyncServiceManager {
                 .request(|reply| SyncCommand::AddPeer { peer, reply })
                 .await;
         } else {
-            let mut peers = self.configured_peers.lock().await;
+            let mut peers = self.shared.configured_peers.lock().await;
             if !peers.contains(&peer) {
                 peers.push(peer);
                 tracing::debug!("Added peer {} to sync manager", peer);
@@ -596,7 +606,7 @@ impl SyncServiceManager {
                 .request(|reply| SyncCommand::RemovePeer { peer: *peer, reply })
                 .await;
         } else {
-            let mut peers = self.configured_peers.lock().await;
+            let mut peers = self.shared.configured_peers.lock().await;
             peers.retain(|p| p != peer);
             tracing::debug!("Removed peer {} from sync manager", peer);
         }
@@ -1171,6 +1181,7 @@ mod tests {
 
         RuntimeService::start(&manager, &context).await.unwrap();
         let task_group = manager
+            .shared
             .maintenance_tasks
             .lock()
             .await

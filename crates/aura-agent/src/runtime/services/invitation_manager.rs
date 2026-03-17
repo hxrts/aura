@@ -4,7 +4,6 @@ use super::state::with_state_mut_validated;
 use crate::handlers::Invitation;
 use aura_core::types::identifiers::InvitationId;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
@@ -13,16 +12,16 @@ struct InvitationState {
 }
 
 /// Manages cached invitations for the invitation handler.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct InvitationManager {
-    state: Arc<RwLock<InvitationState>>,
+    state: RwLock<InvitationState>,
 }
 
 impl InvitationManager {
     /// Create a new invitation manager.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(InvitationState::default())),
+            state: RwLock::new(InvitationState::default()),
         }
     }
 

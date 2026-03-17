@@ -89,7 +89,10 @@ impl AntiEntropyHandler {
         // Evaluate guard chain - this enforces authorization and flow budget
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
             tracing::error!(peer = ?peer_id, error = %e, "Guard chain evaluation failed");
-            SyncError::GuardChainFailure(format!("Digest request guard failed: {e}"))
+            SyncError::GuardChainFailure {
+                operation: "digest_request",
+                detail: format!("guard evaluation failed: {e}"),
+            }
         })?;
 
         if !guard_result.authorized {
@@ -98,11 +101,12 @@ impl AntiEntropyHandler {
                 reason = ?guard_result.denial_reason,
                 "Digest request denied by guard chain"
             );
-            return Err(SyncError::GuardChainFailure(
-                guard_result
+            return Err(SyncError::GuardChainFailure {
+                operation: "digest_request",
+                detail: guard_result
                     .denial_reason
                     .unwrap_or_else(|| "Authorization denied".to_string()),
-            ));
+            });
         }
 
         tracing::debug!(
@@ -253,7 +257,10 @@ impl AntiEntropyHandler {
         // Evaluate guard chain
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
             tracing::error!(peer = ?peer_id, error = %e, "Guard chain evaluation failed for ops request");
-            SyncError::GuardChainFailure(format!("Ops request guard failed: {e}"))
+            SyncError::GuardChainFailure {
+                operation: "ops_request",
+                detail: format!("guard evaluation failed: {e}"),
+            }
         })?;
 
         if !guard_result.authorized {
@@ -263,11 +270,12 @@ impl AntiEntropyHandler {
                 reason = ?guard_result.denial_reason,
                 "Ops request denied by guard chain"
             );
-            return Err(SyncError::GuardChainFailure(
-                guard_result
+            return Err(SyncError::GuardChainFailure {
+                operation: "ops_request",
+                detail: guard_result
                     .denial_reason
                     .unwrap_or_else(|| "Authorization denied".to_string()),
-            ));
+            });
         }
 
         tracing::debug!(

@@ -10,12 +10,17 @@ cfg_if! {
         use std::sync::Arc;
         use tokio::sync::RwLock;
 
+        #[derive(Debug)]
+        struct LanTransportShared {
+            metrics: Arc<RwLock<LanTransportMetrics>>,
+        }
+
         /// LAN transport service placeholder for wasm builds.
         #[derive(Debug)]
         pub struct LanTransportService {
             advertised_addrs: Vec<String>,
             websocket_addrs: Vec<String>,
-            metrics: Arc<RwLock<LanTransportMetrics>>,
+            shared: Arc<LanTransportShared>,
         }
 
         /// Runtime metrics for LAN transport.
@@ -41,7 +46,9 @@ cfg_if! {
                 Ok(Self {
                     advertised_addrs: Vec::new(),
                     websocket_addrs: Vec::new(),
-                    metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
+                    shared: Arc::new(LanTransportShared {
+                        metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
+                    }),
                 })
             }
 
@@ -57,7 +64,7 @@ cfg_if! {
 
             /// Get a snapshot of LAN transport metrics.
             pub async fn metrics(&self) -> LanTransportMetrics {
-                self.metrics.read().await.clone()
+                self.shared.metrics.read().await.clone()
             }
         }
     } else {
@@ -69,6 +76,11 @@ cfg_if! {
         use tokio::sync::RwLock;
         use tracing::info;
 
+        #[derive(Debug)]
+        struct LanTransportShared {
+            metrics: Arc<RwLock<LanTransportMetrics>>,
+        }
+
         /// LAN transport service holding the listener and advertised addresses.
         #[derive(Debug)]
         pub struct LanTransportService {
@@ -76,7 +88,7 @@ cfg_if! {
             advertised_addrs: Vec<String>,
             websocket_listener: Arc<TcpListener>,
             websocket_addrs: Vec<String>,
-            metrics: Arc<RwLock<LanTransportMetrics>>,
+            shared: Arc<LanTransportShared>,
         }
 
         /// Runtime metrics for LAN transport.
@@ -200,7 +212,9 @@ cfg_if! {
                     advertised_addrs,
                     websocket_listener: Arc::new(websocket_listener),
                     websocket_addrs,
-                    metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
+                    shared: Arc::new(LanTransportShared {
+                        metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
+                    }),
                 })
             }
 
@@ -216,12 +230,12 @@ cfg_if! {
 
             /// Get a snapshot of LAN transport metrics.
             pub async fn metrics(&self) -> LanTransportMetrics {
-                self.metrics.read().await.clone()
+                self.shared.metrics.read().await.clone()
             }
 
             /// Access the metrics handle for live updates.
             pub fn metrics_handle(&self) -> Arc<RwLock<LanTransportMetrics>> {
-                self.metrics.clone()
+                Arc::clone(&self.shared.metrics)
             }
 
             /// Access the underlying listener.

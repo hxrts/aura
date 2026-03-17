@@ -24,8 +24,12 @@ use tokio::sync::RwLock;
 /// Runtime-owned reconfiguration state and lifecycle methods.
 #[derive(Clone)]
 pub struct ReconfigurationManager {
-    controller: Arc<RwLock<ReconfigurationController>>,
+    shared: Arc<ReconfigurationShared>,
     runtime_capabilities: RuntimeCapabilityHandler,
+}
+
+struct ReconfigurationShared {
+    controller: RwLock<ReconfigurationController>,
 }
 
 /// Typed runtime delegation request for one session ownership transfer.
@@ -196,7 +200,9 @@ impl ReconfigurationManager {
                 .expect("generated reconfiguration bundles must be unique and valid");
         }
         Self {
-            controller: Arc::new(RwLock::new(controller)),
+            shared: Arc::new(ReconfigurationShared {
+                controller: RwLock::new(controller),
+            }),
             runtime_capabilities,
         }
     }
@@ -220,7 +226,7 @@ impl ReconfigurationManager {
         bundle: ComposedBundle,
     ) -> Result<(), ReconfigurationManagerError> {
         let bundle_id = bundle.bundle_id.clone();
-        let mut controller = self.controller.write().await;
+        let mut controller = self.shared.controller.write().await;
         controller.register_bundle(bundle).map_err(|e| {
             ReconfigurationManagerError::RegisterBundle {
                 bundle_id: bundle_id.clone(),
@@ -233,13 +239,13 @@ impl ReconfigurationManager {
 
     /// Snapshot one registered bundle by id.
     pub async fn bundle(&self, bundle_id: &str) -> Option<ComposedBundle> {
-        let controller = self.controller.read().await;
+        let controller = self.shared.controller.read().await;
         controller.bundle(bundle_id).cloned()
     }
 
     /// Snapshot one authority footprint by id.
     pub async fn footprint(&self, authority: AuthorityId) -> Option<SessionFootprint> {
-        let controller = self.controller.read().await;
+        let controller = self.shared.controller.read().await;
         controller.footprint(&authority).cloned()
     }
 
@@ -253,7 +259,7 @@ impl ReconfigurationManager {
         self.require_reconfiguration_capability("bundle linking")
             .await?;
         let linked_bundle_id = linked_bundle_id.into();
-        let mut controller = self.controller.write().await;
+        let mut controller = self.shared.controller.write().await;
         let linked = controller
             .link(bundle_a, bundle_b, linked_bundle_id.clone())
             .map_err(|e| ReconfigurationManagerError::LinkBundles {
@@ -275,7 +281,7 @@ impl ReconfigurationManager {
 
     /// Record that `authority` currently owns `session_id` natively.
     pub async fn record_native_session(&self, authority: AuthorityId, session_id: SessionId) {
-        let mut controller = self.controller.write().await;
+        let mut controller = self.shared.controller.write().await;
         controller.footprint_extend(authority, session_id, SessionFootprintClass::Native);
     }
 
@@ -379,7 +385,7 @@ impl ReconfigurationManager {
             .await?;
 
         let (receipt, controller_snapshot) = {
-            let mut controller = self.controller.write().await;
+            let mut controller = self.shared.controller.write().await;
             let controller_snapshot = controller.clone();
             let from_known = controller
                 .footprint(&from_authority)
@@ -426,7 +432,7 @@ impl ReconfigurationManager {
         ));
 
         if let Err(error) = effects.commit_relational_facts(vec![fact]).await {
-            let mut controller = self.controller.write().await;
+            let mut controller = self.shared.controller.write().await;
             *controller = controller_snapshot;
             return Err(ReconfigurationManagerError::PersistDelegationFact {
                 session_id,
@@ -460,7 +466,7 @@ impl ReconfigurationManager {
 
     /// Verify global coherence and emit diagnostics on violations.
     pub async fn verify_coherence(&self) -> CoherenceStatus {
-        let controller = self.controller.read().await;
+        let controller = self.shared.controller.read().await;
         let status = controller.verify_coherence();
         if let CoherenceStatus::Violations(violations) = &status {
             tracing::error!(
@@ -567,7 +573,7 @@ impl ReconfigurationManager {
         requested_boundary: Option<AuraLinkBoundary>,
         capability_scope: &SessionOwnerCapabilityScope,
     ) -> Result<AuraLinkBoundary, ReconfigurationManagerError> {
-        let controller = self.controller.read().await;
+        let controller = self.shared.controller.read().await;
         let Some(bundle) = controller.bundle(bundle_id).cloned() else {
             return Err(ReconfigurationManagerError::BundleNotRegistered {
                 bundle_id: bundle_id.to_string(),

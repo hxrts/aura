@@ -7,7 +7,6 @@ use super::state::with_state_mut_validated;
 use crate::core::AgentConfig;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Context status
@@ -75,7 +74,7 @@ pub struct ContextManager {
     #[allow(dead_code)] // Will be used for context configuration
     config: AgentConfig,
     /// Context storage by ID and authority index
-    state: Arc<RwLock<ContextManagerState>>,
+    state: RwLock<ContextManagerState>,
 }
 
 #[derive(Debug, Default)]
@@ -151,7 +150,7 @@ impl ContextManager {
     pub fn new(config: &AgentConfig) -> Self {
         Self {
             config: config.clone(),
-            state: Arc::new(RwLock::new(ContextManagerState::default())),
+            state: RwLock::new(ContextManagerState::default()),
         }
     }
 

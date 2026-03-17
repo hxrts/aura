@@ -3,7 +3,6 @@
 use super::state::with_state_mut_validated;
 use crate::handlers::AuthChallenge;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
@@ -29,16 +28,16 @@ impl AuthState {
 }
 
 /// Manages authentication challenges for the auth handler.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct AuthManager {
-    state: Arc<RwLock<AuthState>>,
+    state: RwLock<AuthState>,
 }
 
 impl AuthManager {
     /// Create a new auth manager.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(AuthState::default())),
+            state: RwLock::new(AuthState::default()),
         }
     }
 

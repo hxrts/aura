@@ -31,6 +31,26 @@ guardian request handling, and consensus-backed relationship establishment.
 - Capability-gated publication is required for parity-critical relational facts.
 - `Observed` views may inspect relationship state but not author it.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/context/domain types | `Pure` | Deterministic relational fact reduction and context-scoped relationship semantics. |
+| relationship establishment, guardian binding requests, mutual-agreement flows | `MoveOwned` | Exclusive relationship authority and agreement handoff remain explicit. |
+| cross-authority consensus-backed operations | typed workflow boundary | Direct consensus integration is explicit; no hidden adapter layer remains. |
+| long-lived coordination | none local | Runtime relationship workflow ownership belongs in higher layers. |
+| Observed-only surfaces | downstream relational views only | Observation does not author relational truth. |
+
+### Capability-Gated Points
+
+- parity-critical relational fact publication
+- consensus-backed relationship establishment and guardian binding transitions
+
+### Verification Hooks
+
+- `cargo check -p aura-relational`
+- `cargo test -p aura-relational -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantRelationalMutualAgreement

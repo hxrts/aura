@@ -37,6 +37,27 @@ and authority-centric messaging.
 - Runtime services and `Observed` projections consume these contracts
   downstream; they do not redefine them here.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/types.rs`, `src/envelope.rs`, `src/receipt.rs`, `src/privacy.rs` | `Pure` | Transport message, receipt, and privacy semantics. |
+| `src/protocols/` | `Pure`, `MoveOwned` | Session/channel descriptors and protocol state are explicit values; protocol timeout/retry settings here are configuration data, not owner-run loops. |
+| `src/facts.rs` | `Pure` | Fact-backed transport state transitions. |
+| Actor-owned runtime state | none | Connection ownership and live peer state belong in higher layers. |
+| Observed-only surfaces | none | Observation of transport state belongs in runtime/interface layers. |
+
+### Capability-Gated Points
+
+- typed send/receive authority surfaces consumed by higher-layer guards
+- receipt and transport fact semantics used by higher-layer mutation/publication
+  gates
+
+### Verification Hooks
+
+- `cargo check -p aura-transport`
+- `cargo test -p aura-transport -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantSequenceMonotonic

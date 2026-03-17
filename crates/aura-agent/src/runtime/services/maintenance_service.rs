@@ -36,6 +36,12 @@ impl MaintenanceServiceState {
     }
 }
 
+struct RuntimeMaintenanceShared {
+    tasks: RwLock<Option<TaskGroup>>,
+    state: RwLock<MaintenanceServiceState>,
+    lifecycle: Mutex<()>,
+}
+
 #[derive(Clone)]
 pub struct RuntimeMaintenanceService {
     effects: Arc<AuraEffectSystem>,
@@ -45,9 +51,7 @@ pub struct RuntimeMaintenanceService {
     rendezvous_manager: Option<RendezvousManager>,
     rendezvous_handler: Option<RendezvousHandler>,
     lan_transport: Option<Arc<LanTransportService>>,
-    tasks: Arc<RwLock<Option<TaskGroup>>>,
-    state: Arc<RwLock<MaintenanceServiceState>>,
-    lifecycle: Arc<Mutex<()>>,
+    shared: Arc<RuntimeMaintenanceShared>,
 }
 
 impl RuntimeMaintenanceService {
@@ -68,19 +72,21 @@ impl RuntimeMaintenanceService {
             rendezvous_manager,
             rendezvous_handler,
             lan_transport,
-            tasks: Arc::new(RwLock::new(None)),
-            state: Arc::new(RwLock::new(MaintenanceServiceState::Stopped)),
-            lifecycle: Arc::new(Mutex::new(())),
+            shared: Arc::new(RuntimeMaintenanceShared {
+                tasks: RwLock::new(None),
+                state: RwLock::new(MaintenanceServiceState::Stopped),
+                lifecycle: Mutex::new(()),
+            }),
         }
     }
 
     async fn mark_state(&self, next: MaintenanceServiceState) {
-        *self.state.write().await = next;
+        *self.shared.state.write().await = next;
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        let _guard = self.lifecycle.lock().await;
-        let current = *self.state.read().await;
+        let _guard = self.shared.lifecycle.lock().await;
+        let current = *self.shared.state.read().await;
         if current == MaintenanceServiceState::Running {
             return Ok(());
         }
@@ -90,21 +96,21 @@ impl RuntimeMaintenanceService {
         let tasks = context.tasks().group(self.name());
         self.spawn_loops(tasks.clone(), context.time_effects())
             .await?;
-        *self.tasks.write().await = Some(tasks);
+        *self.shared.tasks.write().await = Some(tasks);
         self.mark_state(MaintenanceServiceState::Running).await;
         Ok(())
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _guard = self.lifecycle.lock().await;
-        let current = *self.state.read().await;
+        let _guard = self.shared.lifecycle.lock().await;
+        let current = *self.shared.state.read().await;
         if current == MaintenanceServiceState::Stopped {
             return Ok(());
         }
         validate_actor_transition(self.name(), current.phase(), ActorLifecyclePhase::Stopping)?;
         self.mark_state(MaintenanceServiceState::Stopping).await;
 
-        let shutdown_error = if let Some(tasks) = self.tasks.write().await.take() {
+        let shutdown_error = if let Some(tasks) = self.shared.tasks.write().await.take() {
             tasks
                 .shutdown_with_timeout(Duration::from_secs(2))
                 .await
@@ -398,7 +404,7 @@ impl RuntimeService for RuntimeMaintenanceService {
     }
 
     async fn health(&self) -> ServiceHealth {
-        match *self.state.read().await {
+        match *self.shared.state.read().await {
             MaintenanceServiceState::Stopped => ServiceHealth::Stopped,
             MaintenanceServiceState::Starting => ServiceHealth::Starting,
             MaintenanceServiceState::Stopping => ServiceHealth::Stopping,
@@ -406,7 +412,7 @@ impl RuntimeService for RuntimeMaintenanceService {
                 reason: "maintenance service entered failed lifecycle state".to_string(),
             },
             MaintenanceServiceState::Running => {
-                if self.tasks.read().await.is_some() {
+                if self.shared.tasks.read().await.is_some() {
                     ServiceHealth::Healthy
                 } else {
                     ServiceHealth::Unhealthy {

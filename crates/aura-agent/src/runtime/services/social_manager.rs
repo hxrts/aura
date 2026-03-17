@@ -59,7 +59,7 @@ pub enum SocialManagerState {
 /// - Discovery layer determination
 pub struct SocialManager {
     /// Social topology
-    topology: Arc<RwLock<SocialTopology>>,
+    topology: RwLock<SocialTopology>,
 
     /// Relay selector
     relay_selector: Arc<DeterministicRandomSelector>,
@@ -68,7 +68,7 @@ pub struct SocialManager {
     config: SocialManagerConfig,
 
     /// Current state
-    state: Arc<RwLock<SocialManagerState>>,
+    state: RwLock<SocialManagerState>,
 
     /// Local authority
     authority_id: AuthorityId,
@@ -81,10 +81,10 @@ impl SocialManager {
         let relay_selector = DeterministicRandomSelector::new(config.prefer_proximity);
 
         Self {
-            topology: Arc::new(RwLock::new(topology)),
+            topology: RwLock::new(topology),
             relay_selector: Arc::new(relay_selector),
             config,
-            state: Arc::new(RwLock::new(SocialManagerState::Uninitialized)),
+            state: RwLock::new(SocialManagerState::Uninitialized),
             authority_id,
         }
     }

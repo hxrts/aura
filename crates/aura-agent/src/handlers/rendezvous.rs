@@ -73,7 +73,7 @@ pub struct RendezvousHandler {
     /// Inner rendezvous service for guard chain operations
     service: Arc<RendezvousService>,
     /// Rendezvous cache manager (descriptors + pending channels)
-    cache_manager: RendezvousCacheManager,
+    cache_manager: Arc<RendezvousCacheManager>,
     /// Optional rendezvous manager for shared descriptor cache
     rendezvous_manager: Option<RendezvousManager>,
 }
@@ -89,7 +89,7 @@ impl RendezvousHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            cache_manager: RendezvousCacheManager::new(),
+            cache_manager: Arc::new(RendezvousCacheManager::new()),
             rendezvous_manager: None,
         })
     }
@@ -104,7 +104,7 @@ impl RendezvousHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            cache_manager: RendezvousCacheManager::new(),
+            cache_manager: Arc::new(RendezvousCacheManager::new()),
             rendezvous_manager: None,
         })
     }

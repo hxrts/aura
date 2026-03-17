@@ -4,7 +4,6 @@ use super::state::with_state_mut_validated;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::RendezvousDescriptor;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -49,16 +48,16 @@ impl RendezvousCacheState {
 }
 
 /// Manages rendezvous handler caches (descriptors + pending channels).
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct RendezvousCacheManager {
-    state: Arc<RwLock<RendezvousCacheState>>,
+    state: RwLock<RendezvousCacheState>,
 }
 
 impl RendezvousCacheManager {
     /// Create a new rendezvous cache manager.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(RendezvousCacheState::default())),
+            state: RwLock::new(RendezvousCacheState::default()),
         }
     }
 

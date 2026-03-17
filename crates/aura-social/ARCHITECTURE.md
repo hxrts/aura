@@ -33,6 +33,27 @@ discovery, relay selection, and content moderation for the social graph.
 - Capability-gated publication is required for parity-critical social facts.
 - `Observed` social views are downstream and must not author semantic truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/topology/view logic | `Pure` | Deterministic social fact reduction and topology derivation. |
+| moderation and topology-transition semantics | `MoveOwned` | Exclusive moderation or trust-boundary transitions remain explicit. |
+| long-lived topology/discovery ownership | none local | Runtime discovery/topology coordination belongs in higher-layer services. |
+| capability-gated publication | typed social workflow boundary | Social fact publication remains explicit and auditable. |
+| Observed-only surfaces | topology/view consumers only | UI/runtime views stay downstream of authoritative social state. |
+
+### Capability-Gated Points
+
+- parity-critical social fact publication
+- moderation and membership transition flows consumed by higher-layer runtime
+  services
+
+### Verification Hooks
+
+- `cargo check -p aura-social`
+- `cargo test -p aura-social -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantSocialBoundaryScopedMembership

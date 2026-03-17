@@ -136,10 +136,16 @@ impl SyncWireMessage {
 }
 
 pub fn serialize_message(msg: &SyncWireMessage) -> Result<Vec<u8>, SyncError> {
-    aura_core::util::serialization::to_vec(msg).map_err(|e| SyncError::NetworkError(e.to_string()))
+    aura_core::util::serialization::to_vec(msg).map_err(|e| SyncError::NetworkError {
+        operation: "serialize_wire_message",
+        detail: e.to_string(),
+    })
 }
 
 pub fn deserialize_message(bytes: &[u8]) -> Result<SyncWireMessage, SyncError> {
     aura_core::util::serialization::from_slice(bytes)
-        .map_err(|e| SyncError::NetworkError(e.to_string()))
+        .map_err(|e| SyncError::NetworkError {
+            operation: "deserialize_wire_message",
+            detail: e.to_string(),
+        })
 }

@@ -48,13 +48,17 @@ use tokio::sync::RwLock;
 /// Tracks state of guardian ceremonies
 #[derive(Clone)]
 pub struct CeremonyTracker {
-    state: Arc<RwLock<CeremonyTrackerState>>,
     /// Time effects for deterministic simulation support
     time: Arc<dyn PhysicalTimeEffects>,
+    shared: Arc<CeremonyTrackerShared>,
+}
+
+struct CeremonyTrackerShared {
+    state: RwLock<CeremonyTrackerState>,
     /// Authoritative lifecycle state for runtime health.
-    lifecycle: Arc<RwLock<ServiceHealth>>,
+    lifecycle: RwLock<ServiceHealth>,
     /// Owned cleanup tasks for ceremony timeout maintenance.
-    cleanup_tasks: Arc<RwLock<Option<TaskGroup>>>,
+    cleanup_tasks: RwLock<Option<TaskGroup>>,
 }
 
 #[derive(Debug, Default)]
@@ -319,10 +323,12 @@ impl CeremonyTracker {
     /// * `time` - Time effects for deterministic simulation support
     pub fn new(time: Arc<dyn PhysicalTimeEffects>) -> Self {
         Self {
-            state: Arc::new(RwLock::new(CeremonyTrackerState::default())),
             time,
-            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
-            cleanup_tasks: Arc::new(RwLock::new(None)),
+            shared: Arc::new(CeremonyTrackerShared {
+                state: RwLock::new(CeremonyTrackerState::default()),
+                lifecycle: RwLock::new(ServiceHealth::NotStarted),
+                cleanup_tasks: RwLock::new(None),
+            }),
         }
     }
 
@@ -447,7 +453,7 @@ impl CeremonyTracker {
         };
 
         let result = with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 if tracker.ceremonies.contains_key(&ceremony_id) {
                     return Err(IntentError::validation_failed(format!(
@@ -482,7 +488,7 @@ impl CeremonyTracker {
     /// # Returns
     /// The current ceremony state
     pub async fn get(&self, ceremony_id: &CeremonyId) -> Result<TrackedCeremony, IntentError> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
 
         state.ceremonies.get(ceremony_id).cloned().ok_or_else(|| {
             IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
@@ -517,7 +523,7 @@ impl CeremonyTracker {
         participant: ParticipantIdentity,
     ) -> Result<bool, IntentError> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
@@ -572,7 +578,7 @@ impl CeremonyTracker {
         consensus_id: Option<ConsensusId>,
     ) -> Result<(), IntentError> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
@@ -616,7 +622,7 @@ impl CeremonyTracker {
     /// This is only called after threshold is reached and `commit_key_rotation` succeeds.
     pub async fn mark_committed(&self, ceremony_id: &CeremonyId) -> Result<(), IntentError> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
@@ -682,7 +688,7 @@ impl CeremonyTracker {
         error_message: Option<String>,
     ) -> Result<(), IntentError> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
@@ -721,7 +727,7 @@ impl CeremonyTracker {
     /// * `ceremony_id` - The ceremony identifier
     pub async fn remove(&self, ceremony_id: &CeremonyId) -> Result<(), IntentError> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 tracker.ceremonies.remove(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
@@ -741,7 +747,7 @@ impl CeremonyTracker {
     /// # Returns
     /// Vector of (ceremony_id, state) tuples
     pub async fn list_active(&self) -> Vec<(CeremonyId, TrackedCeremony)> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         state
             .ceremonies
             .iter()
@@ -766,7 +772,7 @@ impl CeremonyTracker {
         };
 
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 let mut removed = Vec::new();
 
@@ -831,7 +837,7 @@ impl CeremonyTracker {
         );
 
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |tracker| {
                 // Verify old ceremony exists
                 let old_state = tracker.ceremonies.get_mut(old_ceremony_id).ok_or_else(|| {
@@ -903,7 +909,7 @@ impl CeremonyTracker {
         kind: CeremonyKind,
         prestate_hash: Option<&Hash32>,
     ) -> Vec<CeremonyId> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
 
         state
             .ceremonies
@@ -945,7 +951,7 @@ impl CeremonyTracker {
         ceremony_id: &CeremonyId,
     ) -> Vec<SupersessionRecord> {
         let ceremony_hash = Hash32::from_bytes(ceremony_id.as_str().as_bytes());
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
 
         state
             .supersession_records
@@ -965,7 +971,7 @@ impl CeremonyTracker {
 
     /// Get all supersession records (for debugging/auditing).
     pub async fn all_supersession_records(&self) -> Vec<SupersessionRecord> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         state.supersession_records.clone()
     }
 }
@@ -982,16 +988,16 @@ impl RuntimeService for CeremonyTracker {
     }
 
     async fn start(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        *self.lifecycle.write().await = ServiceHealth::Healthy;
+        *self.shared.lifecycle.write().await = ServiceHealth::Healthy;
         let cleanup_group = context.tasks().group(self.name());
         self.spawn_timeout_cleanup_task(cleanup_group.clone(), context.time_effects());
-        *self.cleanup_tasks.write().await = Some(cleanup_group);
+        *self.shared.cleanup_tasks.write().await = Some(cleanup_group);
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
-        *self.lifecycle.write().await = ServiceHealth::Stopping;
-        if let Some(task_group) = self.cleanup_tasks.write().await.take() {
+        *self.shared.lifecycle.write().await = ServiceHealth::Stopping;
+        if let Some(task_group) = self.shared.cleanup_tasks.write().await.take() {
             task_group
                 .shutdown_with_timeout(Duration::from_secs(2))
                 .await
@@ -1004,12 +1010,12 @@ impl RuntimeService for CeremonyTracker {
         }
         // Clean up any tracked ceremonies
         self.cleanup_timed_out().await;
-        *self.lifecycle.write().await = ServiceHealth::Stopped;
+        *self.shared.lifecycle.write().await = ServiceHealth::Stopped;
         Ok(())
     }
 
     async fn health(&self) -> ServiceHealth {
-        self.lifecycle.read().await.clone()
+        self.shared.lifecycle.read().await.clone()
     }
 }
 
@@ -1356,7 +1362,7 @@ mod tests {
         tracker.mark_committed(&ceremony_id).await.unwrap();
 
         {
-            let mut guard = tracker.state.write().await;
+            let mut guard = tracker.shared.state.write().await;
             let state = guard.ceremonies.get_mut(&ceremony_id).unwrap();
             state.started_at.ts_ms = state.started_at.ts_ms.saturating_sub(60_000);
             state.timeout = Duration::from_millis(1);

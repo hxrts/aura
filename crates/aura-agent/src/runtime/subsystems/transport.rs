@@ -85,24 +85,18 @@ impl TransportStatsCounters {
 /// - Inbox for incoming envelopes
 /// - Shared transport for simulation/demo mode
 /// - Transport statistics
+struct TransportSubsystemShared {
+    inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    shared_transport: Option<SharedTransport>,
+    stats: Arc<TransportStatsCounters>,
+}
+
 pub struct TransportSubsystem {
     /// Core transport handler
     #[allow(dead_code)]
     handler: aura_effects::transport::RealTransportHandler,
-
-    /// Incoming message inbox
-    ///
-    /// Protected by parking_lot::RwLock for concurrent access.
-    /// Lock is never held across .await points.
-    inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
-
-    /// Optional shared transport for simulation mode
-    ///
-    /// When set, all agents share a common in-memory transport network.
-    shared_transport: Option<SharedTransport>,
-
-    /// Transport statistics (messages sent, received, errors, etc.)
-    stats: Arc<TransportStatsCounters>,
+    /// Shared mutable transport state boundary.
+    shared: Arc<TransportSubsystemShared>,
 }
 
 impl TransportSubsystem {
@@ -110,9 +104,11 @@ impl TransportSubsystem {
     pub fn new() -> Self {
         Self {
             handler: aura_effects::transport::RealTransportHandler::default(),
-            inbox: Arc::new(RwLock::new(Vec::new())),
-            shared_transport: None,
-            stats: Arc::new(TransportStatsCounters::default()),
+            shared: Arc::new(TransportSubsystemShared {
+                inbox: Arc::new(RwLock::new(Vec::new())),
+                shared_transport: None,
+                stats: Arc::new(TransportStatsCounters::default()),
+            }),
         }
     }
 
@@ -124,9 +120,11 @@ impl TransportSubsystem {
 
         Self {
             handler: aura_effects::transport::RealTransportHandler::default(),
-            inbox: shared.inbox_for(authority),
-            shared_transport: Some(shared),
-            stats: Arc::new(TransportStatsCounters::default()),
+            shared: Arc::new(TransportSubsystemShared {
+                inbox: shared.inbox_for(authority),
+                shared_transport: Some(shared),
+                stats: Arc::new(TransportStatsCounters::default()),
+            }),
         }
     }
 
@@ -140,9 +138,11 @@ impl TransportSubsystem {
     ) -> Self {
         Self {
             handler,
-            inbox,
-            shared_transport,
-            stats: Arc::new(TransportStatsCounters::default()),
+            shared: Arc::new(TransportSubsystemShared {
+                inbox,
+                shared_transport,
+                stats: Arc::new(TransportStatsCounters::default()),
+            }),
         }
     }
 
@@ -154,31 +154,31 @@ impl TransportSubsystem {
 
     /// Get shared inbox reference
     pub fn inbox(&self) -> Arc<RwLock<Vec<TransportEnvelope>>> {
-        self.inbox.clone()
+        Arc::clone(&self.shared.inbox)
     }
 
     /// Get shared stats reference
     #[allow(dead_code)]
     fn stats(&self) -> Arc<TransportStatsCounters> {
-        self.stats.clone()
+        Arc::clone(&self.shared.stats)
     }
 
     /// Check if using shared transport (simulation mode)
     pub fn is_shared(&self) -> bool {
-        self.shared_transport.is_some()
+        self.shared.shared_transport.is_some()
     }
 
     /// Get shared transport if available
     pub fn shared_transport(&self) -> Option<&SharedTransport> {
-        self.shared_transport.as_ref()
+        self.shared.shared_transport.as_ref()
     }
 
     /// Push an envelope to the inbox
     pub fn queue_envelope(&self, envelope: TransportEnvelope) {
-        if let Some(shared) = self.shared_transport.as_ref() {
+        if let Some(shared) = self.shared.shared_transport.as_ref() {
             shared.route_envelope(envelope);
         } else {
-            let mut inbox = self.inbox.write();
+            let mut inbox = self.shared.inbox.write();
             inbox.push(envelope);
         }
     }
@@ -186,44 +186,44 @@ impl TransportSubsystem {
     /// Drain all envelopes from the inbox
     #[allow(dead_code)]
     pub fn drain_inbox(&self) -> Vec<TransportEnvelope> {
-        let mut inbox = self.inbox.write();
+        let mut inbox = self.shared.inbox.write();
         std::mem::take(&mut *inbox)
     }
 
     /// Get current inbox size
     pub fn inbox_len(&self) -> usize {
-        self.inbox.read().len()
+        self.shared.inbox.read().len()
     }
 
     /// Record a successful send and payload size
     pub fn record_send(&self, payload_len: usize) {
-        self.stats.record_send(payload_len);
+        self.shared.stats.record_send(payload_len);
     }
 
     /// Record a successful receive
     pub fn record_receive(&self) {
-        self.stats.record_receive();
+        self.shared.stats.record_receive();
     }
 
     /// Record a send failure
     pub fn record_send_failure(&self) {
-        self.stats.record_send_failure();
+        self.shared.stats.record_send_failure();
     }
 
     /// Record a receive failure
     #[allow(dead_code)]
     pub fn record_receive_failure(&self) {
-        self.stats.record_receive_failure();
+        self.shared.stats.record_receive_failure();
     }
 
     /// Set active channel count
     pub fn set_active_channels(&self, active: u32) {
-        self.stats.set_active_channels(active);
+        self.shared.stats.set_active_channels(active);
     }
 
     /// Get a snapshot of current stats
     pub fn stats_snapshot(&self) -> TransportStats {
-        self.stats.snapshot()
+        self.shared.stats.snapshot()
     }
 }
 

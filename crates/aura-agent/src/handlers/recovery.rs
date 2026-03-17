@@ -18,6 +18,7 @@ use aura_guards::chain::create_send_guard;
 use aura_guards::types::CapabilityId;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Recovery operation state
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,7 +157,7 @@ pub(crate) struct ActiveRecovery {
 pub struct RecoveryHandler {
     context: HandlerContext,
     /// Active recovery ceremonies
-    recovery_manager: RecoveryManager,
+    recovery_manager: Arc<RecoveryManager>,
 }
 
 impl RecoveryHandler {
@@ -165,7 +166,7 @@ impl RecoveryHandler {
         HandlerUtilities::validate_authority_context(&authority)?;
         Ok(Self {
             context: HandlerContext::new(authority),
-            recovery_manager: RecoveryManager::new(),
+            recovery_manager: Arc::new(RecoveryManager::new()),
         })
     }
 

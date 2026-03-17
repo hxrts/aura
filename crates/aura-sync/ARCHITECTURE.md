@@ -35,6 +35,36 @@ coordination, and writer fence semantics for distributed journal consistency.
   current reference pattern.
 - `Observed` consumers may inspect sync state but not author it.
 
+### Ownership Inventory
+
+- `Pure`
+  - merkle verification, reconciliation, writer-fence checks, protocol facts,
+    and reducers in `core/` and `protocols/`
+- `MoveOwned`
+  - sync-session identifiers, fence guards, and proposal/ceremony transitions
+    that invalidate stale owners on handoff
+- `ActorOwned`
+  - long-lived runtime orchestration belongs in Layer 6; within this crate,
+    `SyncService` and `MaintenanceService` keep service-local mutable state
+    behind a single service-owned lock boundary rather than shared `Arc` state
+- `Observed`
+  - health, metrics, verification outputs, and status inspection surfaces
+
+### Capability-Gated Points
+
+- typed terminal protocol/service failure is required at async boundaries
+- readiness and publication are expected to flow through owning runtime/service
+  coordinators rather than ambient callers
+- timeout and retry behavior must use the shared timeout/retry model rather than
+  crate-local wall-clock ownership
+
+### Verification Hooks
+
+- `cargo check -p aura-sync`
+- `just ci-timeout-policy`
+- `just ci-timeout-backoff`
+- targeted service/protocol tests in `cargo test -p aura-sync ...`
+
 ### Detailed Specifications
 
 ### InvariantSyncMerkleVerification

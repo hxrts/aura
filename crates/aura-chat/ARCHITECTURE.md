@@ -30,6 +30,26 @@ state reduction for encrypted group and direct messaging.
 - Message and membership publication must remain capability-gated and typed.
 - `Observed` chat views are downstream and must not author chat truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/view reduction | `Pure` | Deterministic chat fact reduction and derived state. |
+| message/channel/membership workflow-domain operations | `MoveOwned` | Exclusive channel/message authority and operation handles remain explicit. |
+| long-lived mutable chat ownership | none local | Runtime chat coordination and caches belong in higher layers. |
+| capability-gated publication | typed domain/workflow boundary | Message and membership publication stay explicit and auditable. |
+| Observed-only surfaces | chat view consumers only | UI/runtime views remain downstream. |
+
+### Capability-Gated Points
+
+- message publication and membership-change admission
+- chat/channel operations consumed by higher-layer guards and runtime services
+
+### Verification Hooks
+
+- `cargo check -p aura-chat`
+- `cargo test -p aura-chat -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantChatContextReduction

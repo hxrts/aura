@@ -17,8 +17,8 @@
 
 use aura_agent::reactive::ViewReduction;
 use aura_core::{
-    identifiers::{AuthorityId, ContextId},
     time::{OrderTime, PhysicalTime, TimeStamp},
+    AuthorityId, ContextId,
 };
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use std::sync::atomic::{AtomicUsize, Ordering};

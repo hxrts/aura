@@ -43,6 +43,27 @@ verification with authority lifecycle management and session validation.
   gate mutation/publication correctly.
 - `Observed` consumers may render signature-derived state but not author it.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/authority.rs`, `src/guardian.rs`, `src/threshold.rs`, `src/session.rs`, `src/event_validation.rs` | `Pure` | Verification and validation logic only; no long-lived mutable owner state. |
+| `src/registry.rs` | `Pure`, `MoveOwned` | Authority lifecycle is modeled as explicit value transitions, not shared runtime mutation. |
+| `src/facts/`, `src/messages.rs` | `Pure` | Fact/message schemas and typed signature-domain payloads. |
+| Actor-owned runtime state | none | Signature semantics must not accumulate service/task ownership in Layer 2. |
+| Observed-only surfaces | none | Observation of verification output belongs in higher layers. |
+
+### Capability-Gated Points
+
+- signature and threshold attestation semantics consumed by higher-layer
+  mutation/publication gates
+- authority/session verification results used as explicit authorization inputs
+
+### Verification Hooks
+
+- `cargo check -p aura-signature`
+- `cargo test -p aura-signature -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantAuthorityLifecycleMonotonicity

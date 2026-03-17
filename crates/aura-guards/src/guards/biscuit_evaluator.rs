@@ -58,7 +58,9 @@ impl BiscuitGuardEvaluator {
     ) -> Result<GuardResult, GuardError> {
         let can_charge = budget
             .can_charge(flow_cost)
-            .map_err(|e| GuardError::FlowBudget(e.to_string()))?;
+            .map_err(|e| GuardError::FlowBudgetEvaluationFailed {
+                detail: e.to_string(),
+            })?;
         if !can_charge {
             return Err(GuardError::BudgetExceeded {
                 required: u64::from(flow_cost),
@@ -74,15 +76,15 @@ impl BiscuitGuardEvaluator {
         )?;
 
         if !auth_result.authorized {
-            return Err(GuardError::AuthorizationFailed(format!(
-                "Token does not grant capability: {guard_capability}"
-            )));
+            return Err(GuardError::MissingCapability {
+                capability: guard_capability.to_string(),
+            });
         }
 
         if let Err(e) = budget.record_charge(flow_cost) {
-            return Err(GuardError::FlowBudget(format!(
-                "Failed to record charge: {e}"
-            )));
+            return Err(GuardError::FlowBudgetChargeFailed {
+                detail: e.to_string(),
+            });
         }
 
         Ok(GuardResult {
@@ -121,23 +123,27 @@ pub enum GuardError {
     #[error("Budget exceeded: required {required}, available {available}")]
     BudgetExceeded { required: u64, available: u64 },
 
-    #[error("Authorization failed: {0}")]
-    AuthorizationFailed(String),
+    #[error("authorization failed: missing capability {capability}")]
+    MissingCapability { capability: String },
 
     #[error("Biscuit error: {0}")]
     Biscuit(#[from] BiscuitError),
 
-    #[error("Flow budget error: {0}")]
-    FlowBudget(String),
+    #[error("flow budget evaluation failed: {detail}")]
+    FlowBudgetEvaluationFailed { detail: String },
+
+    #[error("flow budget charge failed: {detail}")]
+    FlowBudgetChargeFailed { detail: String },
 }
 
 impl aura_core::ProtocolErrorCode for GuardError {
     fn code(&self) -> &'static str {
         match self {
             GuardError::BudgetExceeded { .. } => "budget_exceeded",
-            GuardError::AuthorizationFailed(_) => "unauthorized",
+            GuardError::MissingCapability { .. } => "unauthorized",
             GuardError::Biscuit(_) => "biscuit_error",
-            GuardError::FlowBudget(_) => "flow_budget",
+            GuardError::FlowBudgetEvaluationFailed { .. } => "flow_budget_evaluation_failed",
+            GuardError::FlowBudgetChargeFailed { .. } => "flow_budget_charge_failed",
         }
     }
 }

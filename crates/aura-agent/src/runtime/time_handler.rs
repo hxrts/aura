@@ -17,11 +17,15 @@ struct TimeoutTask {
     completed: bool,
 }
 
+struct TimeHandlerShared {
+    state: RwLock<TimeHandlerState>,
+}
+
 /// Enhanced time handler with scheduling, timeouts, and event-driven waking
 #[derive(Clone)]
 pub struct EnhancedTimeHandler {
     /// In-memory time handler state (contexts, timeouts, stats)
-    state: Arc<RwLock<TimeHandlerState>>,
+    shared: Arc<TimeHandlerShared>,
     /// Underlying time provider for deterministic/testing overrides
     provider: Arc<dyn PhysicalTimeEffects>,
     /// Random provider for generating unique IDs
@@ -99,7 +103,7 @@ impl EnhancedTimeHandler {
     /// Sleep for a given number of milliseconds
     pub async fn sleep_ms(&self, ms: u64) {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.stats.total_sleeps += 1;
             },
@@ -123,7 +127,7 @@ impl EnhancedTimeHandler {
         };
 
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.timeouts.insert(timeout_id, timeout_task);
                 state.stats.total_timeouts_set += 1;
@@ -139,7 +143,7 @@ impl EnhancedTimeHandler {
     /// Cancel a timeout
     pub async fn cancel_timeout(&self, timeout_handle: TimeoutHandle) -> Result<()> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 if state.timeouts.remove(&timeout_handle).is_some() {
                     state.stats.total_timeouts_cancelled += 1;
@@ -157,7 +161,7 @@ impl EnhancedTimeHandler {
     /// Register a context for time notifications
     pub async fn register_context(&self, context_id: uuid::Uuid) {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 if state.contexts.insert(context_id, ()).is_none() {
                     state.stats.active_contexts += 1;
@@ -171,7 +175,7 @@ impl EnhancedTimeHandler {
     /// Unregister a context
     pub async fn unregister_context(&self, context_id: uuid::Uuid) {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 if state.contexts.remove(&context_id).is_some() {
                     state.stats.active_contexts = state.stats.active_contexts.saturating_sub(1);
@@ -185,7 +189,7 @@ impl EnhancedTimeHandler {
     /// Yield until a wake condition is met
     pub async fn yield_until(&self, condition: WakeCondition) -> Result<()> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.stats.total_yield_operations += 1;
             },
@@ -284,7 +288,9 @@ impl EnhancedTimeHandler {
         simulated: bool,
     ) -> Self {
         Self {
-            state: Arc::new(RwLock::new(TimeHandlerState::default())),
+            shared: Arc::new(TimeHandlerShared {
+                state: RwLock::new(TimeHandlerState::default()),
+            }),
             provider,
             random_provider,
             simulated,
@@ -293,7 +299,7 @@ impl EnhancedTimeHandler {
 
     /// Get current time handler statistics
     pub async fn get_statistics(&self) -> TimeHandlerStats {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         let mut stats = state.stats.clone();
         stats.active_contexts = state.contexts.len() as u64;
         stats.active_timeouts = state.timeouts.len() as u64;
@@ -304,7 +310,7 @@ impl EnhancedTimeHandler {
     pub async fn cleanup_expired_timeouts(&self) -> Result<()> {
         let now_ms = self.current_timestamp().await?;
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 let expired_ids: Vec<TimeoutHandle> = state
                     .timeouts
@@ -342,7 +348,7 @@ impl EnhancedTimeHandler {
     /// Increment the global event count
     async fn increment_event_count(&self) {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.event_count = state.event_count.saturating_add(1);
             },
@@ -353,7 +359,7 @@ impl EnhancedTimeHandler {
 
     /// Get current event count
     async fn get_event_count(&self) -> u32 {
-        self.state.read().await.event_count
+        self.shared.state.read().await.event_count
     }
 
     /// Process wake condition and return whether it's satisfied
@@ -385,7 +391,7 @@ impl EnhancedTimeHandler {
             WakeCondition::TimeoutExpired { timeout_id } => {
                 let current = self.current_timestamp().await?;
                 with_state_mut_validated(
-                    &self.state,
+                    &self.shared.state,
                     |state| -> Result<bool> {
                         if let Some(task) = state.timeouts.get_mut(timeout_id) {
                             if !task.completed && current >= task.expires_at_ms {

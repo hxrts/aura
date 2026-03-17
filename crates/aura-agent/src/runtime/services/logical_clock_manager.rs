@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use aura_core::effects::time::{LogicalClockEffects, TimeError};
 use aura_core::time::{LogicalTime, VectorClock};
 use aura_core::types::identifiers::DeviceId;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Mutable logical clock state.
@@ -35,9 +34,9 @@ impl LogicalClockState {
 }
 
 /// Runtime-owned logical clock manager.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LogicalClockManager {
-    state: Arc<RwLock<LogicalClockState>>,
+    state: RwLock<LogicalClockState>,
     device_id: Option<DeviceId>,
 }
 
@@ -45,7 +44,7 @@ impl LogicalClockManager {
     /// Create a new logical clock manager.
     pub fn new(device_id: Option<DeviceId>) -> Self {
         Self {
-            state: Arc::new(RwLock::new(LogicalClockState::default())),
+            state: RwLock::new(LogicalClockState::default()),
             device_id,
         }
     }

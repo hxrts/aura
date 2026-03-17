@@ -147,7 +147,7 @@ pub struct AuraEffectSystem {
 
     // === Time Services ===
     time_handler: EnhancedTimeHandler,
-    logical_clock: LogicalClockManager,
+    logical_clock: Arc<LogicalClockManager>,
     order_clock: OrderClockHandler,
 
     // === Authorization & Flow Control ===
@@ -417,7 +417,7 @@ impl AuraEffectSystem {
             tree_handler,
             sync_handler,
             time_handler,
-            logical_clock: LogicalClockManager::new(Some(device_id)),
+            logical_clock: Arc::new(LogicalClockManager::new(Some(device_id))),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,

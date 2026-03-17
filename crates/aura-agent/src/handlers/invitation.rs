@@ -206,7 +206,7 @@ pub struct InvitationHandler {
     /// Core invitation service from aura_invitation
     service: CoreInvitationService,
     /// Cache of pending invitations (for quick lookup)
-    invitation_cache: InvitationManager,
+    invitation_cache: Arc<InvitationManager>,
 }
 
 impl Clone for InvitationHandler {
@@ -216,7 +216,7 @@ impl Clone for InvitationHandler {
         Self {
             context: self.context.clone(),
             service,
-            invitation_cache: self.invitation_cache.clone(),
+            invitation_cache: Arc::clone(&self.invitation_cache),
         }
     }
 }
@@ -235,7 +235,7 @@ impl InvitationHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            invitation_cache: InvitationManager::new(),
+            invitation_cache: Arc::new(InvitationManager::new()),
         })
     }
 

@@ -19,13 +19,17 @@ use aura_sync::protocols::ota_ceremony::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+struct OtaActivationShared {
+    executor: RwLock<OTACeremonyExecutor<Arc<AuraEffectSystem>>>,
+}
+
 /// OTA activation ceremony service API.
 #[derive(Clone)]
 pub struct OtaActivationServiceApi {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
     authority_context: AuthorityContext,
-    executor: Arc<RwLock<OTACeremonyExecutor<Arc<AuraEffectSystem>>>>,
+    shared: Arc<OtaActivationShared>,
     config: OTACeremonyConfig,
 }
 
@@ -72,7 +76,9 @@ impl OtaActivationServiceApi {
             effects,
             ceremony_runner,
             authority_context,
-            executor: Arc::new(RwLock::new(executor)),
+            shared: Arc::new(OtaActivationShared {
+                executor: RwLock::new(executor),
+            }),
             config,
         })
     }
@@ -114,6 +120,7 @@ impl OtaActivationServiceApi {
 
         let prestate_hash = self.compute_prestate_hash().await?;
         let ceremony_id = self
+            .shared
             .executor
             .write()
             .await
@@ -161,6 +168,7 @@ impl OtaActivationServiceApi {
         commitment: ReadinessCommitment,
     ) -> AgentResult<bool> {
         let threshold_reached = self
+            .shared
             .executor
             .write()
             .await
@@ -182,6 +190,7 @@ impl OtaActivationServiceApi {
     /// Commit the OTA activation ceremony and update the shared runner status.
     pub async fn commit_activation(&self, ceremony_id: OTACeremonyId) -> AgentResult<Epoch> {
         let activation_epoch = self
+            .shared
             .executor
             .write()
             .await
@@ -216,7 +225,8 @@ impl OtaActivationServiceApi {
         ceremony_id: OTACeremonyId,
         reason: &str,
     ) -> AgentResult<()> {
-        self.executor
+        self.shared
+            .executor
             .write()
             .await
             .abort_ceremony(ceremony_id, reason)

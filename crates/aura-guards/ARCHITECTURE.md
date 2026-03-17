@@ -32,6 +32,27 @@ EffectCommands; no guard performs I/O directly.
   than hidden fail-open or silent blocking behavior.
 - `Observed` consumers may inspect decisions and receipts but not redefine them.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `guards/pure.rs`, `guards/chain.rs`, `guards/types.rs`, `guards/policy.rs` | `Pure` | Canonical guard ordering, policy, and typed guard results. |
+| `guards/biscuit_evaluator.rs`, `guards/capability_guard.rs`, `guards/flow.rs`, `guards/journal.rs` | `Pure`, `MoveOwned` | Guard inputs/results remain explicit values; no hidden ownership transfer or fail-open mutation. |
+| `guards/executor.rs` | effectful orchestrator | Applies effect commands without becoming a long-lived semantic owner. |
+| Actor-owned runtime state | none | Guard chain ownership stays outside this crate. |
+| Observed-only surfaces | none | Observation of decisions/receipts belongs downstream. |
+
+### Capability-Gated Points
+
+- guard capability requirements and Biscuit-based authorization input
+- typed guard outcomes consumed by higher-layer send/journal/flow execution
+
+### Verification Hooks
+
+- `cargo check -p aura-guards`
+- `cargo test -p aura-guards --lib -- --nocapture`
+- `just check-arch`
+
 ### Detailed Specifications
 
 ### InvariantSentMessagesHaveFacts

@@ -5,7 +5,6 @@
 use super::authority_state::{AuthorityManagerState, AuthorityState, AuthorityStatus};
 use super::state::with_state_mut_validated;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Authority manager error
@@ -28,14 +27,14 @@ pub enum AuthorityError {
 
 /// Authority manager service
 pub struct AuthorityManager {
-    state: Arc<RwLock<AuthorityManagerState>>,
+    state: RwLock<AuthorityManagerState>,
 }
 
 impl AuthorityManager {
     /// Create a new authority manager.
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(AuthorityManagerState::default())),
+            state: RwLock::new(AuthorityManagerState::default()),
         }
     }
 

@@ -29,6 +29,27 @@ relational journal facts.
 - Capability-gated message and checkpoint publication must remain explicit.
 - `Observed` consumers may render AMP state but not author it.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| channel/fact reducers and state derivation | `Pure` | Deterministic AMP state reconstruction from relational facts. |
+| channel/session coordination and bootstrap authority | `MoveOwned` | Exclusive channel/session authority remains explicit at coordination boundaries. |
+| long-lived AMP coordination | selective `ActorOwned` | Only where higher layers explicitly supervise ongoing coordination. |
+| evidence cache surfaces | isolated support state | Evidence is explicitly non-canonical and must not become hidden semantic ownership. |
+| Observed-only surfaces | none | Observation of AMP state belongs in higher layers. |
+
+### Capability-Gated Points
+
+- message publication and checkpoint publication boundaries
+- channel-policy and epoch-advancement operations consumed by higher-layer
+  guards/runtime
+
+### Verification Hooks
+
+- `cargo check -p aura-amp`
+- `cargo test -p aura-amp -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantAmpEpochMonotonic

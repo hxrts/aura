@@ -840,8 +840,8 @@ mod tests {
     use crate::fact_registry::build_fact_registry;
     use aura_chat::{ChatDelta, ChatFact};
     use aura_core::{
-        identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
         time::{OrderTime, PhysicalTime, TimeStamp},
+        AuthorityId, ChannelId, ContextId, InvitationId,
     };
     use aura_invitation::{InvitationDelta, InvitationFact};
     use aura_journal::fact::{FactContent, RelationalFact};

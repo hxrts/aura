@@ -36,6 +36,27 @@ relationships. Includes guardian setup, membership management, and recovery cere
   flags.
 - `Observed` recovery views are downstream of authoritative recovery semantics.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/state/view logic | `Pure` | Deterministic recovery fact reduction and typed derived state. |
+| recovery grants, approvals, handoffs, ceremonies, protocol contracts | `MoveOwned` | Exclusive recovery authority and handoff records remain explicit. |
+| `RecoveryProtocolHandler` approval tracking | local single-owner mutation | Approval tracking is now handler-local mutable state, not shared across clones. |
+| long-lived recovery coordination | selective single-owner | Ongoing recovery coordination must stay explicit and not leak into views/wrappers. |
+| capability-gated publication | typed ceremony/workflow boundary | Recovery transitions and publication remain explicit and auditable. |
+
+### Capability-Gated Points
+
+- grant/approval/recovery transitions
+- ceremony and protocol publication consumed by higher-layer runtime/interface
+  flows
+
+### Verification Hooks
+
+- `cargo check -p aura-recovery`
+- `cargo test -p aura-recovery --lib test_recovery_failure_preserves_reason -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantRecoveryThresholdEnforcement

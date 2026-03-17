@@ -74,15 +74,22 @@ impl From<&'static str> for EffectOperation {
 /// Dynamic registry for effect handlers
 #[derive(Debug)]
 pub struct EffectRegistry {
-    handlers: Arc<RwLock<HashMap<EffectKey, Arc<dyn std::any::Any + Send + Sync>>>>,
+    shared: Arc<EffectRegistryShared>,
     execution_mode: ExecutionMode,
+}
+
+#[derive(Debug)]
+struct EffectRegistryShared {
+    handlers: RwLock<HashMap<EffectKey, Arc<dyn std::any::Any + Send + Sync>>>,
 }
 
 impl EffectRegistry {
     /// Create a new effect registry
     pub fn new(execution_mode: ExecutionMode) -> Self {
         Self {
-            handlers: Arc::new(RwLock::new(HashMap::new())),
+            shared: Arc::new(EffectRegistryShared {
+                handlers: RwLock::new(HashMap::new()),
+            }),
             execution_mode,
         }
     }
@@ -123,6 +130,7 @@ impl EffectRegistry {
         let key = EffectKey::new(effect_type, operation);
 
         let mut handlers = self
+            .shared
             .handlers
             .write()
             .map_err(|_| EffectRegistryError::LockError)?;
@@ -140,6 +148,7 @@ impl EffectRegistry {
         let key = EffectKey::new(effect_type, operation);
 
         let handlers = self
+            .shared
             .handlers
             .read()
             .map_err(|_| EffectRegistryError::LockError)?;
@@ -153,7 +162,8 @@ impl EffectRegistry {
     pub fn has_handler(&self, effect_type: EffectType, operation: EffectOperation) -> bool {
         let key = EffectKey::new(effect_type, operation);
 
-        self.handlers
+        self.shared
+            .handlers
             .read()
             .map(|handlers| handlers.contains_key(&key))
             .unwrap_or(false)
@@ -161,7 +171,8 @@ impl EffectRegistry {
 
     /// Get all registered effect types
     pub fn effect_types(&self) -> Vec<EffectType> {
-        self.handlers
+        self.shared
+            .handlers
             .read()
             .map(|handlers| {
                 handlers
@@ -176,7 +187,8 @@ impl EffectRegistry {
 
     /// Get operations for an effect type
     pub fn operations(&self, effect_type: EffectType) -> Vec<EffectOperation> {
-        self.handlers
+        self.shared
+            .handlers
             .read()
             .map(|handlers| {
                 handlers
@@ -191,6 +203,7 @@ impl EffectRegistry {
     /// Clear all handlers
     pub fn clear(&self) -> Result<(), EffectRegistryError> {
         let mut handlers = self
+            .shared
             .handlers
             .write()
             .map_err(|_| EffectRegistryError::LockError)?;
@@ -208,7 +221,7 @@ impl EffectRegistry {
 impl Clone for EffectRegistry {
     fn clone(&self) -> Self {
         Self {
-            handlers: self.handlers.clone(),
+            shared: Arc::clone(&self.shared),
             execution_mode: self.execution_mode,
         }
     }

@@ -289,7 +289,7 @@ fn test_memory_bounded_with_gc() {
 
     // Verify operations after snapshot are preserved
     let ops_after_snapshot = oplog
-        .list_ops()
+        .get_all_operations()
         .iter()
         .filter(|op| op.op.parent_epoch > Epoch::new(500))
         .count();

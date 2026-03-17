@@ -102,7 +102,7 @@ impl CapabilityGuard {
             0, // current_time_seconds
         ) {
             Ok(_result) => Ok(true),
-            Err(super::GuardError::AuthorizationFailed(_)) => Ok(false),
+            Err(super::GuardError::MissingCapability { .. }) => Ok(false),
             Err(e) => Err(AuraError::permission_denied(format!("Guard error: {e:?}"))),
         }
     }
@@ -154,7 +154,7 @@ impl CapabilityGuard {
             0, // current_time_seconds
         ) {
             Ok(result) => Ok((true, result)),
-            Err(super::GuardError::AuthorizationFailed(_)) => Ok((
+            Err(super::GuardError::MissingCapability { .. }) => Ok((
                 false,
                 GuardResult {
                     authorized: false,
@@ -199,7 +199,7 @@ impl CapabilityGuard {
             0, // current_time_seconds
         ) {
             Ok(_result) => Ok(true),
-            Err(super::GuardError::AuthorizationFailed(_)) => Ok(false),
+            Err(super::GuardError::MissingCapability { .. }) => Ok(false),
             Err(e) => Err(AuraError::permission_denied(format!("Guard error: {e:?}"))),
         }
     }

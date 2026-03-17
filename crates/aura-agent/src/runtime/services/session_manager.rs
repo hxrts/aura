@@ -4,7 +4,6 @@ use super::state::with_state_mut_validated;
 use aura_core::types::identifiers::{DeviceId, SessionId};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
@@ -35,9 +34,9 @@ impl SessionState {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub(crate) struct SessionManager {
-    state: Arc<RwLock<SessionState>>,
+    state: RwLock<SessionState>,
 }
 
 impl SessionManager {

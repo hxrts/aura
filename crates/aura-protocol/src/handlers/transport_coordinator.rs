@@ -49,31 +49,55 @@ impl Default for TransportCoordinationConfig {
 /// Transport coordination error types
 #[derive(Debug, thiserror::Error)]
 pub enum TransportCoordinationError {
-    /// Protocol execution failed with error message
-    #[error("Protocol execution failed: {0}")]
-    ProtocolFailed(String),
-    /// Capability check failed with error message
-    #[error("Capability check failed: {0}")]
-    CapabilityCheckFailed(String),
-    /// Flow budget exceeded with error message
-    #[error("Flow budget exceeded: {0}")]
-    FlowBudgetExceeded(String),
+    /// Connection limit exceeded.
+    #[error("maximum connections exceeded: {max_connections}")]
+    ConnectionLimitExceeded { max_connections: usize },
+    /// Required capability check failed.
+    #[error("capability check failed: {detail}")]
+    CapabilityCheckFailed { detail: String },
+    /// Flow budget exceeded.
+    #[error("flow budget exceeded: {detail}")]
+    FlowBudgetExceeded { detail: String },
+    /// Opening a network connection failed.
+    #[error("network open failed for {address}: {detail}")]
+    NetworkOpenFailed { address: String, detail: String },
+    /// Local time source was unavailable.
+    #[error("failed to get local time: {detail}")]
+    TimeUnavailable { detail: String },
+    /// Requested connection was not found.
+    #[error("connection not found: {connection_id}")]
+    ConnectionNotFound { connection_id: String },
+    /// Sending data failed.
+    #[error("send failed on {connection_id}: {detail}")]
+    SendFailed {
+        connection_id: String,
+        detail: String,
+    },
+    /// Disconnecting a connection failed.
+    #[error("disconnect failed on {connection_id}: {detail}")]
+    DisconnectFailed {
+        connection_id: String,
+        detail: String,
+    },
     /// Transport layer error
     #[error("Transport error: {0}")]
     Transport(#[from] TransportError),
-    /// Effect system error
-    #[error("Effect error: {0}")]
-    Effect(String),
 }
 
 impl aura_core::ProtocolErrorCode for TransportCoordinationError {
     fn code(&self) -> &'static str {
         match self {
-            TransportCoordinationError::ProtocolFailed(_) => "transport_protocol_failed",
-            TransportCoordinationError::CapabilityCheckFailed(_) => "transport_capability_check",
-            TransportCoordinationError::FlowBudgetExceeded(_) => "transport_flow_budget_exceeded",
+            TransportCoordinationError::ConnectionLimitExceeded { .. } => {
+                "transport_connection_limit_exceeded"
+            }
+            TransportCoordinationError::CapabilityCheckFailed { .. } => "transport_capability_check",
+            TransportCoordinationError::FlowBudgetExceeded { .. } => "transport_flow_budget_exceeded",
+            TransportCoordinationError::NetworkOpenFailed { .. } => "transport_network_open_failed",
+            TransportCoordinationError::TimeUnavailable { .. } => "transport_time_unavailable",
+            TransportCoordinationError::ConnectionNotFound { .. } => "transport_connection_not_found",
+            TransportCoordinationError::SendFailed { .. } => "transport_send_failed",
+            TransportCoordinationError::DisconnectFailed { .. } => "transport_disconnect_failed",
             TransportCoordinationError::Transport(_) => "transport_layer_error",
-            TransportCoordinationError::Effect(_) => "transport_effect_error",
         }
     }
 }
@@ -114,9 +138,10 @@ impl RetryingTransportManager {
                     .await
                     .map(|connection_id| ConnectionInfo { connection_id })
                     .map_err(|error| {
-                        TransportCoordinationError::Effect(format!(
-                            "Network open failed: {error}"
-                        ))
+                        TransportCoordinationError::NetworkOpenFailed {
+                            address: address.to_string(),
+                            detail: error.to_string(),
+                        }
                     })
             })
             .await
@@ -209,9 +234,9 @@ where
         {
             let state = self.state.read().await;
             if state.active_connections.len() >= self.config.max_connections {
-                return Err(TransportCoordinationError::ProtocolFailed(
-                    "Maximum connections exceeded".to_string(),
-                ));
+                return Err(TransportCoordinationError::ConnectionLimitExceeded {
+                    max_connections: self.config.max_connections,
+                });
             }
         }
 
@@ -224,7 +249,9 @@ where
         // Store connection state using injected time effects
         let current_time =
             self.effects.physical_time().await.map_err(|e| {
-                TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
+                TransportCoordinationError::TimeUnavailable {
+                    detail: e.to_string(),
+                }
             })?;
         let now_ms = current_time.ts_ms;
 
@@ -250,7 +277,9 @@ where
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
         let current_time =
             self.effects.physical_time().await.map_err(|e| {
-                TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
+                TransportCoordinationError::TimeUnavailable {
+                    detail: e.to_string(),
+                }
             })?;
         let now_ms = current_time.ts_ms;
 
@@ -259,9 +288,9 @@ where
             if let Some(connection_state) = state.active_connections.get_mut(connection_id) {
                 connection_state.last_activity_ms = now_ms;
             } else {
-                return Err(TransportCoordinationError::ProtocolFailed(format!(
-                    "Connection not found: {connection_id}"
-                )));
+                return Err(TransportCoordinationError::ConnectionNotFound {
+                    connection_id: connection_id.to_string(),
+                });
             }
         }
 
@@ -269,7 +298,10 @@ where
         self.transport_manager
             .send_data(&self.effects, connection_id, data)
             .await
-            .map_err(|e| TransportCoordinationError::ProtocolFailed(format!("Send failed: {e}")))?;
+            .map_err(|e| TransportCoordinationError::SendFailed {
+                connection_id: connection_id.to_string(),
+                detail: e.to_string(),
+            })?;
 
         Ok(())
     }
@@ -286,8 +318,9 @@ where
         self.transport_manager
             .disconnect(&self.effects, connection_id)
             .await
-            .map_err(|e| {
-                TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {e}"))
+            .map_err(|e| TransportCoordinationError::DisconnectFailed {
+                connection_id: connection_id.to_string(),
+                detail: e.to_string(),
             })?;
 
         Ok(())
@@ -315,7 +348,9 @@ where
     ) -> CoordinationResult<usize> {
         let current_time =
             self.effects.physical_time().await.map_err(|e| {
-                TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
+                TransportCoordinationError::TimeUnavailable {
+                    detail: e.to_string(),
+                }
             })?;
         let now_ms = current_time.ts_ms;
         let max_idle_ms = max_idle.as_millis() as u64;

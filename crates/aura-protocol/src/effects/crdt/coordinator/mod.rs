@@ -203,7 +203,10 @@ where
         state: &T,
     ) -> Result<Vec<u8>, CrdtCoordinatorError> {
         aura_core::util::serialization::to_vec(state).map_err(|e| {
-            CrdtCoordinatorError::Serialization(format!("Failed to serialize state: {e}"))
+            CrdtCoordinatorError::SerializationFailed {
+                target: "state",
+                detail: e.to_string(),
+            }
         })
     }
 
@@ -212,7 +215,10 @@ where
         clock: &VectorClock,
     ) -> Result<Vec<u8>, CrdtCoordinatorError> {
         aura_core::util::serialization::to_vec(clock).map_err(|e| {
-            CrdtCoordinatorError::Serialization(format!("Failed to serialize vector clock: {e}"))
+            CrdtCoordinatorError::SerializationFailed {
+                target: "vector_clock",
+                detail: e.to_string(),
+            }
         })
     }
 
@@ -221,9 +227,10 @@ where
         bytes: &[u8],
     ) -> Result<VectorClock, CrdtCoordinatorError> {
         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-            CrdtCoordinatorError::Deserialization(format!(
-                "Failed to deserialize vector clock: {e}"
-            ))
+            CrdtCoordinatorError::DeserializationFailed {
+                target: "vector_clock",
+                detail: e.to_string(),
+            }
         })
     }
 

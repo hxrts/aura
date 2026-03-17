@@ -35,6 +35,26 @@ guards and Aura-specific extensions.
 - `Observed` tooling may inspect generated artifacts but not author protocol
   truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/projection.rs`, `src/protocol.rs`, `src/types.rs`, `src/guards.rs` | `Pure` | Protocol/specification semantics and projection rules only. |
+| `src/runtime.rs`, endpoint/session descriptors, continuation types | `MoveOwned` | Session endpoints and protocol continuations are value-level handoff surfaces consumed by higher layers. |
+| `src/ast_extraction.rs` | `Pure` | Annotation parsing and typed choreography metadata extraction. |
+| Actor-owned runtime state | none | Live protocol execution ownership belongs in higher layers using these types. |
+| Observed-only surfaces | none | Tooling can inspect generated artifacts but does not own protocol truth. |
+
+### Capability-Gated Points
+
+- typed protocol annotations and guard metadata consumed by higher-layer
+  capability-gated mutation/publication paths
+
+### Verification Hooks
+
+- `cargo check -p aura-mpst`
+- `cargo test -p aura-mpst -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantMpstProjectionSafety

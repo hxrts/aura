@@ -38,7 +38,6 @@
 
 use parking_lot::RwLock;
 use std::collections::BTreeSet;
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -133,22 +132,22 @@ pub struct MaintenanceService {
     config: MaintenanceServiceConfig,
 
     /// Service state
-    state: Arc<RwLock<ServiceState>>,
+    state: RwLock<ServiceState>,
 
     /// Snapshot protocol
-    snapshot_protocol: Arc<RwLock<SnapshotProtocol>>,
+    snapshot_protocol: RwLock<SnapshotProtocol>,
 
     /// OTA protocol
-    ota_protocol: Arc<RwLock<OTAProtocol>>,
+    ota_protocol: RwLock<OTAProtocol>,
 
     /// Cache manager
-    cache_manager: Arc<RwLock<CacheManager>>,
+    cache_manager: RwLock<CacheManager>,
 
     /// Service start time
-    started_at: Arc<RwLock<Option<MonotonicInstant>>>,
+    started_at: RwLock<Option<MonotonicInstant>>,
 
     /// Last snapshot epoch
-    last_snapshot_epoch: Arc<RwLock<Option<Epoch>>>,
+    last_snapshot_epoch: RwLock<Option<Epoch>>,
 }
 
 impl MaintenanceService {
@@ -160,12 +159,12 @@ impl MaintenanceService {
 
         Ok(Self {
             config,
-            state: Arc::new(RwLock::new(ServiceState::Stopped)),
-            snapshot_protocol: Arc::new(RwLock::new(snapshot_protocol)),
-            ota_protocol: Arc::new(RwLock::new(ota_protocol)),
-            cache_manager: Arc::new(RwLock::new(cache_manager)),
-            started_at: Arc::new(RwLock::new(None)),
-            last_snapshot_epoch: Arc::new(RwLock::new(None)),
+            state: RwLock::new(ServiceState::Stopped),
+            snapshot_protocol: RwLock::new(snapshot_protocol),
+            ota_protocol: RwLock::new(ota_protocol),
+            cache_manager: RwLock::new(cache_manager),
+            started_at: RwLock::new(None),
+            last_snapshot_epoch: RwLock::new(None),
         })
     }
 

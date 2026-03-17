@@ -37,6 +37,26 @@ flood propagation, and LAN discovery for P2P connectivity.
   payloads.
 - `Observed` consumers may render rendezvous state but not author it.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| descriptor facts/reducers and validation logic | `Pure` | Deterministic descriptor semantics and reduction. |
+| channel establishment, handshake, and protocol state | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed. |
+| `RendezvousService` local caches/handshakers | local service-owned mutation | Local descriptor cache and handshake registry are service-local state, not shared semantic ownership across layers. |
+| `FloodPropagation` topology/budget/nonce state | bounded coordination state | Uses injected topology references and local flood bookkeeping without becoming a global runtime owner. |
+| long-lived discovery runtime ownership | none local | Ongoing peer/discovery ownership belongs in higher-layer runtime services. |
+
+### Capability-Gated Points
+
+- descriptor publication and channel-establishment publication
+- retry/lifecycle outcomes consumed by higher-layer runtime/interface flows
+
+### Verification Hooks
+
+- `cargo check -p aura-rendezvous`
+- `cargo test -p aura-rendezvous -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantSecureChannelLifecycle

@@ -132,25 +132,25 @@ pub struct SyncService {
     config: SyncServiceConfig,
 
     /// Service state
-    state: Arc<RwLock<ServiceState>>,
+    state: RwLock<ServiceState>,
 
     /// Peer manager
-    peer_manager: Arc<RwLock<PeerManager>>,
+    peer_manager: RwLock<PeerManager>,
 
     /// Rate limiter
-    rate_limiter: Arc<RwLock<RateLimiter>>,
+    rate_limiter: RwLock<RateLimiter>,
 
     /// Session manager
-    session_manager: Arc<RwLock<SessionManager<serde_json::Value>>>,
+    session_manager: RwLock<SessionManager<serde_json::Value>>,
 
     /// Journal sync protocol
-    journal_sync: Arc<RwLock<JournalSyncProtocol>>,
+    journal_sync: RwLock<JournalSyncProtocol>,
 
     /// Metrics collector
-    metrics: Arc<RwLock<MetricsCollector>>,
+    metrics: RwLock<MetricsCollector>,
 
     /// Service start time
-    started_at: Arc<RwLock<Option<MonotonicInstant>>>,
+    started_at: RwLock<Option<MonotonicInstant>>,
 
     /// Time effects for unified time operations
     time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
@@ -191,13 +191,13 @@ impl SyncService {
 
         Ok(Self {
             config,
-            state: Arc::new(RwLock::new(ServiceState::Stopped)),
-            peer_manager: Arc::new(RwLock::new(peer_manager)),
-            rate_limiter: Arc::new(RwLock::new(rate_limiter)),
-            session_manager: Arc::new(RwLock::new(session_manager)),
-            journal_sync: Arc::new(RwLock::new(journal_sync)),
-            metrics: Arc::new(RwLock::new(metrics)),
-            started_at: Arc::new(RwLock::new(None)),
+            state: RwLock::new(ServiceState::Stopped),
+            peer_manager: RwLock::new(peer_manager),
+            rate_limiter: RwLock::new(rate_limiter),
+            session_manager: RwLock::new(session_manager),
+            journal_sync: RwLock::new(journal_sync),
+            metrics: RwLock::new(metrics),
+            started_at: RwLock::new(None),
             time_effects,
         })
     }
@@ -395,10 +395,10 @@ impl SyncService {
     /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
     #[allow(dead_code)]
     async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects>(
-        peer_manager: &Arc<RwLock<PeerManager>>,
-        session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
-        journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
-        rate_limiter: &Arc<RwLock<RateLimiter>>,
+        peer_manager: &RwLock<PeerManager>,
+        session_manager: &RwLock<SessionManager<serde_json::Value>>,
+        journal_sync: &RwLock<JournalSyncProtocol>,
+        rate_limiter: &RwLock<RateLimiter>,
         max_concurrent: usize, // usize ok: function parameter for collection sizing
         time_effects: &T,
         now_instant: MonotonicInstant,
@@ -714,7 +714,7 @@ impl SyncService {
 
     /// Select best auto-sync peers based on health and priority (static helper)
     async fn select_best_auto_sync_peers(
-        peer_manager: &Arc<RwLock<PeerManager>>,
+        peer_manager: &RwLock<PeerManager>,
         peers: &[DeviceId],
         max_peers: usize, // usize ok: function parameter for collection sizing
     ) -> SyncResult<Vec<DeviceId>> {
@@ -740,7 +740,7 @@ impl SyncService {
 
     /// Create sync sessions for selected peers (static method)
     async fn create_sync_sessions<T: PhysicalTimeEffects>(
-        session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
+        session_manager: &RwLock<SessionManager<serde_json::Value>>,
         peers: &[DeviceId],
         time_effects: &T,
     ) -> SyncResult<Vec<DeviceId>> {
@@ -776,7 +776,7 @@ impl SyncService {
     /// Execute auto-sync protocols for peers (static method)
     #[allow(dead_code)]
     async fn execute_auto_sync_protocols(
-        journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
+        journal_sync: &RwLock<JournalSyncProtocol>,
         peers: &[DeviceId],
     ) -> SyncResult<Vec<(DeviceId, bool)>> {
         let mut results = Vec::new();
@@ -791,7 +791,7 @@ impl SyncService {
 
     /// Update peer scores based on sync results (static method)
     async fn update_peer_scores_from_sync(
-        peer_manager: &Arc<RwLock<PeerManager>>,
+        peer_manager: &RwLock<PeerManager>,
         results: &[(DeviceId, bool)],
         now: &aura_core::time::PhysicalTime,
     ) -> SyncResult<()> {

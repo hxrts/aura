@@ -39,6 +39,25 @@ snapshots, cache invalidation, OTA upgrades, and admin replacement.
 - `Observed` layers may display maintenance state but must not author lifecycle
   truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `facts.rs`, `reducer.rs` | `Pure` | Fact schemas and deterministic maintenance reduction. |
+| `release.rs`, `scope.rs`, `gc.rs` | `Pure`, `MoveOwned` | Release/scope/GC planning surfaces are value-level contracts; any exclusive cutover authority stays explicit for higher layers. |
+| Actor-owned runtime state | none | Staging, rollout, and activation services belong in higher layers. |
+| Observed-only surfaces | none | Observation of maintenance state belongs in runtime/interface layers. |
+
+### Capability-Gated Points
+
+- maintenance fact publication and high-risk operation admission consumed by
+  higher-layer guards and consensus paths
+
+### Verification Hooks
+
+- `cargo check -p aura-maintenance`
+- `cargo test -p aura-maintenance -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantMaintenanceReducerDeterminism

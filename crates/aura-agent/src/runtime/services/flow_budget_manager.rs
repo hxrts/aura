@@ -11,7 +11,6 @@ use crate::core::AgentConfig;
 use async_trait::async_trait;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// A flow budget for a context-peer pair
@@ -65,11 +64,11 @@ pub struct FlowBudgetManager {
     #[allow(dead_code)] // Will be used for flow budget configuration
     config: AgentConfig,
     /// Budget storage per (ContextId, AuthorityId) pair
-    state: Arc<RwLock<FlowBudgetState>>,
+    state: RwLock<FlowBudgetState>,
     /// Default budget limit for new pairs
     default_limit: u32,
     /// Authoritative lifecycle state for runtime health.
-    lifecycle: Arc<RwLock<ServiceHealth>>,
+    lifecycle: RwLock<ServiceHealth>,
 }
 
 #[derive(Debug, Default)]
@@ -99,9 +98,9 @@ impl FlowBudgetManager {
     pub fn new(config: &AgentConfig) -> Self {
         Self {
             config: config.clone(),
-            state: Arc::new(RwLock::new(FlowBudgetState::default())),
+            state: RwLock::new(FlowBudgetState::default()),
             default_limit: 1000, // Default limit per epoch
-            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
+            lifecycle: RwLock::new(ServiceHealth::NotStarted),
         }
     }
 

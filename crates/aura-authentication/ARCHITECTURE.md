@@ -36,6 +36,27 @@ management, device key derivation, and guardian-based recovery authorization.
   detail instead of collapsing failures to request/session ids plus free text.
 - `Observed` consumers may render authentication state but not author it.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/views | `Pure` | Authentication state reduction and typed view projection. |
+| ceremonies, request/session workflows, recovery authorization flows | `MoveOwned` | Exclusive request/session/approval authority remains explicit. |
+| long-lived ceremony coordination | selective single-owner | Any ongoing coordination must remain explicit and single-owner, not ambient shared state. |
+| capability-gated publication | typed workflow boundary | Authentication publication and denial/failure surfaces stay typed and explicit. |
+| Observed-only surfaces | `AuthView` consumers only | UI/runtime observation remains downstream. |
+
+### Capability-Gated Points
+
+- recovery authorization and guardian approval flows
+- parity-critical authentication publication and session/recovery outcome
+  surfaces
+
+### Verification Hooks
+
+- `cargo check -p aura-authentication`
+- `cargo test -p aura-authentication -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantAuthenticationContextBinding

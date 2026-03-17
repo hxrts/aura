@@ -154,7 +154,7 @@ pub struct SessionOperations {
     /// Account ID
     _account_id: AccountId,
     /// Session state manager
-    pub(super) session_manager: SessionManager,
+    pub(super) session_manager: Arc<SessionManager>,
 }
 
 impl SessionOperations {
@@ -168,7 +168,7 @@ impl SessionOperations {
             effects,
             authority_context,
             _account_id: account_id,
-            session_manager: SessionManager::new(),
+            session_manager: Arc::new(SessionManager::new()),
         }
     }
 

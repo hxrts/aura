@@ -279,7 +279,7 @@ choreography!(include_str!("src/recovery_protocol.choreo"));
 /// Recovery protocol handler
 pub struct RecoveryProtocolHandler {
     protocol: Arc<RecoveryProtocol>,
-    approvals: Arc<Mutex<HashMap<RecoveryId, Vec<GuardianApproval>>>>,
+    approvals: Mutex<HashMap<RecoveryId, Vec<GuardianApproval>>>,
 }
 
 impl RecoveryProtocolHandler {
@@ -287,7 +287,7 @@ impl RecoveryProtocolHandler {
     pub fn new(protocol: Arc<RecoveryProtocol>) -> Self {
         Self {
             protocol,
-            approvals: Arc::new(Mutex::new(HashMap::new())),
+            approvals: Mutex::new(HashMap::new()),
         }
     }
 

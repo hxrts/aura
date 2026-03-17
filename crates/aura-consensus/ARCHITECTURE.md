@@ -42,6 +42,27 @@ signatures. Sole strong-agreement mechanism in Aura; all other coordination is C
 - Consensus operations require typed terminal success, failure, or abort paths.
 - `Observed` projections and diagnostics remain downstream of consensus truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `core/` | `Pure` | Deterministic consensus state machine and validation logic. |
+| proposal/share/transcript/evidence types | `MoveOwned` | Exclusive proposal, share, and transcript authority remains explicit and value-based. |
+| `protocol/`, `frost/`, witness/round coordinators | `ActorOwned` where long-lived | Coordinator ownership is explicit only where lifecycle/supervision matters; not the default for all logic. |
+| `relational/`, `dkg/` orchestration adapters | `MoveOwned`, selective `ActorOwned` | Cross-authority coordination and DKG orchestration remain explicit about owner boundaries. |
+| Observed-only surfaces | none | Projection/diagnostics stay downstream of consensus truth. |
+
+### Capability-Gated Points
+
+- agreement and publication boundaries that emit consensus results/evidence
+- guard-mediated send and runtime-bridge publication paths that consume
+  consensus outputs
+
+### Verification Hooks
+
+- `cargo check -p aura-consensus`
+- `cargo test -p aura-consensus -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantUniqueCommitPerInstance

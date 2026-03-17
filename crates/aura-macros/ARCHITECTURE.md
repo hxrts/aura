@@ -33,6 +33,25 @@ type-safe Rust code for distributed protocols.
   macro crate does not own those lifecycles at runtime.
 - `Observed` tooling may inspect expansions, not mutate semantic truth.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| proc-macro parsers and expanders in `src/` | `Pure` | Compile-time parsing and code generation only. |
+| generated choreography/fact/handler surfaces | `Pure` producer | Macro output may encode `MoveOwned` and capability-gated contracts, but the macro crate does not own them at runtime. |
+| Actor-owned runtime state | none | Proc-macro crates must not own runtime lifecycle or background tasks. |
+| Observed-only surfaces | none | Macro inspection tooling lives outside the crate. |
+
+### Capability-Gated Points
+
+- generated typed capability surfaces and ownership contracts consumed by
+  downstream crates
+
+### Verification Hooks
+
+- `cargo check -p aura-macros`
+- `cargo test -p aura-macros -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantChoreographyAnnotationProjection

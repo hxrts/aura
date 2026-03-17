@@ -143,12 +143,16 @@ pub struct ReceiptManager {
     agent_config: AgentConfig,
     /// Receipt manager configuration
     config: ReceiptManagerConfig,
+    shared: Arc<ReceiptManagerShared>,
+}
+
+struct ReceiptManagerShared {
     /// Owned receipt state (receipts + chains)
-    state: Arc<RwLock<ReceiptState>>,
+    state: RwLock<ReceiptState>,
     /// Authoritative lifecycle state for runtime health and shutdown.
-    lifecycle: Arc<RwLock<ServiceHealth>>,
+    lifecycle: RwLock<ServiceHealth>,
     /// Owned cleanup task group for receipt-local maintenance.
-    cleanup_tasks: Arc<RwLock<Option<TaskGroup>>>,
+    cleanup_tasks: RwLock<Option<TaskGroup>>,
 }
 
 impl ReceiptManager {
@@ -162,9 +166,11 @@ impl ReceiptManager {
         Self {
             agent_config: agent_config.clone(),
             config,
-            state: Arc::new(RwLock::new(ReceiptState::default())),
-            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
-            cleanup_tasks: Arc::new(RwLock::new(None)),
+            shared: Arc::new(ReceiptManagerShared {
+                state: RwLock::new(ReceiptState::default()),
+                lifecycle: RwLock::new(ServiceHealth::NotStarted),
+                cleanup_tasks: RwLock::new(None),
+            }),
         }
     }
 
@@ -175,12 +181,12 @@ impl ReceiptManager {
             return;
         }
 
-        let state = self.state.clone();
+        let shared = Arc::clone(&self.shared);
         let retention_ms = self.config.retention_period.as_millis() as u64;
         let interval = self.config.cleanup_interval;
 
         tasks.spawn_interval_until_named("receipt.cleanup", time.clone(), interval, move || {
-            let state = state.clone();
+            let shared = Arc::clone(&shared);
             let time = time.clone();
 
             async move {
@@ -198,7 +204,7 @@ impl ReceiptManager {
 
                 // Prune expired receipts
                 let count = with_state_mut_validated(
-                    &state,
+                    &shared.state,
                     |state| {
                         let expired_ids: Vec<ReceiptId> = state
                             .receipts
@@ -227,7 +233,7 @@ impl ReceiptManager {
                 .await;
 
                 if count > 0 {
-                    let remaining = state.read().await.receipts.len();
+                    let remaining = shared.state.read().await.receipts.len();
                     tracing::debug!(
                         pruned = count,
                         cutoff_ms = cutoff,
@@ -248,7 +254,7 @@ impl ReceiptManager {
     }
 
     async fn set_lifecycle(&self, health: ServiceHealth) {
-        *self.lifecycle.write().await = health;
+        *self.shared.lifecycle.write().await = health;
     }
 
     /// Get the configuration
@@ -263,7 +269,7 @@ impl ReceiptManager {
         let peer_id = receipt.peer_id;
 
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.receipts.insert(id, receipt);
                 state
@@ -281,7 +287,7 @@ impl ReceiptManager {
 
     /// Get a receipt by ID
     pub async fn get_receipt(&self, id: ReceiptId) -> Result<Option<Receipt>, ReceiptError> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         Ok(state.receipts.get(&id).cloned())
     }
 
@@ -291,7 +297,7 @@ impl ReceiptManager {
         context: ContextId,
         peer: AuthorityId,
     ) -> Result<Vec<Receipt>, ReceiptError> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         let receipt_ids = state
             .chains
             .get(&(context, peer))
@@ -317,7 +323,7 @@ impl ReceiptManager {
         before_timestamp: u64,
     ) -> Result<usize, ReceiptError> {
         let count = with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 // Find expired receipt IDs
                 let expired_ids: Vec<ReceiptId> = state
@@ -374,7 +380,7 @@ impl ReceiptManager {
     ) -> Result<Receipt, ReceiptError> {
         // Get the previous receipt in the chain
         let previous = {
-            let state = self.state.read().await;
+            let state = self.shared.state.read().await;
             state
                 .chains
                 .get(&(context_id, peer_id))
@@ -425,14 +431,14 @@ impl RuntimeService for ReceiptManager {
         self.set_lifecycle(ServiceHealth::Starting).await;
         let cleanup_group = context.tasks().group(self.name());
         self.spawn_cleanup_task(cleanup_group.clone(), context.time_effects());
-        *self.cleanup_tasks.write().await = Some(cleanup_group);
+        *self.shared.cleanup_tasks.write().await = Some(cleanup_group);
         self.set_lifecycle(ServiceHealth::Healthy).await;
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
         self.set_lifecycle(ServiceHealth::Stopping).await;
-        if let Some(task_group) = self.cleanup_tasks.write().await.take() {
+        if let Some(task_group) = self.shared.cleanup_tasks.write().await.take() {
             task_group
                 .shutdown_with_timeout(Duration::from_secs(2))
                 .await
@@ -445,7 +451,7 @@ impl RuntimeService for ReceiptManager {
         }
         // Clear all receipts on shutdown
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.receipts.clear();
                 state.chains.clear();
@@ -458,6 +464,6 @@ impl RuntimeService for ReceiptManager {
     }
 
     async fn health(&self) -> ServiceHealth {
-        self.lifecycle.read().await.clone()
+        self.shared.lifecycle.read().await.clone()
     }
 }

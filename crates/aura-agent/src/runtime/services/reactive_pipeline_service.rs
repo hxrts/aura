@@ -31,14 +31,18 @@ impl ReactivePipelineServiceState {
     }
 }
 
+struct ReactivePipelineShared {
+    pipeline: RwLock<Option<ReactivePipeline>>,
+    state: RwLock<ReactivePipelineServiceState>,
+    lifecycle: Mutex<()>,
+}
+
 #[derive(Clone)]
 pub struct ReactivePipelineService {
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
     diagnostics: Arc<RuntimeDiagnosticSink>,
-    pipeline: Arc<RwLock<Option<ReactivePipeline>>>,
-    state: Arc<RwLock<ReactivePipelineServiceState>>,
-    lifecycle: Arc<Mutex<()>>,
+    shared: Arc<ReactivePipelineShared>,
 }
 
 impl ReactivePipelineService {
@@ -53,24 +57,27 @@ impl ReactivePipelineService {
             effects,
             authority_id,
             diagnostics,
-            pipeline: Arc::new(RwLock::new(None)),
-            state: Arc::new(RwLock::new(ReactivePipelineServiceState::Stopped)),
-            lifecycle: Arc::new(Mutex::new(())),
+            shared: Arc::new(ReactivePipelineShared {
+                pipeline: RwLock::new(None),
+                state: RwLock::new(ReactivePipelineServiceState::Stopped),
+                lifecycle: Mutex::new(()),
+            }),
         }
     }
 
     async fn mark_state(&self, next: ReactivePipelineServiceState) {
-        *self.state.write().await = next;
+        *self.shared.state.write().await = next;
     }
 
     pub async fn is_running(&self) -> bool {
-        let state = *self.state.read().await;
-        state == ReactivePipelineServiceState::Running && self.pipeline.read().await.is_some()
+        let state = *self.shared.state.read().await;
+        state == ReactivePipelineServiceState::Running
+            && self.shared.pipeline.read().await.is_some()
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        let _guard = self.lifecycle.lock().await;
-        let current = *self.state.read().await;
+        let _guard = self.shared.lifecycle.lock().await;
+        let current = *self.shared.state.read().await;
         if current == ReactivePipelineServiceState::Running {
             return Ok(());
         }
@@ -118,14 +125,14 @@ impl ReactivePipelineService {
             }
         }
 
-        *self.pipeline.write().await = Some(pipeline);
+        *self.shared.pipeline.write().await = Some(pipeline);
         self.mark_state(ReactivePipelineServiceState::Running).await;
         Ok(())
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _guard = self.lifecycle.lock().await;
-        let current = *self.state.read().await;
+        let _guard = self.shared.lifecycle.lock().await;
+        let current = *self.shared.state.read().await;
         if current == ReactivePipelineServiceState::Stopped {
             return Ok(());
         }
@@ -133,7 +140,7 @@ impl ReactivePipelineService {
         self.mark_state(ReactivePipelineServiceState::Stopping)
             .await;
 
-        let pipeline = self.pipeline.write().await.take();
+        let pipeline = self.shared.pipeline.write().await.take();
         let shutdown_error = if let Some(pipeline) = pipeline {
             let timeout_ms = Self::SHUTDOWN_TIMEOUT.as_millis() as u64;
             let shutdown_fut = std::pin::pin!(pipeline.shutdown());
@@ -187,7 +194,7 @@ impl RuntimeService for ReactivePipelineService {
     }
 
     async fn health(&self) -> ServiceHealth {
-        match *self.state.read().await {
+        match *self.shared.state.read().await {
             ReactivePipelineServiceState::Stopped => ServiceHealth::Stopped,
             ReactivePipelineServiceState::Starting => ServiceHealth::Starting,
             ReactivePipelineServiceState::Stopping => ServiceHealth::Stopping,
@@ -195,7 +202,7 @@ impl RuntimeService for ReactivePipelineService {
                 reason: "reactive pipeline entered failed lifecycle state".to_string(),
             },
             ReactivePipelineServiceState::Running => {
-                if self.pipeline.read().await.is_some() {
+                if self.shared.pipeline.read().await.is_some() {
                     ServiceHealth::Healthy
                 } else {
                     ServiceHealth::Unhealthy {

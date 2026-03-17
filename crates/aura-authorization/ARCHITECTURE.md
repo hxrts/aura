@@ -32,6 +32,28 @@ for cryptographically verifiable capability delegation.
 - `Observed` layers may inspect authorization results but must not invent their
   own authority.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/capabilities.rs`, `src/facts.rs`, `src/flow_budget.rs`, `src/view.rs` | `Pure` | Capability semantics, fact reduction, and derived authorization state. |
+| `src/storage_authorization.rs` | `Pure`, `MoveOwned` | Storage-token and budget handling remain synchronous and typed; no async owner state or runtime locks. |
+| `src/effects.rs` | `Pure` | Authorization effect contracts and pure capability-facing adapters. |
+| Actor-owned runtime state | none | Layer 2 authorization must not accumulate background owner tasks. |
+| Observed-only surfaces | none | Observation belongs in higher layers that consume authorization results. |
+
+### Capability-Gated Points
+
+- Biscuit validation and attenuation issuance
+- storage authorization admission and budget charging
+- capability evaluation surfaces consumed by higher-layer mutation/publication
+  gates
+
+### Verification Hooks
+
+- `cargo check -p aura-authorization`
+- `cargo test -p aura-authorization storage_authorization -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantCapabilityMeetMonotonicity

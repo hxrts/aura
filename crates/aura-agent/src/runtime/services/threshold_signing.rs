@@ -191,20 +191,22 @@ impl ThresholdSigningState {
 pub struct ThresholdSigningService {
     /// Effect system for crypto and secure storage operations
     effects: Arc<AuraEffectSystem>,
-
-    /// In-memory signing state (contexts + leases)
-    state: Arc<RwLock<ThresholdSigningState>>,
-
+    shared: Arc<ThresholdSigningShared>,
     /// Runtime capability admission snapshot for threshold-signing gates.
     runtime_capabilities: RuntimeCapabilityHandler,
+}
+
+struct ThresholdSigningShared {
+    /// In-memory signing state (contexts + leases)
+    state: RwLock<ThresholdSigningState>,
     /// Authoritative lifecycle state for runtime health.
-    lifecycle: Arc<RwLock<ServiceHealth>>,
+    lifecycle: RwLock<ServiceHealth>,
 }
 
 impl std::fmt::Debug for ThresholdSigningService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ThresholdSigningService")
-            .field("state", &"<RwLock<ThresholdSigningState>>")
+            .field("shared", &"<ThresholdSigningShared>")
             .finish()
     }
 }
@@ -213,9 +215,8 @@ impl Clone for ThresholdSigningService {
     fn clone(&self) -> Self {
         Self {
             effects: self.effects.clone(),
-            state: self.state.clone(),
+            shared: Arc::clone(&self.shared),
             runtime_capabilities: self.runtime_capabilities.clone(),
-            lifecycle: self.lifecycle.clone(),
         }
     }
 }
@@ -227,9 +228,11 @@ impl ThresholdSigningService {
             RuntimeCapabilityHandler::from_pairs([("byzantine_envelope", true)]);
         Self {
             effects,
-            state: Arc::new(RwLock::new(ThresholdSigningState::default())),
+            shared: Arc::new(ThresholdSigningShared {
+                state: RwLock::new(ThresholdSigningState::default()),
+                lifecycle: RwLock::new(ServiceHealth::NotStarted),
+            }),
             runtime_capabilities,
-            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
         }
     }
 
@@ -240,9 +243,11 @@ impl ThresholdSigningService {
     ) -> Self {
         Self {
             effects,
-            state: Arc::new(RwLock::new(ThresholdSigningState::default())),
+            shared: Arc::new(ThresholdSigningShared {
+                state: RwLock::new(ThresholdSigningState::default()),
+                lifecycle: RwLock::new(ServiceHealth::NotStarted),
+            }),
             runtime_capabilities,
-            lifecycle: Arc::new(RwLock::new(ServiceHealth::NotStarted)),
         }
     }
 
@@ -343,7 +348,7 @@ impl ThresholdSigningService {
         mode: AgreementMode,
     ) -> Result<(), AuraError> {
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 let context = state
                     .contexts
@@ -369,7 +374,7 @@ impl ThresholdSigningService {
             issued_at_ms: now.ts_ms,
         };
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 if let Some(existing) = state.leases.get(authority) {
                     if coord_epoch <= existing.coord_epoch {
@@ -397,7 +402,7 @@ impl ThresholdSigningService {
         ack_set: Option<BTreeSet<AuthorityId>>,
         window: u64,
     ) -> Result<ConvergenceCert, AuraError> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         let lease = state
             .leases
             .get(coordinator)
@@ -421,7 +426,7 @@ impl ThresholdSigningService {
         op_id: Hash32,
         winner_op_id: Hash32,
     ) -> Result<ReversionFact, AuraError> {
-        let state = self.state.read().await;
+        let state = self.shared.state.read().await;
         let lease = state
             .leases
             .get(coordinator)
@@ -796,7 +801,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Store in memory cache
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state_map| {
                 state_map.contexts.insert(*authority, state);
             },
@@ -812,6 +817,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
     async fn sign(&self, context: SigningContext) -> Result<ThresholdSignature, AuraError> {
         let state = self
+            .shared
             .state
             .read()
             .await
@@ -889,7 +895,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig> {
-        self.state
+        self.shared.state
             .read()
             .await
             .contexts
@@ -898,7 +904,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState> {
-        self.state
+        self.shared.state
             .read()
             .await
             .contexts
@@ -913,7 +919,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
-        self.state
+        self.shared.state
             .read()
             .await
             .contexts
@@ -923,7 +929,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
-        self.state
+        self.shared.state
             .read()
             .await
             .contexts
@@ -957,6 +963,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Get current state to determine new epoch
         let current_epoch = self
+            .shared
             .state
             .read()
             .await
@@ -1279,7 +1286,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         let total_n = config_metadata.total_n;
 
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 if let Some(context) = state.contexts.get_mut(authority) {
                     let old_epoch = context.epoch;
@@ -1458,15 +1465,15 @@ impl RuntimeService for ThresholdSigningService {
     }
 
     async fn start(&self, _context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        *self.lifecycle.write().await = ServiceHealth::Healthy;
+        *self.shared.lifecycle.write().await = ServiceHealth::Healthy;
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
-        *self.lifecycle.write().await = ServiceHealth::Stopping;
+        *self.shared.lifecycle.write().await = ServiceHealth::Stopping;
         // Clear signing contexts + leases on shutdown
         with_state_mut_validated(
-            &self.state,
+            &self.shared.state,
             |state| {
                 state.contexts.clear();
                 state.leases.clear();
@@ -1474,12 +1481,12 @@ impl RuntimeService for ThresholdSigningService {
             |state| state.validate(),
         )
         .await;
-        *self.lifecycle.write().await = ServiceHealth::Stopped;
+        *self.shared.lifecycle.write().await = ServiceHealth::Stopped;
         Ok(())
     }
 
     async fn health(&self) -> ServiceHealth {
-        self.lifecycle.read().await.clone()
+        self.shared.lifecycle.read().await.clone()
     }
 }
 

@@ -32,9 +32,12 @@ impl BloomDigest {
     pub fn from_oplog(oplog: &OpLog) -> Result<Self, SyncError> {
         let mut cids = BTreeSet::new();
 
-        for op in oplog.list_ops().iter() {
+        for op in oplog.get_all_operations().iter() {
             let bytes = aura_core::util::serialization::to_vec(op)
-                .map_err(|e| SyncError::VerificationFailed(e.to_string()))?;
+                .map_err(|e| SyncError::VerificationFailed {
+                    target: "oplog_digest",
+                    detail: e.to_string(),
+                })?;
             cids.insert(Hash32::from(aura_core::hash::hash(&bytes)));
         }
 
@@ -72,12 +75,15 @@ pub enum SyncError {
     PeerUnreachable(DeviceId),
 
     /// Operation verification failed
-    #[error("Operation verification failed: {0}")]
-    VerificationFailed(String),
+    #[error("operation verification failed for {target}: {detail}")]
+    VerificationFailed { target: &'static str, detail: String },
 
     /// Network error during sync
-    #[error("Network error: {0}")]
-    NetworkError(String),
+    #[error("network error during {operation}: {detail}")]
+    NetworkError {
+        operation: &'static str,
+        detail: String,
+    },
 
     /// Rate limit exceeded
     #[error("Rate limit exceeded for peer {0}")]
@@ -104,23 +110,26 @@ pub enum SyncError {
     AuthorizationFailed,
 
     /// Guard chain evaluation failure (authorization, flow budget, or journal coupling)
-    #[error("Guard chain failure: {0}")]
-    GuardChainFailure(String),
+    #[error("guard chain failure during {operation}: {detail}")]
+    GuardChainFailure {
+        operation: &'static str,
+        detail: String,
+    },
 }
 
 impl aura_core::ProtocolErrorCode for SyncError {
     fn code(&self) -> &'static str {
         match self {
             SyncError::PeerUnreachable(_) => "peer_unreachable",
-            SyncError::VerificationFailed(_) => "verification_failed",
-            SyncError::NetworkError(_) => "network",
+            SyncError::VerificationFailed { .. } => "verification_failed",
+            SyncError::NetworkError { .. } => "network",
             SyncError::RateLimitExceeded(_) => "rate_limit",
             SyncError::InvalidDigest(_) => "invalid_digest",
             SyncError::OperationNotFound => "not_found",
             SyncError::BackPressure => "back_pressure",
             SyncError::TimeError => "time_error",
             SyncError::AuthorizationFailed => "unauthorized",
-            SyncError::GuardChainFailure(_) => "guard_chain",
+            SyncError::GuardChainFailure { .. } => "guard_chain",
         }
     }
 }
