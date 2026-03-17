@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/issue_operation_handle_wrong_capability.rs:7:52
+  |
+7 |     let _ = issue_operation_handle::<Invite, _, _>(&capability, "invitation_create", 1u64);
+  |             -------------------------------------- ^^^^^^^^^^^ expected `&ActorIngressMutationCapability`, found `&LifecyclePublicationCapability`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected reference `&ActorIngressMutationCapability`
+             found reference `&LifecyclePublicationCapability`
+note: function defined here
+ --> src/ownership.rs
+  |
+  | pub fn issue_operation_handle<Kind, HandleId, InstanceId>(
+  |        ^^^^^^^^^^^^^^^^^^^^^^

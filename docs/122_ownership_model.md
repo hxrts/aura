@@ -76,14 +76,21 @@ let transfer = token.handoff("invite-coordinator");
 
 The original `token` is consumed by `handoff`. Trying to act through the old owner is a compile-time error.
 
+Typed ownership capabilities from the same wrapper family can also be issued
+onto Aura's existing Biscuit path without first down-converting them to raw
+`CapabilityKey` values via `ownership_capability_token_request_for(...)`.
+Lower layers should not expose parallel raw ownership-capability request
+helpers once a typed wrapper family exists.
+
 ### When To Use Capability Tokens
 
 Use capability wrappers whenever parity-critical code needs authority to author semantic truth.
 
 ```rust
 use aura_core::{
-    AuthorizedLifecyclePublication, LifecyclePublicationCapability,
-    OperationLifecycle,
+    AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
+    LifecyclePublicationCapability, OperationLifecycle,
+    ReadinessPublicationCapability,
 };
 
 let capability = LifecyclePublicationCapability::new("semantic:lifecycle");
@@ -94,6 +101,11 @@ let update = AuthorizedLifecyclePublication::authorize(
 ```
 
 Publication requires a capability-shaped input. Random helper code cannot publish lifecycle by accident.
+
+The same rule applies to readiness and actor-ingress mutation. Higher layers
+should prefer `AuthorizedReadinessPublication<T>` and
+`AuthorizedActorIngressMutation<T>` over raw capability arguments when they
+need to move parity-critical authority across API boundaries.
 
 ### When To Use `ActorOwned`
 
@@ -190,6 +202,47 @@ This inventory covers every Rust crate under `crates/`. It is the workspace-leve
 | `aura-consensus` | `MoveOwned`, `ActorOwned` | round coordinators, vote collection | proposal tokens, quorum certificates | vote admission, round-finalization | actor-owned lifecycle inventory open |
 | `aura-amp` | `MoveOwned`, `ActorOwned` | channel/state coordinators | channel bindings, bootstrap tokens | channel bootstrap, membership progression | authority mismatches and timeout debt |
 | `aura-anti-entropy` | `MoveOwned`, `ActorOwned` | reconciliation supervisors | reconciliation handles, checkpoint cursors | reconciliation progress publication | actor/task lifecycle cleanup pending |
+
+#### Layer 4 audit findings
+
+The current Layer 4 ownership audit found the following concrete shared-state
+surfaces that need explicit classification and follow-up refactors:
+
+- `aura-protocol`
+  - `handlers/timeout_coordinator.rs` is still a thin wrapper today, but any
+    future global timeout/context registry must be introduced as an explicit
+    `ActorOwned` coordinator rather than as a shared lock registry.
+  - `handlers/transport_coordinator.rs` no longer spreads its connection
+    registry across clones via `Arc<RwLock<_>>`; the remaining follow-up is to
+    decide whether it should stay as a single-owner coordinator object or grow
+    into a dedicated owner task with command ingress.
+  - `handlers/context/agent.rs` clones and replaces session maps by hand. This
+    is a `MoveOwned` candidate: session ownership and handoff should be
+    expressed as consumed transfer values rather than ad hoc map rewrites.
+- `aura-consensus`
+  - `frost.rs`, `protocol/logic.rs`, and `witness.rs` no longer spread active
+    instances and witness state through `Arc<RwLock<HashMap<...>>>` clones; the
+    remaining work is to decide which of these coordinator-owned state holders
+    should stay as single-owner coordinator objects and which need explicit
+    actor ingress once cross-task ownership appears.
+  - `evidence.rs` keeps mutable evidence trackers in plain `HashMap`s. This is
+    acceptable only while single-owner and local; any async sharing should move
+    behind an actor boundary.
+- `aura-anti-entropy`
+  - `anti_entropy.rs` and `broadcast.rs` no longer spread oplogs, peer sets,
+    announcement queues, and rate limits across `Arc<RwLock<_>>` registries;
+    they now keep coordinator-owned state objects. `persistent.rs` and any
+    future background reconciliation services still need the same treatment if
+    they become long-lived async owners.
+- `aura-amp`
+  - the audit did not find direct owner-field rewrites, but AMP still carries
+    orchestration state in consensus/bootstrap helpers that should be reviewed
+    alongside the channel bootstrap and membership coordinator work.
+
+The audit did not find remaining direct move-owned field rewrites in Layer 4,
+but it did confirm that several orchestration crates still rely on shared
+mutable registries where a single-owner actor or a consumed handoff surface is
+the correct model.
 
 ### Layer 5
 

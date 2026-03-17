@@ -7,6 +7,7 @@ use aura_simulator::async_host::{AsyncHostRequest, AsyncHostResponse, AsyncSimul
 use tokio::runtime::{Builder, Runtime};
 
 use crate::config::RuntimeSubstrate;
+use crate::timeouts::blocking_sleep;
 
 pub struct RuntimeSubstrateController {
     inner: RuntimeSubstrateInner,
@@ -58,7 +59,7 @@ impl RuntimeSubstrateController {
     pub fn fault_delay(&mut self, actor: &str, delay_ms: u64) -> Result<()> {
         match &mut self.inner {
             RuntimeSubstrateInner::Real => {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                blocking_sleep(std::time::Duration::from_millis(delay_ms));
                 Ok(())
             }
             RuntimeSubstrateInner::Simulator(simulator) => {

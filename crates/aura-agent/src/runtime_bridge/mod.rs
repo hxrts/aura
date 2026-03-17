@@ -34,6 +34,7 @@ use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
     ThresholdSigningEffects, TransportEffects, TransportEnvelope,
 };
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::hash::hash;
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
@@ -87,6 +88,25 @@ const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 4_500;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
+
+async fn execute_with_effect_timeout<TTime, T, E, Fut>(
+    time: &TTime,
+    timeout: Duration,
+    operation: Fut,
+) -> Result<T, TimeoutRunError<E>>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let started_at = time.physical_time().await.map_err(|error| {
+        TimeoutRunError::Timeout(aura_core::TimeoutBudgetError::time_source_unavailable(
+            error.to_string(),
+        ))
+    })?;
+    let budget =
+        TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(TimeoutRunError::Timeout)?;
+    execute_with_timeout_budget(time, &budget, || operation).await
+}
 
 #[derive(Debug, Default)]
 struct ChannelFactInspection {
@@ -826,15 +846,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
         params: ChannelJoinParams,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let timestamp = tokio::time::timeout(
+        let timestamp = execute_with_effect_timeout(
+            &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            ChannelMembershipFact::random_timestamp(&effects),
+            async { Ok::<_, IntentError>(ChannelMembershipFact::random_timestamp(&effects).await) },
         )
         .await
-        .map_err(|_| {
-            IntentError::internal_error(format!(
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
                 "amp_repair_local_channel_membership.random_timestamp timed out after {AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS}ms"
-            ))
+            )),
+            TimeoutRunError::Operation(error) => error,
         })?;
         let membership = ChannelMembershipFact::new(
             params.context,
@@ -843,20 +865,21 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ChannelParticipantEvent::Joined,
             timestamp,
         );
-        tokio::time::timeout(
+        execute_with_effect_timeout(
+            &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
             effects.insert_relational_fact(membership.to_generic()),
         )
         .await
-        .map_err(|_| {
-            IntentError::internal_error(format!(
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
                 "amp_repair_local_channel_membership.insert_relational_fact timed out after {AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS}ms"
-            ))
-        })?
-        .map_err(|error| {
-            IntentError::internal_error(format!(
-                "failed to repair local AMP membership: {error}"
-            ))
+            )),
+            TimeoutRunError::Operation(error) => {
+                IntentError::internal_error(format!(
+                    "failed to repair local AMP membership: {error}"
+                ))
+            }
         })
     }
 
@@ -3491,46 +3514,38 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         #[cfg(not(target_arch = "wasm32"))]
         let invitation = {
-            let join = tokio::spawn(async move {
-                invitation_service
-                    .invite_to_channel(
-                        receiver,
-                        home_id,
-                        context_id,
-                        channel_name_hint,
-                        bootstrap,
-                        message,
-                        ttl_ms,
-                    )
-                    .await
-            });
-            match tokio::time::timeout(
+            match execute_with_effect_timeout(
+                &self.agent.runtime().effects(),
                 Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-                join,
+                invitation_service.invite_to_channel(
+                    receiver,
+                    home_id,
+                    context_id,
+                    channel_name_hint,
+                    bootstrap,
+                    message,
+                    ttl_ms,
+                ),
             )
-            .await
-            {
-                Err(_) => {
+            .await {
+                Err(TimeoutRunError::Timeout(_)) => {
                     return Err(IntentError::internal_error(format!(
                         "invitation_service.invite_to_channel timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
                     )));
                 }
-                Ok(Err(error)) => {
+                Err(TimeoutRunError::Operation(e)) => {
                     return Err(IntentError::internal_error(format!(
-                        "invitation_service.invite_to_channel task failed: {error}"
-                    )));
-                }
-                Ok(Ok(result)) => result.map_err(|e| {
-                    IntentError::internal_error(format!(
                         "Failed to create channel invitation: {}",
                         e
-                    ))
-                })?,
+                    )));
+                }
+                Ok(result) => result,
             }
         };
 
         #[cfg(target_arch = "wasm32")]
-        let invitation = tokio::time::timeout(
+        let invitation = execute_with_effect_timeout(
+            &self.agent.runtime().effects(),
             Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
             invitation_service
                 .invite_to_channel(
@@ -3544,14 +3559,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ),
         )
         .await
-        .map_err(|_| {
-            IntentError::internal_error(format!(
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
                 "invitation_service.invite_to_channel timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
-            ))
+            )),
+            TimeoutRunError::Operation(e) => {
+                IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
+            }
         })?
-        .map_err(|e| {
-            IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
-        })?;
+        ?;
 
         Ok(convert_invitation_to_bridge_info(&invitation))
     }

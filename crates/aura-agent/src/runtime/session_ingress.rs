@@ -143,6 +143,12 @@ pub struct OwnedVmSession {
     vm_session_id: telltale_vm::SessionId,
 }
 
+#[derive(Debug)]
+struct OwnedVmSessionOwnerTransfer {
+    next_owner: RuntimeSessionOwner,
+    next_boundary: AuraLinkBoundary,
+}
+
 fn log_session_owner_assigned(
     owner: &RuntimeSessionOwner,
     protocol_id: Option<&str>,
@@ -259,6 +265,23 @@ fn log_session_ingress_dropped(
 }
 
 impl OwnedVmSession {
+    fn prepare_owner_transfer(
+        &self,
+        next_owner_label: impl Into<String>,
+        next_boundary: AuraLinkBoundary,
+    ) -> Result<OwnedVmSessionOwnerTransfer, SessionIngressError> {
+        let next_scope = next_boundary.capability_scope.clone();
+        let next_owner = self.effects.transfer_owned_choreography_session_owner(
+            self.owner.clone(),
+            next_owner_label,
+            next_scope,
+        )?;
+        Ok(OwnedVmSessionOwnerTransfer {
+            next_owner,
+            next_boundary,
+        })
+    }
+
     pub fn owner(&self) -> &RuntimeSessionOwner {
         &self.owner
     }
@@ -430,14 +453,9 @@ impl OwnedVmSession {
         next_owner_label: impl Into<String>,
         next_boundary: AuraLinkBoundary,
     ) -> Result<(), SessionIngressError> {
-        let next_scope = next_boundary.capability_scope.clone();
-        let next_owner = self.effects.transfer_owned_choreography_session_owner(
-            self.owner.clone(),
-            next_owner_label,
-            next_scope,
-        )?;
-        self.routing_boundary = next_boundary;
-        self.owner = next_owner;
+        let transfer = self.prepare_owner_transfer(next_owner_label, next_boundary)?;
+        self.routing_boundary = transfer.next_boundary;
+        let _previous = std::mem::replace(&mut self.owner, transfer.next_owner);
         Ok(())
     }
 

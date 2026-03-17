@@ -27,7 +27,7 @@
 //! - Context-scoped fact journal mirror (uses `aura-journal` fact model)
 //! - Guardian binding management and query operations
 //! - Recovery grant management and retrieval
-//! - Consensus adapter for running Aura Consensus on relational state
+//! - Direct Aura Consensus integration for relational state agreement
 //! - Context-scoped metadata and participant tracking
 //!
 //! ## What Does NOT Belong Here
@@ -52,7 +52,7 @@
 //! - **RelationalContext**: Multi-authority coordination unit
 //! - **Context Journal**: CRDT fact journal for relational state (`aura-journal` facts + `Generic` extensibility)
 //! - **RelationalFact**: Guardian bindings, recovery grants, peer metadata
-//! - **ConsensusAdapter**: Aura Consensus coordination for agreement
+//! - **Aura Consensus**: direct relational consensus coordination
 //!
 //! RelationalContext implementation for cross-authority coordination
 //!
@@ -81,7 +81,6 @@ use aura_journal::DomainFact;
 use std::collections::BTreeSet;
 use std::sync::RwLock;
 
-pub mod consensus_adapter;
 pub mod facts;
 pub mod guardian;
 pub mod guardian_request;
@@ -111,8 +110,7 @@ pub use facts::{
     RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 
-// Export consensus functions from adapter
-pub use consensus_adapter::{run_consensus, run_consensus_with_config, ConsensusConfig};
+pub use aura_consensus::types::ConsensusConfig;
 pub use guardian_request::{
     parse_guardian_request, GuardianRequestFact, GuardianRequestFactReducer,
     GuardianRequestPayload, GUARDIAN_REQUEST_FACT_TYPE_ID,

@@ -4,12 +4,15 @@
 //! Moderators (Admins) have elevated permissions within a home.
 
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
+use crate::workflows::runtime::{
+    converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
+    workflow_retry_policy,
+};
 use crate::workflows::{channel_ref::ChannelRef, snapshot_policy::chat_snapshot};
 use crate::{views::home::HomeRole, AppCore};
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::AuraError;
+use aura_core::{AuraError, RetryRunError};
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::moderation::facts::{HomeGrantModeratorFact, HomeRevokeModeratorFact};
 use std::sync::Arc;
@@ -23,24 +26,31 @@ async fn send_moderator_fact_with_retry(
     context_id: ContextId,
     fact: &RelationalFact,
 ) -> Result<(), AuraError> {
-    let mut last_error: Option<String> = None;
-
-    for attempt in 0..MODERATOR_FACT_SEND_MAX_ATTEMPTS {
-        match runtime.send_chat_fact(peer, context_id, fact).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error.to_string()),
-        }
-
-        if attempt + 1 < MODERATOR_FACT_SEND_MAX_ATTEMPTS {
-            converge_runtime(runtime).await;
-            for _ in 0..MODERATOR_FACT_SEND_YIELDS_PER_RETRY {
-                cooperative_yield().await;
+    let retry_policy = workflow_retry_policy(
+        MODERATOR_FACT_SEND_MAX_ATTEMPTS as u32,
+        std::time::Duration::from_millis(1),
+        std::time::Duration::from_millis(1),
+    )?;
+    execute_with_runtime_retry_budget(runtime, &retry_policy, |attempt| {
+        let runtime = Arc::clone(runtime);
+        async move {
+            if attempt > 0 {
+                converge_runtime(&runtime).await;
+                for _ in 0..MODERATOR_FACT_SEND_YIELDS_PER_RETRY {
+                    cooperative_yield().await;
+                }
             }
+            runtime
+                .send_chat_fact(peer, context_id, fact)
+                .await
+                .map_err(|error| AuraError::from(super::error::runtime_call("Send moderator fact", error)))
         }
-    }
-
-    let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
-    Err(super::error::runtime_call("Send moderator fact", message).into())
+    })
+    .await
+    .map_err(|error| match error {
+        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
+        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
+    })
 }
 
 async fn resolve_target_authority(

@@ -31,6 +31,9 @@ relationships. Includes guardian setup, membership management, and recovery cere
 - Long-lived recovery coordination should be explicit and single-owner rather
   than spread across wrappers and views.
 - Recovery publication and transitions must remain capability-gated and typed.
+- Recovery lifecycle reduction must preserve typed terminal failure/rejection
+  detail in derived state rather than collapsing everything to bare `Failed`
+  flags.
 - `Observed` recovery views are downstream of authoritative recovery semantics.
 
 ### Detailed Specifications

@@ -33,6 +33,15 @@ builder, and lifecycle infrastructure for composing stateless handlers.
 - `Observed` tooling may inspect assembled systems, but composition should not
   author semantic lifecycle.
 
+### Allowed Assembly Mechanics
+
+The `Arc<dyn ...>` adapter surfaces in `src/adapters/*` are allowed because
+they are shared references to already-owned handlers, not ownership of mutable
+runtime state. Composition may hold and clone handler references for type-safe
+assembly, but it must not introduce background tasks, internal mutable
+registries with semantic meaning, or lifecycle ownership of the assembled
+system.
+
 ### Detailed Specifications
 
 ### InvariantCompositionTypeSafeRegistry

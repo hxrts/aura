@@ -9,6 +9,8 @@ use tokio::time::Instant;
 
 use anyhow::{anyhow, bail, Context, Result};
 
+use crate::timeouts::blocking_sleep;
+
 /// Agent launch specification used by namespace-aware harness runners.
 #[derive(Debug, Clone)]
 pub struct AgentLaunchSpec {
@@ -160,7 +162,7 @@ impl AgentNamespaceLauncher for StandardAgentLauncher {
                 ));
             }
 
-            std::thread::sleep(Duration::from_millis(100));
+            blocking_sleep(Duration::from_millis(100));
         }
     }
 }

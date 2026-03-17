@@ -218,6 +218,29 @@ than as an acceptable alternate pattern.
 The required split is:
 
 - actor-owned subsystems own long-lived mutable async state and lifecycle
+- move-owned handles/tokens invalidate stale holders by construction
+- observed layers render and assert, but do not author semantic truth
+
+### Required Ownership Invariants
+
+Ownership-model migrations are not complete until the following test classes
+exist for the affected parity-critical surface:
+
+- compile-fail guards for private constructors, wrong-capability issuance, and
+  stale-owner misuse where the boundary is enforced in types
+- dynamic invariant tests proving owner drop reaches explicit terminal failure
+  or cancellation
+- dynamic invariant tests proving terminal states do not regress on the same
+  logical operation instance
+- handle/instance tests proving stale handles do not match or advance the wrong
+  operation instance after transfer or replacement
+- concurrency tests for actor-owned coordinators where lost updates or multiple
+  live owners are plausible
+- timeout/backoff invariant tests proving typed timeout failure,
+  remaining-budget propagation, bounded attempts, and local-choice scaling
+
+If a flow changes ownership model or timeout policy and these test classes do
+not move with it, treat the migration as incomplete.
 - move-owned surfaces own exclusive right-to-act and ownership transfer
 - observed surfaces render, wait, and diagnose without authoring semantic truth
 

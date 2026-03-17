@@ -18,7 +18,7 @@
 //! - `RecoveryView`: Pending recovery operations
 //! - `GuardianApprovalView`: Guardian approval status
 
-use crate::facts::{AuthFact, AuthFactDelta, AuthFactReducer};
+use crate::facts::{AuthFact, AuthFactDelta, AuthFactReducer, RecoveryFailureReason};
 use crate::guards::RecoveryOperationType;
 use aura_core::types::identifiers::AuthorityId;
 use aura_signature::session::SessionScope;
@@ -49,6 +49,9 @@ pub struct AuthView {
 
     /// Recent authentication failures for rate limiting
     pub recent_failures: Vec<FailureRecord>,
+
+    /// Recent recovery failures and denials
+    pub recent_recovery_failures: Vec<RecoveryFailureRecord>,
 }
 
 /// Information about an active session
@@ -100,6 +103,17 @@ pub struct RecoveryInfo {
     pub expires_at_ms: u64,
 }
 
+/// Record of a recovery denial/failure
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecoveryFailureRecord {
+    /// Request ID that failed
+    pub request_id: String,
+    /// Account tied to the failure if known
+    pub account_id: Option<AuthorityId>,
+    /// Typed failure reason
+    pub reason: RecoveryFailureReason,
+}
+
 /// Record of an authentication failure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureRecord {
@@ -108,9 +122,14 @@ pub struct FailureRecord {
     /// Authority that failed
     pub authority_id: AuthorityId,
     /// Failure reason
-    pub reason: String,
+    pub reason: AuthFailureReason,
     /// Failure timestamp (ms)
     pub failed_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthFailureReason {
+    VerificationFailed { reason: String },
 }
 
 impl AuthView {
@@ -309,7 +328,13 @@ impl AuthViewReducer {
                 view.pending_recoveries.remove(&request_id);
             }
 
-            AuthFactDelta::RecoveryFailed { request_id } => {
+            AuthFactDelta::RecoveryFailed { request_id, reason } => {
+                let account_id = view.pending_recoveries.get(&request_id).map(|r| r.account_id);
+                view.recent_recovery_failures.push(RecoveryFailureRecord {
+                    request_id: request_id.clone(),
+                    account_id,
+                    reason,
+                });
                 view.pending_recoveries.remove(&request_id);
             }
         }
@@ -326,7 +351,9 @@ impl AuthViewReducer {
             view.recent_failures.push(FailureRecord {
                 session_id: session_id.clone(),
                 authority_id: *authority_id,
-                reason: reason.clone(),
+                reason: AuthFailureReason::VerificationFailed {
+                    reason: reason.clone(),
+                },
                 failed_at_ms: *failed_at_ms,
             });
 
@@ -491,6 +518,50 @@ mod tests {
         reducer.apply(&mut view, &fail_fact);
         assert_eq!(view.recent_failures.len(), 1);
         assert_eq!(view.recent_failures[0].session_id, "session_456");
+        assert_eq!(
+            view.recent_failures[0].reason,
+            AuthFailureReason::VerificationFailed {
+                reason: "Invalid signature".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_recovery_failure_tracking() {
+        let reducer = AuthViewReducer::new();
+        let mut view = AuthView::new();
+
+        let request_fact = AuthFact::GuardianApprovalRequested {
+            context_id: test_context_id(),
+            request_id: "recovery_789".to_string(),
+            account_id: test_authority(),
+            requester_id: test_authority_2(),
+            operation_type: RecoveryOperationType::AccountAccessRecovery,
+            required_guardians: 2,
+            is_emergency: false,
+            justification: "Need recovery".to_string(),
+            requested_at_ms: 1000,
+            expires_at_ms: 5000,
+        };
+        reducer.apply(&mut view, &request_fact);
+
+        let fail_fact = AuthFact::GuardianDenied {
+            context_id: test_context_id(),
+            request_id: "recovery_789".to_string(),
+            guardian_id: test_authority_2(),
+            reason: "guardian denied".to_string(),
+            denied_at_ms: 1500,
+        };
+        reducer.apply(&mut view, &fail_fact);
+
+        assert!(!view.pending_recoveries.contains_key("recovery_789"));
+        assert_eq!(view.recent_recovery_failures.len(), 1);
+        assert_eq!(
+            view.recent_recovery_failures[0].reason,
+            RecoveryFailureReason::GuardianDenied {
+                reason: "guardian denied".to_string(),
+            }
+        );
     }
 
     #[test]

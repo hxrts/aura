@@ -5,14 +5,6 @@
 # loops that must move onto the shared retry-budget model.
 # Doc: work/ownership.md
 
-^crates/aura-app/src/workflows/access\.rs:
-^crates/aura-app/src/workflows/account\.rs:
-^crates/aura-app/src/workflows/ceremonies\.rs:
-^crates/aura-app/src/workflows/invitation\.rs:
-^crates/aura-app/src/workflows/messaging\.rs:
-^crates/aura-app/src/workflows/moderation\.rs:
-^crates/aura-app/src/workflows/moderator\.rs:
-^crates/aura-app/src/workflows/recovery\.rs:
 ^crates/aura-terminal/src/tui/harness_state\.rs:
 ^crates/aura-terminal/src/tui/hooks\.rs:
 ^crates/aura-terminal/src/tui/screens/app/shell\.rs:

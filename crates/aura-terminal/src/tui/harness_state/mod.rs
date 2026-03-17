@@ -6,7 +6,7 @@ mod socket;
 
 pub use commands::TuiSemanticInputs;
 pub(crate) use commands::apply_harness_command;
-pub use snapshot::{authoritative_ui_snapshot, maybe_export_ui_snapshot, try_authoritative_ui_snapshot};
+pub use snapshot::maybe_export_ui_snapshot;
 pub(crate) use socket::{
     clear_harness_command_sender, ensure_harness_command_listener, register_harness_command_sender,
 };
@@ -33,6 +33,9 @@ mod tests {
     };
     use aura_app::ui::types::StateSnapshot;
     use aura_app::ui_contract::RuntimeFact;
+    use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError};
+    use aura_core::effects::PhysicalTimeEffects;
+    use aura_effects::time::PhysicalTimeHandler;
     use std::os::unix::net::UnixListener as StdUnixListener;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -665,11 +668,28 @@ mod tests {
         });
 
         let apply_task = tokio::spawn(async move {
-            let observed_submission =
-                tokio::time::timeout(Duration::from_secs(1), command_rx.recv())
-                    .await
-                    .unwrap_or_else(|_| panic!("timed out waiting for harness command submission"))
-                    .unwrap_or_else(|| panic!("harness command channel closed unexpectedly"));
+            let time = PhysicalTimeHandler::new();
+            let started_at = time
+                .physical_time()
+                .await
+                .unwrap_or_else(|error| panic!("failed to read physical time: {error}"));
+            let timeout = TimeoutExecutionProfile::simulation_test()
+                .scale_duration(Duration::from_secs(1))
+                .unwrap_or_else(|error| panic!("failed to scale test timeout: {error}"));
+            let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout)
+                .unwrap_or_else(|error| panic!("failed to build test timeout budget: {error}"));
+            let observed_submission = match execute_with_timeout_budget(&time, &budget, || async {
+                Ok::<_, std::convert::Infallible>(command_rx.recv().await)
+            })
+            .await
+            {
+                Ok(Some(submission)) => submission,
+                Ok(None) => panic!("harness command channel closed unexpectedly"),
+                Err(TimeoutRunError::Timeout(error)) => {
+                    panic!("timed out waiting for harness command submission: {error}")
+                }
+                Err(TimeoutRunError::Operation(error)) => match error {},
+            };
             match observed_submission {
                 HarnessCommandSubmission {
                     command:

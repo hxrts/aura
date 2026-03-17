@@ -4573,7 +4573,10 @@ mod tests {
         };
         let mut tui = web.clone();
         tui.messages[0].id = "tui-1".to_string();
-        tui.operations[0].instance_id = OperationInstanceId("tui-op".to_string());
+        tui.operations = vec![OperationSnapshot {
+            instance_id: OperationInstanceId("tui-op".to_string()),
+            ..tui.operations[0].clone()
+        }];
 
         assert!(compare_ui_snapshots_for_parity(&web, &tui).is_empty());
 

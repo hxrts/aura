@@ -2,11 +2,14 @@ use super::AuraEffectSystem;
 use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
 use aura_core::effects::network::PeerEventStream;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
     TransportEffects, TransportError,
 };
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_effects::time::PhysicalTimeHandler;
 use aura_core::types::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
 use cfg_if::cfg_if;
@@ -24,6 +27,28 @@ use std::net::SocketAddr;
 use tokio::io::AsyncWriteExt;
 const NETWORK_CONTENT_TYPE: &str = "application/aura-network";
 const CONNECTION_ID_PREFIX: &str = "conn-";
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn execute_network_timeout<F, Fut, T>(
+    timeout: std::time::Duration,
+    timeout_error: impl Fn() -> NetworkError + Copy,
+    f: F,
+) -> Result<T, NetworkError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, NetworkError>>,
+{
+    let time = PhysicalTimeHandler::new();
+    let started_at = time.physical_time().await.map_err(|_| timeout_error())?;
+    let budget =
+        TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| timeout_error())?;
+    Ok(execute_with_timeout_budget(&time, &budget, f)
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => timeout_error(),
+            TimeoutRunError::Operation(error) => error,
+        })?)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ConnectionId(uuid::Uuid);
@@ -332,38 +357,49 @@ impl NetworkExtendedEffects for AuraEffectSystem {
                     })?;
 
                 let config = aura_effects::transport::TransportConfig::default();
-                let mut stream = tokio::time::timeout(
+                let mut stream = execute_network_timeout(
                     config.connect_timeout.get(),
-                    tokio::net::TcpStream::connect(socket_addr),
+                    || NetworkError::OperationTimeout {
+                        operation: "network_send_connect".to_string(),
+                        timeout_ms: config.connect_timeout.get().as_millis() as u64,
+                    },
+                    || async {
+                        tokio::net::TcpStream::connect(socket_addr)
+                            .await
+                            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))
+                    },
                 )
-                .await
-                .map_err(|_| NetworkError::OperationTimeout {
-                    operation: "network_send_connect".to_string(),
-                    timeout_ms: config.connect_timeout.get().as_millis() as u64,
-                })?
-                .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+                .await?;
 
                 let len = (_data.len() as u32).to_be_bytes();
-                tokio::time::timeout(config.write_timeout.get(), stream.write_all(&len))
-                    .await
-                    .map_err(|_| NetworkError::OperationTimeout {
+                execute_network_timeout(
+                    config.write_timeout.get(),
+                    || NetworkError::OperationTimeout {
                         operation: "network_send_len".to_string(),
                         timeout_ms: config.write_timeout.get().as_millis() as u64,
-                    })?
-                    .map_err(|e| NetworkError::SendFailed {
-                        peer_id: None,
-                        reason: e.to_string(),
-                    })?;
-                tokio::time::timeout(config.write_timeout.get(), stream.write_all(&_data))
-                    .await
-                    .map_err(|_| NetworkError::OperationTimeout {
+                    },
+                    || async {
+                        stream.write_all(&len).await.map_err(|e| NetworkError::SendFailed {
+                            peer_id: None,
+                            reason: e.to_string(),
+                        })
+                    },
+                )
+                .await?;
+                execute_network_timeout(
+                    config.write_timeout.get(),
+                    || NetworkError::OperationTimeout {
                         operation: "network_send_payload".to_string(),
                         timeout_ms: config.write_timeout.get().as_millis() as u64,
-                    })?
-                    .map_err(|e| NetworkError::SendFailed {
-                        peer_id: None,
-                        reason: e.to_string(),
-                    })?;
+                    },
+                    || async {
+                        stream.write_all(&_data).await.map_err(|e| NetworkError::SendFailed {
+                            peer_id: None,
+                            reason: e.to_string(),
+                        })
+                    },
+                )
+                .await?;
 
                 Ok(())
             }

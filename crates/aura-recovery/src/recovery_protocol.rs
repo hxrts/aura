@@ -4,6 +4,8 @@
 //! replacing the device-centric recovery model with authority-based recovery.
 
 use crate::facts::{RecoveryFact, RecoveryFactEmitter};
+use aura_consensus::relational::run_consensus_with_commit;
+use aura_consensus::types::CommitFact;
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
@@ -16,9 +18,10 @@ use aura_core::types::identifiers::{ContextId, RecoveryId};
 use aura_core::types::Epoch;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
 use aura_journal::DomainFact;
 use aura_macros::choreography;
-use aura_relational::consensus_adapter::{run_consensus_with_commit, CommitFact};
 use aura_relational::RelationalContext;
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
@@ -164,6 +167,8 @@ impl RecoveryProtocol {
         );
         let epoch = Epoch::from(1); // Recovery uses a default epoch
 
+        let random = RealRandomHandler;
+        let time = PhysicalTimeHandler;
         run_consensus_with_commit(
             self.recovery_context.context_id,
             &prestate,
@@ -171,6 +176,8 @@ impl RecoveryProtocol {
             key_packages,
             group_public_key,
             epoch,
+            &random,
+            &time,
         )
         .await
     }

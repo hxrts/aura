@@ -93,7 +93,7 @@ fn arb_oplog() -> impl Strategy<Value = OpLog> {
     prop::collection::vec(arb_op(), 1..=10).prop_map(|ops| {
         let mut oplog = OpLog::new();
         for op in ops {
-            oplog.append(op);
+            oplog.add_operation(op);
         }
         oplog
     })
@@ -104,7 +104,7 @@ proptest! {
     /// Reducing the same OpLog multiple times produces identical TreeState
     #[test]
     fn prop_reduction_deterministic(oplog in arb_oplog()) {
-        let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
+        let ops: Vec<AttestedOp> = oplog.get_all_operations().into_iter().cloned().collect();
         let state1 = reduce(&ops)?;
         let state2 = reduce(&ops)?;
 
@@ -126,8 +126,8 @@ proptest! {
         let joined_ba = oplog2.join(&oplog1);
 
         // Reduce both
-        let ops_ab: Vec<AttestedOp> = joined_ab.list_ops().into_iter().cloned().collect();
-        let ops_ba: Vec<AttestedOp> = joined_ba.list_ops().into_iter().cloned().collect();
+        let ops_ab: Vec<AttestedOp> = joined_ab.get_all_operations().into_iter().cloned().collect();
+        let ops_ba: Vec<AttestedOp> = joined_ba.get_all_operations().into_iter().cloned().collect();
         let state_ab = reduce(&ops_ab)?;
         let state_ba = reduce(&ops_ba)?;
 
@@ -153,8 +153,8 @@ proptest! {
         let right = oplog1.join(&oplog2.join(&oplog3));
 
         // Reduce both
-        let ops_left: Vec<AttestedOp> = left.list_ops().into_iter().cloned().collect();
-        let ops_right: Vec<AttestedOp> = right.list_ops().into_iter().cloned().collect();
+        let ops_left: Vec<AttestedOp> = left.get_all_operations().into_iter().cloned().collect();
+        let ops_right: Vec<AttestedOp> = right.get_all_operations().into_iter().cloned().collect();
         let state_left = reduce(&ops_left)?;
         let state_right = reduce(&ops_right)?;
 
@@ -171,14 +171,14 @@ proptest! {
     #[test]
     fn prop_duplicate_ops_idempotent(op in arb_op()) {
         let mut oplog1 = OpLog::new();
-        oplog1.append(op.clone());
+        oplog1.add_operation(op.clone());
 
         let mut oplog2 = OpLog::new();
-        oplog2.append(op.clone());
-        oplog2.append(op); // Duplicate
+        oplog2.add_operation(op.clone());
+        oplog2.add_operation(op); // Duplicate
 
-        let ops1: Vec<AttestedOp> = oplog1.list_ops().into_iter().cloned().collect();
-        let ops2: Vec<AttestedOp> = oplog2.list_ops().into_iter().cloned().collect();
+        let ops1: Vec<AttestedOp> = oplog1.get_all_operations().into_iter().cloned().collect();
+        let ops2: Vec<AttestedOp> = oplog2.get_all_operations().into_iter().cloned().collect();
         let state1 = reduce(&ops1)?;
         let state2 = reduce(&ops2)?;
 
@@ -193,7 +193,7 @@ mod unit_tests {
     #[test]
     fn test_empty_oplog_reduction() {
         let oplog = OpLog::new();
-        let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
+        let ops: Vec<AttestedOp> = oplog.get_all_operations().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
         assert_eq!(state.epoch, Epoch(0));
@@ -204,9 +204,9 @@ mod unit_tests {
     fn test_single_op_reduction() {
         let mut oplog = OpLog::new();
         let op = create_op(0, [0u8; 32], 1);
-        oplog.append(op);
+        oplog.add_operation(op);
 
-        let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
+        let ops: Vec<AttestedOp> = oplog.get_all_operations().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
         assert!(!state.leaves.is_empty() || state.epoch >= Epoch(1));
@@ -215,10 +215,10 @@ mod unit_tests {
     #[test]
     fn test_deterministic_reduction_same_ops() {
         let mut oplog = OpLog::new();
-        oplog.append(create_op(0, [0u8; 32], 1));
-        oplog.append(create_op(0, [0u8; 32], 2));
+        oplog.add_operation(create_op(0, [0u8; 32], 1));
+        oplog.add_operation(create_op(0, [0u8; 32], 2));
 
-        let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
+        let ops: Vec<AttestedOp> = oplog.get_all_operations().into_iter().cloned().collect();
         let state1 = reduce(&ops).unwrap();
         let state2 = reduce(&ops).unwrap();
 
@@ -229,13 +229,13 @@ mod unit_tests {
     #[test]
     fn test_join_then_reduce() {
         let mut oplog1 = OpLog::new();
-        oplog1.append(create_op(0, [0u8; 32], 1));
+        oplog1.add_operation(create_op(0, [0u8; 32], 1));
 
         let mut oplog2 = OpLog::new();
-        oplog2.append(create_op(0, [0u8; 32], 2));
+        oplog2.add_operation(create_op(0, [0u8; 32], 2));
 
         let joined = oplog1.join(&oplog2);
-        let ops: Vec<AttestedOp> = joined.list_ops().into_iter().cloned().collect();
+        let ops: Vec<AttestedOp> = joined.get_all_operations().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
         // State should reflect both operations
@@ -245,16 +245,16 @@ mod unit_tests {
     #[test]
     fn test_commutative_join_reduction() {
         let mut oplog1 = OpLog::new();
-        oplog1.append(create_op(0, [0u8; 32], 1));
+        oplog1.add_operation(create_op(0, [0u8; 32], 1));
 
         let mut oplog2 = OpLog::new();
-        oplog2.append(create_op(0, [0u8; 32], 2));
+        oplog2.add_operation(create_op(0, [0u8; 32], 2));
 
         let joined_ab = oplog1.join(&oplog2);
         let joined_ba = oplog2.join(&oplog1);
 
-        let ops_ab: Vec<AttestedOp> = joined_ab.list_ops().into_iter().cloned().collect();
-        let ops_ba: Vec<AttestedOp> = joined_ba.list_ops().into_iter().cloned().collect();
+        let ops_ab: Vec<AttestedOp> = joined_ab.get_all_operations().into_iter().cloned().collect();
+        let ops_ba: Vec<AttestedOp> = joined_ba.get_all_operations().into_iter().cloned().collect();
         let state_ab = reduce(&ops_ab).unwrap();
         let state_ba = reduce(&ops_ba).unwrap();
 
@@ -266,10 +266,10 @@ mod unit_tests {
     fn test_idempotent_reduction() {
         let mut oplog = OpLog::new();
         let op = create_op(0, [0u8; 32], 1);
-        oplog.append(op.clone());
-        oplog.append(op); // Add same op twice
+        oplog.add_operation(op.clone());
+        oplog.add_operation(op); // Add same op twice
 
-        let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
+        let ops: Vec<AttestedOp> = oplog.get_all_operations().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
         // OpLog deduplicates, so state should be as if added once
@@ -279,19 +279,19 @@ mod unit_tests {
     #[test]
     fn test_associative_join_reduction() {
         let mut oplog1 = OpLog::new();
-        oplog1.append(create_op(0, [0u8; 32], 1));
+        oplog1.add_operation(create_op(0, [0u8; 32], 1));
 
         let mut oplog2 = OpLog::new();
-        oplog2.append(create_op(0, [0u8; 32], 2));
+        oplog2.add_operation(create_op(0, [0u8; 32], 2));
 
         let mut oplog3 = OpLog::new();
-        oplog3.append(create_op(0, [0u8; 32], 3));
+        oplog3.add_operation(create_op(0, [0u8; 32], 3));
 
         let left = oplog1.join(&oplog2).join(&oplog3);
         let right = oplog1.join(&oplog2.join(&oplog3));
 
-        let ops_left: Vec<AttestedOp> = left.list_ops().into_iter().cloned().collect();
-        let ops_right: Vec<AttestedOp> = right.list_ops().into_iter().cloned().collect();
+        let ops_left: Vec<AttestedOp> = left.get_all_operations().into_iter().cloned().collect();
+        let ops_right: Vec<AttestedOp> = right.get_all_operations().into_iter().cloned().collect();
         let state_left = reduce(&ops_left).unwrap();
         let state_right = reduce(&ops_right).unwrap();
 

@@ -837,6 +837,43 @@ mod tests {
         assert_eq!(scaled.backoff().jitter(), JitterMode::None);
     }
 
+    #[test]
+    fn execution_profile_scaling_preserves_local_success_and_failure_relations() {
+        let profiles = [
+            TimeoutExecutionProfile::production(),
+            TimeoutExecutionProfile::simulation_test(),
+            TimeoutExecutionProfile::harness(),
+        ];
+
+        let base_timeout = Duration::from_secs(4);
+        let base_success_latency = Duration::from_millis(1_500);
+        let base_failure_latency = Duration::from_secs(6);
+
+        assert!(base_success_latency <= base_timeout);
+        assert!(base_failure_latency > base_timeout);
+
+        for profile in profiles {
+            let scaled_timeout = profile.scale_duration(base_timeout).expect("scaled timeout");
+            let scaled_success = profile
+                .scale_duration(base_success_latency)
+                .expect("scaled success latency");
+            let scaled_failure = profile
+                .scale_duration(base_failure_latency)
+                .expect("scaled failure latency");
+
+            assert!(
+                scaled_success <= scaled_timeout,
+                "profile {:?} changed a local success relation into failure",
+                profile.class()
+            );
+            assert!(
+                scaled_failure > scaled_timeout,
+                "profile {:?} changed a local failure relation into success",
+                profile.class()
+            );
+        }
+    }
+
     #[tokio::test]
     async fn timeout_wrapper_returns_typed_deadline_error() {
         let effects = ScriptedTimeEffects::new(

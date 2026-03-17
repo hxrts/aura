@@ -32,6 +32,9 @@ flood propagation, and LAN discovery for P2P connectivity.
   and typed.
 - Retry/lifecycle outcomes should terminate explicitly rather than relying on
   implicit background ownership.
+- Rendezvous/channel-establishment lifecycle state must use typed terminal
+  failure enums rather than stringly `Failed { reason }` or `Error(String)`
+  payloads.
 - `Observed` consumers may render rendezvous state but not author it.
 
 ### Detailed Specifications

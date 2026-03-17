@@ -139,7 +139,7 @@ impl RecoveryState {
                     // Check if setup has failed (not enough guardians left)
                     let remaining = setup.target_guardians.len() - setup.declined.len();
                     if remaining < setup.threshold as usize {
-                        setup.status = SetupStatus::Failed;
+                        setup.status = SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
                     }
                 }
             }
@@ -152,7 +152,11 @@ impl RecoveryState {
 
             RecoveryFact::GuardianSetupFailed { context_id, .. } => {
                 if let Some(setup) = self.setups.get_mut(context_id) {
-                    setup.status = SetupStatus::Failed;
+                    if let RecoveryFact::GuardianSetupFailed { reason, .. } = fact {
+                        setup.status = SetupStatus::Failed(SetupFailure::Explicit {
+                            reason: reason.clone(),
+                        });
+                    }
                 }
             }
 
@@ -205,7 +209,11 @@ impl RecoveryState {
 
             RecoveryFact::MembershipChangeRejected { context_id, .. } => {
                 if let Some(proposal) = self.proposals.get_mut(context_id) {
-                    proposal.status = ProposalStatus::Rejected;
+                    if let RecoveryFact::MembershipChangeRejected { reason, .. } = fact {
+                        proposal.status = ProposalStatus::Rejected(ProposalRejection {
+                            reason: reason.clone(),
+                        });
+                    }
                 }
             }
 
@@ -258,7 +266,12 @@ impl RecoveryState {
                     if !recovery.disputes.contains(disputer_id) {
                         recovery.disputes.push(*disputer_id);
                     }
-                    recovery.status = RecoveryStatus::Disputed;
+                    if let RecoveryFact::RecoveryDisputeFiled { reason, .. } = fact {
+                        recovery.status = RecoveryStatus::Disputed(RecoveryDispute {
+                            disputer_id: *disputer_id,
+                            reason: reason.clone(),
+                        });
+                    }
                 }
             }
 
@@ -270,7 +283,11 @@ impl RecoveryState {
 
             RecoveryFact::RecoveryFailed { context_id, .. } => {
                 if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    recovery.status = RecoveryStatus::Failed;
+                    if let RecoveryFact::RecoveryFailed { reason, .. } = fact {
+                        recovery.status = RecoveryStatus::Failed(RecoveryFailure {
+                            reason: reason.clone(),
+                        });
+                    }
                 }
             }
 
@@ -302,7 +319,7 @@ impl RecoveryState {
     pub fn active_setups(&self) -> impl Iterator<Item = &SetupState> {
         self.setups
             .values()
-            .filter(|s| !matches!(s.status, SetupStatus::Completed | SetupStatus::Failed))
+            .filter(|s| !matches!(s.status, SetupStatus::Completed | SetupStatus::Failed(_)))
     }
 
     /// Get all active (non-completed/failed) proposals.
@@ -310,7 +327,7 @@ impl RecoveryState {
         self.proposals.values().filter(|p| {
             !matches!(
                 p.status,
-                ProposalStatus::Approved | ProposalStatus::Rejected
+                ProposalStatus::Approved | ProposalStatus::Rejected(_)
             )
         })
     }
@@ -319,21 +336,21 @@ impl RecoveryState {
     pub fn active_recoveries(&self) -> impl Iterator<Item = &RecoveryOperationState> {
         self.recoveries
             .values()
-            .filter(|r| !matches!(r.status, RecoveryStatus::Completed | RecoveryStatus::Failed))
+            .filter(|r| !matches!(r.status, RecoveryStatus::Completed | RecoveryStatus::Failed(_)))
     }
 
     /// Check if there's any active operation for a context.
     pub fn has_active_operation(&self, context_id: &ContextId) -> bool {
         self.setup_for_context(context_id)
-            .is_some_and(|s| !matches!(s.status, SetupStatus::Completed | SetupStatus::Failed))
+            .is_some_and(|s| !matches!(s.status, SetupStatus::Completed | SetupStatus::Failed(_)))
             || self.proposal_for_context(context_id).is_some_and(|p| {
                 !matches!(
                     p.status,
-                    ProposalStatus::Approved | ProposalStatus::Rejected
+                    ProposalStatus::Approved | ProposalStatus::Rejected(_)
                 )
             })
             || self.recovery_for_context(context_id).is_some_and(|r| {
-                !matches!(r.status, RecoveryStatus::Completed | RecoveryStatus::Failed)
+                !matches!(r.status, RecoveryStatus::Completed | RecoveryStatus::Failed(_))
             })
     }
 }
@@ -376,7 +393,7 @@ impl SetupState {
 }
 
 /// Status of a guardian setup operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetupStatus {
     /// Waiting for guardian responses
     AwaitingResponses,
@@ -385,7 +402,13 @@ pub enum SetupStatus {
     /// Setup completed successfully
     Completed,
     /// Setup failed (not enough guardians)
-    Failed,
+    Failed(SetupFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetupFailure {
+    ThresholdUnsatisfied,
+    Explicit { reason: String },
 }
 
 /// State of a membership change proposal.
@@ -417,14 +440,19 @@ impl MembershipProposalState {
 }
 
 /// Status of a membership change proposal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProposalStatus {
     /// Awaiting votes
     Pending,
     /// Proposal was approved
     Approved,
     /// Proposal was rejected
-    Rejected,
+    Rejected(ProposalRejection),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalRejection {
+    pub reason: String,
 }
 
 /// State of a key recovery operation.
@@ -454,18 +482,29 @@ impl RecoveryOperationState {
 }
 
 /// Status of a key recovery operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryStatus {
     /// Waiting for guardian shares
     AwaitingShares,
     /// Guardian approvals reached quorum
     Approved,
     /// A dispute has been filed
-    Disputed,
+    Disputed(RecoveryDispute),
     /// Recovery completed successfully
     Completed,
     /// Recovery failed
-    Failed,
+    Failed(RecoveryFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryDispute {
+    pub disputer_id: AuthorityId,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryFailure {
+    pub reason: String,
 }
 
 #[cfg(test)]
@@ -590,7 +629,10 @@ mod tests {
         let setup = state.setup_for_context(&ctx).unwrap();
 
         assert_eq!(setup.declined.len(), 1);
-        assert_eq!(setup.status, SetupStatus::Failed);
+        assert_eq!(
+            setup.status,
+            SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied)
+        );
     }
 
     #[test]
@@ -633,6 +675,40 @@ mod tests {
         assert_eq!(proposal.votes_for.len(), 1);
         assert_eq!(proposal.votes_against.len(), 1);
         assert_eq!(proposal.status, ProposalStatus::Pending);
+    }
+
+    #[test]
+    fn test_membership_rejection_preserves_reason() {
+        let ctx = test_context_id();
+        let proposer = test_authority_id(1);
+
+        let facts = vec![
+            RecoveryFact::MembershipChangeProposed {
+                context_id: ctx,
+                proposer_id: proposer,
+                trace_id: None,
+                change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
+                proposal_hash: test_hash(1),
+                proposed_at: pt(1000),
+            },
+            RecoveryFact::MembershipChangeRejected {
+                context_id: ctx,
+                proposal_hash: test_hash(1),
+                trace_id: None,
+                reason: "guardian quorum denied".to_string(),
+                rejected_at: pt(1500),
+            },
+        ];
+
+        let state = RecoveryState::from_facts(&facts);
+        let proposal = state.proposal_for_context(&ctx).unwrap();
+
+        assert_eq!(
+            proposal.status,
+            ProposalStatus::Rejected(ProposalRejection {
+                reason: "guardian quorum denied".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -721,7 +797,46 @@ mod tests {
         let recovery = state.recovery_for_context(&ctx).unwrap();
 
         assert_eq!(recovery.disputes.len(), 1);
-        assert_eq!(recovery.status, RecoveryStatus::Disputed);
+        assert_eq!(
+            recovery.status,
+            RecoveryStatus::Disputed(RecoveryDispute {
+                disputer_id: disputer,
+                reason: "Unauthorized recovery attempt".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_recovery_failure_preserves_reason() {
+        let ctx = test_context_id();
+        let account = test_authority_id(1);
+
+        let facts = vec![
+            RecoveryFact::RecoveryInitiated {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                request_hash: test_hash(1),
+                initiated_at: pt(1000),
+            },
+            RecoveryFact::RecoveryFailed {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                reason: "guardian share verification failed".to_string(),
+                failed_at: pt(1500),
+            },
+        ];
+
+        let state = RecoveryState::from_facts(&facts);
+        let recovery = state.recovery_for_context(&ctx).unwrap();
+
+        assert_eq!(
+            recovery.status,
+            RecoveryStatus::Failed(RecoveryFailure {
+                reason: "guardian share verification failed".to_string(),
+            })
+        );
     }
 
     #[test]

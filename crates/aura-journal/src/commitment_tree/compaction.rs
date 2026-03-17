@@ -40,7 +40,7 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
         .map_err(|e| CompactionError::InvalidSnapshot(e.to_string()))?;
 
     // Get all operations from OpLog
-    let all_ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
+    let all_ops: Vec<AttestedOp> = oplog.get_all_operations().into_iter().cloned().collect();
 
     // Partition operations: before and after snapshot cut
     let (before_cut, after_cut) = partition_by_epoch(&all_ops, snapshot);
@@ -54,12 +54,12 @@ pub fn compact(oplog: &OpLog, snapshot: &Snapshot) -> Result<OpLog, CompactionEr
     // Only add snapshot fact if there were operations before the cut
     if !before_cut.is_empty() {
         let snapshot_fact = create_snapshot_fact_operation(snapshot, snapshot.epoch)?;
-        compacted.append(snapshot_fact);
+        compacted.add_operation(snapshot_fact);
     }
 
     // Add all operations after cut
     for op in after_cut {
-        compacted.append(op.clone());
+        compacted.add_operation(op.clone());
     }
 
     Ok(compacted)
@@ -227,7 +227,7 @@ pub fn verify_join_preserving(
     let join_of_h = h_x.join(&h_y);
 
     // They should be equal
-    Ok(h_of_join.list_ops() == join_of_h.list_ops())
+    Ok(h_of_join.get_all_operations() == join_of_h.get_all_operations())
 }
 
 /// Verify retraction property: h(x) ≤ x
@@ -238,13 +238,13 @@ pub fn verify_retraction(oplog: &OpLog, snapshot: &Snapshot) -> Result<bool, Com
     let compacted = compact(oplog, snapshot)?;
 
     let original_cids: BTreeSet<[u8; 32]> = oplog
-        .list_ops()
+        .get_all_operations()
         .iter()
         .map(|op| op.op.parent_commitment)
         .collect();
 
     let compacted_cids: BTreeSet<[u8; 32]> = compacted
-        .list_ops()
+        .get_all_operations()
         .iter()
         .map(|op| op.op.parent_commitment)
         .collect();
@@ -316,52 +316,52 @@ mod tests {
 
         let result = compact(&oplog, &snapshot);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().list_ops().len(), 0);
+        assert_eq!(result.unwrap().get_all_operations().len(), 0);
     }
 
     #[test]
     fn test_compact_all_before_cut() {
         let mut oplog = OpLog::new();
-        oplog.append(create_test_op(1, [1u8; 32], 1));
-        oplog.append(create_test_op(2, [2u8; 32], 2));
-        oplog.append(create_test_op(3, [3u8; 32], 3));
+        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
+        oplog.add_operation(create_test_op(2, [2u8; 32], 2));
+        oplog.add_operation(create_test_op(3, [3u8; 32], 3));
 
         let snapshot = create_test_snapshot(5, vec![1, 2, 3]);
 
         let compacted = compact(&oplog, &snapshot).unwrap();
         // All ops before cut should be replaced with one snapshot fact
-        assert_eq!(compacted.list_ops().len(), 1);
+        assert_eq!(compacted.get_all_operations().len(), 1);
     }
 
     #[test]
     fn test_compact_all_after_cut() {
         let mut oplog = OpLog::new();
-        oplog.append(create_test_op(6, [1u8; 32], 1));
-        oplog.append(create_test_op(7, [2u8; 32], 2));
+        oplog.add_operation(create_test_op(6, [1u8; 32], 1));
+        oplog.add_operation(create_test_op(7, [2u8; 32], 2));
 
         let snapshot = create_test_snapshot(5, vec![1]);
 
         let compacted = compact(&oplog, &snapshot).unwrap();
         // All ops after cut should be preserved
-        assert_eq!(compacted.list_ops().len(), 2);
+        assert_eq!(compacted.get_all_operations().len(), 2);
     }
 
     #[test]
     fn test_compact_mixed() {
         let mut oplog = OpLog::new();
-        oplog.append(create_test_op(1, [1u8; 32], 1));
-        oplog.append(create_test_op(2, [2u8; 32], 2));
-        oplog.append(create_test_op(6, [3u8; 32], 3));
-        oplog.append(create_test_op(7, [4u8; 32], 4));
+        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
+        oplog.add_operation(create_test_op(2, [2u8; 32], 2));
+        oplog.add_operation(create_test_op(6, [3u8; 32], 3));
+        oplog.add_operation(create_test_op(7, [4u8; 32], 4));
 
         let snapshot = create_test_snapshot(5, vec![1, 2]);
 
         let compacted = compact(&oplog, &snapshot).unwrap();
         // Snapshot fact + 2 ops after epoch 5 should remain
-        assert_eq!(compacted.list_ops().len(), 3);
+        assert_eq!(compacted.get_all_operations().len(), 3);
 
         let cids: Vec<[u8; 32]> = compacted
-            .list_ops()
+            .get_all_operations()
             .iter()
             .map(|op| op.op.parent_commitment)
             .collect();
@@ -417,10 +417,10 @@ mod tests {
     #[test]
     fn test_verify_join_preserving() {
         let mut oplog1 = OpLog::new();
-        oplog1.append(create_test_op(1, [1u8; 32], 1));
+        oplog1.add_operation(create_test_op(1, [1u8; 32], 1));
 
         let mut oplog2 = OpLog::new();
-        oplog2.append(create_test_op(2, [2u8; 32], 2));
+        oplog2.add_operation(create_test_op(2, [2u8; 32], 2));
 
         let snapshot = create_test_snapshot(5, vec![1, 2]);
 
@@ -432,9 +432,9 @@ mod tests {
     #[test]
     fn test_verify_retraction() {
         let mut oplog = OpLog::new();
-        oplog.append(create_test_op(1, [1u8; 32], 1));
-        oplog.append(create_test_op(2, [2u8; 32], 2));
-        oplog.append(create_test_op(6, [3u8; 32], 3));
+        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
+        oplog.add_operation(create_test_op(2, [2u8; 32], 2));
+        oplog.add_operation(create_test_op(6, [3u8; 32], 3));
 
         let snapshot = create_test_snapshot(5, vec![1, 2]);
 
@@ -446,8 +446,8 @@ mod tests {
     #[test]
     fn test_idempotent_compaction() {
         let mut oplog = OpLog::new();
-        oplog.append(create_test_op(1, [1u8; 32], 1));
-        oplog.append(create_test_op(6, [2u8; 32], 2));
+        oplog.add_operation(create_test_op(1, [1u8; 32], 1));
+        oplog.add_operation(create_test_op(6, [2u8; 32], 2));
 
         let snapshot = create_test_snapshot(5, vec![1]);
 
@@ -455,6 +455,9 @@ mod tests {
         let compacted2 = compact(&compacted1, &snapshot).unwrap();
 
         // compact(compact(x)) = compact(x)
-        assert_eq!(compacted1.list_ops().len(), compacted2.list_ops().len());
+        assert_eq!(
+            compacted1.get_all_operations().len(),
+            compacted2.get_all_operations().len()
+        );
     }
 }

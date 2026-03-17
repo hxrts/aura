@@ -11,8 +11,8 @@ use crate::tui::types::{
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, HarnessUiCommand, ListId, ListItemSnapshot, ListSnapshot,
-    ModalId, ScreenId, SelectionSnapshot, ToastKind, ToastSnapshot,
+    ControlId, HarnessUiCommand, ListId, ListItemSnapshot, ListSnapshot, ModalId, ScreenId,
+    SelectionSnapshot, ToastKind,
 };
 use aura_app::ui::types::StateSnapshot;
 

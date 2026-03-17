@@ -5,21 +5,9 @@
 # primitives until they are refactored onto the shared timeout model.
 # Doc: work/ownership.md
 
-^crates/aura-app/src/workflows/invitation\.rs:
-^crates/aura-app/src/workflows/messaging\.rs:
-^crates/aura-app/src/workflows/runtime\.rs:
 ^crates/aura-agent/src/handlers/invitation\.rs:
-^crates/aura-agent/src/runtime_bridge/mod\.rs:
 ^crates/aura-agent/src/runtime/effects/choreography\.rs:
 ^crates/aura-agent/src/runtime/effects/network\.rs:
-^crates/aura-terminal/src/tui/callbacks/factories\.rs:
-^crates/aura-terminal/src/tui/context/dispatch\.rs:
-^crates/aura-terminal/src/tui/harness_state\.rs:
-^crates/aura-terminal/src/tui/hooks\.rs:
-^crates/aura-terminal/src/tui/screens/app/shell\.rs:
-^crates/aura-terminal/src/tui/screens/app/subscriptions\.rs:
-^crates/aura-terminal/src/tui/screens/settings/screen\.rs:
-^crates/aura-terminal/src/tui/semantic_lifecycle\.rs:
 ^crates/aura-harness/src/backend/local_pty\.rs:
 ^crates/aura-harness/src/backend/mod\.rs:
 ^crates/aura-harness/src/backend/playwright_browser\.rs:

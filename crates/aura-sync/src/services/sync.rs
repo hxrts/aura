@@ -342,12 +342,12 @@ impl SyncService {
 
     /// Get service health
     pub fn get_health(&self) -> SyncServiceHealth {
-        let state = *self.state.read();
+        let state = self.state.read().clone();
         let status = match state {
             ServiceState::Running => HealthStatus::Healthy,
             ServiceState::Starting => HealthStatus::Starting,
             ServiceState::Stopping => HealthStatus::Stopping,
-            ServiceState::Stopped | ServiceState::Failed => HealthStatus::Unhealthy,
+            ServiceState::Stopped | ServiceState::Failed(_) => HealthStatus::Unhealthy,
         };
 
         let session_stats = self.session_manager.read().get_statistics();
@@ -854,7 +854,7 @@ impl Service for SyncService {
     async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
         {
             let mut state = self.state.write();
-            if *state == ServiceState::Running {
+            if state.is_running() {
                 return Err(sync_session_error("Service already running"));
             }
 
@@ -930,7 +930,7 @@ impl Service for SyncService {
     }
 
     fn is_running(&self) -> bool {
-        *self.state.read() == ServiceState::Running
+        self.state.read().is_running()
     }
 }
 

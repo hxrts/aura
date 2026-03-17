@@ -22,6 +22,8 @@ use aura_app::ui_contract::{
     bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind,
 };
 use aura_core::AuthorityId;
+use aura_core::effects::time::PhysicalTimeEffects;
+use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::chat_scope::{
     active_home_scope_id, effective_home_scope_id, is_dm_like_channel, scoped_channels,
@@ -197,6 +199,7 @@ pub fn use_nav_status_signals(
         let mut now_ms = now_ms.clone();
         async move {
             let mut consecutive_failures = 0u32;
+            let time = PhysicalTimeHandler::new();
             loop {
                 let runtime = app_core.raw().read().await.runtime().cloned();
                 if let Some(runtime) = runtime {
@@ -215,7 +218,7 @@ pub fn use_nav_status_signals(
                 if consecutive_failures > 200 {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(1000)).await;
+                let _ = time.sleep_ms(Duration::from_millis(1000).as_millis() as u64).await;
             }
         }
     });

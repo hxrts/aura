@@ -25,6 +25,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::TransportEnvelope;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::types::identifiers::AuthorityId;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::util::serialization::from_slice;
@@ -655,9 +656,26 @@ impl RuntimeSystem {
             phase = "stop_requested",
             "Stopping runtime service"
         );
-        tokio::time::timeout(SERVICE_STOP_TIMEOUT, service.stop())
+        let started_at = self.effect_system.physical_time().await.map_err(|error| {
+            ServiceError::new(
+                service.name(),
+                ServiceErrorKind::Internal,
+                format!("could not read physical time for service stop budget: {error}"),
+            )
+        })?;
+        let budget = TimeoutBudget::from_start_and_timeout(&started_at, SERVICE_STOP_TIMEOUT)
+            .map_err(|error| {
+                ServiceError::new(
+                    service.name(),
+                    ServiceErrorKind::Internal,
+                    format!("invalid service stop timeout budget: {error}"),
+                )
+            })?;
+
+        execute_with_timeout_budget(self.effect_system.as_ref(), &budget, || service.stop())
             .await
-            .map_err(|_| {
+            .map_err(|error| match error {
+                TimeoutRunError::Timeout(_) => {
                 tracing::warn!(
                     event = "runtime.shutdown.service_timeout",
                     service = service.name(),
@@ -672,7 +690,13 @@ impl RuntimeSystem {
                         SERVICE_STOP_TIMEOUT.as_millis()
                     ),
                 )
-            })??;
+                }
+                TimeoutRunError::Operation(error) => ServiceError::new(
+                    service.name(),
+                    ServiceErrorKind::Internal,
+                    error.to_string(),
+                ),
+            })?;
         let health = service.health().await;
         match health {
             ServiceHealth::Stopped | ServiceHealth::NotStarted => {

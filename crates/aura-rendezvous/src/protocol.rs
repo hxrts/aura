@@ -185,7 +185,14 @@ pub enum ExchangeState {
     /// Channel established
     Complete { channel_id: [u8; 32] },
     /// Protocol failed
-    Failed { reason: String },
+    Failed { reason: ExchangeFailure },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExchangeFailure {
+    Timeout,
+    ProtocolViolation,
+    TransportUnavailable,
 }
 
 /// State of the relayed rendezvous protocol
@@ -202,7 +209,14 @@ pub enum RelayedState {
     /// Relay complete - response delivered to initiator
     Complete,
     /// Protocol failed
-    Failed { reason: String },
+    Failed { reason: RelayFailure },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelayFailure {
+    Timeout,
+    RelayUnavailable,
+    ResponseRejected,
 }
 
 // =============================================================================
@@ -422,11 +436,11 @@ mod tests {
     #[test]
     fn test_relayed_state_failure() {
         let state = RelayedState::Failed {
-            reason: "connection timeout".to_string(),
+            reason: RelayFailure::Timeout,
         };
 
         if let RelayedState::Failed { reason } = state {
-            assert_eq!(reason, "connection timeout");
+            assert_eq!(reason, RelayFailure::Timeout);
         } else {
             panic!("Expected Failed state");
         }

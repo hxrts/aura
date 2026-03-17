@@ -15,7 +15,9 @@ use crate::workflows::context::current_home_context_or_authority_default;
 use crate::workflows::harness_determinism;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
-    converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity, require_runtime,
+    converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity,
+    execute_with_runtime_retry_budget, execute_with_runtime_timeout_budget, require_runtime,
+    workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -24,7 +26,8 @@ use crate::workflows::runtime_error_classification::{
 use crate::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_failure_with_instance,
     publish_authoritative_operation_phase, publish_authoritative_operation_phase_with_instance,
-    replace_authoritative_semantic_facts_of_kind, update_authoritative_semantic_facts,
+    replace_authoritative_semantic_facts_of_kind, semantic_lifecycle_publication_capability,
+    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
 };
 use crate::workflows::signals::{emit_signal, read_signal, read_signal_or_default};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
@@ -55,7 +58,7 @@ use aura_core::{
     },
     effects::task::TaskSpawner,
     types::{AuthorityId, ChannelId, ContextId},
-    AuraError, InvitationId,
+    AuraError, InvitationId, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError,
 };
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
@@ -64,7 +67,7 @@ use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
@@ -93,35 +96,41 @@ macro_rules! messaging_warn {
 }
 
 async fn timeout_workflow_stage_with_deadline<T>(
+    runtime: &Arc<dyn RuntimeBridge>,
     operation: &'static str,
     stage: &'static str,
-    deadline: Option<Instant>,
+    deadline: Option<TimeoutBudget>,
     future: impl Future<Output = Result<T, AuraError>>,
 ) -> Result<T, AuraError> {
-    let timeout = match deadline {
-        Some(deadline) => {
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(AuraError::from(super::error::WorkflowError::TimedOut {
-                    operation,
-                    stage,
-                    timeout_ms: 0,
-                }));
-            }
-            std::cmp::min(
-                deadline.duration_since(now),
-                Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS),
-            )
-        }
-        None => Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS),
-    };
-    tokio::time::timeout(timeout, future).await.map_err(|_| {
-        AuraError::from(super::error::WorkflowError::TimedOut {
-            operation,
-            stage,
-            timeout_ms: timeout.as_millis() as u64,
+    let requested = deadline
+        .map(|deadline| {
+            Duration::from_millis(deadline.timeout_ms())
+                .min(Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS))
         })
-    })?
+        .unwrap_or(Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS));
+    let budget = match workflow_timeout_budget(runtime, requested).await {
+        Ok(budget) => budget,
+        Err(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+            return Err(AuraError::from(super::error::WorkflowError::TimedOut {
+                operation,
+                stage,
+                timeout_ms: 0,
+            }));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    match execute_with_runtime_timeout_budget(runtime, &budget, || future).await {
+        Ok(value) => Ok(value),
+        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+            Err(AuraError::from(super::error::WorkflowError::TimedOut {
+                operation,
+                stage,
+                timeout_ms: budget.timeout_ms(),
+            }))
+        }
+        Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
+        Err(TimeoutRunError::Operation(error)) => Err(error),
+    }
 }
 
 fn update_invite_stage(tracker: &Option<Arc<Mutex<&'static str>>>, stage: &'static str) {
@@ -413,6 +422,7 @@ async fn publish_send_message_phase(
 ) -> Result<(), AuraError> {
     publish_authoritative_operation_phase(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::send_message(),
         SemanticOperationKind::SendChatMessage,
         phase,
@@ -426,6 +436,7 @@ async fn publish_create_channel_phase(
 ) -> Result<(), AuraError> {
     publish_authoritative_operation_phase(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::create_channel(),
         SemanticOperationKind::CreateChannel,
         phase,
@@ -439,6 +450,7 @@ async fn publish_create_channel_failure(
 ) -> Result<(), AuraError> {
     publish_authoritative_operation_failure(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::create_channel(),
         SemanticOperationKind::CreateChannel,
         SemanticOperationError::new(
@@ -456,6 +468,7 @@ async fn publish_send_message_failure(
 ) -> Result<(), AuraError> {
     publish_authoritative_operation_failure(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::send_message(),
         SemanticOperationKind::SendChatMessage,
         error.semantic_error(),
@@ -567,27 +580,33 @@ async fn send_chat_fact_with_retry(
     context: ContextId,
     fact: &RelationalFact,
 ) -> Result<(), AuraError> {
-    let mut last_error: Option<String> = None;
-
-    for attempt in 0..CHAT_FACT_SEND_MAX_ATTEMPTS {
+    let retry_policy = workflow_retry_policy(
+        CHAT_FACT_SEND_MAX_ATTEMPTS as u32,
+        Duration::from_millis(1),
+        Duration::from_millis(1),
+    )?;
+    let mut attempts = retry_policy.attempt_budget();
+    let last_error = loop {
+        let _attempt = attempts.record_attempt()?;
         match runtime.send_chat_fact(peer, context, fact).await {
             Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error.to_string()),
-        }
-
-        if attempt + 1 < CHAT_FACT_SEND_MAX_ATTEMPTS {
-            converge_runtime(runtime).await;
-            for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
-                cooperative_yield().await;
+            Err(error) => {
+                if attempts.can_attempt() {
+                    converge_runtime(runtime).await;
+                    for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
+                        cooperative_yield().await;
+                    }
+                    continue;
+                }
+                break error.to_string();
             }
         }
-    }
+    };
 
-    let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
     Err(super::error::WorkflowError::DeliveryFailed {
         peer: peer.to_string(),
         attempts: CHAT_FACT_SEND_MAX_ATTEMPTS,
-        detail: message,
+        detail: last_error,
     }
     .into())
 }
@@ -640,13 +659,24 @@ async fn deliver_message_fact_remotely(
     let mut failed_fanout = Vec::new();
     let mut attempted_fanout_total = 0usize;
     let mut last_connectivity_error: Option<String> = None;
-
-    for attempt in 0..REMOTE_DELIVERY_RETRY_ATTEMPTS {
+    let retry_policy = workflow_retry_policy(
+        REMOTE_DELIVERY_RETRY_ATTEMPTS as u32,
+        Duration::from_millis(REMOTE_DELIVERY_RETRY_BACKOFF_MS),
+        Duration::from_millis(REMOTE_DELIVERY_RETRY_BACKOFF_MS),
+    )?;
+    let mut attempts = retry_policy.attempt_budget();
+    loop {
+        let attempt = attempts.record_attempt()?;
         if recipients.is_empty() {
             converge_runtime(runtime).await;
-            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
-            recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
-            continue;
+            if attempts.can_attempt() {
+                runtime
+                    .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
+                    .await;
+                recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                continue;
+            }
+            break;
         }
 
         let mut channel_setup_errors = Vec::new();
@@ -680,10 +710,14 @@ async fn deliver_message_fact_remotely(
             break;
         }
 
-        if attempt + 1 < REMOTE_DELIVERY_RETRY_ATTEMPTS {
+        if attempts.can_attempt() {
             converge_runtime(runtime).await;
-            runtime.sleep_ms(REMOTE_DELIVERY_RETRY_BACKOFF_MS).await;
+            runtime
+                .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
+                .await;
             recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+        } else {
+            break;
         }
     }
 
@@ -827,8 +861,13 @@ pub async fn refresh_authoritative_channel_membership_readiness(
     }
     replace_authoritative_semantic_facts_of_kind(
         app_core,
-        AuthoritativeSemanticFactKind::ChannelMembershipReady,
-        replacements,
+        aura_core::AuthorizedReadinessPublication::authorize(
+            semantic_readiness_publication_capability(),
+            (
+                AuthoritativeSemanticFactKind::ChannelMembershipReady,
+                replacements,
+            ),
+        ),
     )
     .await
 }
@@ -844,8 +883,13 @@ pub(crate) async fn refresh_authoritative_recipient_resolution_readiness(
         .collect::<Vec<_>>();
     replace_authoritative_semantic_facts_of_kind(
         app_core,
-        AuthoritativeSemanticFactKind::RecipientPeersResolved,
-        replacements,
+        aura_core::AuthorizedReadinessPublication::authorize(
+            semantic_readiness_publication_capability(),
+            (
+                AuthoritativeSemanticFactKind::RecipientPeersResolved,
+                replacements,
+            ),
+        ),
     )
     .await
 }
@@ -1465,20 +1509,27 @@ pub(crate) async fn require_authoritative_context_id_for_channel(
     channel_id: ChannelId,
     _operation: &str,
 ) -> Result<ContextId, AuraError> {
-    for attempt in 0..CHANNEL_CONTEXT_RETRY_ATTEMPTS {
+    let policy = workflow_retry_policy(
+        CHANNEL_CONTEXT_RETRY_ATTEMPTS as u32,
+        Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
+        Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
+    )?;
+    execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         if let Some(context_id) = authoritative_context_id_for_channel(app_core, channel_id).await {
             return Ok(context_id);
         }
-        if attempt + 1 < CHANNEL_CONTEXT_RETRY_ATTEMPTS {
-            converge_runtime(runtime).await;
-            runtime.sleep_ms(CHANNEL_CONTEXT_RETRY_BACKOFF_MS).await;
-        }
-    }
-
-    Err(
-        super::error::WorkflowError::Precondition("authoritative context required for channel")
-            .into(),
-    )
+        converge_runtime(runtime).await;
+        Err(AuraError::from(
+            super::error::WorkflowError::Precondition("authoritative context required for channel"),
+        ))
+    })
+    .await
+    .map_err(|error| match error {
+        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
+        RetryRunError::AttemptsExhausted { .. } => AuraError::from(
+            super::error::WorkflowError::Precondition("authoritative context required for channel"),
+        ),
+    })
 }
 
 async fn runtime_channel_state_exists(
@@ -1501,19 +1552,28 @@ async fn wait_for_runtime_channel_state(
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
 ) -> Result<(), AuraError> {
-    for attempt in 0..CHANNEL_CONTEXT_RETRY_ATTEMPTS {
+    let policy = workflow_retry_policy(
+        CHANNEL_CONTEXT_RETRY_ATTEMPTS as u32,
+        Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
+        Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
+    )?;
+    execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         if runtime_channel_state_exists(app_core, runtime, channel_id).await? {
             refresh_authoritative_channel_membership_readiness(app_core).await?;
             return Ok(());
         }
-
-        if attempt + 1 < CHANNEL_CONTEXT_RETRY_ATTEMPTS {
-            converge_runtime(runtime).await;
-            runtime.sleep_ms(CHANNEL_CONTEXT_RETRY_BACKOFF_MS).await;
-        }
-    }
-
-    Err(super::error::WorkflowError::Precondition("canonical AMP channel state required").into())
+        converge_runtime(runtime).await;
+        Err(AuraError::from(super::error::WorkflowError::Precondition(
+            "canonical AMP channel state required",
+        )))
+    })
+    .await
+    .map_err(|error| match error {
+        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
+        RetryRunError::AttemptsExhausted { .. } => AuraError::from(
+            super::error::WorkflowError::Precondition("canonical AMP channel state required"),
+        ),
+    })
 }
 
 async fn ensure_home_state_for_channel(
@@ -2485,30 +2545,69 @@ pub async fn send_message_ref(
                 }
             };
             if maybe_cipher.is_none() {
-                for attempt in 1..=AMP_SEND_RETRY_ATTEMPTS {
-                    runtime
-                        .sleep_ms(AMP_SEND_RETRY_BACKOFF_MS * attempt as u64)
-                        .await;
-                    match runtime.amp_send_message(send_params.clone()).await {
-                        Ok(cipher) => {
-                            maybe_cipher = Some(cipher);
-                            break;
+                #[derive(Debug, thiserror::Error)]
+                enum AmpSendRetryError {
+                    #[error("canonical AMP channel state required")]
+                    ChannelStateUnavailable,
+                    #[error("{0}")]
+                    Transport(String),
+                }
+
+                let retry_policy = workflow_retry_policy(
+                    AMP_SEND_RETRY_ATTEMPTS as u32,
+                    Duration::from_millis(AMP_SEND_RETRY_BACKOFF_MS),
+                    Duration::from_millis(
+                        AMP_SEND_RETRY_BACKOFF_MS * AMP_SEND_RETRY_ATTEMPTS as u64,
+                    ),
+                )?;
+                match execute_with_runtime_retry_budget(&runtime, &retry_policy, |attempt| {
+                    let runtime = Arc::clone(&runtime);
+                    let send_params = send_params.clone();
+                    async move {
+                        if attempt > 0 {
+                            converge_runtime(&runtime).await;
                         }
-                        Err(error) => {
-                            if is_amp_channel_state_unavailable(&error) {
-                                continue;
+                        match runtime.amp_send_message(send_params).await {
+                            Ok(cipher) => Ok(cipher),
+                            Err(error) if is_amp_channel_state_unavailable(&error) => {
+                                Err(AmpSendRetryError::ChannelStateUnavailable)
                             }
-                            return fail_send_message(
-                                app_core,
-                                SendMessageError::Transport {
-                                    channel_id,
-                                    detail: format!(
-                                        "context_id={context_id}; amp_send_message retry failed: {error}"
-                                    ),
-                                },
-                            )
-                            .await;
+                            Err(error) => Err(AmpSendRetryError::Transport(error.to_string())),
                         }
+                    }
+                })
+                .await
+                {
+                    Ok(cipher) => maybe_cipher = Some(cipher),
+                    Err(RetryRunError::Timeout(timeout_error)) => {
+                        return fail_send_message(
+                            app_core,
+                            SendMessageError::Transport {
+                                channel_id,
+                                detail: format!(
+                                    "context_id={context_id}; amp_send_message retry timed out: {timeout_error}"
+                                ),
+                            },
+                        )
+                        .await;
+                    }
+                    Err(RetryRunError::AttemptsExhausted {
+                        last_error: AmpSendRetryError::ChannelStateUnavailable,
+                        ..
+                    }) => {
+                        maybe_cipher = None;
+                    }
+                    Err(RetryRunError::AttemptsExhausted { last_error, .. }) => {
+                        return fail_send_message(
+                            app_core,
+                            SendMessageError::Transport {
+                                channel_id,
+                                detail: format!(
+                                    "context_id={context_id}; amp_send_message retry failed: {last_error}"
+                                ),
+                            },
+                        )
+                        .await;
                     }
                 }
             }
@@ -2916,12 +3015,17 @@ pub async fn invite_user_to_channel_with_context(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    let timeout = Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS);
-    let deadline = Instant::now() + timeout;
+    let runtime = require_runtime(app_core).await?;
+    let deadline = workflow_timeout_budget(
+        &runtime,
+        Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS),
+    )
+    .await?;
     let stage_tracker = Some(Arc::new(Mutex::new("publish_workflow_dispatched")));
     if operation_instance_id.is_some() {
         publish_authoritative_operation_phase_with_instance(
             app_core,
+            semantic_lifecycle_publication_capability(),
             OperationId::invitation_create(),
             operation_instance_id.clone(),
             SemanticOperationKind::InviteActorToChannel,
@@ -2930,10 +3034,11 @@ pub async fn invite_user_to_channel_with_context(
         .await?;
     }
 
-    let result = tokio::time::timeout(timeout, async {
+    let result = execute_with_runtime_timeout_budget(&runtime, &deadline, || async {
         // Resolve via contacts first so command targets can use IDs or contact names.
         update_invite_stage(&stage_tracker, "resolve_target_authority");
         let receiver = timeout_workflow_stage_with_deadline(
+            &runtime,
             "invite_user_to_channel",
             "resolve_target_authority",
             Some(deadline),
@@ -2942,6 +3047,7 @@ pub async fn invite_user_to_channel_with_context(
         .await?;
         update_invite_stage(&stage_tracker, "resolve_channel_id");
         let channel_id = timeout_workflow_stage_with_deadline(
+            &runtime,
             "invite_user_to_channel",
             "resolve_channel_id",
             Some(deadline),
@@ -2966,18 +3072,21 @@ pub async fn invite_user_to_channel_with_context(
         .await
     })
     .await
-    .map_err(|_| {
-        let stage = stage_tracker
-            .as_ref()
-            .and_then(|tracker| tracker.lock().ok().map(|guard| *guard))
-            .unwrap_or("operation");
-        AuraError::from(super::error::WorkflowError::TimedOut {
-            operation: "invite_user_to_channel",
-            stage,
-            timeout_ms: INVITE_USER_OPERATION_TIMEOUT_MS,
-        })
-    })
-    .and_then(|inner| inner);
+    .map_err(|error| match error {
+        TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+            let stage = stage_tracker
+                .as_ref()
+                .and_then(|tracker| tracker.lock().ok().map(|guard| *guard))
+                .unwrap_or("operation");
+            AuraError::from(super::error::WorkflowError::TimedOut {
+                operation: "invite_user_to_channel",
+                stage,
+                timeout_ms: deadline.timeout_ms(),
+            })
+        }
+        TimeoutRunError::Timeout(timeout_error) => timeout_error.into(),
+        TimeoutRunError::Operation(operation_error) => operation_error,
+    });
 
     if let Err(error) = &result {
         if let Some(instance_id) = operation_instance_id {
@@ -2988,6 +3097,7 @@ pub async fn invite_user_to_channel_with_context(
             .with_detail(error.to_string());
             let _ = publish_authoritative_operation_failure_with_instance(
                 app_core,
+                semantic_lifecycle_publication_capability(),
                 OperationId::invitation_create(),
                 Some(instance_id),
                 SemanticOperationKind::InviteActorToChannel,
@@ -3023,24 +3133,19 @@ pub async fn invite_authority_to_channel_with_context(
     context_id: Option<ContextId>,
     channel_name_hint: Option<String>,
     operation_instance_id: Option<OperationInstanceId>,
-    deadline: Option<Instant>,
+    deadline: Option<TimeoutBudget>,
     stage_tracker: Option<Arc<Mutex<&'static str>>>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
     update_invite_stage(&stage_tracker, "require_runtime");
-    let runtime = timeout_workflow_stage_with_deadline(
-        "invite_authority_to_channel",
-        "require_runtime",
-        deadline,
-        require_runtime(app_core),
-    )
-    .await?;
+    let runtime = require_runtime(app_core).await?;
     let context_id = match context_id {
         Some(context_id) => context_id,
         None => {
             update_invite_stage(&stage_tracker, "require_authoritative_context");
             timeout_workflow_stage_with_deadline(
+                &runtime,
                 "invite_authority_to_channel",
                 "require_authoritative_context",
                 deadline,
@@ -3103,6 +3208,7 @@ pub async fn invite_authority_to_channel_with_context(
     } else {
         update_invite_stage(&stage_tracker, "local_projection");
         timeout_workflow_stage_with_deadline(
+            &runtime,
             "invite_authority_to_channel",
             "local_projection",
             deadline,
@@ -3352,7 +3458,7 @@ mod tests {
 
         let runtime_for_flip = runtime.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            runtime_for_flip.sleep_ms(50).await;
             runtime_for_flip.set_amp_channel_state_exists(true).await;
         });
 

@@ -32,6 +32,8 @@ invitation creation, redemption, and ceremony coordination.
 - Long-lived invitation coordination should be single-owner and capability-gated.
 - Invitation operations must end with typed terminal success, failure, or
   cancellation.
+- Ceremony and protocol state machines must encode abort/failure/decline with
+  typed terminal payloads rather than raw string reasons.
 - `Observed` layers may display invitation state but must not synthesize
   semantic truth.
 

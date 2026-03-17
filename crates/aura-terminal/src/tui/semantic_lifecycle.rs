@@ -5,14 +5,15 @@ use crate::tui::tasks::UiTaskRegistry;
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
 use aura_app::ui::types::AppCore;
-use aura_app::ui::workflows::semantic_facts::{
-    publish_authoritative_operation_failure, publish_authoritative_operation_phase,
-};
 use aura_app::ui_contract::{
     HarnessUiOperationHandle, OperationId, OperationInstanceId, SemanticFailureCode,
     SemanticFailureDomain, SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
     SemanticOperationStatus,
 };
+#[cfg(test)]
+use aura_core::effects::time::PhysicalTimeEffects;
+#[cfg(test)]
+use aura_effects::time::PhysicalTimeHandler;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -76,67 +77,17 @@ fn next_owned_operation_instance_id(operation_id: &OperationId) -> OperationInst
 }
 
 pub(crate) struct SubmittedOperationOwner {
-    app_core: Arc<RwLock<AppCore>>,
+    _app_core: Arc<RwLock<AppCore>>,
     tasks: Arc<UiTaskRegistry>,
     tx: UiUpdateSender,
     operation_id: OperationId,
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
     owner: SemanticOperationOwner,
-    publish_gate: Arc<tokio::sync::Mutex<()>>,
     settled: bool,
 }
 
 impl SubmittedOperationOwner {
-    pub(crate) fn submit_from_parts(
-        app_core: Arc<RwLock<AppCore>>,
-        tasks: Arc<UiTaskRegistry>,
-        tx: UiUpdateSender,
-        operation_id: OperationId,
-        kind: SemanticOperationKind,
-    ) -> Self {
-        let instance_id = next_owned_operation_instance_id(&operation_id);
-        let publish_gate = Arc::new(tokio::sync::Mutex::new(()));
-        let publish_gate_for_submit = Arc::clone(&publish_gate);
-        let publish_app_core = Arc::clone(&app_core);
-        let publish_operation_id = operation_id.clone();
-        let status = SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched);
-        send_ui_update_now_or_spawn(
-            &tasks,
-            &tx,
-            authoritative_operation_status_update(
-                operation_id.clone(),
-                Some(instance_id.clone()),
-                status,
-            ),
-        );
-        tasks.spawn(async move {
-            let _guard = publish_gate_for_submit.lock().await;
-            if let Err(error) = publish_authoritative_operation_phase(
-                &publish_app_core,
-                publish_operation_id,
-                kind,
-                SemanticOperationPhase::WorkflowDispatched,
-            )
-            .await
-            {
-                tracing::warn!(error = %error, "authoritative operation submission publish failed");
-            }
-        });
-
-        Self {
-            app_core,
-            tasks,
-            tx,
-            operation_id,
-            instance_id,
-            kind,
-            owner: SemanticOperationOwner::FrontendCallback,
-            publish_gate,
-            settled: false,
-        }
-    }
-
     pub(crate) fn submit_local_only(
         app_core: Arc<RwLock<AppCore>>,
         tasks: Arc<UiTaskRegistry>,
@@ -157,14 +108,13 @@ impl SubmittedOperationOwner {
         );
 
         Self {
-            app_core,
+            _app_core: app_core,
             tasks,
             tx,
             operation_id,
             instance_id,
             kind,
             owner: SemanticOperationOwner::FrontendCallback,
-            publish_gate: Arc::new(tokio::sync::Mutex::new(())),
             settled: false,
         }
     }
@@ -181,23 +131,6 @@ impl SubmittedOperationOwner {
             ),
         )
         .await;
-        let app_core = Arc::clone(&self.app_core);
-        let operation_id = self.operation_id.clone();
-        let kind = self.kind;
-        let publish_gate = Arc::clone(&self.publish_gate);
-        self.tasks.spawn(async move {
-            let _guard = publish_gate.lock().await;
-            if let Err(error) = publish_authoritative_operation_phase(
-                &app_core,
-                operation_id,
-                kind,
-                SemanticOperationPhase::Succeeded,
-            )
-            .await
-            {
-                tracing::warn!(error = %error, "authoritative operation success publish failed");
-            }
-        });
     }
 
     pub(crate) async fn fail(self, detail: impl Into<String>) {
@@ -221,18 +154,6 @@ impl SubmittedOperationOwner {
             ),
         )
         .await;
-        let app_core = Arc::clone(&self.app_core);
-        let operation_id = self.operation_id.clone();
-        let kind = self.kind;
-        let publish_gate = Arc::clone(&self.publish_gate);
-        self.tasks.spawn(async move {
-            let _guard = publish_gate.lock().await;
-            if let Err(error) =
-                publish_authoritative_operation_failure(&app_core, operation_id, kind, error).await
-            {
-                tracing::warn!(error = %error, "authoritative operation failure publish failed");
-            }
-        });
     }
 
     pub(crate) fn relinquish_to_workflow(
@@ -284,27 +205,13 @@ impl Drop for SubmittedOperationOwner {
             ),
         );
 
-        let app_core = Arc::clone(&self.app_core);
-        let operation_id = self.operation_id.clone();
-        let kind = self.kind;
-        let publish_gate = Arc::clone(&self.publish_gate);
-        self.tasks.spawn(async move {
-            let _guard = publish_gate.lock().await;
-            if let Err(error) =
-                publish_authoritative_operation_failure(&app_core, operation_id, kind, error).await
-            {
-                tracing::warn!(error = %error, "authoritative dropped-owner failure publish failed");
-            }
-        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use aura_app::{AppConfig, AppCore};
-    use aura_core::effects::reactive::ReactiveEffects;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -358,21 +265,6 @@ mod tests {
             }
             other => panic!("unexpected second update: {other:?}"),
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        let facts = {
-            let core = app_core.read().await;
-            core.read(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
-                .await
-                .unwrap_or_default()
-        };
-        assert!(facts.iter().any(|fact| {
-            fact.operation_status_bridge()
-                .is_some_and(|(operation_id, _instance_id, status)| {
-                    operation_id == OperationId::account_create()
-                        && status.phase == SemanticOperationPhase::Failed
-                })
-        }));
 
         tasks.shutdown();
     }
@@ -482,21 +374,6 @@ mod tests {
             rx.try_recv().is_err(),
             "settled owner must not publish duplicate terminal state"
         );
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        let facts = {
-            let core = app_core.read().await;
-            core.read(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
-                .await
-                .unwrap_or_default()
-        };
-        assert!(facts.iter().any(|fact| {
-            fact.operation_status_bridge()
-                .is_some_and(|(operation_id, _instance_id, status)| {
-                    operation_id == OperationId::account_create()
-                        && status.phase == SemanticOperationPhase::Succeeded
-                })
-        }));
 
         tasks.shutdown();
     }

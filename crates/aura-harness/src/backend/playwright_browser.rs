@@ -17,6 +17,7 @@ use tokio::time::Instant;
 
 use crate::backend::{InstanceBackend, RawUiBackend, SharedSemanticBackend, UiSnapshotEvent};
 use crate::config::InstanceConfig;
+use crate::timeouts::blocking_sleep;
 use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
@@ -775,7 +776,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     stderr_block,
                 );
             }
-            thread::sleep(Duration::from_millis(100));
+            blocking_sleep(Duration::from_millis(100));
         }
     }
 

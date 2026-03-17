@@ -31,6 +31,7 @@ use crate::backend::{
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
+use crate::timeouts::blocking_sleep;
 use crate::workspace_root;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -442,9 +443,9 @@ impl LocalPtyBackend {
             let mut buf = [0u8; 4];
             let s = ch.encode_utf8(&mut buf);
             self.send_keys(s)?;
-            thread::sleep(Duration::from_millis(inter_key_delay_ms));
+            blocking_sleep(Duration::from_millis(inter_key_delay_ms));
         }
-        thread::sleep(Duration::from_millis(50));
+        blocking_sleep(Duration::from_millis(50));
         Ok(())
     }
 
@@ -525,7 +526,7 @@ impl LocalPtyBackend {
                                     error
                                 ));
                             }
-                            thread::sleep(Duration::from_millis(50));
+                            blocking_sleep(Duration::from_millis(50));
                             continue;
                         }
                         Err(error) => return Err(error),
@@ -562,7 +563,7 @@ impl LocalPtyBackend {
                             error
                         ));
                     }
-                    thread::sleep(Duration::from_millis(50));
+                    blocking_sleep(Duration::from_millis(50));
                 }
                 Err(error) => {
                     return Err(error).with_context(|| {
@@ -787,7 +788,7 @@ impl InstanceBackend for LocalPtyBackend {
         let mut last_screen = Self::read_screen(&session.parser);
 
         for _ in 0..MAX_SETTLE_ATTEMPTS {
-            thread::sleep(Duration::from_millis(SETTLE_DELAY_MS));
+            blocking_sleep(Duration::from_millis(SETTLE_DELAY_MS));
             let current_generation = session.parse_generation.load(Ordering::Acquire);
             let current_screen = Self::read_screen(&session.parser);
             if current_generation == last_generation && current_screen == last_screen {
@@ -802,7 +803,7 @@ impl InstanceBackend for LocalPtyBackend {
         let mut recovered_screen = last_screen;
         if !has_nav_header(&recovered_screen) {
             for _ in 0..HEADER_RECOVERY_ATTEMPTS {
-                thread::sleep(Duration::from_millis(HEADER_RECOVERY_DELAY_MS));
+                blocking_sleep(Duration::from_millis(HEADER_RECOVERY_DELAY_MS));
                 recovered_screen = Self::read_screen(&session.parser);
                 if has_nav_header(&recovered_screen) {
                     break;
@@ -909,7 +910,7 @@ impl InstanceBackend for LocalPtyBackend {
                     .map_or(true, |next| *next != b'[' && *next != b'O')
             {
                 // Prevent accidental Alt-key combos when callers intend standalone Esc.
-                thread::sleep(Duration::from_millis(40));
+                blocking_sleep(Duration::from_millis(40));
             }
             index += 1;
         }
@@ -1008,7 +1009,7 @@ impl InstanceBackend for LocalPtyBackend {
                         timeout
                     );
                 }
-                thread::sleep(Duration::from_millis(100));
+                blocking_sleep(Duration::from_millis(100));
             }
         }
 
@@ -1040,7 +1041,7 @@ impl InstanceBackend for LocalPtyBackend {
                     timeout,
                 );
             }
-            thread::sleep(Duration::from_millis(100));
+            blocking_sleep(Duration::from_millis(100));
         }
     }
 
@@ -1135,7 +1136,7 @@ impl RawUiBackend for LocalPtyBackend {
             let snapshot = self.ui_snapshot()?;
             if snapshot.screen == ScreenId::Onboarding {
                 self.send_keys("\t")?;
-                thread::sleep(Duration::from_millis(50));
+                blocking_sleep(Duration::from_millis(50));
             }
         }
         match field_id {
@@ -1149,7 +1150,7 @@ impl RawUiBackend for LocalPtyBackend {
                 {
                     self.send_keys("\x1b")?;
                     self.send_keys("i")?;
-                    thread::sleep(Duration::from_millis(200));
+                    blocking_sleep(Duration::from_millis(200));
                 }
                 self.type_text(value, 12)
             }
@@ -1247,7 +1248,7 @@ impl RawUiBackend for LocalPtyBackend {
                 self.config.id, list_id, item_id, sequence
             );
             self.send_keys(sequence)?;
-            thread::sleep(Duration::from_millis(60));
+            blocking_sleep(Duration::from_millis(60));
         }
         let selection_deadline = Instant::now() + Duration::from_millis(1500);
         loop {
@@ -1267,7 +1268,7 @@ impl RawUiBackend for LocalPtyBackend {
                     selected_item.unwrap_or("<none>")
                 );
             }
-            thread::sleep(Duration::from_millis(80));
+            blocking_sleep(Duration::from_millis(80));
         }
     }
 }
@@ -1482,7 +1483,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             if Instant::now() >= issue_deadline {
                 anyhow::bail!("submit_create_account: account creation did not issue");
             }
-            thread::sleep(Duration::from_millis(100));
+            blocking_sleep(Duration::from_millis(100));
         }
     }
 
@@ -1518,7 +1519,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             if Instant::now() >= deadline {
                 break;
             }
-            thread::sleep(Duration::from_millis(80));
+            blocking_sleep(Duration::from_millis(80));
         }
         anyhow::bail!("submit_create_home did not produce a non-placeholder home")
     }
@@ -1574,7 +1575,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     "submit_create_channel did not publish an authoritative channel binding for {channel_name}"
                 );
             }
-            thread::sleep(Duration::from_millis(80));
+            blocking_sleep(Duration::from_millis(80));
         }
     }
 
@@ -1608,7 +1609,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     "submit_create_contact_invitation did not publish InvitationCodeReady"
                 );
             }
-            thread::sleep(Duration::from_millis(50));
+            blocking_sleep(Duration::from_millis(50));
         };
 
         if self.ui_snapshot()?.open_modal == Some(ModalId::InvitationCode) {
@@ -1624,7 +1625,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     "submit_create_contact_invitation did not close InvitationCode modal"
                 );
             }
-            thread::sleep(Duration::from_millis(50));
+            blocking_sleep(Duration::from_millis(50));
         }
         Ok(SubmittedAction::with_ui_operation(
             ContactInvitationCode { code },
@@ -1831,7 +1832,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             if Instant::now() >= first_deadline {
                 break;
             }
-            thread::sleep(Duration::from_millis(80));
+            blocking_sleep(Duration::from_millis(80));
         }
 
         self.send_harness_command(&HarnessUiCommand::SendChatMessage {
@@ -1857,7 +1858,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     "submit_send_chat_message: send_message never reached a live submitted state"
                 );
             }
-            thread::sleep(Duration::from_millis(80));
+            blocking_sleep(Duration::from_millis(80));
         }
     }
 }
@@ -1976,7 +1977,7 @@ mod tests {
             if attempt + 1 == max_attempts {
                 panic!("timed out waiting for screen to contain {needle:?}; got: {screen:?}");
             }
-            thread::sleep(Duration::from_millis(POLL_INTERVAL_MS as u64));
+            blocking_sleep(Duration::from_millis(POLL_INTERVAL_MS as u64));
         }
 
         panic!("wait_for_screen_contains reached unreachable state");
@@ -2241,7 +2242,7 @@ mod tests {
         if let Err(error) = backend.send_keys("hello-harness\n") {
             panic!("keys send failed: {error}");
         }
-        thread::sleep(Duration::from_millis(80));
+        blocking_sleep(Duration::from_millis(80));
         let screen = match backend.snapshot() {
             Ok(screen) => screen,
             Err(error) => panic!("snapshot failed: {error}"),
@@ -2258,7 +2259,7 @@ mod tests {
         if let Err(error) = backend.start() {
             panic!("backend must start: {error}");
         }
-        thread::sleep(Duration::from_millis(50));
+        blocking_sleep(Duration::from_millis(50));
         let screen = match backend.snapshot() {
             Ok(screen) => screen,
             Err(error) => panic!("snapshot must succeed: {error}"),

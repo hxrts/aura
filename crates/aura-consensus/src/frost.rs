@@ -21,7 +21,6 @@ use aura_core::{
 };
 use rand::SeedableRng;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// FROST consensus orchestrator with pipelining support
@@ -43,7 +42,7 @@ pub struct FrostConsensusOrchestrator {
     group_public_key: PublicKeyPackage,
 
     /// Active consensus instances
-    instances: Arc<RwLock<HashMap<ConsensusId, ConsensusInstance>>>,
+    instances: RwLock<HashMap<ConsensusId, ConsensusInstance>>,
 }
 
 /// State for a single consensus instance
@@ -73,7 +72,7 @@ impl FrostConsensusOrchestrator {
             witness_set,
             key_packages,
             group_public_key,
-            instances: Arc::new(RwLock::new(HashMap::new())),
+            instances: RwLock::new(HashMap::new()),
         })
     }
 

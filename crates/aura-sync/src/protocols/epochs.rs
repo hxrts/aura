@@ -12,6 +12,7 @@ use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use thiserror::Error;
 
 /// Epoch rotation coordinator using choreographic protocols
 #[derive(Debug, Clone)]
@@ -51,7 +52,42 @@ pub enum RotationStatus {
     Gathering,
     Synchronizing,
     Completed,
-    Failed(String),
+    Failed(RotationFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RotationFailure {
+    #[error("insufficient participants: {actual} < {required}")]
+    InsufficientParticipants { actual: u32, required: u32 },
+    #[error("epoch overflow: {reason}")]
+    EpochOverflow { reason: String },
+    #[error("rotation not found: {rotation_id}")]
+    RotationNotFound { rotation_id: String },
+    #[error("epoch mismatch: expected {expected}, got {actual}")]
+    EpochMismatch { expected: Epoch, actual: Epoch },
+    #[error("invalid rotation status: {status:?}")]
+    InvalidStatus { status: RotationPhase },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RotationPhase {
+    Initiated,
+    Gathering,
+    Synchronizing,
+    Completed,
+    Failed,
+}
+
+impl RotationStatus {
+    pub fn phase(&self) -> RotationPhase {
+        match self {
+            RotationStatus::Initiated => RotationPhase::Initiated,
+            RotationStatus::Gathering => RotationPhase::Gathering,
+            RotationStatus::Synchronizing => RotationPhase::Synchronizing,
+            RotationStatus::Completed => RotationPhase::Completed,
+            RotationStatus::Failed(_) => RotationPhase::Failed,
+        }
+    }
 }
 
 /// Epoch rotation proposal
@@ -143,19 +179,22 @@ impl EpochRotationCoordinator {
     ) -> Result<String, AuraError> {
         let participants_len = participants.len() as u32;
         if participants_len < self.epoch_config.rotation_threshold {
-            return Err(sync_protocol_error(
-                "epochs",
-                format!(
-                    "Insufficient participants: {} < {}",
-                    participants_len, self.epoch_config.rotation_threshold
-                ),
-            ));
+            let failure = RotationFailure::InsufficientParticipants {
+                actual: participants_len,
+                required: self.epoch_config.rotation_threshold,
+            };
+            return Err(sync_protocol_error("epochs", failure.to_string()));
         }
 
         let target_epoch = self
             .current_epoch
             .next()
-            .map_err(|e| sync_protocol_error("epochs", format!("epoch overflow: {e}")))?;
+            .map_err(|e| {
+                let failure = RotationFailure::EpochOverflow {
+                    reason: e.to_string(),
+                };
+                sync_protocol_error("epochs", failure.to_string())
+            })?;
         let rotation_id = format!(
             "epoch-rotation-{}-{}-{}",
             self.device_id,
@@ -169,7 +208,7 @@ impl EpochRotationCoordinator {
             participants,
             confirmations: HashMap::new(),
             initiated_at: now.clone(),
-            status: RotationStatus::Initiated,
+            status: RotationStatus::Gathering,
         };
 
         self.pending_rotations.insert(rotation_id.clone(), rotation);
@@ -185,21 +224,20 @@ impl EpochRotationCoordinator {
             .pending_rotations
             .get_mut(&confirmation.rotation_id)
             .ok_or_else(|| {
-                sync_protocol_error(
-                    "epochs",
-                    format!("Rotation not found: {}", confirmation.rotation_id),
-                )
+                let failure = RotationFailure::RotationNotFound {
+                    rotation_id: confirmation.rotation_id.clone(),
+                };
+                sync_protocol_error("epochs", failure.to_string())
             })?;
 
         // Validate confirmation
         if confirmation.ready_for_epoch != rotation.target_epoch {
-            return Err(sync_protocol_error(
-                "epochs",
-                format!(
-                    "Epoch mismatch: expected {}, got {}",
-                    rotation.target_epoch, confirmation.ready_for_epoch
-                ),
-            ));
+            let failure = RotationFailure::EpochMismatch {
+                expected: rotation.target_epoch,
+                actual: confirmation.ready_for_epoch,
+            };
+            rotation.status = RotationStatus::Failed(failure.clone());
+            return Err(sync_protocol_error("epochs", failure.to_string()));
         }
 
         // Store confirmation
@@ -223,13 +261,19 @@ impl EpochRotationCoordinator {
         let rotation = self
             .pending_rotations
             .get_mut(rotation_id)
-            .ok_or_else(|| AuraError::not_found(format!("Rotation not found: {rotation_id}")))?;
+            .ok_or_else(|| {
+                let failure = RotationFailure::RotationNotFound {
+                    rotation_id: rotation_id.to_string(),
+                };
+                sync_protocol_error("epochs", failure.to_string())
+            })?;
 
         if rotation.status != RotationStatus::Synchronizing {
-            return Err(sync_protocol_error(
-                "epochs",
-                format!("Invalid rotation status: {:?}", rotation.status),
-            ));
+            let failure = RotationFailure::InvalidStatus {
+                status: rotation.status.phase(),
+            };
+            rotation.status = RotationStatus::Failed(failure.clone());
+            return Err(sync_protocol_error("epochs", failure.to_string()));
         }
 
         // Commit the epoch
@@ -268,3 +312,70 @@ impl EpochRotationCoordinator {
 // Coordinated epoch rotation across multiple participants
 // The generated manifest carries epoch-rotation transfer link metadata for reconfiguration.
 choreography!(include_str!("src/protocols/epochs.choreo"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
+    fn time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
+    #[test]
+    fn confirmation_mismatch_marks_rotation_failed() {
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
+        let mut coordinator =
+            EpochRotationCoordinator::new(device(1), Epoch::new(0), EpochConfig::default());
+        let rotation_id = coordinator
+            .initiate_rotation(vec![device(2), device(3)], context_id, &time(100))
+            .expect("rotation should be created");
+
+        let error = coordinator
+            .process_confirmation(EpochConfirmation {
+                rotation_id: rotation_id.clone(),
+                participant_id: device(2),
+                current_epoch: Epoch::new(0),
+                ready_for_epoch: Epoch::new(9),
+                confirmation_timestamp: time(101),
+            })
+            .expect_err("mismatched epoch should fail");
+
+        assert!(error.to_string().contains("epoch mismatch"));
+        assert_eq!(
+            coordinator.get_rotation_status(&rotation_id),
+            Some(&RotationStatus::Failed(RotationFailure::EpochMismatch {
+                expected: Epoch::new(1),
+                actual: Epoch::new(9),
+            }))
+        );
+    }
+
+    #[test]
+    fn invalid_commit_marks_rotation_failed() {
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let mut coordinator =
+            EpochRotationCoordinator::new(device(4), Epoch::new(0), EpochConfig::default());
+        let rotation_id = coordinator
+            .initiate_rotation(vec![device(5), device(6)], context_id, &time(200))
+            .expect("rotation should be created");
+
+        let error = coordinator
+            .commit_rotation(&rotation_id)
+            .expect_err("commit before synchronization should fail");
+
+        assert!(error.to_string().contains("invalid rotation status"));
+        assert_eq!(
+            coordinator.get_rotation_status(&rotation_id),
+            Some(&RotationStatus::Failed(RotationFailure::InvalidStatus {
+                status: RotationPhase::Gathering,
+            }))
+        );
+    }
+}

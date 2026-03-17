@@ -18,7 +18,6 @@
 pub mod core;
 pub mod effect_composer;
 pub mod fault_simulation;
-pub mod retry;
 pub mod scenario;
 pub mod stateless_simulator;
 pub mod time_control;
@@ -30,7 +29,6 @@ pub use effect_composer::{
     SimulationResults, SimulationScenarioConfig,
 };
 pub use fault_simulation::SimulationFaultHandler;
-pub use retry::{simulated_exponential_backoff, simulated_fixed_retry};
 pub use scenario::{
     InjectionAction, ScenarioDefinition, SimulationScenarioHandler, TriggerCondition,
 };

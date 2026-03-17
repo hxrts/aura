@@ -45,6 +45,28 @@ conflict-free state reduction across distributed replicas.
 - Downstream projections are `Observed` consumers of reduced journal state and
   must not become semantic owners.
 
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/fact.rs`, `src/reduction.rs`, `src/extensibility.rs` | `Pure` | Canonical fact encoding, reduction, and registry semantics. |
+| `src/algebra/`, `src/crdt/`, `src/commitment_tree/` | `Pure` | Deterministic algebra/CRDT/tree-state transitions with no long-lived async owner. |
+| `src/effect_api/` | `MoveOwned` | Typed journal append/intent/capability records and effect-facing handoff surfaces. |
+| Actor-owned runtime state | none | Journal semantics must not accumulate background owner tasks in Layer 2. |
+| Observed-only surfaces | none | Observation belongs in higher layers that consume reduced journal state. |
+
+### Capability-Gated Points
+
+- journal append capability/effect surfaces in `src/effect_api/`
+- fact acceptance and interpretation gates that remain explicit in typed
+  journal/domain APIs
+
+### Verification Hooks
+
+- `cargo check -p aura-journal`
+- `cargo test -p aura-journal convergence -- --nocapture`
+- `cargo test -p aura-journal nonce -- --nocapture`
+
 ### Detailed Specifications
 
 ### InvariantCRDTConvergence

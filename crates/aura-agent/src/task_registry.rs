@@ -18,6 +18,8 @@ use crate::runtime::{
 };
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::effects::PhysicalTimeEffects;
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_effects::time::PhysicalTimeHandler;
 use futures::future::{BoxFuture, LocalBoxFuture};
 use futures::FutureExt;
 #[cfg(not(target_arch = "wasm32"))]
@@ -444,11 +446,26 @@ impl TaskGroup {
 
     pub async fn wait_for_idle(&self, timeout: Duration) -> Result<(), TaskSupervisionError> {
         let group_name = self.shared.name.clone();
-        let result = tokio::time::timeout(timeout, async {
+        let time = PhysicalTimeHandler::new();
+        let started_at = time
+            .physical_time()
+            .await
+            .map_err(|_| TaskSupervisionError::Timeout {
+                group: group_name.clone(),
+                active_tasks: self.active_tasks(),
+            })?;
+        let budget =
+            TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| {
+                TaskSupervisionError::Timeout {
+                    group: group_name.clone(),
+                    active_tasks: self.active_tasks(),
+                }
+            })?;
+        let result = execute_with_timeout_budget(&time, &budget, || async {
             loop {
                 self.reconcile_exits();
                 if self.shared.tasks.lock().is_empty() {
-                    return;
+                    return Ok::<(), ()>(());
                 }
                 self.shared.notify.notified().await;
             }
@@ -457,7 +474,8 @@ impl TaskGroup {
 
         match result {
             Ok(()) => Ok(()),
-            Err(_) => Err(TaskSupervisionError::Timeout {
+            Err(TimeoutRunError::Timeout(_)) | Err(TimeoutRunError::Operation(_)) => Err(
+                TaskSupervisionError::Timeout {
                 group: group_name,
                 active_tasks: self.active_tasks(),
             }),

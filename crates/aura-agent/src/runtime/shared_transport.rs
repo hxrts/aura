@@ -245,10 +245,24 @@ mod tests {
         let b = AuthorityId::new_from_entropy([4u8; 32]);
         let notify = shared.inbox_notify(a);
         let notified = notify.notified();
+        let time = aura_effects::time::PhysicalTimeHandler::new();
+        let started_at = time
+            .physical_time()
+            .await
+            .expect("physical time should be available");
+        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &started_at,
+            std::time::Duration::from_millis(40),
+        )
+        .expect("timeout budget should fit");
 
         shared.route_envelope(envelope_for(a, b));
-        tokio::time::timeout(std::time::Duration::from_millis(40), notified)
-            .await
-            .expect("shared transport should notify promptly");
+        aura_core::execute_with_timeout_budget(&time, &budget, || async {
+            notified.await;
+            Ok::<(), ()>(())
+        })
+        .await
+        .expect("shared transport should notify promptly")
+        .expect("notification future should succeed");
     }
 }

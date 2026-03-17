@@ -71,6 +71,19 @@ operations.
 | Invitation/channel/delivery readiness derivation rules | `Pure` + coordinator-consumed `ActorOwned` inputs | readiness coordinators in `aura-app::workflows::*` | workflow/coordinator modules only | frontends, harness |
 | Opaque handles / owner-token / handoff surfaces | `MoveOwned` | current token/record holder through sanctioned APIs | contract/workflow transfer APIs | render/projection layers, harness diagnostics |
 
+### Required Ownership Tests
+
+Changes to `aura-app` ownership boundaries should ship with:
+
+- compile-fail guards for opaque handles, owner-token issuance, and
+  capability-gated publication surfaces
+- dynamic tests proving terminal lifecycle cannot regress for the same logical
+  operation instance
+- coordinator/concurrency tests proving authoritative semantic-fact updates do
+  not lose entries under concurrent publication
+- timeout/backoff invariant tests for local-budget propagation and typed
+  timeout failure where the workflow owns timeout policy
+
 ### Detailed Specifications
 
 ### InvariantAppWorkflowPurity

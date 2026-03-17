@@ -42,9 +42,15 @@ use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
+use aura_core::{
+    execute_with_retry_budget, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
+    TimeoutExecutionProfile,
+};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
+use aura_effects::time::PhysicalTimeHandler;
 
 use crate::error::TerminalError;
 use crate::tui::callbacks::CallbackRegistry;
@@ -69,6 +75,32 @@ use crate::tui::screens::app::subscriptions::{
     use_pending_requests_subscription, use_threshold_subscription, SharedChannels, SharedContacts,
     SharedDevices, SharedMessages, SharedNeighborhoodHomeMeta,
 };
+
+async fn effect_sleep(duration: std::time::Duration) {
+    let _ = PhysicalTimeHandler::new()
+        .sleep_ms(duration.as_millis() as u64)
+        .await;
+}
+
+fn shell_retry_policy() -> RetryBudgetPolicy {
+    let profile = if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        TimeoutExecutionProfile::harness()
+    } else {
+        TimeoutExecutionProfile::production()
+    };
+    let base = RetryBudgetPolicy::new(
+        200,
+        ExponentialBackoffPolicy::new(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_secs(2),
+            profile.jitter(),
+        )
+        .expect("shell backoff policy must be valid"),
+    );
+    profile
+        .apply_retry_policy(&base)
+        .expect("shell retry policy must scale")
+}
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreen, NotificationsScreen, SettingsScreen,
@@ -221,7 +253,7 @@ fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = SubmittedOperationOwner::submit_from_parts(
+            let operation = SubmittedOperationOwner::submit_local_only(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -877,14 +909,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 }
             }
 
-            // Subscribe for updates.
-            // IMPORTANT: never permanently stop listening. If the subscription stream
-            // errors (e.g., closed/lost), retry with backoff instead of silently ending.
-            let mut backoff = std::time::Duration::from_millis(50);
-            loop {
+            let retry_policy = shell_retry_policy();
+            let time = PhysicalTimeHandler::new();
+            let result = execute_with_retry_budget(&time, &retry_policy, |_attempt| {
+                let app_core = app_core.clone();
+                let mut tui = tui.clone();
+                let shutdown = shutdown.clone();
+                async move {
                 if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                    break;
+                    return Ok::<(), String>(());
                 }
+
                 let mut stream = {
                     let core = app_core.raw().read().await;
                     core.subscribe(&*ERROR_SIGNAL)
@@ -892,7 +927,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 while let Ok(err_opt) = stream.recv().await {
                     if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                        return;
+                        return Ok(());
                     }
                     let Some(err) = err_opt else { continue };
                     let msg = format_error(&err);
@@ -921,12 +956,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             state.toast_queue.enqueue(toast);
                         }
                     });
-
-                    backoff = std::time::Duration::from_millis(50);
                 }
 
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(std::time::Duration::from_secs(2));
+                Err("ERROR_SIGNAL subscription stream ended".to_string())
+            }})
+            .await;
+
+            match result {
+                Ok(()) => {}
+                Err(RetryRunError::AttemptsExhausted {
+                    attempts_used,
+                    last_error,
+                }) => tracing::warn!(
+                    attempts_used,
+                    last_error,
+                    "ERROR_SIGNAL subscription abandoned after max retries"
+                ),
+                Err(RetryRunError::Timeout(error)) => tracing::warn!(
+                    error = %error,
+                    "ERROR_SIGNAL retry budget timed out"
+                ),
             }
         }
     });
@@ -988,7 +1037,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 if let Err(e) = network_workflows::discover_peers(&app_core, timestamp_ms).await {
                     tracing::debug!(error = %e, "discover_peers failed");
                 }
-                tokio::time::sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
+                effect_sleep(network_workflows::DISCOVERED_PEERS_REFRESH_INTERVAL).await;
             }
         }
     });
@@ -1023,7 +1072,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                     let _ = system_workflows::refresh_account(&app_core).await;
 
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    effect_sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
         });
@@ -2376,7 +2425,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             );
                                             continue;
                                         };
-                                        let operation = SubmittedOperationOwner::submit_from_parts(
+                                        let operation = SubmittedOperationOwner::submit_local_only(
                                             app_core_for_events.clone(),
                                             tasks_for_events.clone(),
                                             update_tx,
@@ -3304,7 +3353,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                                     });
                                                                 }
                                                             },
-                                                            tokio::time::sleep,
+                                                            effect_sleep,
                                                         )
                                                         .await;
                                                     });
@@ -3444,7 +3493,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                                     });
                                                                 }
                                                             },
-                                                            tokio::time::sleep,
+                                                            effect_sleep,
                                                         )
                                                         .await;
                                                     });

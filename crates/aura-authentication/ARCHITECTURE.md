@@ -32,6 +32,8 @@ management, device key derivation, and guardian-based recovery authorization.
 - Long-lived ceremony coordination should be explicit and single-owner.
 - Capability-gated publication and typed terminal failure are required for
   parity-critical authentication flows.
+- Authentication view reduction must preserve typed terminal failure/denial
+  detail instead of collapsing failures to request/session ids plus free text.
 - `Observed` consumers may render authentication state but not author it.
 
 ### Detailed Specifications

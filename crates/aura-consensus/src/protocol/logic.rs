@@ -15,7 +15,6 @@ use aura_core::{
     AuraError, AuthorityId, ContextId, Prestate, Result,
 };
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Protocol coordinator that manages consensus execution
 pub struct ConsensusProtocol {
@@ -35,10 +34,10 @@ pub struct ConsensusProtocol {
     pub(crate) group_public_key: PublicKeyPackage,
 
     /// Active protocol instances
-    pub(crate) instances: Arc<RwLock<HashMap<ConsensusId, ProtocolInstance>>>,
+    pub(crate) instances: RwLock<HashMap<ConsensusId, ProtocolInstance>>,
 
     /// Evidence tracker for equivocation proofs
-    pub(crate) evidence_tracker: Arc<RwLock<crate::evidence::EvidenceTracker>>,
+    pub(crate) evidence_tracker: RwLock<crate::evidence::EvidenceTracker>,
 }
 
 impl ConsensusProtocol {
@@ -77,8 +76,8 @@ impl ConsensusProtocol {
             config,
             frost_orchestrator,
             group_public_key,
-            instances: Arc::new(RwLock::new(HashMap::new())),
-            evidence_tracker: Arc::new(RwLock::new(crate::evidence::EvidenceTracker::new())),
+            instances: RwLock::new(HashMap::new()),
+            evidence_tracker: RwLock::new(crate::evidence::EvidenceTracker::new()),
         })
     }
 

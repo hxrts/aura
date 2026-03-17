@@ -2,14 +2,14 @@
 
 use super::commands::{
     map_modal, map_screen, map_toast_kind, push_list, screen_item_id, selected_by_index,
-    visible_home_ids, TuiSemanticInputs,
+    TuiSemanticInputs,
 };
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot, ModalId, ScreenId,
-    ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
+    ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot, ScreenId, ToastId,
+    ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot};
 use parking_lot::Mutex;

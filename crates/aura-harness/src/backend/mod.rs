@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use crate::config::{InstanceConfig, InstanceMode};
+use crate::timeouts::blocking_sleep;
 use crate::tool_api::ToolKey;
 
 #[derive(Debug, Clone)]
@@ -422,7 +423,7 @@ pub(crate) fn wait_for_operation_submission(
         if Instant::now() >= deadline {
             bail!("timed out waiting for operation submission {operation_id:?}");
         }
-        std::thread::sleep(Duration::from_millis(50));
+        blocking_sleep(Duration::from_millis(50));
     }
 }
 

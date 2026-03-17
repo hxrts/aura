@@ -3,9 +3,8 @@
 #![allow(clippy::expect_used, missing_docs)]
 
 use aura_core::{
-    identifiers::{AuthorityId, ContextId},
     time::{OrderTime, TimeStamp},
-    Hash32, JoinSemilattice,
+    AuthorityId, ContextId, Hash32, JoinSemilattice,
 };
 use aura_journal::{
     fact::{Fact, FactContent, Journal, JournalNamespace, ProtocolRelationalFact, RelationalFact},

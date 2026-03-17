@@ -6,7 +6,6 @@
 
 ^crates/aura-agent/src/reactive/frp\.rs:.*tokio::spawn
 ^crates/aura-agent/src/reactive/scheduler\.rs:.*tokio::spawn
-^crates/aura-agent/src/runtime_bridge/mod\.rs:.*tokio::spawn
 ^crates/aura-agent/src/runtime/effects/choreography\.rs:.*tokio::spawn
 ^crates/aura-agent/src/runtime/effects/network\.rs:.*tokio::spawn
 ^crates/aura-app/src/workflows/messaging\.rs:.*tokio::spawn

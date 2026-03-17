@@ -31,7 +31,7 @@ use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::*;
 use aura_core::hash::hash as aura_hash;
 use aura_core::types::scope::AuthorizationOp;
-use aura_core::{AuraError, AuthorityId, ContextId};
+use aura_core::{execute_with_timeout_budget, AuraError, AuthorityId, ContextId, TimeoutBudget};
 use aura_effects::{
     crypto::RealCryptoHandler,
     encrypted_storage::{EncryptedStorage, EncryptedStorageConfig},
@@ -710,7 +710,18 @@ impl AuraEffectSystem {
         };
 
         if std::env::var_os("AURA_HARNESS_MODE").is_some() {
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), wait_for_batch).await;
+            let time = PhysicalTimeHandler::new();
+            if let Ok(started_at) = time.physical_time().await {
+                if let Ok(budget) =
+                    TimeoutBudget::from_start_and_timeout(&started_at, std::time::Duration::from_secs(2))
+                {
+                    let _ = execute_with_timeout_budget(&time, &budget, || async {
+                        wait_for_batch.await;
+                        Ok::<(), ()>(())
+                    })
+                    .await;
+                }
+            }
             return;
         }
 

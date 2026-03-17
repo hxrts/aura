@@ -472,8 +472,26 @@ mod tests {
     use crate::core::AgentConfig;
     use aura_core::DeviceId;
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::sync::Barrier;
     use uuid::Uuid;
+
+    async fn assert_completes_within<T, E>(
+        future: impl std::future::Future<Output = Result<T, E>>,
+        timeout: Duration,
+        message: &str,
+    ) -> Result<T, E> {
+        let time = aura_effects::time::PhysicalTimeHandler::new();
+        let started_at = time
+            .physical_time()
+            .await
+            .expect("physical time should be available");
+        let budget = aura_core::TimeoutBudget::from_start_and_timeout(&started_at, timeout)
+            .expect("timeout budget should fit");
+        aura_core::execute_with_timeout_budget(&time, &budget, || future)
+            .await
+            .expect(message)
+    }
 
     fn test_effects(authority_id: AuthorityId) -> Arc<AuraEffectSystem> {
         let authority_bytes = authority_id.to_bytes();
@@ -764,12 +782,12 @@ mod tests {
             });
         });
 
-        let payload = tokio::time::timeout(
-            std::time::Duration::from_millis(40),
+        let payload = assert_completes_within(
             effects.receive_from_role_bytes(peer_role),
+            Duration::from_millis(40),
+            "session-local notify should wake receive before polling-sized timeout",
         )
         .await
-        .expect("session-local notify should wake receive before polling-sized timeout")
         .expect("session-scoped receive succeeds");
         assert_eq!(payload, b"notified".to_vec());
 
@@ -958,12 +976,12 @@ mod tests {
             .expect("session starts");
         effects.set_timeout(20).await;
 
-        let error = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
+        let error = assert_completes_within(
             effects.receive_from_role_bytes(peer_role),
+            Duration::from_millis(100),
+            "receive should resolve with a timeout error",
         )
         .await
-        .expect("receive should resolve with a timeout error")
         .expect_err("receive should time out");
         assert!(matches!(
             error,
@@ -1001,12 +1019,12 @@ mod tests {
                 .cancel_session(runtime_session_id);
         });
 
-        let error = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
+        let error = assert_completes_within(
             effects.receive_from_role_bytes(peer_role),
+            Duration::from_millis(100),
+            "receive should resolve when session is cancelled",
         )
         .await
-        .expect("receive should resolve when session is cancelled")
         .expect_err("receive should fail when session is cancelled");
         assert!(matches!(error, ChoreographyError::SessionNotStarted));
     }

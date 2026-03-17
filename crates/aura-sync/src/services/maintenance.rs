@@ -464,7 +464,7 @@ impl MaintenanceService {
     ) -> SyncResult<()> {
         {
             let mut state = self.state.write();
-            if *state == ServiceState::Running {
+            if state.is_running() {
                 return Err(sync_session_error("Service already running"));
             }
             *state = ServiceState::Starting;
@@ -487,7 +487,7 @@ impl Service for MaintenanceService {
     async fn start(&self, now: MonotonicInstant) -> SyncResult<()> {
         // NOTE: Prefer start_with_time_effects() for proper effect system integration
         let mut state = self.state.write();
-        if *state == ServiceState::Running {
+        if state.is_running() {
             return Err(sync_session_error("Service already running"));
         }
 
@@ -516,12 +516,12 @@ impl Service for MaintenanceService {
     async fn health_check(&self) -> SyncResult<HealthCheck> {
         // Implement health check logic inline since Service trait doesn't support time_effects parameter
         let time_effects = aura_effects::time::PhysicalTimeHandler;
-        let state = *self.state.read();
+        let state = self.state.read().clone();
         let status = match state {
             ServiceState::Running => HealthStatus::Healthy,
             ServiceState::Starting => HealthStatus::Starting,
             ServiceState::Stopping => HealthStatus::Stopping,
-            ServiceState::Stopped | ServiceState::Failed => HealthStatus::Unhealthy,
+            ServiceState::Stopped | ServiceState::Failed(_) => HealthStatus::Unhealthy,
         };
 
         let mut details = std::collections::HashMap::new();
@@ -565,7 +565,7 @@ impl Service for MaintenanceService {
     }
 
     fn is_running(&self) -> bool {
-        *self.state.read() == ServiceState::Running
+        self.state.read().is_running()
     }
 }
 

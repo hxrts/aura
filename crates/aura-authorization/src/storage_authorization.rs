@@ -514,8 +514,7 @@ pub fn check_biscuit_access(
 
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 
 /// Storage handler wrapper that enforces Biscuit authorization on all operations
 ///
@@ -540,10 +539,10 @@ pub struct AuthorizedStorageHandler<S: StorageCoreEffects + StorageExtendedEffec
     inner: S,
     /// Biscuit authorization evaluator
     evaluator: BiscuitStorageEvaluator,
-    /// Biscuit token for authorization (shared, can be updated)
-    token: Arc<RwLock<Option<Biscuit>>>,
-    /// Flow budget for operations (shared, can be updated)
-    budget: Arc<RwLock<FlowBudget>>,
+    /// Biscuit token for authorization.
+    token: RwLock<Option<Biscuit>>,
+    /// Flow budget for operations.
+    budget: RwLock<FlowBudget>,
 }
 
 impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S> {
@@ -552,8 +551,8 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
         Self {
             inner,
             evaluator,
-            token: Arc::new(RwLock::new(None)),
-            budget: Arc::new(RwLock::new(budget)),
+            token: RwLock::new(None),
+            budget: RwLock::new(budget),
         }
     }
 
@@ -567,27 +566,38 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
         Self {
             inner,
             evaluator,
-            token: Arc::new(RwLock::new(Some(token))),
-            budget: Arc::new(RwLock::new(budget)),
+            token: RwLock::new(Some(token)),
+            budget: RwLock::new(budget),
         }
     }
 
     /// Set the Biscuit token for authorization
-    pub async fn set_token(&self, token: Biscuit) {
-        let mut guard = self.token.write().await;
+    pub fn set_token(&self, token: Biscuit) -> Result<(), StorageError> {
+        let mut guard = self
+            .token
+            .write()
+            .map_err(|_| StorageError::WriteFailed("authorized storage token lock poisoned".into()))?;
         *guard = Some(token);
+        Ok(())
     }
 
     /// Clear the authorization token
-    pub async fn clear_token(&self) {
-        let mut guard = self.token.write().await;
+    pub fn clear_token(&self) -> Result<(), StorageError> {
+        let mut guard = self
+            .token
+            .write()
+            .map_err(|_| StorageError::WriteFailed("authorized storage token lock poisoned".into()))?;
         *guard = None;
+        Ok(())
     }
 
     /// Get the remaining flow budget
-    pub async fn remaining_budget(&self) -> u64 {
-        let guard = self.budget.read().await;
-        guard.headroom()
+    pub fn remaining_budget(&self) -> Result<u64, StorageError> {
+        let guard = self
+            .budget
+            .read()
+            .map_err(|_| StorageError::ReadFailed("authorized storage budget lock poisoned".into()))?;
+        Ok(guard.headroom())
     }
 
     /// Check authorization for a storage operation
@@ -596,12 +606,18 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
         resource: &StorageResource,
         permission: &StoragePermission,
     ) -> Result<(), StorageError> {
-        let token_guard = self.token.read().await;
+        let token_guard = self
+            .token
+            .read()
+            .map_err(|_| StorageError::ReadFailed("authorized storage token lock poisoned".into()))?;
         let token = token_guard.as_ref().ok_or_else(|| {
             StorageError::PermissionDenied("No authorization token set".to_string())
         })?;
 
-        let mut budget_guard = self.budget.write().await;
+        let mut budget_guard = self
+            .budget
+            .write()
+            .map_err(|_| StorageError::WriteFailed("authorized storage budget lock poisoned".into()))?;
         let decision = self
             .evaluator
             .evaluate_access(token, resource, permission, &mut budget_guard)
@@ -996,7 +1012,7 @@ mod tests {
         let authorized = AuthorizedStorageHandler::new(mock_storage, evaluator, budget);
 
         // Initial budget should be full
-        assert_eq!(authorized.remaining_budget().await, 1000);
+        assert_eq!(authorized.remaining_budget().unwrap(), 1000);
     }
 
     #[tokio::test]
@@ -1017,7 +1033,7 @@ mod tests {
         assert!(result1.is_err());
 
         // Set token
-        authorized.set_token(token).await;
+        authorized.set_token(token).unwrap();
 
         // Now operation should at least pass the "no token" check
         let result2 = authorized.retrieve("test").await;
@@ -1031,7 +1047,7 @@ mod tests {
         }
 
         // Clear token
-        authorized.clear_token().await;
+        authorized.clear_token().unwrap();
 
         // Should fail again with "no token"
         let result3 = authorized.retrieve("test").await;

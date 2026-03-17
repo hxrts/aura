@@ -506,11 +506,15 @@ fn has_explicit_admin_scope(command: &EffectCommand) -> bool {
 #[allow(clippy::expect_used)] // Tests use expect() for cleaner error handling
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use async_lock::RwLock;
     use aura_app::ui::prelude::*;
     use aura_app::ui::signals::ERROR_SIGNAL;
+    use aura_core::effects::PhysicalTimeEffects;
     use aura_core::effects::reactive::ReactiveEffects;
+    use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError};
+    use aura_effects::time::PhysicalTimeHandler;
 
     use crate::handlers::tui::TuiMode;
     use crate::tui::context::{InitializedAppCore, IoContext};
@@ -518,19 +522,37 @@ mod tests {
     use crate::TerminalError;
 
     async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
-        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+        let time = PhysicalTimeHandler::new();
+        let started_at = time
+            .physical_time()
+            .await
+            .expect("failed to read physical time");
+        let timeout = TimeoutExecutionProfile::simulation_test()
+            .scale_duration(Duration::from_millis(500))
+            .expect("failed to scale timeout");
+        let budget =
+            TimeoutBudget::from_start_and_timeout(&started_at, timeout).expect("budget should fit");
+        match execute_with_timeout_budget(&time, &budget, || async {
             loop {
                 {
                     let core = app_core.read().await;
                     if let Ok(Some(err)) = core.read(&*ERROR_SIGNAL).await {
-                        return err;
+                        return Ok::<_, std::convert::Infallible>(err);
                     }
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                time.sleep_ms(10)
+                    .await
+                    .expect("sleep should succeed while waiting for error signal");
             }
         })
         .await
-        .expect("Timed out waiting for ERROR_SIGNAL to become Some")
+        {
+            Ok(error) => error,
+            Err(TimeoutRunError::Timeout(error)) => {
+                panic!("Timed out waiting for ERROR_SIGNAL to become Some: {error}")
+            }
+            Err(TimeoutRunError::Operation(error)) => match error {},
+        }
     }
 
     #[tokio::test]

@@ -68,6 +68,19 @@ Rules:
 | Runtime-facing readiness and lifecycle state consumed by shared semantic flows | `ActorOwned` | runtime readiness/lifecycle coordinator | owning runtime coordinator and sanctioned hooks | `aura-app`, frontends, harness |
 | Frontend-visible projections and facts | `Observed` | downstream of runtime/workflow ownership | projection reducers/exporters only | frontends, harness |
 
+### Required Ownership Tests
+
+Changes to `aura-agent` ownership boundaries should ship with:
+
+- actor/concurrency tests proving coordinator-owned runtime state does not lose
+  updates or admit multiple live owners for the same mutable domain
+- compile-fail or capability-boundary tests where ownership transfer and
+  authority are enforced in types
+- lifecycle tests proving owner death, shutdown, or failure results in explicit
+  terminal state rather than silent task loss
+- timeout/backoff tests proving retry budgeting stays bounded and local
+  timeouts do not leak into distributed semantic ordering
+
 ### Service Actor Pattern
 
 Long-lived runtime services use actor ownership with typed command channels:

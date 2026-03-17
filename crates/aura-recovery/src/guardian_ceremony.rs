@@ -169,7 +169,35 @@ pub enum CeremonyStatus {
     /// Ceremony completed successfully
     Committed { new_epoch: u64 },
     /// Ceremony was aborted
-    Aborted { reason: String },
+    Aborted { reason: CeremonyAbortReason },
+}
+
+/// Typed terminal failure for guardian ceremonies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CeremonyAbortReason {
+    /// One or more guardians explicitly declined the rotation.
+    GuardianDeclined,
+    /// All guardians responded but the acceptance threshold was not met.
+    InsufficientAcceptances { accepted: u16, required: u16 },
+    /// The ceremony was manually cancelled.
+    Manual { reason: String },
+}
+
+impl std::fmt::Display for CeremonyAbortReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CeremonyAbortReason::GuardianDeclined => {
+                write!(f, "One or more guardians declined")
+            }
+            CeremonyAbortReason::InsufficientAcceptances { accepted, required } => {
+                write!(
+                    f,
+                    "Insufficient acceptances: got {accepted}, need {required}"
+                )
+            }
+            CeremonyAbortReason::Manual { reason } => write!(f, "{reason}"),
+        }
+    }
 }
 
 /// Complete state of an ongoing ceremony
@@ -745,7 +773,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
 
         // Check if any guardian declined
         if state.has_decline() {
-            let reason = "One or more guardians declined".to_string();
+            let reason = CeremonyAbortReason::GuardianDeclined;
             state.status = CeremonyStatus::Aborted {
                 reason: reason.clone(),
             };
@@ -754,7 +782,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             // Emit abort fact
             self.emit_fact(CeremonyFact::Aborted {
                 ceremony_id: state.ceremony_id.0,
-                reason,
+                reason: reason.to_string(),
                 aborted_at: now,
             })
             .await?;
@@ -772,15 +800,14 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         if !state.has_threshold() {
             if state.all_responded() {
                 // All responded but didn't reach threshold
-                let reason = format!(
-                    "Insufficient acceptances: got {}, need {}",
-                    state
+                let reason = CeremonyAbortReason::InsufficientAcceptances {
+                    accepted: state
                         .responses
                         .values()
                         .filter(|r| **r == CeremonyResponse::Accept)
-                        .count(),
-                    state.operation.threshold_k
-                );
+                        .count() as u16,
+                    required: state.operation.threshold_k,
+                };
                 state.status = CeremonyStatus::Aborted {
                     reason: reason.clone(),
                 };
@@ -788,7 +815,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
 
                 self.emit_fact(CeremonyFact::Aborted {
                     ceremony_id: state.ceremony_id.0,
-                    reason,
+                    reason: reason.to_string(),
                     aborted_at: now,
                 })
                 .await?;
@@ -873,15 +900,18 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             uncertainty: None,
         });
 
-        state.status = CeremonyStatus::Aborted {
+        let abort_reason = CeremonyAbortReason::Manual {
             reason: reason.clone(),
+        };
+        state.status = CeremonyStatus::Aborted {
+            reason: abort_reason.clone(),
         };
         state.completed_at = Some(now.clone());
 
         // Emit abort fact
         self.emit_fact(CeremonyFact::Aborted {
             ceremony_id: state.ceremony_id.0,
-            reason: reason.clone(),
+            reason: abort_reason.to_string(),
             aborted_at: now,
         })
         .await?;

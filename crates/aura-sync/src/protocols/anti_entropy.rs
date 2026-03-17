@@ -510,60 +510,41 @@ impl AntiEntropyProtocol {
 
         let mut result = AntiEntropyResult::default();
 
-        // Retry loop for resilient operation
-        let mut retry_count = 0;
-        let max_retries = if self.config.retry_enabled {
-            self.config.retry_policy.max_attempts
-        } else {
-            1
-        };
+        loop {
+            let round_result = if self.config.retry_enabled {
+                let retry_policy = self
+                    .config
+                    .retry_policy
+                    .clone()
+                    .with_max_attempts(self.config.retry_policy.max_attempts.saturating_sub(1));
+                retry_policy
+                    .execute_with_effects(effects, || self.execute_sync_round(effects, peer))
+                    .await?
+            } else {
+                self.execute_sync_round(effects, peer).await?
+            };
 
-        while retry_count < max_retries {
-            match self.execute_sync_round(effects, peer).await {
-                Ok(round_result) => {
-                    result.applied += round_result.applied;
-                    result.duplicates += round_result.duplicates;
-                    result.rounds += 1;
-                    result.final_status = round_result.final_status;
+            result.applied += round_result.applied;
+            result.duplicates += round_result.duplicates;
+            result.rounds += 1;
+            result.final_status = round_result.final_status;
 
-                    // If we're synchronized, break out of retry loop
-                    if matches!(round_result.final_status, Some(DigestStatus::Equal)) {
-                        tracing::info!(
-                            "Sync completed successfully after {} rounds with peer {}",
-                            result.rounds,
-                            peer
-                        );
-                        break;
-                    }
+            if matches!(round_result.final_status, Some(DigestStatus::Equal)) {
+                tracing::info!(
+                    "Sync completed successfully after {} rounds with peer {}",
+                    result.rounds,
+                    peer
+                );
+                break;
+            }
 
-                    // Check if we've reached max rounds
-                    if result.rounds >= self.config.max_rounds {
-                        tracing::warn!(
-                            "Reached max rounds ({}) syncing with peer {}",
-                            self.config.max_rounds,
-                            peer
-                        );
-                        break;
-                    }
-                }
-                Err(e) => {
-                    retry_count += 1;
-                    if retry_count >= max_retries {
-                        return Err(e);
-                    }
-
-                    tracing::warn!(
-                        "Sync round failed with peer {}, retrying ({}/{}): {}",
-                        peer,
-                        retry_count + 1,
-                        max_retries,
-                        e
-                    );
-
-                    // Apply retry delay
-                    let delay = self.config.retry_policy.calculate_delay(retry_count);
-                    let _ = effects.sleep_ms(delay.as_millis() as u64).await;
-                }
+            if result.rounds >= self.config.max_rounds {
+                tracing::warn!(
+                    "Reached max rounds ({}) syncing with peer {}",
+                    self.config.max_rounds,
+                    peer
+                );
+                break;
             }
         }
 

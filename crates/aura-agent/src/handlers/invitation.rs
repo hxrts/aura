@@ -32,12 +32,14 @@ use aura_core::effects::{
     TransportReceipt,
 };
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
 use aura_core::Receipt;
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_guards::types::CapabilityId;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
@@ -103,19 +105,28 @@ const INVITATION_CONTENT_TYPE: &str = "application/aura-invitation";
 const INVITATION_PREPARE_STAGE_TIMEOUT_MS: u64 = 4_000;
 
 async fn timeout_prepare_invitation_stage<T>(
+    effects: &AuraEffectSystem,
     stage: &'static str,
     future: impl Future<Output = AgentResult<T>>,
 ) -> AgentResult<T> {
-    tokio::time::timeout(
-        Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
-        future,
-    )
-    .await
-    .map_err(|_| {
+    let started_at = effects.physical_time().await.map_err(|error| {
         AgentError::runtime(format!(
-            "invitation.prepare stage `{stage}` timed out after {INVITATION_PREPARE_STAGE_TIMEOUT_MS}ms"
+            "invitation.prepare stage `{stage}` could not read physical time: {error}"
         ))
-    })?
+    })?;
+    let budget = TimeoutBudget::from_start_and_timeout(
+        &started_at,
+        Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
+    )
+    .map_err(|error| AgentError::runtime(error.to_string()))?;
+    Ok(execute_with_timeout_budget(effects, &budget, || future)
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => AgentError::runtime(format!(
+                "invitation.prepare stage `{stage}` timed out after {INVITATION_PREPARE_STAGE_TIMEOUT_MS}ms"
+            )),
+            TimeoutRunError::Operation(error) => error,
+        })?)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -242,14 +253,20 @@ impl InvitationHandler {
 
     async fn best_effort_current_timestamp_ms(effects: &AuraEffectSystem) -> u64 {
         if std::env::var_os("AURA_HARNESS_MODE").is_some() {
-            return match tokio::time::timeout(
-                std::time::Duration::from_millis(50),
-                effects.current_timestamp(),
-            )
-            .await
+            let Ok(started_at) = effects.physical_time().await else {
+                return 0;
+            };
+            let Ok(budget) =
+                TimeoutBudget::from_start_and_timeout(&started_at, Duration::from_millis(50))
+            else {
+                return 0;
+            };
+
+            return match execute_with_timeout_budget(effects, &budget, || effects.current_timestamp())
+                .await
             {
-                Ok(Ok(value)) => value,
-                Ok(Err(_)) | Err(_) => 0,
+                Ok(value) => value,
+                Err(TimeoutRunError::Operation(_)) | Err(TimeoutRunError::Timeout(_)) => 0,
             };
         }
 
@@ -526,7 +543,7 @@ impl InvitationHandler {
         let invitation_context = if let Some(context_id) = context_override {
             context_id
         } else {
-            timeout_prepare_invitation_stage("resolve_invitation_context", async {
+            timeout_prepare_invitation_stage(effects.as_ref(), "resolve_invitation_context", async {
                 Ok(self
                     .resolve_invitation_context(effects.as_ref(), &invitation_type)
                     .await)
@@ -559,6 +576,7 @@ impl InvitationHandler {
         let (local_effects, deferred_network_effects) =
             split_invitation_send_guard_outcome(outcome, &self.context.authority)?;
         timeout_prepare_invitation_stage(
+            effects.as_ref(),
             "execute_local_effects",
             execute_invitation_effect_commands(
                 local_effects,
@@ -613,6 +631,7 @@ impl InvitationHandler {
 
         // Persist the invitation to storage (so it survives service recreation)
         timeout_prepare_invitation_stage(
+            effects.as_ref(),
             "persist_created_invitation",
             Self::persist_created_invitation(
                 effects.as_ref(),

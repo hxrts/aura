@@ -57,10 +57,7 @@ pub mod ota_transition;
 pub mod sync;
 
 // Re-export key service types
-pub use ack_routing::{
-    AckRouter, AckSignal, AckSignalCallback, FnAckSignalCallback, LoggingAckSignalCallback,
-    NoOpAckSignalCallback,
-};
+pub use ack_routing::{AckRouter, AckSignal, AckSignalCallback};
 pub use aura_maintenance::{
     AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch,
     MaintenanceFact, MaintenanceFactKey, SnapshotCompleted, SnapshotProposed, UpgradeActivated,
@@ -156,7 +153,7 @@ pub trait Service: Send + Sync {
 }
 
 /// Service lifecycle state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ServiceState {
     /// Service not yet started
     Stopped,
@@ -171,7 +168,20 @@ pub enum ServiceState {
     Stopping,
 
     /// Service stopped due to error
-    Failed,
+    Failed(ServiceFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ServiceFailure {
+    Startup { reason: String },
+    Shutdown { reason: String },
+    HealthCheck { reason: String },
+}
+
+impl ServiceState {
+    pub fn is_running(&self) -> bool {
+        matches!(self, ServiceState::Running)
+    }
 }
 
 /// Common service metrics

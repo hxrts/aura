@@ -89,7 +89,15 @@ pub enum ChannelState {
     /// Channel has been closed
     Closed,
     /// Channel encountered an error
-    Error(String),
+    Error(ChannelFailure),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelFailure {
+    EpochRegression {
+        current_epoch: u64,
+        requested_epoch: u64,
+    },
 }
 
 impl SecureChannel {
@@ -195,6 +203,10 @@ impl SecureChannel {
     /// Full implementation will re-key the underlying Noise transport.
     pub fn rotate(&mut self, new_epoch: u64) -> AuraResult<()> {
         if new_epoch <= self.epoch {
+            self.state = ChannelState::Error(ChannelFailure::EpochRegression {
+                current_epoch: self.epoch,
+                requested_epoch: new_epoch,
+            });
             return Err(AuraError::invalid(
                 "New epoch must be greater than current epoch",
             ));
@@ -423,7 +435,49 @@ pub enum HandshakeStatus {
     /// Handshake complete
     Complete,
     /// Handshake failed
-    Failed(String),
+    Failed(HandshakeFailure),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandshakePhase {
+    Initial,
+    InitSent,
+    InitReceived,
+    ResponseSent,
+    ResponseReceived,
+    Complete,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandshakeAction {
+    CreateInitMessage,
+    ProcessInit,
+    CreateResponse,
+    ProcessResponse,
+    Complete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandshakeFailure {
+    InvalidState {
+        action: HandshakeAction,
+        state: HandshakePhase,
+    },
+}
+
+impl HandshakeStatus {
+    pub fn phase(&self) -> HandshakePhase {
+        match self {
+            HandshakeStatus::Initial => HandshakePhase::Initial,
+            HandshakeStatus::InitSent => HandshakePhase::InitSent,
+            HandshakeStatus::InitReceived => HandshakePhase::InitReceived,
+            HandshakeStatus::ResponseSent => HandshakePhase::ResponseSent,
+            HandshakeStatus::ResponseReceived => HandshakePhase::ResponseReceived,
+            HandshakeStatus::Complete => HandshakePhase::Complete,
+            HandshakeStatus::Failed(_) => HandshakePhase::Failed,
+        }
+    }
 }
 
 /// Handshake result containing the established channel
@@ -453,6 +507,15 @@ impl Handshaker {
         &self.state
     }
 
+    fn fail_invalid_state(&mut self, action: HandshakeAction) -> AuraError {
+        let failure = HandshakeFailure::InvalidState {
+            action,
+            state: self.state.phase(),
+        };
+        self.state = HandshakeStatus::Failed(failure);
+        AuraError::invalid(format!("Invalid state for {action:?}"))
+    }
+
     /// Get the channel ID (if generated)
     pub fn channel_id(&self) -> Option<[u8; 32]> {
         self.channel_id
@@ -467,7 +530,7 @@ impl Handshaker {
         effects: &E,
     ) -> AuraResult<Vec<u8>> {
         if self.state != HandshakeStatus::Initial {
-            return Err(AuraError::invalid("Invalid state for create_init_message"));
+            return Err(self.fail_invalid_state(HandshakeAction::CreateInitMessage));
         }
 
         // Convert keys to X25519
@@ -513,7 +576,7 @@ impl Handshaker {
         effects: &E,
     ) -> AuraResult<()> {
         if self.state != HandshakeStatus::Initial {
-            return Err(AuraError::invalid("Invalid state for process_init"));
+            return Err(self.fail_invalid_state(HandshakeAction::ProcessInit));
         }
 
         // Convert keys to X25519
@@ -561,7 +624,7 @@ impl Handshaker {
         effects: &E,
     ) -> AuraResult<Vec<u8>> {
         if self.state != HandshakeStatus::InitReceived {
-            return Err(AuraError::invalid("Invalid state for create_response"));
+            return Err(self.fail_invalid_state(HandshakeAction::CreateResponse));
         }
 
         let noise_state = self
@@ -585,7 +648,7 @@ impl Handshaker {
         effects: &E,
     ) -> AuraResult<()> {
         if self.state != HandshakeStatus::InitSent {
-            return Err(AuraError::invalid("Invalid state for process_response"));
+            return Err(self.fail_invalid_state(HandshakeAction::ProcessResponse));
         }
 
         let noise_state = self
@@ -613,7 +676,7 @@ impl Handshaker {
         ];
 
         if !valid_states.contains(&self.state) {
-            return Err(AuraError::invalid("Invalid state for complete"));
+            return Err(self.fail_invalid_state(HandshakeAction::Complete));
         }
 
         let channel_id = self
@@ -679,4 +742,51 @@ fn generate_channel_id(
     let mut channel_id = [0u8; 32];
     channel_id.copy_from_slice(&result);
     channel_id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_rotate_regression_marks_typed_error() {
+        let local = AuthorityId::new_from_entropy([1u8; 32]);
+        let remote = AuthorityId::new_from_entropy([2u8; 32]);
+        let context = ContextId::new_from_entropy([3u8; 32]);
+        let mut channel = SecureChannel::new([4u8; 32], context, local, remote, 5, None);
+
+        let error = channel.rotate(5).expect_err("same epoch should fail");
+        assert!(error.to_string().contains("greater than current epoch"));
+        assert_eq!(
+            channel.state(),
+            &ChannelState::Error(ChannelFailure::EpochRegression {
+                current_epoch: 5,
+                requested_epoch: 5,
+            })
+        );
+    }
+
+    #[test]
+    fn handshake_invalid_state_marks_typed_failure() {
+        let local = AuthorityId::new_from_entropy([5u8; 32]);
+        let remote = AuthorityId::new_from_entropy([6u8; 32]);
+        let context = ContextId::new_from_entropy([7u8; 32]);
+        let mut handshaker = Handshaker::new(HandshakeConfig {
+            local,
+            remote,
+            context_id: context,
+            psk: [8u8; 32],
+            timeout_ms: 1000,
+        });
+
+        let error = handshaker.fail_invalid_state(HandshakeAction::Complete);
+        assert!(error.to_string().contains("Invalid state"));
+        assert_eq!(
+            handshaker.state(),
+            &HandshakeStatus::Failed(HandshakeFailure::InvalidState {
+                action: HandshakeAction::Complete,
+                state: HandshakePhase::Initial,
+            })
+        );
+    }
 }

@@ -30,6 +30,9 @@ coordination, and writer fence semantics for distributed journal consistency.
 - Sync mutation and publication must remain capability-gated and typed.
 - Retry and completion semantics should terminate explicitly rather than through
   ambiguous background state.
+- Terminal lifecycle state in protocol coordinators must carry typed failure
+  causes rather than stringly `Failed(...)` payloads; epoch rotation is the
+  current reference pattern.
 - `Observed` consumers may inspect sync state but not author it.
 
 ### Detailed Specifications

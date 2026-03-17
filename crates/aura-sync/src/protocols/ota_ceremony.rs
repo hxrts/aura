@@ -40,6 +40,7 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::threshold::{
     policy_for, AgreementMode, CeremonyFlow, SigningContext, ThresholdSignature,
 };
@@ -47,9 +48,15 @@ use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 use super::ota::{UpgradeKind, UpgradeProposal as OTAProposal};
+
+static OTA_CEREMONY_MUTATION_CAPABILITY: LazyLock<ActorIngressMutationCapability> =
+    LazyLock::new(|| ActorIngressMutationCapability::new("aura-sync:ota-ceremony"));
+static OTA_CEREMONY_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
+    LazyLock::new(|| LifecyclePublicationCapability::new("aura-sync:ota-facts"));
 
 // =============================================================================
 // CEREMONY TYPES
@@ -189,7 +196,25 @@ pub enum OTACeremonyStatus {
     /// Consensus reached, activation committed
     Committed,
     /// Ceremony aborted (insufficient readiness, timeout, or explicit abort)
-    Aborted { reason: String },
+    Aborted { reason: OTACeremonyAbortReason },
+}
+
+/// Typed terminal failure for OTA activation ceremonies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OTACeremonyAbortReason {
+    /// Ceremony exceeded its configured deadline.
+    TimedOut,
+    /// Ceremony was manually cancelled.
+    Manual { reason: String },
+}
+
+impl std::fmt::Display for OTACeremonyAbortReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OTACeremonyAbortReason::TimedOut => write!(f, "Ceremony timed out"),
+            OTACeremonyAbortReason::Manual { reason } => write!(f, "{reason}"),
+        }
+    }
 }
 
 /// Full state of an OTA activation ceremony.
@@ -453,6 +478,31 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         Self::new(effects, OTACeremonyConfig::default())
     }
 
+    fn ota_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
+        &OTA_CEREMONY_MUTATION_CAPABILITY
+    }
+
+    fn ota_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
+        &OTA_CEREMONY_PUBLICATION_CAPABILITY
+    }
+
+    fn insert_ceremony(
+        &mut self,
+        _capability: &ActorIngressMutationCapability,
+        ceremony_id: OTACeremonyId,
+        state: OTACeremonyState,
+    ) {
+        self.ceremonies.insert(ceremony_id, state);
+    }
+
+    fn remove_ceremony(
+        &mut self,
+        _capability: &ActorIngressMutationCapability,
+        ceremony_id: &OTACeremonyId,
+    ) {
+        self.ceremonies.remove(ceremony_id);
+    }
+
     // =========================================================================
     // CEREMONY LIFECYCLE - COORDINATOR SIDE
     // =========================================================================
@@ -524,11 +574,15 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             timeout_ms: self.config.timeout_ms,
         };
 
-        // Store ceremony
-        self.ceremonies.insert(ceremony_id, state);
+        // Store ceremony through the sanctioned mutation boundary.
+        self.insert_ceremony(Self::ota_ceremony_mutation_capability(), ceremony_id, state);
 
         // Emit ceremony initiated fact
-        self.emit_ceremony_initiated_fact(ceremony_id, &proposal)
+        self.emit_ceremony_initiated_fact(
+            Self::ota_ceremony_publication_capability(),
+            ceremony_id,
+            &proposal,
+        )
             .await?;
 
         Ok(ceremony_id)
@@ -582,7 +636,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             // Check timeout
             if now > ceremony.started_at_ms + ceremony.timeout_ms {
                 ceremony.status = OTACeremonyStatus::Aborted {
-                    reason: "Ceremony timed out".to_string(),
+                    reason: OTACeremonyAbortReason::TimedOut,
                 };
                 return Ok(false);
             }
@@ -608,12 +662,20 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         }
 
         // Emit commitment received fact
-        self.emit_commitment_received_fact(ceremony_id, &commitment)
+        self.emit_commitment_received_fact(
+            Self::ota_ceremony_publication_capability(),
+            ceremony_id,
+            &commitment,
+        )
             .await?;
 
         // Emit threshold reached fact if applicable
         if threshold_reached {
-            self.emit_threshold_reached_fact(ceremony_id).await?;
+            self.emit_threshold_reached_fact(
+                Self::ota_ceremony_publication_capability(),
+                ceremony_id,
+            )
+            .await?;
         }
 
         Ok(threshold_reached)
@@ -662,6 +724,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
 
         // Emit committed fact
         self.emit_ceremony_committed_fact(
+            Self::ota_ceremony_publication_capability(),
             ceremony_id,
             activation_epoch,
             &ready_devices,
@@ -670,7 +733,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         .await?;
 
         // Remove terminal ceremony state to prevent unbounded growth.
-        self.ceremonies.remove(&ceremony_id);
+        self.remove_ceremony(Self::ota_ceremony_mutation_capability(), &ceremony_id);
 
         Ok(activation_epoch)
     }
@@ -697,15 +760,23 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             _ => {}
         }
 
-        ceremony.status = OTACeremonyStatus::Aborted {
+        let abort_reason = OTACeremonyAbortReason::Manual {
             reason: reason.to_string(),
+        };
+        ceremony.status = OTACeremonyStatus::Aborted {
+            reason: abort_reason.clone(),
         };
 
         // Emit aborted fact
-        self.emit_ceremony_aborted_fact(ceremony_id, reason).await?;
+        self.emit_ceremony_aborted_fact(
+            Self::ota_ceremony_publication_capability(),
+            ceremony_id,
+            &abort_reason.to_string(),
+        )
+        .await?;
 
         // Remove terminal ceremony state to prevent unbounded growth.
-        self.ceremonies.remove(&ceremony_id);
+        self.remove_ceremony(Self::ota_ceremony_mutation_capability(), &ceremony_id);
 
         Ok(())
     }
@@ -847,6 +918,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     /// Emit ceremony initiated fact.
     async fn emit_ceremony_initiated_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: OTACeremonyId,
         proposal: &UpgradeProposal,
     ) -> AuraResult<()> {
@@ -883,6 +955,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     /// Emit commitment received fact.
     async fn emit_commitment_received_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: OTACeremonyId,
         commitment: &ReadinessCommitment,
     ) -> AuraResult<()> {
@@ -917,7 +990,11 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     }
 
     /// Emit threshold reached fact.
-    async fn emit_threshold_reached_fact(&self, ceremony_id: OTACeremonyId) -> AuraResult<()> {
+    async fn emit_threshold_reached_fact(
+        &self,
+        _capability: &LifecyclePublicationCapability,
+        ceremony_id: OTACeremonyId,
+    ) -> AuraResult<()> {
         let timestamp_ms = self
             .effects
             .physical_time()
@@ -962,6 +1039,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     /// Emit ceremony committed fact.
     async fn emit_ceremony_committed_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: OTACeremonyId,
         activation_epoch: Epoch,
         ready_devices: &[DeviceId],
@@ -999,6 +1077,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     /// Emit ceremony aborted fact.
     async fn emit_ceremony_aborted_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: OTACeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
@@ -1296,9 +1375,14 @@ mod tests {
         assert!(matches!(status, OTACeremonyStatus::Committed));
 
         let status = OTACeremonyStatus::Aborted {
-            reason: "test".to_string(),
+            reason: OTACeremonyAbortReason::TimedOut,
         };
-        assert!(matches!(status, OTACeremonyStatus::Aborted { .. }));
+        assert!(matches!(
+            status,
+            OTACeremonyStatus::Aborted {
+                reason: OTACeremonyAbortReason::TimedOut
+            }
+        ));
     }
 
     #[test]

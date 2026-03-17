@@ -317,7 +317,7 @@ pub enum InvitationExchangeState {
     /// Acknowledgment sent, protocol complete
     Complete { accepted: bool },
     /// Protocol failed
-    Failed { reason: String },
+    Failed { reason: InvitationProtocolFailure },
 }
 
 /// State of the guardian invitation protocol
@@ -330,13 +330,15 @@ pub enum GuardianInvitationState {
     /// Guardian accepted
     Accepted { recovery_public_key: Vec<u8> },
     /// Guardian declined
-    Declined { reason: Option<String> },
+    Declined {
+        reason: Option<InvitationDeclineReason>,
+    },
     /// Relationship confirmed and established
     Confirmed {
         relationship_id: CeremonyRelationshipId,
     },
     /// Protocol failed
-    Failed { reason: String },
+    Failed { reason: InvitationProtocolFailure },
 }
 
 /// State of the device enrollment protocol
@@ -349,11 +351,26 @@ pub enum DeviceEnrollmentState {
     /// Enrollment accepted by invitee
     Accepted { device_id: DeviceId },
     /// Enrollment declined by invitee
-    Declined { reason: Option<String> },
+    Declined {
+        reason: Option<InvitationDeclineReason>,
+    },
     /// Enrollment confirmed and established
     Confirmed { new_epoch: u64 },
     /// Protocol failed
-    Failed { reason: String },
+    Failed { reason: InvitationProtocolFailure },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvitationProtocolFailure {
+    Timeout,
+    GuardDenied,
+    InvalidState { detail: String },
+    Internal { detail: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvitationDeclineReason {
+    Provided { detail: String },
 }
 
 // =============================================================================
@@ -554,6 +571,31 @@ mod tests {
         if let GuardianInvitationState::Confirmed { relationship_id } = state {
             assert_eq!(relationship_id.as_str(), "rel-0011223344556677");
         }
+    }
+
+    #[test]
+    fn test_protocol_failure_states_are_typed() {
+        let exchange = InvitationExchangeState::Failed {
+            reason: InvitationProtocolFailure::Timeout,
+        };
+        assert!(matches!(
+            exchange,
+            InvitationExchangeState::Failed {
+                reason: InvitationProtocolFailure::Timeout
+            }
+        ));
+
+        let guardian = GuardianInvitationState::Declined {
+            reason: Some(InvitationDeclineReason::Provided {
+                detail: "not available".to_string(),
+            }),
+        };
+        assert!(matches!(
+            guardian,
+            GuardianInvitationState::Declined {
+                reason: Some(InvitationDeclineReason::Provided { .. })
+            }
+        ));
     }
 
     #[test]

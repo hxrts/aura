@@ -16,11 +16,12 @@ use crate::ui_contract::{
 };
 use crate::workflows::semantic_facts::{
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
+    semantic_lifecycle_publication_capability,
 };
 use crate::AppCore;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
-use aura_core::AuraError;
+use aura_core::{AttemptBudget, AuraError};
 use std::future::Future;
 use std::time::Duration;
 
@@ -35,6 +36,7 @@ async fn fail_start_device_enrollment<T>(
     .with_detail(detail.into());
     publish_authoritative_operation_failure(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::device_enrollment(),
         SemanticOperationKind::StartDeviceEnrollment,
         error.clone(),
@@ -89,6 +91,7 @@ pub async fn start_device_enrollment_ceremony(
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
     publish_authoritative_operation_phase(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::device_enrollment(),
         SemanticOperationKind::StartDeviceEnrollment,
         SemanticOperationPhase::WorkflowDispatched,
@@ -115,6 +118,7 @@ pub async fn start_device_enrollment_ceremony(
     };
     publish_authoritative_operation_phase(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::device_enrollment(),
         SemanticOperationKind::StartDeviceEnrollment,
         SemanticOperationPhase::Succeeded,
@@ -242,7 +246,12 @@ where
     SleepFut: Future<Output = ()> + Send,
 {
     // Bounded polling to avoid infinite loops; UIs can re-invoke if desired.
-    for attempt in 1..=policy.max_attempts {
+    let mut attempts = AttemptBudget::new(policy.max_attempts);
+    while attempts.can_attempt() {
+        let attempt = attempts
+            .record_attempt()
+            .map_err(AuraError::from)?
+            .saturating_add(1);
         sleep_fn(policy.interval).await;
 
         let status = get_key_rotation_ceremony_status(app_core, &ceremony_id).await?;

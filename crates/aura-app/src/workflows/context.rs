@@ -17,6 +17,7 @@ use crate::{
     workflows::harness_determinism,
     workflows::semantic_facts::{
         publish_authoritative_operation_failure, publish_authoritative_operation_phase,
+        semantic_lifecycle_publication_capability,
     },
     workflows::signals::read_signal,
     AppCore,
@@ -496,6 +497,7 @@ async fn fail_create_home<T>(
     .with_detail(detail.into());
     publish_authoritative_operation_failure(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::create_home(),
         SemanticOperationKind::CreateHome,
         error.clone(),
@@ -516,6 +518,7 @@ pub async fn create_home(
 ) -> Result<ChannelId, AuraError> {
     publish_authoritative_operation_phase(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::create_home(),
         SemanticOperationKind::CreateHome,
         SemanticOperationPhase::WorkflowDispatched,
@@ -541,6 +544,7 @@ pub async fn create_home(
 
     publish_authoritative_operation_phase(
         app_core,
+        semantic_lifecycle_publication_capability(),
         OperationId::create_home(),
         SemanticOperationKind::CreateHome,
         SemanticOperationPhase::Succeeded,

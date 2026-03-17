@@ -356,8 +356,10 @@ let commitment = context.journal.compute_commitment();
 ### Integration with Aura Consensus
 
 ```rust
+use aura_consensus::relational::run_consensus;
 use aura_core::relational::ConsensusProof;
-use aura_relational::run_consensus;
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
 
 // 1. Prepare operation requiring consensus
 let binding = GuardianBindingBuilder::new()
@@ -369,10 +371,17 @@ let binding = GuardianBindingBuilder::new()
 let prestate = context.compute_prestate(authority_commitments);
 
 // 3. Run consensus
+let random = RealRandomHandler;
+let time = PhysicalTimeHandler;
 let consensus_proof = run_consensus(
-    prestate,
-    serde_json::to_vec(&binding)?,
-    witness_set,
+    context.context_id,
+    &prestate,
+    &binding,
+    key_packages,
+    group_public_key,
+    epoch,
+    &random,
+    &time,
 ).await?;
 
 // 4. Attach proof to fact
@@ -546,7 +555,8 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 - **Reduction**: `aura-journal/src/reduction.rs` - RelationalState, reduce_context()
 - **Context Management**: `aura-relational/src/lib.rs` - RelationalContext (context-scoped fact journal mirror + helpers)
 - **Consensus Integration**: `crates/aura-consensus/src/consensus/relational.rs` - consensus implementation
-- **Consensus Adapter**: `aura-relational/src/consensus_adapter.rs` - thin consensus delegation layer
+- **Consensus Integration**: `aura-consensus/src/relational.rs` - direct relational
+  consensus with explicit time/random effect ownership
 - **Prestate Computation**: `aura-core/src/domain/consensus.rs` - Prestate struct and methods
 - **Protocol Usage**: `aura-authentication/src/guardian_auth_relational.rs` - Guardian authentication
 - **Recovery Flows**: `aura-recovery/src/` - Guardian recovery choreographies

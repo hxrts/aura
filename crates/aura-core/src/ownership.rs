@@ -145,17 +145,19 @@ pub trait OwnershipCapability {
     }
 }
 
-/// Build a standard capability-token request for ownership/lifecycle authority.
-///
-/// This keeps ownership-related authority on Aura's existing capability/Biscuit
-/// issuance path rather than inventing a separate token model.
-pub fn ownership_capability_token_request(
+/// Build a standard capability-token request directly from typed ownership
+/// capability wrappers of one wrapper family.
+pub fn ownership_capability_token_request_for<C>(
     subject: impl Into<String>,
-    capabilities: impl IntoIterator<Item = CapabilityKey>,
-) -> CapabilityTokenRequest {
+    capabilities: impl IntoIterator<Item = C>,
+) -> CapabilityTokenRequest
+where
+    C: OwnershipCapability,
+{
     let subject = subject.into();
     let permissions = capabilities
         .into_iter()
+        .map(OwnershipCapability::into_capability_key)
         .map(|capability| capability.as_str().to_string())
         .collect::<Vec<_>>();
     CapabilityTokenRequest::standard(&subject, &permissions)
@@ -192,6 +194,76 @@ impl<Phase, Output, Error> AuthorizedLifecyclePublication<Phase, Output, Error> 
 
     pub fn into_parts(self) -> (LifecyclePublicationCapability, OperationLifecycle<Phase, Output, Error>) {
         (self.capability, self.lifecycle)
+    }
+}
+
+/// Capability-gated readiness publication artifact.
+///
+/// This keeps readiness updates on the same sanctioned authority path as
+/// lifecycle updates instead of passing raw capability references through
+/// higher-layer helper APIs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorizedReadinessPublication<Payload> {
+    capability: ReadinessPublicationCapability,
+    payload: Payload,
+}
+
+impl<Payload> AuthorizedReadinessPublication<Payload> {
+    pub fn authorize(
+        capability: &ReadinessPublicationCapability,
+        payload: Payload,
+    ) -> Self {
+        Self {
+            capability: capability.clone(),
+            payload,
+        }
+    }
+
+    pub fn capability(&self) -> &CapabilityKey {
+        self.capability.as_key()
+    }
+
+    pub fn payload(&self) -> &Payload {
+        &self.payload
+    }
+
+    pub fn into_parts(self) -> (ReadinessPublicationCapability, Payload) {
+        (self.capability, self.payload)
+    }
+}
+
+/// Capability-gated actor-ingress mutation artifact.
+///
+/// Higher layers can use this wrapper when they need to hand a mutation command
+/// across an actor-owned ingress boundary without exposing raw capability refs
+/// as parallel API surface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorizedActorIngressMutation<Mutation> {
+    capability: ActorIngressMutationCapability,
+    mutation: Mutation,
+}
+
+impl<Mutation> AuthorizedActorIngressMutation<Mutation> {
+    pub fn authorize(
+        capability: &ActorIngressMutationCapability,
+        mutation: Mutation,
+    ) -> Self {
+        Self {
+            capability: capability.clone(),
+            mutation,
+        }
+    }
+
+    pub fn capability(&self) -> &CapabilityKey {
+        self.capability.as_key()
+    }
+
+    pub fn mutation(&self) -> &Mutation {
+        &self.mutation
+    }
+
+    pub fn into_parts(self) -> (ActorIngressMutationCapability, Mutation) {
+        (self.capability, self.mutation)
     }
 }
 
@@ -472,7 +544,8 @@ impl<Phase, Output, Error> Terminality for OperationLifecycle<Phase, Output, Err
 #[cfg(test)]
 mod tests {
     use super::{
-        ActorIngressMutationCapability, AuthorizedLifecyclePublication,
+        ActorIngressMutationCapability, AuthorizedActorIngressMutation,
+        AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
         LifecyclePublicationCapability, OperationLifecycle, OwnershipCapability,
         OwnershipCategory, OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
         OwnershipTransferCapability, ReadinessPublicationCapability, Terminality,
@@ -575,11 +648,11 @@ mod tests {
 
     #[test]
     fn ownership_capabilities_use_existing_capability_token_request_shape() {
-        let request = super::ownership_capability_token_request(
+        let request = super::ownership_capability_token_request_for(
             "owner-a",
             [
-                LifecyclePublicationCapability::new("semantic:lifecycle").into_capability_key(),
-                OwnershipTransferCapability::new("ownership:transfer").into_capability_key(),
+                LifecyclePublicationCapability::new("semantic:lifecycle"),
+                LifecyclePublicationCapability::new("semantic:lifecycle:secondary"),
             ],
         );
 
@@ -588,7 +661,7 @@ mod tests {
             request.permissions,
             vec![
                 "semantic:lifecycle".to_string(),
-                "ownership:transfer".to_string(),
+                "semantic:lifecycle:secondary".to_string(),
             ]
         );
     }
@@ -603,5 +676,26 @@ mod tests {
 
         assert_eq!(publication.capability().as_str(), "semantic:lifecycle");
         assert!(publication.lifecycle().is_submitted());
+    }
+
+    #[test]
+    fn readiness_publication_requires_capability_wrapper() {
+        let capability = ReadinessPublicationCapability::new("semantic:readiness");
+        let publication = AuthorizedReadinessPublication::authorize(
+            &capability,
+            "channel_membership_ready",
+        );
+
+        assert_eq!(publication.capability().as_str(), "semantic:readiness");
+        assert_eq!(publication.payload(), &"channel_membership_ready");
+    }
+
+    #[test]
+    fn actor_ingress_mutation_requires_capability_wrapper() {
+        let capability = ActorIngressMutationCapability::new("actor:ingress");
+        let mutation = AuthorizedActorIngressMutation::authorize(&capability, "join_channel");
+
+        assert_eq!(mutation.capability().as_str(), "actor:ingress");
+        assert_eq!(mutation.mutation(), &"join_channel");
     }
 }

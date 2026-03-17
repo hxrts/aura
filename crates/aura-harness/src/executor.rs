@@ -35,6 +35,7 @@ use crate::config::{
     ScenarioConfig, ScreenSource,
 };
 use crate::introspection::ToastLevel;
+use crate::timeouts::blocking_sleep;
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
@@ -808,7 +809,7 @@ fn execute_compatibility_step(
                         "send_clipboard timed out for source={source_instance_id} target={target_instance_id} timeout_ms={timeout_ms} last_error={attempt_error}"
                     );
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                blocking_sleep(Duration::from_millis(100));
             };
             if let Some(selector) = resolve_optional_field(step.selector.as_deref(), context)? {
                 dispatch(
@@ -2449,7 +2450,7 @@ fn execute_chat_command(
             keys: "i".to_string(),
         },
     )?;
-    std::thread::sleep(Duration::from_millis(180));
+    blocking_sleep(Duration::from_millis(180));
     dispatch(
         tool_api,
         ToolRequest::SendKeys {
@@ -2540,7 +2541,7 @@ fn execute_semantic_send_clipboard(
                 attempt_error
             );
         }
-        std::thread::sleep(Duration::from_millis(100));
+        blocking_sleep(Duration::from_millis(100));
     };
     dispatch_clipboard_text(tool_api, target_instance_id, &clipboard_text)?;
     Ok(())
@@ -2638,7 +2639,7 @@ fn wait_for_operation_handle_state(
         if Instant::now() >= deadline {
             break;
         }
-        std::thread::sleep(Duration::from_millis(40));
+        blocking_sleep(Duration::from_millis(40));
         let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
         if operation_handle_matches(&snapshot, handle, state) {
             return Ok(());
@@ -2680,7 +2681,7 @@ fn read_clipboard_value(
         if Instant::now() >= deadline {
             bail!("step {step_id} read_clipboard timed out on instance {instance_id} after {timeout_ms}ms");
         }
-        std::thread::sleep(Duration::from_millis(100));
+        blocking_sleep(Duration::from_millis(100));
     }
 }
 
@@ -3390,7 +3391,7 @@ fn wait_for_semantic_state(
                 Ok(None) => match fetch_ui_snapshot(tool_api, instance_id) {
                     Ok(snapshot) => snapshot,
                     Err(error) if is_browser_ui_snapshot_transient(&error) => {
-                        std::thread::sleep(Duration::from_millis(100));
+                        blocking_sleep(Duration::from_millis(100));
                         continue;
                     }
                     Err(error) => return Err(error),
@@ -3399,7 +3400,7 @@ fn wait_for_semantic_state(
                     match fetch_ui_snapshot(tool_api, instance_id) {
                         Ok(snapshot) => snapshot,
                         Err(fetch_error) if is_browser_ui_snapshot_transient(&fetch_error) => {
-                            std::thread::sleep(Duration::from_millis(100));
+                            blocking_sleep(Duration::from_millis(100));
                             continue;
                         }
                         Err(fetch_error) => return Err(fetch_error),
@@ -3411,7 +3412,7 @@ fn wait_for_semantic_state(
                 },
             }
         } else {
-            std::thread::sleep(Duration::from_millis(40));
+            blocking_sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
         if baseline_satisfied(required_newer_than, &snapshot)
@@ -3524,7 +3525,7 @@ fn wait_for_parity(
                 local = snapshot;
                 local_version = Some(version);
             } else {
-                std::thread::sleep(Duration::from_millis(40));
+                blocking_sleep(Duration::from_millis(40));
                 local = fetch_ui_snapshot(tool_api, instance_id)?;
             }
         } else if !wait_local_next && peer_backend_kind == "playwright_browser" {
@@ -3534,11 +3535,11 @@ fn wait_for_parity(
                 peer = snapshot;
                 peer_version = Some(version);
             } else {
-                std::thread::sleep(Duration::from_millis(40));
+                blocking_sleep(Duration::from_millis(40));
                 peer = fetch_ui_snapshot(tool_api, peer_instance)?;
             }
         } else {
-            std::thread::sleep(Duration::from_millis(40));
+            blocking_sleep(Duration::from_millis(40));
             local = fetch_ui_snapshot(tool_api, instance_id)?;
             peer = fetch_ui_snapshot(tool_api, peer_instance)?;
         }
@@ -3717,7 +3718,7 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
             )?;
             chunk.clear();
             chunk_len = 0;
-            std::thread::sleep(Duration::from_millis(CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS));
+            blocking_sleep(Duration::from_millis(CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS));
         }
     }
 
@@ -4774,7 +4775,7 @@ mod tests {
 
         let clipboard_path = alice_data.join(".harness-clipboard.txt");
         let writer_thread = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            blocking_sleep(std::time::Duration::from_millis(200));
             let _ = std::fs::write(&clipboard_path, "invite-code-123\n");
         });
 

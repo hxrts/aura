@@ -22,6 +22,7 @@ use crate::{
 use async_lock::RwLock;
 use aura_core::{
     types::{AuthorityId, FrostThreshold},
+    AttemptBudget,
     AuraError, CeremonyId, Hash32,
 };
 use aura_journal::fact::RelationalFact;
@@ -345,7 +346,12 @@ where
     SleepFn: FnMut(Duration) -> SleepFut + Send,
     SleepFut: Future<Output = ()> + Send,
 {
-    for attempt in 1..=policy.max_attempts {
+    let mut attempts = AttemptBudget::new(policy.max_attempts);
+    while attempts.can_attempt() {
+        let attempt = attempts
+            .record_attempt()
+            .map_err(AuraError::from)?
+            .saturating_add(1);
         sleep_fn(policy.interval).await;
 
         let status = get_ceremony_status(app_core, &ceremony_id).await?;

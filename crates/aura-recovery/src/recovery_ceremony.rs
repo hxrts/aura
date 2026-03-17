@@ -42,11 +42,18 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::{AuraError, AuraResult, Hash32};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+static RECOVERY_CEREMONY_MUTATION_CAPABILITY: LazyLock<ActorIngressMutationCapability> =
+    LazyLock::new(|| ActorIngressMutationCapability::new("aura-recovery:approval-ceremony"));
+static RECOVERY_CEREMONY_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
+    LazyLock::new(|| LifecyclePublicationCapability::new("aura-recovery:approval-facts"));
 
 // =============================================================================
 // CEREMONY TYPES
@@ -149,7 +156,25 @@ pub enum RecoveryCeremonyStatus {
     /// Consensus reached, recovery committed
     Committed,
     /// Ceremony aborted (insufficient approvals, rejection, or timeout)
-    Aborted { reason: String },
+    Aborted { reason: RecoveryCeremonyAbortReason },
+}
+
+/// Typed terminal failure for recovery ceremonies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoveryCeremonyAbortReason {
+    /// Ceremony exceeded its configured deadline.
+    TimedOut,
+    /// Ceremony was manually cancelled.
+    Manual { reason: String },
+}
+
+impl std::fmt::Display for RecoveryCeremonyAbortReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecoveryCeremonyAbortReason::TimedOut => write!(f, "Ceremony timed out"),
+            RecoveryCeremonyAbortReason::Manual { reason } => write!(f, "{reason}"),
+        }
+    }
 }
 
 /// Full state of a recovery ceremony.
@@ -375,6 +400,23 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         Self::new(effects, RecoveryCeremonyConfig::default())
     }
 
+    fn recovery_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
+        &RECOVERY_CEREMONY_MUTATION_CAPABILITY
+    }
+
+    fn recovery_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
+        &RECOVERY_CEREMONY_PUBLICATION_CAPABILITY
+    }
+
+    fn insert_ceremony(
+        &mut self,
+        _capability: &ActorIngressMutationCapability,
+        ceremony_id: RecoveryCeremonyId,
+        state: RecoveryCeremonyState,
+    ) {
+        self.ceremonies.insert(ceremony_id, state);
+    }
+
     // =========================================================================
     // CEREMONY LIFECYCLE
     // =========================================================================
@@ -434,11 +476,21 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             agreement_mode: policy_for(CeremonyFlow::RecoveryApproval).initial_mode(),
         };
 
-        // Store ceremony
-        self.ceremonies.insert(ceremony_id, state);
+        // Store ceremony through the sanctioned mutation boundary.
+        self.insert_ceremony(
+            Self::recovery_ceremony_mutation_capability(),
+            ceremony_id,
+            state,
+        );
 
         // Emit ceremony initiated fact
-        self.emit_ceremony_initiated_fact(ceremony_id, &request, &guardians, threshold)
+        self.emit_ceremony_initiated_fact(
+            Self::recovery_ceremony_publication_capability(),
+            ceremony_id,
+            &request,
+            &guardians,
+            threshold,
+        )
             .await?;
 
         Ok(ceremony_id)
@@ -499,7 +551,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             // Check timeout
             if now > ceremony.started_at_ms + ceremony.timeout_ms {
                 ceremony.status = RecoveryCeremonyStatus::Aborted {
-                    reason: "Ceremony timed out".to_string(),
+                    reason: RecoveryCeremonyAbortReason::TimedOut,
                 };
                 return Ok(false);
             }
@@ -527,12 +579,20 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         }
 
         // Emit approval received fact
-        self.emit_approval_received_fact(ceremony_id, &approval)
+        self.emit_approval_received_fact(
+            Self::recovery_ceremony_publication_capability(),
+            ceremony_id,
+            &approval,
+        )
             .await?;
 
         // Emit quorum reached fact if applicable
         if quorum_reached {
-            self.emit_quorum_reached_fact(ceremony_id).await?;
+            self.emit_quorum_reached_fact(
+                Self::recovery_ceremony_publication_capability(),
+                ceremony_id,
+            )
+            .await?;
         }
 
         Ok(quorum_reached)
@@ -581,6 +641,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
 
         // Emit committed fact
         self.emit_ceremony_committed_fact(
+            Self::recovery_ceremony_publication_capability(),
             ceremony_id,
             account_authority,
             &operation_type,
@@ -613,12 +674,20 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             _ => {}
         }
 
-        ceremony.status = RecoveryCeremonyStatus::Aborted {
+        let abort_reason = RecoveryCeremonyAbortReason::Manual {
             reason: reason.to_string(),
+        };
+        ceremony.status = RecoveryCeremonyStatus::Aborted {
+            reason: abort_reason.clone(),
         };
 
         // Emit aborted fact
-        self.emit_ceremony_aborted_fact(ceremony_id, reason).await?;
+        self.emit_ceremony_aborted_fact(
+            Self::recovery_ceremony_publication_capability(),
+            ceremony_id,
+            &abort_reason.to_string(),
+        )
+        .await?;
 
         Ok(())
     }
@@ -676,6 +745,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     /// Emit ceremony initiated fact.
     async fn emit_ceremony_initiated_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: RecoveryCeremonyId,
         request: &CeremonyRecoveryRequest,
         guardians: &[AuthorityId],
@@ -713,6 +783,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     /// Emit approval received fact.
     async fn emit_approval_received_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: RecoveryCeremonyId,
         approval: &RecoveryApproval,
     ) -> AuraResult<()> {
@@ -745,7 +816,11 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     }
 
     /// Emit quorum reached fact.
-    async fn emit_quorum_reached_fact(&self, ceremony_id: RecoveryCeremonyId) -> AuraResult<()> {
+    async fn emit_quorum_reached_fact(
+        &self,
+        _capability: &LifecyclePublicationCapability,
+        ceremony_id: RecoveryCeremonyId,
+    ) -> AuraResult<()> {
         let timestamp_ms = self
             .effects
             .physical_time()
@@ -788,6 +863,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     /// Emit ceremony committed fact.
     async fn emit_ceremony_committed_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: RecoveryCeremonyId,
         account_authority: AuthorityId,
         operation_type: &CeremonyRecoveryOperation,
@@ -832,6 +908,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     /// Emit ceremony aborted fact.
     async fn emit_ceremony_aborted_fact(
         &self,
+        _capability: &LifecyclePublicationCapability,
         ceremony_id: RecoveryCeremonyId,
         reason: &str,
     ) -> AuraResult<()> {
@@ -939,9 +1016,14 @@ mod tests {
         assert!(matches!(status, RecoveryCeremonyStatus::Committed));
 
         let status = RecoveryCeremonyStatus::Aborted {
-            reason: "test".to_string(),
+            reason: RecoveryCeremonyAbortReason::TimedOut,
         };
-        assert!(matches!(status, RecoveryCeremonyStatus::Aborted { .. }));
+        assert!(matches!(
+            status,
+            RecoveryCeremonyStatus::Aborted {
+                reason: RecoveryCeremonyAbortReason::TimedOut
+            }
+        ));
     }
 
     #[test]

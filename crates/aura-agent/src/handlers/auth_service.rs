@@ -557,7 +557,7 @@ mod tests {
             if service.is_authenticated().await {
                 return;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            effects.sleep_ms(20).await;
         }
         panic!("expected auth service to report authenticated within timeout");
     }

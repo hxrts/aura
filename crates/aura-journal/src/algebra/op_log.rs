@@ -249,17 +249,6 @@ impl OpLog {
         summary.cids.iter().all(|cid| self.contains_operation(cid))
     }
 
-    /// Get all operations as a vector of references
-    /// Alias for get_all_operations() for compatibility
-    pub fn list_ops(&self) -> Vec<&AttestedOp> {
-        self.get_all_operations()
-    }
-
-    /// Add an operation to the log
-    /// Alias for add_operation() for compatibility
-    pub fn append(&mut self, op: AttestedOp) -> Hash32 {
-        self.add_operation(op)
-    }
 }
 
 impl Default for OpLog {

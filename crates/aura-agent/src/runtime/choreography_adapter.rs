@@ -31,6 +31,7 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
+use aura_core::TimeoutBudget;
 use aura_core::FlowCost;
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
@@ -689,9 +690,26 @@ where
     where
         F: std::future::Future<Output = ChoreoResult<T>> + Send,
     {
-        tokio::time::timeout(dur, body)
+        let started_at = self
+            .effects
+            .physical_time()
             .await
-            .map_err(|_| TelltaleChoreographyError::Timeout(dur))?
+            .map_err(|_| TelltaleChoreographyError::Timeout(dur))?;
+        let budget = TimeoutBudget::from_start_and_timeout(&started_at, dur)
+            .map_err(|_| TelltaleChoreographyError::Timeout(dur))?;
+        let now = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|_| TelltaleChoreographyError::Timeout(dur))?;
+        let remaining = budget
+            .remaining_at(&now)
+            .map_err(|_| TelltaleChoreographyError::Timeout(dur))?;
+        let sleep_ms = remaining.as_millis().min(u128::from(u64::MAX)) as u64;
+        tokio::select! {
+            result = body => result,
+            _ = self.effects.sleep_ms(sleep_ms) => Err(TelltaleChoreographyError::Timeout(dur)),
+        }
     }
 }
 

@@ -480,16 +480,26 @@ impl AuthFactReducer {
                 guardian_id: *guardian_id,
             },
 
-            AuthFact::GuardianDenied { request_id, .. } => AuthFactDelta::RecoveryFailed {
+            AuthFact::GuardianDenied {
+                request_id, reason, ..
+            } => AuthFactDelta::RecoveryFailed {
                 request_id: request_id.clone(),
+                reason: RecoveryFailureReason::GuardianDenied {
+                    reason: reason.clone(),
+                },
             },
 
             AuthFact::RecoveryCompleted { request_id, .. } => AuthFactDelta::RecoveryCompleted {
                 request_id: request_id.clone(),
             },
 
-            AuthFact::RecoveryFailed { request_id, .. } => AuthFactDelta::RecoveryFailed {
+            AuthFact::RecoveryFailed {
+                request_id, reason, ..
+            } => AuthFactDelta::RecoveryFailed {
                 request_id: request_id.clone(),
+                reason: RecoveryFailureReason::RecoveryFailed {
+                    reason: reason.clone(),
+                },
             },
 
             // Facts that don't produce view deltas
@@ -572,7 +582,16 @@ pub enum AuthFactDelta {
     RecoveryCompleted { request_id: String },
 
     /// A recovery request failed
-    RecoveryFailed { request_id: String },
+    RecoveryFailed {
+        request_id: String,
+        reason: RecoveryFailureReason,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecoveryFailureReason {
+    GuardianDenied { reason: String },
+    RecoveryFailed { reason: String },
 }
 
 // =============================================================================

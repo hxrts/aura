@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/issue_owner_token_wrong_capability.rs:5:31
+  |
+5 |     let _ = issue_owner_token(&capability, "token-1", "session");
+  |             ----------------- ^^^^^^^^^^^ expected `&OwnershipTransferCapability`, found `&ActorIngressMutationCapability`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected reference `&OwnershipTransferCapability`
+             found reference `&ActorIngressMutationCapability`
+note: function defined here
+ --> src/ownership.rs
+  |
+  | pub fn issue_owner_token<Scope, TokenId>(
+  |        ^^^^^^^^^^^^^^^^^

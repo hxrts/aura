@@ -90,54 +90,19 @@ pub trait AckSignalCallback: Send + Sync {
     fn on_ack_signal(&self, signal: AckSignal);
 }
 
-/// No-op implementation
-pub struct NoOpAckSignalCallback;
-
-impl AckSignalCallback for NoOpAckSignalCallback {
-    fn on_ack_signal(&self, _signal: AckSignal) {
-        // Intentionally empty
-    }
-}
-
-/// Logging implementation
-pub struct LoggingAckSignalCallback;
-
-impl AckSignalCallback for LoggingAckSignalCallback {
-    fn on_ack_signal(&self, signal: AckSignal) {
-        match &signal {
-            AckSignal::AckReceived { fact_id, from } => {
-                tracing::debug!("Ack received for {:?} from {:?}", fact_id, from);
-            }
-            AckSignal::FullyAcked { fact_id } => {
-                tracing::info!("Fact {:?} fully acknowledged", fact_id);
-            }
-            AckSignal::RoutingFailed { fact_id, error } => {
-                tracing::warn!("Ack routing failed for {:?}: {}", fact_id, error);
-            }
-        }
-    }
-}
-
-/// Function-based callback wrapper
-pub struct FnAckSignalCallback<F>(F);
-
-impl<F> FnAckSignalCallback<F>
-where
-    F: Fn(AckSignal) + Send + Sync,
-{
-    /// Create a new function-based callback
-    pub fn new(f: F) -> Self {
-        Self(f)
-    }
-}
-
-impl<F> AckSignalCallback for FnAckSignalCallback<F>
+impl<F> AckSignalCallback for F
 where
     F: Fn(AckSignal) + Send + Sync,
 {
     fn on_ack_signal(&self, signal: AckSignal) {
-        (self.0)(signal);
+        (self)(signal);
     }
+}
+
+struct NullAckSignalCallback;
+
+impl AckSignalCallback for NullAckSignalCallback {
+    fn on_ack_signal(&self, _signal: AckSignal) {}
 }
 
 // =============================================================================
@@ -162,16 +127,6 @@ impl AckRouter {
         Self {
             callback: Arc::new(callback),
         }
-    }
-
-    /// Create a new ack router with no callbacks
-    pub fn no_op() -> Self {
-        Self::new(NoOpAckSignalCallback)
-    }
-
-    /// Create a new ack router with logging
-    pub fn with_logging() -> Self {
-        Self::new(LoggingAckSignalCallback)
     }
 
     /// Route a received ack to journal storage.
@@ -253,7 +208,7 @@ impl AckRouter {
 
 impl Default for AckRouter {
     fn default() -> Self {
-        Self::no_op()
+        Self::new(NullAckSignalCallback)
     }
 }
 
@@ -283,9 +238,9 @@ mod tests {
         let signal_count = Arc::new(AtomicUsize::new(0));
         let signal_count_clone = signal_count.clone();
 
-        let router = AckRouter::new(FnAckSignalCallback::new(move |_| {
+        let router = AckRouter::new(move |_| {
             signal_count_clone.fetch_add(1, Ordering::SeqCst);
-        }));
+        });
 
         let mut ack_storage = AckStorage::new();
         let expected_peers = vec![test_authority(1), test_authority(2)];
@@ -309,11 +264,11 @@ mod tests {
         let fully_acked = Arc::new(AtomicUsize::new(0));
         let fully_acked_clone = fully_acked.clone();
 
-        let router = AckRouter::new(FnAckSignalCallback::new(move |signal| {
+        let router = AckRouter::new(move |signal| {
             if matches!(signal, AckSignal::FullyAcked { .. }) {
                 fully_acked_clone.fetch_add(1, Ordering::SeqCst);
             }
-        }));
+        });
 
         let mut ack_storage = AckStorage::new();
         let expected_peers = vec![test_authority(1), test_authority(2)];
@@ -337,7 +292,7 @@ mod tests {
 
     #[test]
     fn test_route_batch() {
-        let router = AckRouter::no_op();
+        let router = AckRouter::default();
         let mut ack_storage = AckStorage::new();
 
         let expected_peers = vec![test_authority(1)];

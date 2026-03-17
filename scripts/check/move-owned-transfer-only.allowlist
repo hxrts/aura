@@ -4,6 +4,4 @@
 # rewrites onto sanctioned handoff / transfer surfaces.
 # Doc: work/ownership.md
 
-^crates/aura-agent/src/runtime/session_ingress\.rs:
-^crates/aura-app/src/ui_contract\.rs:
 ^crates/aura-ui/src/model\.rs:

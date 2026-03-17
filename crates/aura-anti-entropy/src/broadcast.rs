@@ -48,33 +48,33 @@ impl Default for BroadcastConfig {
 ///
 /// Includes rate limiting and back pressure handling to prevent overwhelming peers.
 /// When network effects are configured, sends go through actual network transport.
-#[derive(Clone)]
 pub struct BroadcasterHandler {
     config: BroadcastConfig,
-    /// Local operation store
-    oplog: Arc<RwLock<BTreeMap<Hash32, AttestedOp>>>,
-    /// Insertion order for oplog eviction
-    oplog_order: Arc<RwLock<VecDeque<Hash32>>>,
-    peers: Arc<RwLock<BTreeSet<DeviceId>>>,
-    /// Pending announcements (CID -> set of peers that need it)
-    pending_announcements: Arc<RwLock<BTreeMap<Hash32, BTreeSet<DeviceId>>>>,
-    /// Rate limiting: peer -> count of ops pushed in current interval
-    rate_limits: Arc<RwLock<BTreeMap<DeviceId, usize>>>,
+    state: RwLock<BroadcasterState>,
     /// Context ID for guard chain operations
     context_id: ContextId,
     /// Optional network effects for actual message transport
     network: Option<Arc<dyn NetworkEffects + Send + Sync>>,
 }
 
+#[derive(Default)]
+struct BroadcasterState {
+    /// Local operation store
+    oplog: BTreeMap<Hash32, AttestedOp>,
+    /// Insertion order for oplog eviction
+    oplog_order: VecDeque<Hash32>,
+    peers: BTreeSet<DeviceId>,
+    /// Pending announcements (CID -> set of peers that need it)
+    pending_announcements: BTreeMap<Hash32, BTreeSet<DeviceId>>,
+    /// Rate limiting: peer -> count of ops pushed in current interval
+    rate_limits: BTreeMap<DeviceId, usize>,
+}
+
 impl BroadcasterHandler {
     pub fn new(config: BroadcastConfig, context_id: ContextId) -> Self {
         Self {
             config,
-            oplog: Arc::new(RwLock::new(BTreeMap::new())),
-            oplog_order: Arc::new(RwLock::new(VecDeque::new())),
-            peers: Arc::new(RwLock::new(BTreeSet::new())),
-            pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
-            rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
+            state: RwLock::new(BroadcasterState::default()),
             context_id,
             network: None,
         }
@@ -88,11 +88,7 @@ impl BroadcasterHandler {
     ) -> Self {
         Self {
             config,
-            oplog: Arc::new(RwLock::new(BTreeMap::new())),
-            oplog_order: Arc::new(RwLock::new(VecDeque::new())),
-            peers: Arc::new(RwLock::new(BTreeSet::new())),
-            pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
-            rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
+            state: RwLock::new(BroadcasterState::default()),
             context_id,
             network: Some(network),
         }
@@ -108,34 +104,36 @@ impl BroadcasterHandler {
         }
 
         // Check back pressure
-        let pending = self.pending_announcements.read().await;
-        if pending.len() >= self.config.max_pending_announcements {
+        let pending_count = {
+            let state = self.state.read().await;
+            state.pending_announcements.len()
+        };
+        if pending_count >= self.config.max_pending_announcements {
             return Err(SyncError::BackPressure);
         }
-        drop(pending);
 
         let peers = self.get_connected_peers().await?;
         let cid = Hash32::from(op.op.parent_commitment);
 
         // Apply rate limiting per peer
-        let mut rate_limits = self.rate_limits.write().await;
         let mut eligible_peers = Vec::new();
-
-        for peer in peers {
-            let count = rate_limits.entry(peer).or_insert(0);
-            if *count < self.config.max_ops_per_peer {
-                eligible_peers.push(peer);
-                *count += 1;
+        {
+            let mut state = self.state.write().await;
+            for peer in peers {
+                let count = state.rate_limits.entry(peer).or_insert(0);
+                if *count < self.config.max_ops_per_peer {
+                    eligible_peers.push(peer);
+                    *count += 1;
+                }
             }
         }
-        drop(rate_limits);
 
         if !eligible_peers.is_empty() {
             self.push_op_to_peers(op, eligible_peers).await?;
         } else {
             // All peers at rate limit - queue for later
-            let mut pending = self.pending_announcements.write().await;
-            pending.insert(cid, BTreeSet::new());
+            let mut state = self.state.write().await;
+            state.pending_announcements.insert(cid, BTreeSet::new());
         }
 
         Ok(())
@@ -151,48 +149,51 @@ impl BroadcasterHandler {
             return Err(SyncError::OperationNotFound);
         }
 
-        let oplog = self.oplog.read().await;
-        oplog.get(&cid).cloned().ok_or(SyncError::OperationNotFound)
+        let state = self.state.read().await;
+        state
+            .oplog
+            .get(&cid)
+            .cloned()
+            .ok_or(SyncError::OperationNotFound)
     }
 
     /// Add operation to local store
     pub async fn add_op(&self, op: AttestedOp) {
         let cid = Hash32::from(op.op.parent_commitment);
-        let mut oplog = self.oplog.write().await;
-        let mut order = self.oplog_order.write().await;
-        if !oplog.contains_key(&cid) {
-            order.push_back(cid);
+        let mut state = self.state.write().await;
+        if !state.oplog.contains_key(&cid) {
+            state.oplog_order.push_back(cid);
         }
-        oplog.insert(cid, op);
-        while order.len() > self.config.max_oplog_entries {
-            if let Some(oldest) = order.pop_front() {
-                oplog.remove(&oldest);
+        state.oplog.insert(cid, op);
+        while state.oplog_order.len() > self.config.max_oplog_entries {
+            if let Some(oldest) = state.oplog_order.pop_front() {
+                state.oplog.remove(&oldest);
             }
         }
     }
 
     /// Add peer to known peer set
     pub async fn add_peer(&self, peer_id: DeviceId) {
-        let mut peers = self.peers.write().await;
-        peers.insert(peer_id);
+        let mut state = self.state.write().await;
+        state.peers.insert(peer_id);
     }
 
     /// Reset rate limits (should be called periodically)
     pub async fn reset_rate_limits(&self) {
-        let mut rate_limits = self.rate_limits.write().await;
-        rate_limits.clear();
+        let mut state = self.state.write().await;
+        state.rate_limits.clear();
     }
 
     /// Get pending announcements count (for monitoring)
     pub async fn pending_count(&self) -> usize {
-        let pending = self.pending_announcements.read().await;
-        pending.len()
+        let state = self.state.read().await;
+        state.pending_announcements.len()
     }
 
     /// Check if back pressure is active
     pub async fn has_back_pressure(&self) -> bool {
-        let pending = self.pending_announcements.read().await;
-        pending.len() >= self.config.max_pending_announcements
+        let state = self.state.read().await;
+        state.pending_announcements.len() >= self.config.max_pending_announcements
     }
 }
 
@@ -205,8 +206,8 @@ impl SyncEffects for BroadcasterHandler {
     }
 
     async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
-        let oplog = self.oplog.read().await;
-        let cids: BTreeSet<Hash32> = oplog.keys().copied().collect();
+        let state = self.state.read().await;
+        let cids: BTreeSet<Hash32> = state.oplog.keys().copied().collect();
         Ok(BloomDigest { cids })
     }
 
@@ -214,10 +215,10 @@ impl SyncEffects for BroadcasterHandler {
         &self,
         remote_digest: &BloomDigest,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        let oplog = self.oplog.read().await;
+        let state = self.state.read().await;
         let mut result = Vec::new();
 
-        for (cid, op) in oplog.iter() {
+        for (cid, op) in &state.oplog {
             if !remote_digest.cids.contains(cid) {
                 result.push(op.clone());
             }
@@ -232,11 +233,11 @@ impl SyncEffects for BroadcasterHandler {
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         // Return any ops we have that match the requested CIDs
-        let oplog = self.oplog.read().await;
+        let state = self.state.read().await;
         let mut result = Vec::new();
 
         for cid in cids {
-            if let Some(op) = oplog.get(&cid) {
+            if let Some(op) = state.oplog.get(&cid) {
                 result.push(op.clone());
             }
         }
@@ -245,20 +246,19 @@ impl SyncEffects for BroadcasterHandler {
     }
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
-        let mut oplog = self.oplog.write().await;
-        let mut order = self.oplog_order.write().await;
+        let mut state = self.state.write().await;
 
         for op in ops {
             let cid = Hash32::from(op.op.parent_commitment);
             // Deduplicate - only insert if not already present
-            if !oplog.contains_key(&cid) {
-                order.push_back(cid);
+            if !state.oplog.contains_key(&cid) {
+                state.oplog_order.push_back(cid);
             }
-            oplog.entry(cid).or_insert(op);
+            state.oplog.entry(cid).or_insert(op);
         }
-        while order.len() > self.config.max_oplog_entries {
-            if let Some(oldest) = order.pop_front() {
-                oplog.remove(&oldest);
+        while state.oplog_order.len() > self.config.max_oplog_entries {
+            if let Some(oldest) = state.oplog_order.pop_front() {
+                state.oplog.remove(&oldest);
             }
         }
 
@@ -267,16 +267,17 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
         // Check for back pressure
-        let pending = self.pending_announcements.read().await;
-        if pending.len() >= self.config.max_pending_announcements {
-            return Err(SyncError::BackPressure);
-        }
-        drop(pending);
-
-        // Get the operation
-        let oplog = self.oplog.read().await;
-        let op = oplog.get(&cid).ok_or(SyncError::OperationNotFound)?.clone();
-        drop(oplog);
+        let op = {
+            let state = self.state.read().await;
+            if state.pending_announcements.len() >= self.config.max_pending_announcements {
+                return Err(SyncError::BackPressure);
+            }
+            state
+                .oplog
+                .get(&cid)
+                .cloned()
+                .ok_or(SyncError::OperationNotFound)?
+        };
 
         // Eager push to neighbors
         self.eager_push_to_neighbors(op).await
@@ -301,8 +302,8 @@ impl SyncEffects for BroadcasterHandler {
                 peer_count = peers.len(),
                 "push_op_to_peers called without network effects - message not sent"
             );
-            let mut pending = self.pending_announcements.write().await;
-            pending.remove(&cid);
+            let mut state = self.state.write().await;
+            state.pending_announcements.remove(&cid);
             return Ok(());
         };
 
@@ -326,8 +327,8 @@ impl SyncEffects for BroadcasterHandler {
         }
 
         // Remove from pending announcements
-        let mut pending = self.pending_announcements.write().await;
-        pending.remove(&cid);
+        let mut state = self.state.write().await;
+        state.pending_announcements.remove(&cid);
 
         // If all sends failed, return an error
         if !send_errors.is_empty() && send_errors.len() == peers.len() {
@@ -341,8 +342,8 @@ impl SyncEffects for BroadcasterHandler {
     }
 
     async fn get_connected_peers(&self) -> Result<Vec<DeviceId>, SyncError> {
-        let peers = self.peers.read().await;
-        Ok(peers.iter().copied().collect())
+        let state = self.state.read().await;
+        Ok(state.peers.iter().copied().collect())
     }
 }
 
@@ -444,8 +445,8 @@ mod tests {
         // Fill pending queue to capacity
         for i in 0..6 {
             let cid = aura_core::Hash32([i as u8; 32]);
-            let mut pending = handler.pending_announcements.write().await;
-            pending.insert(cid, BTreeSet::new());
+            let mut state = handler.state.write().await;
+            state.pending_announcements.insert(cid, BTreeSet::new());
         }
 
         let op = create_test_op(aura_core::Hash32([99u8; 32]));
@@ -528,8 +529,8 @@ mod tests {
             .await
             .unwrap();
 
-        let oplog = handler.oplog.read().await;
-        assert_eq!(oplog.len(), 2); // Only 2 unique operations
+        let state = handler.state.read().await;
+        assert_eq!(state.oplog.len(), 2); // Only 2 unique operations
     }
 
     #[tokio::test]

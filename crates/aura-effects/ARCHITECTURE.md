@@ -33,6 +33,22 @@ Delegates to OS services for crypto, storage, networking, and time.
 - `Observed` and runtime layers consume handler behavior; handlers must not
   silently redefine semantic ownership.
 
+### Allowed Adapter Mechanics
+
+The following stateful mechanics are currently allowed because they are
+low-level adapter boundaries rather than product-semantic owners:
+
+- `reactive/*`: signal graph subscriptions and task registry used to drive the
+  reactive effect surface
+- `query/handler.rs`: query-side caches, pending-consensus tracking, and
+  subscription plumbing around the reactive/query effect boundary
+- `encrypted_storage.rs`: local master-key cache and one-time initialization
+  guard for the encrypted-storage adapter
+
+These surfaces are allowed only as handler-local mechanics. They must not grow
+product-semantic lifecycle, readiness ownership, or unsupervised business-flow
+coordination.
+
 ### Detailed Specifications
 
 ### InvariantStatelessHandlerBoundary

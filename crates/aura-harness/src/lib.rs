@@ -27,6 +27,7 @@ pub mod scenario;
 pub mod scenario_execution;
 pub mod screen_normalization;
 pub mod tool_api;
+pub mod timeouts;
 
 use std::path::{Path, PathBuf};
 

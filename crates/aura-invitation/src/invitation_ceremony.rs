@@ -49,6 +49,7 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::{AuraError, AuraResult, Hash32};
@@ -56,9 +57,15 @@ use aura_journal::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::LazyLock;
 
 use crate::facts::{CeremonyRelationshipId, InvitationFact};
 use crate::InvitationOffer;
+
+static INVITATION_CEREMONY_MUTATION_CAPABILITY: LazyLock<ActorIngressMutationCapability> =
+    LazyLock::new(|| ActorIngressMutationCapability::new("aura-invitation:ceremony"));
+static INVITATION_CEREMONY_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
+    LazyLock::new(|| LifecyclePublicationCapability::new("aura-invitation:ceremony-facts"));
 
 // =============================================================================
 // CEREMONY TYPES
@@ -184,7 +191,13 @@ pub enum CeremonyStatus {
     /// Consensus reached, relationship established
     Committed,
     /// Ceremony aborted (by either party or timeout)
-    Aborted { reason: String },
+    Aborted { reason: CeremonyAbortReason },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CeremonyAbortReason {
+    TimedOut,
+    Requested { reason: String },
 }
 
 /// Full state of an invitation ceremony.
@@ -292,6 +305,31 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         }
     }
 
+    fn invitation_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
+        &INVITATION_CEREMONY_MUTATION_CAPABILITY
+    }
+
+    fn invitation_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
+        &INVITATION_CEREMONY_PUBLICATION_CAPABILITY
+    }
+
+    fn insert_ceremony(
+        &mut self,
+        _capability: &ActorIngressMutationCapability,
+        ceremony_id: InvitationCeremonyId,
+        state: InvitationCeremonyState,
+    ) {
+        self.ceremonies.insert(ceremony_id, state);
+    }
+
+    fn remove_ceremony(
+        &mut self,
+        _capability: &ActorIngressMutationCapability,
+        ceremony_id: &InvitationCeremonyId,
+    ) {
+        self.ceremonies.remove(ceremony_id);
+    }
+
     // =========================================================================
     // CEREMONY LIFECYCLE - SENDER SIDE
     // =========================================================================
@@ -327,8 +365,12 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             timeout_ms: self.default_timeout_ms,
         };
 
-        // Store ceremony
-        self.ceremonies.insert(ceremony_id, state);
+        // Store ceremony through the sanctioned mutation boundary.
+        self.insert_ceremony(
+            Self::invitation_ceremony_mutation_capability(),
+            ceremony_id,
+            state,
+        );
 
         let command = Self::build_ceremony_initiated_command(ceremony_id, sender, now_ms);
 
@@ -358,7 +400,8 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         )?;
 
         for command in commands {
-            self.apply_command(command).await?;
+            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
+                .await?;
         }
 
         Ok(ceremony_id)
@@ -384,7 +427,8 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             self.plan_process_acceptance(ceremony_id, proposal, current_prestate, now_ms)?;
 
         for command in commands {
-            self.apply_command(command).await?;
+            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
+                .await?;
         }
 
         Ok(accepted)
@@ -439,7 +483,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             // Check timeout
             if now_ms > ceremony.started_at_ms + ceremony.timeout_ms {
                 ceremony.status = CeremonyStatus::Aborted {
-                    reason: "Ceremony timed out".to_string(),
+                    reason: CeremonyAbortReason::TimedOut,
                 };
                 return Ok((false, Vec::new()));
             }
@@ -469,11 +513,12 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
 
         let (relationship_id, commands) = self.plan_commit_ceremony(ceremony_id, timestamp_ms)?;
         for command in commands {
-            self.apply_command(command).await?;
+            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
+                .await?;
         }
 
         // Remove terminal ceremony state to prevent unbounded growth.
-        self.ceremonies.remove(&ceremony_id);
+        self.remove_ceremony(Self::invitation_ceremony_mutation_capability(), &ceremony_id);
 
         Ok(relationship_id)
     }
@@ -495,11 +540,12 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
 
         let commands = self.plan_abort_ceremony(ceremony_id, reason, timestamp_ms)?;
         for command in commands {
-            self.apply_command(command).await?;
+            self.apply_command(Self::invitation_ceremony_publication_capability(), command)
+                .await?;
         }
 
         // Remove terminal ceremony state to prevent unbounded growth.
-        self.ceremonies.remove(&ceremony_id);
+        self.remove_ceremony(Self::invitation_ceremony_mutation_capability(), &ceremony_id);
 
         Ok(())
     }
@@ -575,7 +621,9 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         }
 
         ceremony.status = CeremonyStatus::Aborted {
-            reason: reason.to_string(),
+            reason: CeremonyAbortReason::Requested {
+                reason: reason.to_string(),
+            },
         };
 
         let command = Self::build_ceremony_aborted_command(ceremony_id, reason, timestamp_ms);
@@ -767,7 +815,11 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         }
     }
 
-    async fn apply_command(&self, command: InvitationCeremonyCommand) -> AuraResult<()> {
+    async fn apply_command(
+        &self,
+        _capability: &LifecyclePublicationCapability,
+        command: InvitationCeremonyCommand,
+    ) -> AuraResult<()> {
         match command {
             InvitationCeremonyCommand::JournalAppend { key, fact } => {
                 let mut journal = self.effects.get_journal().await?;
@@ -860,7 +912,9 @@ mod tests {
         assert!(matches!(status, CeremonyStatus::Committed));
 
         let status = CeremonyStatus::Aborted {
-            reason: "test".to_string(),
+            reason: CeremonyAbortReason::Requested {
+                reason: "test".to_string(),
+            },
         };
         assert!(matches!(status, CeremonyStatus::Aborted { .. }));
     }

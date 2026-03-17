@@ -17,7 +17,6 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
-use std::time::Duration;
 
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, SyncStatus, DISCOVERED_PEERS_SIGNAL,
@@ -25,6 +24,8 @@ use aura_app::ui::signals::{
     TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::format_relative_time_from;
+use aura_core::effects::time::PhysicalTimeEffects;
+use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback,
@@ -242,8 +243,10 @@ pub fn SettingsScreen(
                     if let Ok(ts) = runtime.current_time_ms().await {
                         reactive_now_ms.set(Some(ts));
                     }
+                    runtime.sleep_ms(1000).await;
+                } else {
+                    let _ = PhysicalTimeHandler::new().sleep_ms(1000).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1000)).await;
             }
         }
     });

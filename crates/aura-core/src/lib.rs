@@ -156,12 +156,13 @@ pub use conformance::{
 };
 pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use ownership::{
-    ActorIngressMutationCapability, AuthorizedLifecyclePublication,
+    ActorIngressMutationCapability, AuthorizedActorIngressMutation,
+    AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
     LifecyclePublicationCapability, OpaqueOperationHandle, OperationLifecycle,
     OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain,
     OwnershipResult, OwnershipTransfer, OwnershipTransferCapability, OwnerToken,
     ReadinessPublicationCapability, Terminality, issue_operation_handle,
-    issue_owner_token, ownership_capability_token_request,
+    issue_owner_token, ownership_capability_token_request_for,
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,

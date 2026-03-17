@@ -1,5 +1,6 @@
 //! Runtime access helpers for workflows.
 
+use async_trait::async_trait;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,7 +12,13 @@ use async_lock::RwLock;
 use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
-use aura_core::AuraError;
+use aura_core::{
+    effects::{PhysicalTimeEffects, TimeError},
+    execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
+    time::PhysicalTime,
+    AuraError, RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
+    TimeoutExecutionProfile, TimeoutRunError,
+};
 
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
 const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
@@ -51,6 +58,109 @@ fn harness_convergence_step_timeout_ms() -> u64 {
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|timeout_ms| *timeout_ms > 0)
         .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS)
+}
+
+struct RuntimeTimeEffects<'a> {
+    runtime: &'a Arc<dyn RuntimeBridge>,
+}
+
+#[async_trait]
+impl PhysicalTimeEffects for RuntimeTimeEffects<'_> {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        self.runtime
+            .current_time_ms()
+            .await
+            .map(|ts_ms| PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            })
+            .map_err(|error| TimeError::OperationFailed {
+                reason: error.to_string(),
+            })
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        self.runtime.sleep_ms(ms).await;
+        Ok(())
+    }
+}
+
+/// Shared timeout scaling profile for workflow-owned local deadlines.
+pub fn workflow_timeout_profile() -> TimeoutExecutionProfile {
+    if harness_mode_enabled() {
+        TimeoutExecutionProfile::harness()
+    } else {
+        TimeoutExecutionProfile::production()
+    }
+}
+
+/// Scale a workflow-local timeout duration for the active execution lane.
+pub fn scaled_workflow_duration(duration: Duration) -> Result<Duration, TimeoutBudgetError> {
+    workflow_timeout_profile().scale_duration(duration)
+}
+
+/// Create a runtime-backed timeout budget for a workflow stage or operation.
+pub async fn workflow_timeout_budget(
+    runtime: &Arc<dyn RuntimeBridge>,
+    duration: Duration,
+) -> Result<TimeoutBudget, TimeoutBudgetError> {
+    let started_at = runtime
+        .current_time_ms()
+        .await
+        .map_err(|error| TimeoutBudgetError::time_source_unavailable(error.to_string()))
+        .map(|ts_ms| PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        })?;
+    let scaled = scaled_workflow_duration(duration)?;
+    TimeoutBudget::from_start_and_timeout(&started_at, scaled)
+}
+
+/// Execute a workflow operation under a runtime-backed timeout budget.
+pub async fn execute_with_runtime_timeout_budget<T, E, F, Fut>(
+    runtime: &Arc<dyn RuntimeBridge>,
+    budget: &TimeoutBudget,
+    operation: F,
+) -> Result<T, TimeoutRunError<E>>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let time = RuntimeTimeEffects { runtime };
+    execute_with_timeout_budget(&time, budget, operation).await
+}
+
+/// Build a runtime-backed retry policy scaled for the active workflow lane.
+/// Build a runtime-backed retry policy scaled for the active workflow lane.
+pub fn workflow_retry_policy(
+    max_attempts: u32,
+    initial_delay: Duration,
+    max_delay: Duration,
+) -> Result<RetryBudgetPolicy, TimeoutBudgetError> {
+    let base = RetryBudgetPolicy::new(
+        max_attempts,
+        ExponentialBackoffPolicy::new(
+            initial_delay,
+            max_delay,
+            workflow_timeout_profile().jitter(),
+        )?,
+    );
+    workflow_timeout_profile().apply_retry_policy(&base)
+}
+
+/// Execute a workflow operation under a runtime-backed retry budget.
+/// Execute a workflow operation under a runtime-backed retry budget.
+pub async fn execute_with_runtime_retry_budget<T, E, F, Fut>(
+    runtime: &Arc<dyn RuntimeBridge>,
+    policy: &RetryBudgetPolicy,
+    operation: F,
+) -> Result<T, RetryRunError<E>>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let time = RuntimeTimeEffects { runtime };
+    execute_with_retry_budget(&time, policy, operation).await
 }
 
 /// Get the runtime bridge or return a consistent error.
@@ -95,8 +205,18 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
     let backoff_ms = harness_convergence_backoff_ms();
     let step_timeout_ms = harness_convergence_step_timeout_ms();
 
-    let run_step = |future: Pin<Box<dyn Future<Output = Result<(), IntentError>> + Send>>| async move {
-        let _ = tokio::time::timeout(Duration::from_millis(step_timeout_ms), future).await;
+    let run_step =
+        |future: Pin<Box<dyn Future<Output = Result<(), IntentError>> + Send>>| async move {
+            let requested = Duration::from_millis(step_timeout_ms);
+            match workflow_timeout_budget(runtime, requested).await {
+                Ok(budget) => {
+                    let _ =
+                        execute_with_runtime_timeout_budget(runtime, &budget, || future).await;
+                }
+                Err(_) => {
+                    let _ = future.await;
+                }
+            }
     };
 
     for round in 0..rounds {

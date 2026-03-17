@@ -13,6 +13,7 @@ use aura_agent::{
     RuntimeService, RuntimeServiceContext, ServiceHealth, SyncManagerConfig, SyncServiceManager,
     TaskSupervisor,
 };
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
@@ -116,7 +117,9 @@ async fn handle_daemon_mode(
                 println!("\nReceived shutdown signal...");
                 break;
             }
-            _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
+            _ = async {
+                let _ = time_handler.sleep_ms(Duration::from_secs(interval_secs).as_millis() as u64).await;
+            } => {
                 tick_count += 1;
                 let uptime_secs = (time_handler.physical_time_now_ms() - start_time) / 1000;
 

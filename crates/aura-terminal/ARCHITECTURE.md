@@ -76,6 +76,19 @@ The correct split is:
 | Callback/subscription bridges for parity-critical flows | `Observed` | upstream workflow/runtime coordinators | local UI adaptation only; never terminal semantic truth | harness, shell |
 | Local focus/selection and nonsemantic view state | `Observed` | TUI shell/model | shell/update-loop code | harness snapshots |
 
+### Required Ownership Tests
+
+Changes to parity-critical TUI ownership boundaries should ship with:
+
+- dynamic tests proving dropped semantic-operation owners publish explicit
+  terminal failure rather than hanging
+- invariant tests proving authoritative and local operation snapshots do not
+  regress terminal state on the same logical instance
+- handle/instance tests proving stale or replaced operation handles do not
+  match the wrong lifecycle record
+- boundary tests showing relinquished callback ownership does not continue to
+  author semantic truth after handoff
+
 ### Detailed Specifications
 
 ### InvariantTerminalUiBoundary

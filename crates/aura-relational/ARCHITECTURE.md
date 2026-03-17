@@ -13,7 +13,7 @@ guardian request handling, and consensus-backed relationship establishment.
 - `ContactFact`, `ContactFactReducer` for contact relationship facts.
 - `GuardianRequest`, `GuardianRequestState` for guardian binding requests.
 - `GuardianService` for guardian relationship management.
-- `ConsensusAdapter` for consensus-backed operations.
+- Direct `aura-consensus` integration for consensus-backed operations.
 - `RelationalContext` for cross-authority context.
 
 ## Invariants

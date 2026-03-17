@@ -1,7 +1,10 @@
 use std::sync::{Arc, LazyLock};
 
 use async_lock::RwLock;
-use aura_core::AuraError;
+use aura_core::{
+    AuraError, AuthorizedReadinessPublication, LifecyclePublicationCapability,
+    ReadinessPublicationCapability,
+};
 
 use crate::signal_defs::{
     AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
@@ -15,6 +18,30 @@ use crate::AppCore;
 
 static AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
+static SEMANTIC_LIFECYCLE_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
+    LazyLock::new(|| LifecyclePublicationCapability::new("aura-app:semantic-lifecycle"));
+static SEMANTIC_READINESS_PUBLICATION_CAPABILITY: LazyLock<ReadinessPublicationCapability> =
+    LazyLock::new(|| ReadinessPublicationCapability::new("aura-app:semantic-readiness"));
+
+/// Return the sanctioned lifecycle-publication capability for shared semantic
+/// operation status publication.
+pub fn semantic_lifecycle_publication_capability() -> &'static LifecyclePublicationCapability {
+    &SEMANTIC_LIFECYCLE_PUBLICATION_CAPABILITY
+}
+
+pub(crate) fn semantic_readiness_publication_capability() -> &'static ReadinessPublicationCapability
+{
+    &SEMANTIC_READINESS_PUBLICATION_CAPABILITY
+}
+
+fn authorize_readiness_publication(
+    fact: AuthoritativeSemanticFact,
+) -> AuthorizedReadinessPublication<AuthoritativeSemanticFact> {
+    AuthorizedReadinessPublication::authorize(
+        semantic_readiness_publication_capability(),
+        fact,
+    )
+}
 
 /// Mutate the authoritative semantic-fact set and publish the replacement atomically.
 pub async fn update_authoritative_semantic_facts<F>(
@@ -39,8 +66,9 @@ where
 /// Publish one authoritative semantic fact, replacing any prior fact with the same key.
 pub async fn publish_authoritative_semantic_fact(
     app_core: &Arc<RwLock<AppCore>>,
-    fact: AuthoritativeSemanticFact,
+    publication: AuthorizedReadinessPublication<AuthoritativeSemanticFact>,
 ) -> Result<(), AuraError> {
+    let (_capability, fact) = publication.into_parts();
     update_authoritative_semantic_facts(app_core, |facts| {
         facts.retain(|existing| existing.key() != fact.key());
         facts.push(fact);
@@ -51,9 +79,12 @@ pub async fn publish_authoritative_semantic_fact(
 /// Replace the full set of authoritative semantic facts for one fact kind.
 pub async fn replace_authoritative_semantic_facts_of_kind(
     app_core: &Arc<RwLock<AppCore>>,
-    kind: AuthoritativeSemanticFactKind,
-    replacements: Vec<AuthoritativeSemanticFact>,
+    publication: AuthorizedReadinessPublication<(
+        AuthoritativeSemanticFactKind,
+        Vec<AuthoritativeSemanticFact>,
+    )>,
 ) -> Result<(), AuraError> {
+    let (_capability, (kind, replacements)) = publication.into_parts();
     update_authoritative_semantic_facts(app_core, |facts| {
         facts.retain(|existing| existing.kind() != kind);
         facts.extend(replacements);
@@ -64,17 +95,26 @@ pub async fn replace_authoritative_semantic_facts_of_kind(
 /// Publish the current phase for a semantic operation.
 pub async fn publish_authoritative_operation_phase(
     app_core: &Arc<RwLock<AppCore>>,
+    capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     kind: SemanticOperationKind,
     phase: SemanticOperationPhase,
 ) -> Result<(), AuraError> {
-    publish_authoritative_operation_phase_with_instance(app_core, operation_id, None, kind, phase)
-        .await
+    publish_authoritative_operation_phase_with_instance(
+        app_core,
+        capability,
+        operation_id,
+        None,
+        kind,
+        phase,
+    )
+    .await
 }
 
 /// Publish the current phase for a semantic operation with an explicit instance.
 pub async fn publish_authoritative_operation_phase_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
+    _capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
@@ -82,11 +122,11 @@ pub async fn publish_authoritative_operation_phase_with_instance(
 ) -> Result<(), AuraError> {
     publish_authoritative_semantic_fact(
         app_core,
-        AuthoritativeSemanticFact::OperationStatus {
+        authorize_readiness_publication(AuthoritativeSemanticFact::OperationStatus {
             operation_id,
             instance_id,
             status: SemanticOperationStatus::new(kind, phase),
-        },
+        }),
     )
     .await
 }
@@ -94,17 +134,26 @@ pub async fn publish_authoritative_operation_phase_with_instance(
 /// Publish a terminal failure for a semantic operation.
 pub async fn publish_authoritative_operation_failure(
     app_core: &Arc<RwLock<AppCore>>,
+    capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     kind: SemanticOperationKind,
     error: SemanticOperationError,
 ) -> Result<(), AuraError> {
-    publish_authoritative_operation_failure_with_instance(app_core, operation_id, None, kind, error)
-        .await
+    publish_authoritative_operation_failure_with_instance(
+        app_core,
+        capability,
+        operation_id,
+        None,
+        kind,
+        error,
+    )
+    .await
 }
 
 /// Publish a terminal failure for a semantic operation with an explicit instance.
 pub async fn publish_authoritative_operation_failure_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
+    _capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
@@ -112,11 +161,11 @@ pub async fn publish_authoritative_operation_failure_with_instance(
 ) -> Result<(), AuraError> {
     publish_authoritative_semantic_fact(
         app_core,
-        AuthoritativeSemanticFact::OperationStatus {
+        authorize_readiness_publication(AuthoritativeSemanticFact::OperationStatus {
             operation_id,
             instance_id,
             status: SemanticOperationStatus::failed(kind, error),
-        },
+        }),
     )
     .await
 }
@@ -124,16 +173,17 @@ pub async fn publish_authoritative_operation_failure_with_instance(
 /// Publish explicit cancellation for a semantic operation.
 pub async fn publish_authoritative_operation_cancellation(
     app_core: &Arc<RwLock<AppCore>>,
+    _capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     kind: SemanticOperationKind,
 ) -> Result<(), AuraError> {
     publish_authoritative_semantic_fact(
         app_core,
-        AuthoritativeSemanticFact::OperationStatus {
+        authorize_readiness_publication(AuthoritativeSemanticFact::OperationStatus {
             operation_id,
             instance_id: None,
             status: SemanticOperationStatus::cancelled(kind),
-        },
+        }),
     )
     .await
 }
@@ -155,14 +205,14 @@ mod tests {
 
         let first = publish_authoritative_semantic_fact(
             &app_core,
-            AuthoritativeSemanticFact::PendingHomeInvitationReady,
+            authorize_readiness_publication(AuthoritativeSemanticFact::PendingHomeInvitationReady),
         );
         let second = publish_authoritative_semantic_fact(
             &app_core,
-            AuthoritativeSemanticFact::ContactLinkReady {
+            authorize_readiness_publication(AuthoritativeSemanticFact::ContactLinkReady {
                 authority_id: "owner-a".into(),
                 contact_count: 1,
-            },
+            }),
         );
 
         let (first_result, second_result) = tokio::join!(first, second);

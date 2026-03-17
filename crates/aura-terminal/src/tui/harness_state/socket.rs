@@ -4,6 +4,13 @@ use crate::tui::updates::{
     HarnessCommandReceiptHandle, HarnessCommandSender, HarnessCommandSubmission,
 };
 use aura_app::ui::contract::{HarnessUiCommand, HarnessUiCommandReceipt};
+use aura_core::effects::PhysicalTimeEffects;
+use aura_core::{
+    execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
+    TimeoutExecutionProfile, TimeoutRunError,
+};
+use aura_effects::time::PhysicalTimeHandler;
 use parking_lot::Mutex;
 use std::fs;
 use std::io;
@@ -95,26 +102,93 @@ async fn forward_harness_commands_from_listener(listener: UnixListener) {
 
 /// Per-connection timeout for reading a harness command payload.
 const HARNESS_COMMAND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const HARNESS_COMMAND_RETRY_INITIAL_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(50);
+const HARNESS_COMMAND_RETRY_MAX_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(500);
+const HARNESS_COMMAND_RETRY_ATTEMPTS: u32 = 200;
+
+fn harness_timeout_profile() -> TimeoutExecutionProfile {
+    TimeoutExecutionProfile::harness()
+}
+
+fn scaled_harness_duration(base: std::time::Duration) -> io::Result<std::time::Duration> {
+    harness_timeout_profile()
+        .scale_duration(base)
+        .map_err(|error| io::Error::other(format!("invalid harness timeout policy: {error}")))
+}
+
+async fn harness_read_budget(time: &PhysicalTimeHandler) -> io::Result<TimeoutBudget> {
+    let started_at = time
+        .physical_time()
+        .await
+        .map_err(|error| io::Error::other(format!("failed to read physical time: {error}")))?;
+    TimeoutBudget::from_start_and_timeout(&started_at, scaled_harness_duration(HARNESS_COMMAND_READ_TIMEOUT)?)
+        .map_err(|error| io::Error::other(format!("failed to create harness read budget: {error}")))
+}
+
+fn harness_command_retry_policy() -> io::Result<RetryBudgetPolicy> {
+    let base = RetryBudgetPolicy::new(
+        HARNESS_COMMAND_RETRY_ATTEMPTS,
+        ExponentialBackoffPolicy::new(
+            HARNESS_COMMAND_RETRY_INITIAL_DELAY,
+            HARNESS_COMMAND_RETRY_MAX_DELAY,
+            harness_timeout_profile().jitter(),
+        )
+        .map_err(|error| io::Error::other(format!("invalid harness backoff policy: {error}")))?,
+    );
+    harness_timeout_profile()
+        .apply_retry_policy(&base)
+        .map_err(|error| io::Error::other(format!("invalid harness retry policy: {error}")))
+}
+
+fn timeout_error_reason(error: TimeoutBudgetError, context: &str) -> String {
+    format!("{context} timed out: {error}")
+}
+
+fn retry_error_reason(error: RetryRunError<io::Error>, unavailable_reason: &str) -> String {
+    match error {
+        RetryRunError::Timeout(error) => timeout_error_reason(error, unavailable_reason),
+        RetryRunError::AttemptsExhausted {
+            attempts_used: _,
+            last_error,
+        } => last_error.to_string(),
+    }
+}
 
 async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
     let mut payload = Vec::new();
-    let read_result = tokio::time::timeout(
-        HARNESS_COMMAND_READ_TIMEOUT,
-        stream.read_to_end(&mut payload),
-    )
-    .await;
-    let read_result = match read_result {
-        Ok(inner) => inner,
-        Err(_) => {
+    let time = PhysicalTimeHandler::new();
+    let read_budget = match harness_read_budget(&time).await {
+        Ok(budget) => budget,
+        Err(error) => {
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
-                    reason: "harness command read timed out".to_string(),
+                    reason: error.to_string(),
                 },
             )
             .await;
             return true;
         }
+    };
+    let read_result = execute_with_timeout_budget(&time, &read_budget, || async {
+        stream.read_to_end(&mut payload).await
+    })
+    .await;
+    let read_result = match read_result {
+        Ok(_bytes_read) => Ok(()),
+        Err(TimeoutRunError::Timeout(error)) => {
+            let _ = write_harness_command_receipt(
+                &mut stream,
+                &HarnessUiCommandReceipt::Rejected {
+                    reason: timeout_error_reason(error, "harness command read"),
+                },
+            )
+            .await;
+            return true;
+        }
+        Err(TimeoutRunError::Operation(error)) => Err(error),
     };
     if let Err(error) = read_result {
         let _ = write_harness_command_receipt(
@@ -139,63 +213,54 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
             return true;
         }
     };
-    let max_retries: u32 = std::env::var("AURA_HARNESS_COMMAND_max_retries")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200); // 200 × 50ms = 10s budget
-    let retry_interval_ms: u64 = std::env::var("AURA_HARNESS_COMMAND_retry_interval_ms")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(50);
-    let mut attempts = 0u32;
-    let receipt = loop {
-        let command_tx = active_harness_command_sender().lock().clone();
-        let Some(command_tx) = command_tx else {
-            attempts += 1;
-            if attempts >= max_retries {
-                break HarnessUiCommandReceipt::Rejected {
-                    reason: "TUI harness command plane is temporarily unavailable".to_string(),
-                };
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
-            continue;
-        };
+    let retry_policy = match harness_command_retry_policy() {
+        Ok(policy) => policy,
+        Err(error) => {
+            let _ = write_harness_command_receipt(
+                &mut stream,
+                &HarnessUiCommandReceipt::Rejected {
+                    reason: error.to_string(),
+                },
+            )
+            .await;
+            return true;
+        }
+    };
+    let receipt = match execute_with_retry_budget(&time, &retry_policy, |_| {
+        let command = command.clone();
+        async move {
+            let command_tx =
+                active_harness_command_sender()
+                    .lock()
+                    .clone()
+                    .ok_or_else(|| {
+                        io::Error::other("TUI harness command plane is temporarily unavailable")
+                    })?;
 
-        let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
-        match command_tx
-            .send(HarnessCommandSubmission {
-                command: command.clone(),
-                receipt: HarnessCommandReceiptHandle::new(receipt_tx),
+            let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
+            command_tx
+                .send(HarnessCommandSubmission {
+                    command,
+                    receipt: HarnessCommandReceiptHandle::new(receipt_tx),
+                })
+                .await
+                .map_err(|error| {
+                    io::Error::other(format!(
+                        "failed to submit harness command into shell ingress: {error}"
+                    ))
+                })?;
+
+            receipt_rx.await.map_err(|error| {
+                io::Error::other(format!("harness command dropped before application: {error}"))
             })
-            .await
-        {
-            Ok(()) => {}
-            Err(error) => {
-                attempts += 1;
-                if attempts >= max_retries {
-                    break HarnessUiCommandReceipt::Rejected {
-                        reason: format!(
-                            "failed to submit harness command into shell ingress: {error}"
-                        ),
-                    };
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
-                continue;
-            }
         }
-
-        match receipt_rx.await {
-            Ok(receipt) => break receipt,
-            Err(error) => {
-                attempts += 1;
-                if attempts >= max_retries {
-                    break HarnessUiCommandReceipt::Rejected {
-                        reason: format!("harness command dropped before application: {error}"),
-                    };
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(retry_interval_ms)).await;
-            }
-        }
+    })
+    .await
+    {
+        Ok(receipt) => receipt,
+        Err(error) => HarnessUiCommandReceipt::Rejected {
+            reason: retry_error_reason(error, "harness command submission"),
+        },
     };
     let _ = write_harness_command_receipt(&mut stream, &receipt).await;
     true

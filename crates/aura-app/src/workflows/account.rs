@@ -9,12 +9,17 @@
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
 use crate::views::PendingAccountBootstrap;
-use crate::workflows::{context, runtime::require_runtime, settings, system};
+use crate::workflows::{
+    context,
+    runtime::{execute_with_runtime_retry_budget, require_runtime, workflow_retry_policy},
+    settings, system,
+};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_core::AuraError;
+use aura_core::{AuraError, RetryRunError};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Threshold configuration for account setup
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -358,20 +363,34 @@ pub async fn finalize_runtime_account_bootstrap(
     {
         const SIGNING_KEY_ATTEMPTS: usize = 40;
         const BOOTSTRAP_RETRY_MS: u64 = 250;
-        for attempt in 0..SIGNING_KEY_ATTEMPTS {
+        let retry_policy = workflow_retry_policy(
+            SIGNING_KEY_ATTEMPTS as u32,
+            Duration::from_millis(BOOTSTRAP_RETRY_MS),
+            Duration::from_millis(BOOTSTRAP_RETRY_MS),
+        )?;
+        let _ = execute_with_runtime_retry_budget(
+            &require_runtime(app_core).await?,
+            &retry_policy,
+            |_attempt| async {
             let runtime = {
                 let core = app_core.read().await;
                 core.runtime().cloned()
             };
             if let Some(runtime) = runtime {
                 if runtime.bootstrap_signing_keys().await.is_ok() {
-                    break;
+                    return Ok(());
                 }
             }
-            if attempt + 1 < SIGNING_KEY_ATTEMPTS {
-                let _ = crate::workflows::time::sleep_ms(app_core, BOOTSTRAP_RETRY_MS).await;
-            }
-        }
+            Err(AuraError::from(crate::workflows::error::WorkflowError::Precondition(
+                "runtime signing keys not yet bootstrapped",
+            )))
+        },
+        )
+        .await
+        .map_err(|error| match error {
+            RetryRunError::Timeout(timeout_error) => AuraError::from(timeout_error),
+            RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
+        });
     }
 
     #[cfg(target_arch = "wasm32")]

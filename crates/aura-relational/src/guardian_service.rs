@@ -2,11 +2,15 @@
 //! with consensus-backed GuardianBinding facts.
 
 use crate::guardian_request::{GuardianRequestFact, GuardianRequestPayload};
-use crate::{run_consensus_with_config, ConsensusConfig, RelationalContext};
+use crate::RelationalContext;
 use async_trait::async_trait;
+use aura_consensus::relational::run_consensus_with_config;
+use aura_consensus::types::ConsensusConfig;
 use aura_core::effects::guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
 use aura_core::relational::GuardianBinding;
 use aura_core::{AuraError, Prestate, Result};
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
 
 /// Guardian service backed by a RelationalContext
@@ -84,6 +88,8 @@ impl GuardianEffects for GuardianService {
             .map_err(|e| AuraError::invalid(e.to_string()))?;
 
         // Run consensus for GuardianBinding
+        let random = RealRandomHandler;
+        let time = PhysicalTimeHandler;
         let consensus_proof = run_consensus_with_config(
             ctx.context_id,
             &prestate,
@@ -91,6 +97,8 @@ impl GuardianEffects for GuardianService {
             self.consensus_config.clone(),
             input.key_packages.clone(),
             input.group_public_key.clone(),
+            &random,
+            &time,
         )
         .await?;
 

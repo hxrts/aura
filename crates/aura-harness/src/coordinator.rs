@@ -27,6 +27,7 @@ use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::events::EventStream;
 use crate::runtime_substrate::RuntimeSubstrateController;
 use crate::screen_normalization::normalize_screen;
+use crate::timeouts::blocking_sleep;
 use crate::tool_api::ToolKey;
 
 const BACKEND_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -250,7 +251,7 @@ impl HarnessCoordinator {
             if Instant::now() >= deadline {
                 bail!("instance {instance_id} failed startup health gate within {timeout:?}");
             }
-            std::thread::sleep(BACKEND_POLL_INTERVAL);
+            blocking_sleep(BACKEND_POLL_INTERVAL);
         }
     }
 
@@ -291,7 +292,7 @@ impl HarnessCoordinator {
                                     "instance {instance_id} failed startup health gate within {BACKEND_HEALTH_TIMEOUT:?}"
                                 );
                             }
-                            std::thread::sleep(BACKEND_POLL_INTERVAL);
+                            blocking_sleep(BACKEND_POLL_INTERVAL);
                         }
                         eprintln!(
                             "[harness] startup phase=health_check done instance={instance_id} backend={backend_kind}"
@@ -425,7 +426,7 @@ impl HarnessCoordinator {
             if Instant::now() >= deadline {
                 bail!("instance {instance_id} failed teardown health gate within {timeout:?}");
             }
-            std::thread::sleep(BACKEND_POLL_INTERVAL);
+            blocking_sleep(BACKEND_POLL_INTERVAL);
         }
     }
 
@@ -794,7 +795,7 @@ impl HarnessCoordinator {
             let remaining = deadline.saturating_duration_since(now);
             let delay = remaining.min(Duration::from_millis(poll_ms));
             if !delay.is_zero() {
-                std::thread::sleep(delay);
+                blocking_sleep(delay);
             }
         }
 
@@ -1123,7 +1124,7 @@ fn wait_for_owned_web_server(
                 log_tail
             );
         }
-        std::thread::sleep(WEB_SERVER_POLL_INTERVAL);
+        blocking_sleep(WEB_SERVER_POLL_INTERVAL);
     }
 }
 

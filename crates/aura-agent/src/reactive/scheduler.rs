@@ -936,6 +936,7 @@ mod tests {
 
         // Wait (bounded) for update to avoid startup/timing flakes.
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let time = aura_effects::time::PhysicalTimeHandler::new();
         loop {
             if *update_count.read().await == 1 {
                 break;
@@ -944,7 +945,7 @@ mod tests {
                 tokio::time::Instant::now() < deadline,
                 "timed out waiting for scheduler to apply fact"
             );
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            time.sleep_ms(10).await.unwrap();
         }
 
         // Shutdown
@@ -1091,7 +1092,10 @@ mod tests {
         }
 
         // Wait for batch window to expire
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        aura_effects::time::PhysicalTimeHandler::new()
+            .sleep_ms(30)
+            .await
+            .unwrap();
 
         // All 5 facts should be batched into one update
         assert_eq!(*update_count.read().await, 5);

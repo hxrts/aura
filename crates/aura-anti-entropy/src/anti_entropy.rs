@@ -16,7 +16,6 @@ use aura_guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
 use aura_guards::{GuardOperation, GuardOperationId};
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 /// Composite trait bound for guard chain operations
 pub trait GuardChainEffects: GuardEffects + GuardContextProvider + PhysicalTimeEffects {}
@@ -35,25 +34,27 @@ impl<T> AntiEntropyProtocolEffects for T where T: GuardChainEffects + TransportE
 /// OpLog differences between peers. Provides eventual consistency
 /// through periodic background synchronization.
 /// All network operations go through guard chain to enforce security.
-#[derive(Clone)]
 pub struct AntiEntropyHandler {
     /// Anti-entropy configuration (sync intervals, batch sizes, etc.)
     config: AntiEntropyConfig,
-    // In real implementation, these would be trait objects for Journal and Transport
-    oplog: Arc<RwLock<Vec<AttestedOp>>>,
-    peers: Arc<RwLock<BTreeSet<DeviceId>>>,
+    state: RwLock<AntiEntropyState>,
     /// Context ID for guard chain operations
     context_id: ContextId,
     /// Runtime cost configuration
     runtime: AntiEntropyRuntimeConfig,
 }
 
+#[derive(Default)]
+struct AntiEntropyState {
+    oplog: Vec<AttestedOp>,
+    peers: BTreeSet<DeviceId>,
+}
+
 impl AntiEntropyHandler {
     pub fn new(config: AntiEntropyConfig, context_id: ContextId) -> Self {
         Self {
             config,
-            oplog: Arc::new(RwLock::new(Vec::new())),
-            peers: Arc::new(RwLock::new(BTreeSet::new())),
+            state: RwLock::new(AntiEntropyState::default()),
             context_id,
             runtime: AntiEntropyRuntimeConfig::default(),
         }
@@ -123,8 +124,8 @@ impl AntiEntropyHandler {
         local: &BloomDigest,
         remote: &BloomDigest,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        let oplog = self.oplog.read().await;
-        pure::compute_ops_to_push(&oplog, local, remote)
+        let state = self.state.read().await;
+        pure::compute_ops_to_push(&state.oplog, local, remote)
     }
 
     /// Compute which CIDs we should pull from peer
@@ -150,28 +151,29 @@ impl AntiEntropyHandler {
 
     /// Add peer to known peer set
     pub async fn add_peer(&self, peer_id: DeviceId) {
-        let mut peers = self.peers.write().await;
-        peers.insert(peer_id);
+        let mut state = self.state.write().await;
+        state.peers.insert(peer_id);
     }
 
     /// Add operation to local OpLog
     pub async fn add_op(&self, op: AttestedOp) {
-        let mut oplog = self.oplog.write().await;
-        oplog.push(op);
+        let mut state = self.state.write().await;
+        state.oplog.push(op);
     }
 
     /// Get all operations in local OpLog
     pub async fn get_ops(&self) -> Vec<AttestedOp> {
-        let oplog = self.oplog.read().await;
-        oplog.clone()
+        let state = self.state.read().await;
+        state.oplog.clone()
     }
 }
 
 impl AntiEntropyHandler {
     /// Get digest of local OpLog.
     pub async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
-        let oplog = self.oplog.read().await;
-        let cids: BTreeSet<Hash32> = oplog
+        let state = self.state.read().await;
+        let cids: BTreeSet<Hash32> = state
+            .oplog
             .iter()
             .map(|op| op.op.parent_commitment.into())
             .collect();
@@ -190,13 +192,13 @@ impl AntiEntropyHandler {
 
     /// Merge remote operations into the local OpLog.
     pub async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+        let mut state = self.state.write().await;
         for op in ops {
             // Verify before merging
             self.verify_operation(&op)?;
 
             // Add to local OpLog
-            let mut oplog = self.oplog.write().await;
-            oplog.push(op);
+            state.oplog.push(op);
         }
 
         Ok(())
@@ -209,8 +211,9 @@ impl AntiEntropyHandler {
         cid: Hash32,
     ) -> Result<AttestedOp, SyncError> {
         // Local oplog lookup - no network request needed
-        let oplog = self.oplog.read().await;
-        oplog
+        let state = self.state.read().await;
+        state
+            .oplog
             .iter()
             .find(|op| Hash32::from(op.op.parent_commitment) == cid)
             .cloned()
@@ -219,8 +222,8 @@ impl AntiEntropyHandler {
 
     /// Get list of currently connected peers.
     pub async fn get_connected_peers(&self) -> Result<Vec<DeviceId>, SyncError> {
-        let peers = self.peers.read().await;
-        Ok(peers.iter().copied().collect())
+        let state = self.state.read().await;
+        Ok(state.peers.iter().copied().collect())
     }
 
     /// Request operations from peer with guard chain enforcement
@@ -276,8 +279,9 @@ impl AntiEntropyHandler {
 
         // In real implementation, transport would send request using the receipt
         // Local oplog lookup - network request pending transport layer integration
-        let oplog = self.oplog.read().await;
-        let ops_result: Vec<AttestedOp> = oplog
+        let state = self.state.read().await;
+        let ops_result: Vec<AttestedOp> = state
+            .oplog
             .iter()
             .filter(|op| cids.contains(&Hash32::from(op.op.parent_commitment)))
             .cloned()
@@ -295,10 +299,13 @@ impl AntiEntropyHandler {
         cid: Hash32,
         effect_system: &E,
     ) -> Result<(), SyncError> {
-        let peers = self.peers.read().await;
+        let peers: Vec<DeviceId> = {
+            let state = self.state.read().await;
+            state.peers.iter().copied().collect()
+        };
         let mut failed_peers = Vec::new();
 
-        for &peer_id in peers.iter() {
+        for peer_id in peers.iter().copied() {
             let peer_authority = AuthorityId::from(peer_id.0);
 
             let guard_chain = create_send_guard_op(

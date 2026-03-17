@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 // use rand_chacha::rand_core::SeedableRng; // Used in tests
 use async_lock::RwLock;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Set of witnesses participating in consensus
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -116,7 +115,7 @@ impl TryFrom<&NonEmptyWitnessSet> for WitnessSet {
 }
 
 /// Set of witnesses participating in consensus
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WitnessSet {
     /// Required threshold for consensus
     pub threshold: u16,
@@ -125,7 +124,7 @@ pub struct WitnessSet {
     pub witnesses: Vec<AuthorityId>,
 
     /// Cached witness states for pipelining optimization
-    states: Arc<RwLock<HashMap<AuthorityId, WitnessState>>>,
+    states: RwLock<HashMap<AuthorityId, WitnessState>>,
 }
 
 impl WitnessSet {
@@ -152,7 +151,7 @@ impl WitnessSet {
         Ok(Self {
             threshold,
             witnesses,
-            states: Arc::new(RwLock::new(HashMap::new())),
+            states: RwLock::new(HashMap::new()),
         })
     }
 

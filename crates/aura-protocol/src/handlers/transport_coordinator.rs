@@ -13,11 +13,14 @@
 //! - Coordinates connection lifecycle across the system
 //! - Enforces global connection limits and cleanup policies
 
-use aura_core::effects::{NetworkEffects, NetworkError, PhysicalTimeEffects, StorageEffects};
+use aura_core::effects::{
+    JitterMode, NetworkEffects, NetworkError, PhysicalTimeEffects, RetryPolicy, StorageEffects,
+};
 use aura_core::{types::identifiers::DeviceId, ContextId};
 use aura_effects::transport::{NonZeroDuration, TransportConfig, TransportError};
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 /// Transport coordination configuration
 #[derive(Debug, Clone)]
@@ -82,46 +85,41 @@ pub type CoordinationResult<T> = Result<T, TransportCoordinationError>;
 #[derive(Debug, Clone)]
 pub struct RetryingTransportManager {
     config: TransportConfig,
-    max_retries: u32,
+    retry_policy: RetryPolicy,
 }
 
 impl RetryingTransportManager {
     /// Create new retrying transport manager
     pub fn new(config: TransportConfig, max_retries: u32) -> Self {
+        let retry_policy = RetryPolicy::exponential()
+            .with_max_attempts(max_retries.saturating_sub(1))
+            .with_initial_delay(Duration::from_millis(100))
+            .with_max_delay(Duration::from_secs(3))
+            .with_jitter(JitterMode::Deterministic);
         Self {
             config,
-            max_retries,
+            retry_policy,
         }
     }
 
     async fn connect_with_retry(
         &self,
-        network: &(impl NetworkEffects + ?Sized),
+        effects: &(impl NetworkEffects + PhysicalTimeEffects),
         address: &str,
     ) -> Result<ConnectionInfo, TransportCoordinationError> {
-        let mut last_error: Option<NetworkError> = None;
-
-        for attempt in 1..=self.max_retries {
-            match network.open(address).await {
-                Ok(connection_id) => return Ok(ConnectionInfo { connection_id }),
-                Err(e) => {
-                    last_error = Some(e);
-                    if attempt < self.max_retries {
-                        continue;
-                    }
-                }
-            }
-        }
-
-        let final_error = last_error
-            .map(|e| TransportCoordinationError::Effect(format!("Network open failed: {e}")))
-            .unwrap_or_else(|| {
-                TransportCoordinationError::Transport(TransportError::ConnectionFailed(
-                    "All retry attempts exhausted".to_string(),
-                ))
-            });
-
-        Err(final_error)
+        self.retry_policy
+            .execute_with_effects(effects, || async {
+                effects
+                    .open(address)
+                    .await
+                    .map(|connection_id| ConnectionInfo { connection_id })
+                    .map_err(|error| {
+                        TransportCoordinationError::Effect(format!(
+                            "Network open failed: {error}"
+                        ))
+                    })
+            })
+            .await
     }
 
     async fn send_data(
@@ -149,7 +147,6 @@ struct ConnectionInfo {
 }
 
 use async_lock::RwLock;
-use std::sync::Arc;
 
 /// Local transport coordinator - NO choreography
 /// Composes transport effects for single-device operations
@@ -157,8 +154,13 @@ use std::sync::Arc;
 pub struct TransportCoordinator<E> {
     config: TransportCoordinationConfig,
     transport_manager: RetryingTransportManager,
-    active_connections: Arc<RwLock<HashMap<String, ConnectionState>>>,
+    state: RwLock<TransportCoordinatorState>,
     effects: E,
+}
+
+#[derive(Debug, Default)]
+struct TransportCoordinatorState {
+    active_connections: HashMap<String, ConnectionState>,
 }
 
 /// Local connection state tracking
@@ -191,7 +193,7 @@ where
         Self {
             config,
             transport_manager,
-            active_connections: Arc::new(RwLock::new(HashMap::new())),
+            state: RwLock::new(TransportCoordinatorState::default()),
             effects,
         }
     }
@@ -205,8 +207,8 @@ where
     ) -> CoordinationResult<String> {
         // Check connection limit
         {
-            let connections = self.active_connections.read().await;
-            if connections.len() >= self.config.max_connections {
+            let state = self.state.read().await;
+            if state.active_connections.len() >= self.config.max_connections {
                 return Err(TransportCoordinationError::ProtocolFailed(
                     "Maximum connections exceeded".to_string(),
                 ));
@@ -235,8 +237,10 @@ where
         };
 
         {
-            let mut connections = self.active_connections.write().await;
-            connections.insert(connection.connection_id.clone(), connection_state);
+            let mut state = self.state.write().await;
+            state
+                .active_connections
+                .insert(connection.connection_id.clone(), connection_state);
         }
 
         Ok(connection.connection_id)
@@ -251,8 +255,8 @@ where
         let now_ms = current_time.ts_ms;
 
         {
-            let mut connections = self.active_connections.write().await;
-            if let Some(connection_state) = connections.get_mut(connection_id) {
+            let mut state = self.state.write().await;
+            if let Some(connection_state) = state.active_connections.get_mut(connection_id) {
                 connection_state.last_activity_ms = now_ms;
             } else {
                 return Err(TransportCoordinationError::ProtocolFailed(format!(
@@ -274,8 +278,8 @@ where
     pub async fn disconnect_peer(&self, connection_id: &str) -> CoordinationResult<()> {
         // Remove from active connections
         {
-            let mut connections = self.active_connections.write().await;
-            connections.remove(connection_id);
+            let mut state = self.state.write().await;
+            state.active_connections.remove(connection_id);
         }
 
         // Clean up transport resources
@@ -291,14 +295,17 @@ where
 
     /// Get connection information
     pub async fn get_connection_info(&self, connection_id: &str) -> Option<DeviceId> {
-        let connections = self.active_connections.read().await;
-        connections.get(connection_id).map(|state| state.device_id)
+        let state = self.state.read().await;
+        state
+            .active_connections
+            .get(connection_id)
+            .map(|connection| connection.device_id)
     }
 
     /// List all active connections
     pub async fn list_connections(&self) -> Vec<String> {
-        let connections = self.active_connections.read().await;
-        connections.keys().cloned().collect()
+        let state = self.state.read().await;
+        state.active_connections.keys().cloned().collect()
     }
 
     /// Clean up stale connections
@@ -316,9 +323,9 @@ where
 
         // Find stale connections
         {
-            let connections = self.active_connections.read().await;
-            for (connection_id, state) in connections.iter() {
-                if now_ms.saturating_sub(state.last_activity_ms) > max_idle_ms {
+            let state = self.state.read().await;
+            for (connection_id, connection) in &state.active_connections {
+                if now_ms.saturating_sub(connection.last_activity_ms) > max_idle_ms {
                     to_remove.push(connection_id.clone());
                 }
             }
@@ -337,7 +344,7 @@ where
 
     /// Get coordination statistics
     pub async fn get_stats(&self) -> CoordinationStats {
-        let connections = self.active_connections.read().await;
+        let state = self.state.read().await;
 
         // Get current time for calculating ages
         let current_time_ms = self.effects.physical_time().await.ok().map(|t| t.ts_ms);
@@ -346,21 +353,21 @@ where
         let mut oldest_connection_ms = None;
         let mut newest_connection_ms = None;
 
-        for state in connections.values() {
+        for connection in state.active_connections.values() {
             *connection_count_by_context
-                .entry(state.context_id)
+                .entry(connection.context_id)
                 .or_insert(0) += 1;
 
             if oldest_connection_ms.is_none()
-                || state.last_activity_ms < oldest_connection_ms.unwrap()
+                || connection.last_activity_ms < oldest_connection_ms.unwrap()
             {
-                oldest_connection_ms = Some(state.last_activity_ms);
+                oldest_connection_ms = Some(connection.last_activity_ms);
             }
 
             if newest_connection_ms.is_none()
-                || state.last_activity_ms > newest_connection_ms.unwrap()
+                || connection.last_activity_ms > newest_connection_ms.unwrap()
             {
-                newest_connection_ms = Some(state.last_activity_ms);
+                newest_connection_ms = Some(connection.last_activity_ms);
             }
         }
 
@@ -375,7 +382,7 @@ where
         });
 
         CoordinationStats {
-            total_connections: connections.len(),
+            total_connections: state.active_connections.len(),
             connection_count_by_context,
             oldest_connection_age,
             newest_connection_age,

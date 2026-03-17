@@ -16,6 +16,7 @@ aura-signature = { path = "../aura-signature" }
 aura-authentication = { path = "../aura-authentication" }
 aura-authorization = { path = "../aura-authorization" }
 aura-effects = { path = "../aura-effects" }
+aura-consensus = { path = "../aura-consensus" }
 aura-protocol = { path = "../aura-protocol" }
 aura-relational = { path = "../aura-relational" }
 aura-macros = { path = "../aura-macros" }

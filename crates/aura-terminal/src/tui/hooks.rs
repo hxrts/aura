@@ -60,8 +60,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_lock::Mutex;
 use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
+use aura_core::{
+    execute_with_retry_budget, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
+    TimeoutExecutionProfile,
+};
+use aura_effects::time::PhysicalTimeHandler;
 
 use crate::error::TerminalResult;
 use crate::tui::context::{InitializedAppCore, IoContext};
@@ -203,11 +209,37 @@ impl AppCoreContext {
 /// Maximum outer retry attempts before giving up on a signal subscription.
 /// At 2s max backoff this is ~6+ minutes of retrying before the loop exits.
 const MAX_SUBSCRIPTION_RETRIES: u32 = 200;
+const SUBSCRIPTION_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
+const SUBSCRIPTION_MAX_BACKOFF: Duration = Duration::from_secs(2);
+
+fn subscription_timeout_profile() -> TimeoutExecutionProfile {
+    if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        TimeoutExecutionProfile::harness()
+    } else {
+        TimeoutExecutionProfile::production()
+    }
+}
+
+fn subscription_retry_policy() -> RetryBudgetPolicy {
+    let profile = subscription_timeout_profile();
+    let base = RetryBudgetPolicy::new(
+        MAX_SUBSCRIPTION_RETRIES,
+        ExponentialBackoffPolicy::new(
+            SUBSCRIPTION_INITIAL_BACKOFF,
+            SUBSCRIPTION_MAX_BACKOFF,
+            profile.jitter(),
+        )
+        .expect("subscription backoff policy must be valid"),
+    );
+    profile
+        .apply_retry_policy(&base)
+        .expect("subscription retry policy must scale")
+}
 
 pub async fn subscribe_signal_with_retry<T, F>(
     app_core: InitializedAppCore,
     signal: &'static Signal<T>,
-    mut on_value: F,
+    on_value: F,
 ) where
     T: Clone + Send + Sync + 'static,
     F: FnMut(T) + Send + 'static,
@@ -217,94 +249,84 @@ pub async fn subscribe_signal_with_retry<T, F>(
         core.reactive().clone()
     };
 
-    let mut last_emitted: Option<String> = None;
-    let mut backoff = Duration::from_millis(50);
-    let mut retries = 0u32;
+    let last_emitted = Arc::new(Mutex::new(None::<String>));
+    let on_value = Arc::new(Mutex::new(on_value));
+    let time = PhysicalTimeHandler::new();
+    let retry_policy = subscription_retry_policy();
 
-    loop {
-        retries += 1;
-        if retries > MAX_SUBSCRIPTION_RETRIES {
-            tracing::warn!(
-                signal = %signal.id(),
-                retries,
-                "Signal subscription abandoned after max retries"
-            );
-            break;
-        }
-        // Guard against races where a component subscribes before init_signals().
+    let result = execute_with_retry_budget(&time, &retry_policy, |_attempt| async {
         if !reactive.is_registered(signal.id()) {
-            maybe_emit_reactive_error(
-                &reactive,
-                &mut last_emitted,
-                format!("Reactive signal not registered: {}", signal.id()),
-            )
-            .await;
-
-            tokio::time::sleep(backoff).await;
-            backoff = (backoff * 2).min(Duration::from_secs(2));
-            continue;
+            let message = format!("Reactive signal not registered: {}", signal.id());
+            maybe_emit_reactive_error(&reactive, &last_emitted, message.clone()).await;
+            return Err(message);
         }
 
-        // Catch-up read.
         match reactive.read(signal).await {
             Ok(value) => {
-                on_value(value);
-                backoff = Duration::from_millis(50);
+                let mut on_value = on_value.lock().await;
+                (*on_value)(value);
             }
             Err(e) => {
-                maybe_emit_reactive_error(
-                    &reactive,
-                    &mut last_emitted,
-                    format!(
-                        "Reactive read failed ({}): {}",
-                        signal.id(),
-                        format_reactive_error(&e)
-                    ),
-                )
-                .await;
-
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(Duration::from_secs(2));
-                continue;
+                let message = format!(
+                    "Reactive read failed ({}): {}",
+                    signal.id(),
+                    format_reactive_error(&e)
+                );
+                maybe_emit_reactive_error(&reactive, &last_emitted, message.clone()).await;
+                return Err(message);
             }
         }
 
-        // Subscribe and forward updates. If the stream errors, retry.
-        // Reset retry counter since the subscription was successfully established.
-        retries = 0;
         let mut stream = reactive.subscribe(signal);
         loop {
             match stream.recv().await {
                 Ok(value) => {
-                    on_value(value);
-                    backoff = Duration::from_millis(50);
+                    let mut on_value = on_value.lock().await;
+                    (*on_value)(value);
                 }
                 Err(e) => {
-                    maybe_emit_reactive_error(
-                        &reactive,
-                        &mut last_emitted,
-                        format!(
-                            "Reactive subscription failed ({}): {}",
-                            signal.id(),
-                            format_reactive_error(&e)
-                        ),
-                    )
-                    .await;
-                    break;
+                    let message = format!(
+                        "Reactive subscription failed ({}): {}",
+                        signal.id(),
+                        format_reactive_error(&e)
+                    );
+                    maybe_emit_reactive_error(&reactive, &last_emitted, message.clone()).await;
+                    return Err(message);
                 }
             }
         }
+    })
+    .await;
 
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(Duration::from_secs(2));
+    match result {
+        Ok(()) => {}
+        Err(RetryRunError::AttemptsExhausted {
+            attempts_used,
+            last_error,
+        }) => {
+            tracing::warn!(
+                signal = %signal.id(),
+                attempts_used,
+                last_error,
+                "Signal subscription abandoned after max retries"
+            );
+        }
+        Err(RetryRunError::Timeout(error)) => {
+            tracing::warn!(
+                signal = %signal.id(),
+                error = %error,
+                "Signal subscription abandoned because retry budget handling timed out"
+            );
+        }
     }
 }
 
 async fn maybe_emit_reactive_error(
     reactive: &ReactiveHandler,
-    last_emitted: &mut Option<String>,
+    last_emitted: &Arc<Mutex<Option<String>>>,
     message: String,
 ) {
+    let mut last_emitted = last_emitted.lock().await;
     if last_emitted.as_deref() == Some(&message) {
         return;
     }

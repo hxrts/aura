@@ -41,10 +41,10 @@
 //! journal facts using join-semilattice operations.
 
 use super::{GuardEffects, GuardOperationId, ProtocolGuard};
-use aura_core::{AuraResult, Journal, TimeEffects};
+use aura_core::{AuraResult, Journal, RetryPolicy, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
-use std::{collections::HashMap, future::Future};
+use std::{collections::HashMap, future::Future, time::Duration};
 use tracing::{debug, error, info, instrument, warn};
 
 /// Journal coupling coordinator for the guard chain
@@ -390,48 +390,51 @@ impl JournalCoupler {
         };
 
         let mut current_journal = initial_journal.clone();
-        let mut applied_ops = Vec::new();
-
-        // Apply the annotation with retry logic
-        for attempt in 0..self.max_retry_attempts {
-            match self
-                .apply_single_annotation(annotation, effect_system, &current_journal)
-                .await
-            {
-                Ok((updated_journal, journal_op)) => {
-                    current_journal = updated_journal;
-                    applied_ops.push(journal_op);
-                    break;
-                }
-                Err(e) => {
-                    if attempt == self.max_retry_attempts - 1 {
-                        error!(
-                            operation_id = %operation_id,
-                            attempt = attempt + 1,
-                            error = %e,
-                            "Journal annotation application failed after max retries"
-                        );
-                        return Err(e);
-                    } else {
-                        warn!(
-                            operation_id = %operation_id,
-                            attempt = attempt + 1,
-                            error = %e,
-                            "Journal annotation application failed, retrying"
-                        );
-                        // Small delay before retry
-                        let delay_ms = 10 * (attempt + 1) as u64;
-                        effect_system.sleep_ms(delay_ms).await.map_err(|e| {
-                            aura_core::AuraError::internal(format!(
-                                "Failed to sleep during journal operation retry: {e}"
-                            ))
-                        })?;
+        let retry_policy = RetryPolicy::exponential()
+            .with_max_attempts(self.max_retry_attempts.saturating_sub(1) as u32)
+            .with_initial_delay(Duration::from_millis(10))
+            .with_max_delay(Duration::from_millis(250));
+        let mut attempt = 0u32;
+        let result = retry_policy
+            .execute_with_sleep(
+                || {
+                    let journal_snapshot = current_journal.clone();
+                    attempt += 1;
+                    async move {
+                        self.apply_single_annotation(annotation, effect_system, &journal_snapshot)
+                            .await
                     }
+                },
+                |delay| async move {
+                    let _ = effect_system.sleep_ms(delay.as_millis() as u64).await;
+                },
+            )
+            .await;
+
+        match result {
+            Ok((updated_journal, journal_op)) => {
+                current_journal = updated_journal;
+                Ok((current_journal, vec![journal_op]))
+            }
+            Err(e) => {
+                if attempt > 1 {
+                    error!(
+                        operation_id = %operation_id,
+                        attempt,
+                        error = %e,
+                        "Journal annotation application failed after retry budget exhausted"
+                    );
+                } else {
+                    error!(
+                        operation_id = %operation_id,
+                        attempt = 1,
+                        error = %e,
+                        "Journal annotation application failed"
+                    );
                 }
+                Err(e)
             }
         }
-
-        Ok((current_journal, applied_ops))
     }
 
     /// Couple journal operations with a successful send operation

@@ -2,11 +2,14 @@
 //!
 //! This module owns runtime-backed writes for per-home capability configuration.
 
-use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
+use crate::workflows::runtime::{
+    converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
+    workflow_retry_policy,
+};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
-use aura_core::AuraError;
+use aura_core::{AuraError, RetryRunError};
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::{AccessLevel, AccessLevelCapabilityConfig, SocialFact};
 use std::collections::BTreeSet;
@@ -33,29 +36,35 @@ async fn send_relational_fact_with_retry(
     context_id: ContextId,
     fact: &RelationalFact,
 ) -> Result<(), AuraError> {
-    let mut last_error: Option<String> = None;
-
-    for attempt in 0..ACCESS_FACT_SEND_MAX_ATTEMPTS {
-        match runtime.send_chat_fact(peer, context_id, fact).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error.to_string()),
-        }
-
-        if attempt + 1 < ACCESS_FACT_SEND_MAX_ATTEMPTS {
-            converge_runtime(runtime).await;
-            for _ in 0..ACCESS_FACT_SEND_YIELDS_PER_RETRY {
-                cooperative_yield().await;
+    let retry_policy = workflow_retry_policy(
+        ACCESS_FACT_SEND_MAX_ATTEMPTS as u32,
+        std::time::Duration::from_millis(1),
+        std::time::Duration::from_millis(1),
+    )?;
+    execute_with_runtime_retry_budget(runtime, &retry_policy, |attempt| {
+        let runtime = Arc::clone(runtime);
+        async move {
+            if attempt > 0 {
+                converge_runtime(&runtime).await;
+                for _ in 0..ACCESS_FACT_SEND_YIELDS_PER_RETRY {
+                    cooperative_yield().await;
+                }
             }
+            runtime
+                .send_chat_fact(peer, context_id, fact)
+                .await
+                .map_err(|error| AuraError::from(super::error::WorkflowError::DeliveryFailed {
+                    peer: peer.to_string(),
+                    attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
+                    detail: error.to_string(),
+                }))
         }
-    }
-
-    let detail = last_error.unwrap_or_else(|| "unknown transport error".to_string());
-    Err(super::error::WorkflowError::DeliveryFailed {
-        peer: peer.to_string(),
-        attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
-        detail,
-    }
-    .into())
+    })
+    .await
+    .map_err(|error| match error {
+        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
+        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
+    })
 }
 
 async fn resolve_scope_by_channel_id(
