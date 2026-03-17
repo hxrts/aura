@@ -4,14 +4,28 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/async-task-ownership.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=(
+  '^crates/aura-agent/src/handlers/recovery_service\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/reactive/frp\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/reactive/pipeline\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/reactive/pipeline\.rs:.*spawn_local'
+  '^crates/aura-agent/src/reactive/scheduler\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/effects/choreography\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/effects/network\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/effects/network\.rs:.*spawn_local'
+  '^crates/aura-agent/src/runtime/effects/transport\.rs:.*spawn_local'
+  '^crates/aura-agent/src/runtime/services/lan_discovery\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/services/rendezvous_manager\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/services/rendezvous_manager\.rs:.*spawn_local'
+  '^crates/aura-agent/src/runtime/system\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime_bridge/mod\.rs:.*spawn_local'
+)
 
 fail() {
   echo "async-task-ownership: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 violations=()
 legacy_exemptions=0
@@ -22,14 +36,13 @@ while IFS= read -r match; do
   fi
 
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")

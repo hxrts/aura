@@ -4,14 +4,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/harness-readiness-ownership.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=()
 
 fail() {
   echo "harness-readiness-ownership: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 # Authoritative readiness authorship must stay in approved workflow/runtime
 # coordinators. Frontend and harness modules may observe readiness facts, but
@@ -22,14 +21,13 @@ legacy_exemptions=0
 
 while IFS= read -r match; do
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")

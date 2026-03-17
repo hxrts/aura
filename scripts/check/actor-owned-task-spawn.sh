@@ -4,14 +4,28 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/actor-owned-task-spawn.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=(
+  '^crates/aura-agent/src/reactive/frp\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/reactive/scheduler\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/effects/choreography\.rs:.*tokio::spawn'
+  '^crates/aura-agent/src/runtime/effects/network\.rs:.*tokio::spawn'
+  '^crates/aura-app/src/workflows/messaging\.rs:.*tokio::spawn'
+  '^crates/aura-sync/src/core/metrics\.rs:.*thread::spawn'
+  '^crates/aura-terminal/src/demo/signal_coordinator\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/demo/simulator\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/handlers/scenarios/simulation\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/handlers/tui\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/tui/context/io_context\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/tui/effects/operational/messaging\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/tui/harness_state\.rs:.*tokio::spawn'
+  '^crates/aura-terminal/src/tui/screens/app/subscriptions\.rs:.*tokio::spawn'
+)
 
 fail() {
   echo "actor-owned-task-spawn: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 approved_patterns=(
   '^crates/aura-agent/src/task_registry\.rs:'
@@ -46,14 +60,13 @@ while IFS= read -r match; do
   fi
 
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")

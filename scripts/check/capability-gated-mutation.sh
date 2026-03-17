@@ -4,14 +4,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/capability-gated-mutation.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=(
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_semantic_fact$'
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:replace_authoritative_semantic_facts_of_kind$'
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_phase$'
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_phase_with_instance$'
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_failure$'
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_failure_with_instance$'
+  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_cancellation$'
+)
 
 fail() {
   echo "capability-gated-mutation: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 # Thin inventory check: public mutation/publication surfaces with
 # ownership-critical names must accept an explicit capability artifact rather
@@ -24,14 +31,13 @@ while IFS= read -r match; do
   [[ -z "$match" ]] && continue
 
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")

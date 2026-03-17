@@ -1,9 +1,0 @@
-# Temporary exemptions for runtime-instrumentation-schema.sh.
-# Format: one extended regex per line matched against `path:line:text`.
-
-^crates/aura-agent/src/task_registry\.rs:
-^crates/aura-agent/src/runtime/services/ceremony_tracker\.rs:
-^crates/aura-agent/src/runtime/services/rendezvous_manager\.rs:
-^crates/aura-agent/src/runtime/services/maintenance_service\.rs:
-^crates/aura-agent/src/runtime/services/sync_manager\.rs:
-^crates/aura-agent/src/runtime/system\.rs:

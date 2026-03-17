@@ -4,14 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/harness-tui-product-path.allowlist"
-
 fail() {
   echo "harness tui product path: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing execution-hook allowlist file"
 
 if rg -q 'AURA_HARNESS_MODE' crates/aura-terminal/src/tui/screens/app/shell.rs; then
   fail "TUI product action dispatch may not branch on AURA_HARNESS_MODE"

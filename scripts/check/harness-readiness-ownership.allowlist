@@ -1,5 +1,0 @@
-# Temporary baseline for frontend-side readiness refresh triggers that must move
-# behind approved single-owner coordinators.
-# Owner: architecture
-# Reason: shared semantic readiness migration is in progress.
-# Doc: work/ownership.md

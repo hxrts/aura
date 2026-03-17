@@ -4,14 +4,29 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/typed-error-boundary.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=(
+  '^crates/aura-app/src/workflows/access\.rs:'
+  '^crates/aura-app/src/workflows/context\.rs:'
+  '^crates/aura-app/src/workflows/messaging\.rs:'
+  '^crates/aura-app/src/workflows/moderation\.rs:'
+  '^crates/aura-app/src/workflows/moderator\.rs:'
+  '^crates/aura-app/src/workflows/query\.rs:'
+  '^crates/aura-app/src/workflows/settings\.rs:'
+  '^crates/aura-app/src/workflows/signals\.rs:'
+  '^crates/aura-agent/src/handlers/invitation/cache\.rs:'
+  '^crates/aura-agent/src/handlers/invitation/channel\.rs:'
+  '^crates/aura-agent/src/handlers/invitation/contact\.rs:'
+  '^crates/aura-agent/src/handlers/invitation/device_enrollment\.rs:'
+  '^crates/aura-agent/src/handlers/invitation/guardian\.rs:'
+  '^crates/aura-agent/src/handlers/invitation/validation\.rs:'
+  '^crates/aura-terminal/src/tui/context/initialized_app_core\.rs:'
+)
 
 fail() {
   echo "typed-error-boundary: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 # Thin inventory check: parity-critical workflow/runtime/interface paths should
 # not wrap primary failures in string formatting. This focuses on structured
@@ -24,14 +39,13 @@ while IFS= read -r match; do
   [[ -z "$match" ]] && continue
 
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")

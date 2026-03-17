@@ -1,3 +1,0 @@
-# Reserved for exceptional harness-specific execution hooks in TUI product action code.
-# Format if entries are ever needed:
-# <path>|<owning_issue_or_design_ref>|<justification>

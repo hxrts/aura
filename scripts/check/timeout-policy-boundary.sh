@@ -4,16 +4,31 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-policy_allowlist="scripts/check/timeout-policy-boundary.allowlist"
-backoff_allowlist="scripts/check/timeout-backoff-discipline.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+policy_allowlist=(
+  '^crates/aura-agent/src/handlers/invitation\.rs:'
+  '^crates/aura-agent/src/runtime/effects/choreography\.rs:'
+  '^crates/aura-agent/src/runtime/effects/network\.rs:'
+  '^crates/aura-harness/src/backend/local_pty\.rs:'
+  '^crates/aura-harness/src/backend/mod\.rs:'
+  '^crates/aura-harness/src/backend/playwright_browser\.rs:'
+  '^crates/aura-harness/src/coordinator\.rs:'
+  '^crates/aura-harness/src/executor\.rs:'
+  '^crates/aura-harness/src/network_lab/launcher\.rs:'
+  '^crates/aura-harness/src/runtime_substrate\.rs:'
+)
+
+backoff_allowlist=(
+  '^crates/aura-terminal/src/tui/harness_state\.rs:'
+  '^crates/aura-terminal/src/tui/hooks\.rs:'
+  '^crates/aura-terminal/src/tui/screens/app/shell\.rs:'
+  '^crates/aura-harness/src/backend/local_pty\.rs:'
+)
 
 fail() {
   echo "timeout-policy-boundary: $*" >&2
   exit 1
 }
-
-[[ -f "$policy_allowlist" ]] || fail "missing allowlist: $policy_allowlist"
-[[ -f "$backoff_allowlist" ]] || fail "missing allowlist: $backoff_allowlist"
 
 exit_code=0
 
@@ -26,14 +41,13 @@ while IFS= read -r match; do
   [[ -z "$match" ]] && continue
 
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${policy_allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$policy_allowlist"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")
@@ -70,14 +84,13 @@ while IFS= read -r match; do
   [[ -z "$match" ]] && continue
 
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${backoff_allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       backoff_exemptions=$((backoff_exemptions + 1))
       break
     fi
-  done < "$backoff_allowlist"
+  done
 
   if (( allowed == 0 )); then
     backoff_violations+=("$match")

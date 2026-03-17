@@ -4,14 +4,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/harness-typed-semantic-errors.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=(
+  '^crates/aura-terminal/src/tui/context/io_context\.rs:'
+  '^crates/aura-terminal/src/tui/context/dispatch\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/context\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/contacts\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/invitations\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/messaging\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/recovery\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/settings\.rs:'
+  '^crates/aura-terminal/src/tui/effects/operational/sync\.rs:'
+)
 
 fail() {
   echo "harness-typed-semantic-errors: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 # Parity-critical shared semantic paths should not rely on stringly frontend
 # error construction as their primary contract. Those paths should map into
@@ -23,14 +32,13 @@ legacy_exemptions=0
 
 while IFS= read -r match; do
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")

@@ -4,14 +4,21 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-allowlist_file="scripts/check/harness-move-ownership-boundary.allowlist"
+# Temporary exemptions (owner: architecture, doc: work/ownership.md)
+allowlist=(
+  '^crates/aura-app/src/scenario_contract\.rs:'
+  '^crates/aura-app/src/workflows/harness_determinism\.rs:'
+  '^crates/aura-harness/src/backend/local_pty\.rs:'
+  '^crates/aura-harness/src/backend/mod\.rs:'
+  '^crates/aura-harness/src/executor\.rs:'
+  '^crates/aura-terminal/src/tui/harness_state\.rs:'
+  '^crates/aura-terminal/src/tui/screens/app/shell\.rs:'
+)
 
 fail() {
   echo "harness-move-ownership-boundary: $*" >&2
   exit 1
 }
-
-[[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 # Shared semantic move ownership is currently expressed through:
 # - UiOperationHandle fabrication and recording
@@ -27,14 +34,13 @@ legacy_exemptions=0
 
 while IFS= read -r match; do
   allowed=0
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" =~ ^# ]] && continue
+  for pattern in "${allowlist[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
       legacy_exemptions=$((legacy_exemptions + 1))
       break
     fi
-  done < "$allowlist_file"
+  done
 
   if (( allowed == 0 )); then
     violations+=("$match")
