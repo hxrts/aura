@@ -33,11 +33,12 @@ impl BloomDigest {
         let mut cids = BTreeSet::new();
 
         for op in oplog.get_all_operations().iter() {
-            let bytes = aura_core::util::serialization::to_vec(op)
-                .map_err(|e| SyncError::VerificationFailed {
+            let bytes = aura_core::util::serialization::to_vec(op).map_err(|e| {
+                SyncError::VerificationFailed {
                     target: "oplog_digest",
                     detail: e.to_string(),
-                })?;
+                }
+            })?;
             cids.insert(Hash32::from(aura_core::hash::hash(&bytes)));
         }
 
@@ -76,7 +77,10 @@ pub enum SyncError {
 
     /// Operation verification failed
     #[error("operation verification failed for {target}: {detail}")]
-    VerificationFailed { target: &'static str, detail: String },
+    VerificationFailed {
+        target: &'static str,
+        detail: String,
+    },
 
     /// Network error during sync
     #[error("network error during {operation}: {detail}")]

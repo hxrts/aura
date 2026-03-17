@@ -248,7 +248,6 @@ impl OpLog {
     pub fn contains_all_from_summary(&self, summary: &OpLogSummary) -> bool {
         summary.cids.iter().all(|cid| self.contains_operation(cid))
     }
-
 }
 
 impl Default for OpLog {

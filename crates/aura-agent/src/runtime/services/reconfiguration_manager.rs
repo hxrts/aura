@@ -478,6 +478,7 @@ impl ReconfigurationManager {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn validate_link_boundary(
     session_id: SessionId,
     bundle_id: &str,

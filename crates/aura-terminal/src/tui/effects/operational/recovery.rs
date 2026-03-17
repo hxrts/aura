@@ -30,9 +30,7 @@ pub async fn handle_recovery(
             Ok(ceremony_id) => Some(Ok(OpResponse::RecoveryStarted {
                 ceremony_id: ceremony_id.to_string(),
             })),
-            Err(e) => Some(Err(OpError::Failed(format!(
-                "Failed to start recovery: {e}"
-            )))),
+            Err(e) => Some(Err(OpError::Failed(e.to_string()))),
         },
 
         EffectCommand::SubmitGuardianApproval { guardian_id } => {
@@ -41,9 +39,7 @@ pub async fn handle_recovery(
             let ceremony_id = CeremonyId::new(guardian_id.clone());
             match approve_recovery(app_core, &ceremony_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to approve recovery: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
 
@@ -65,17 +61,15 @@ pub async fn handle_recovery(
                                     // Ready to complete - would call RuntimeBridge to finalize
                                     Some(Ok(OpResponse::RecoveryCompleted))
                                 } else {
-                                    Some(Err(OpError::Failed(format!(
-                                        "Need {} more approvals",
-                                        recovery.approvals_required - recovery.approvals_received
-                                    ))))
+                                    Some(Err(OpError::Failed(
+                                        (recovery.approvals_required - recovery.approvals_received)
+                                            .to_string(),
+                                    )))
                                 }
                             }
                             None => Some(Err(OpError::Failed("No active recovery".to_string()))),
                         },
-                        Err(e) => Some(Err(OpError::Failed(format!(
-                            "Failed to get recovery status: {e}"
-                        )))),
+                        Err(e) => Some(Err(OpError::Failed(e.to_string()))),
                     }
                 }
                 None => Some(Err(OpError::Failed(
@@ -103,9 +97,7 @@ pub async fn handle_recovery(
                                 "No active recovery to cancel".to_string(),
                             ))),
                         },
-                        Err(e) => Some(Err(OpError::Failed(format!(
-                            "Failed to get recovery status: {e}"
-                        )))),
+                        Err(e) => Some(Err(OpError::Failed(e.to_string()))),
                     }
                 }
                 None => Some(Err(OpError::Failed(
@@ -158,9 +150,7 @@ pub async fn handle_recovery(
                                         invitation_id: invitation_info.invitation_id.to_string(),
                                     }))
                                 }
-                                Err(e) => Some(Err(OpError::Failed(format!(
-                                    "Failed to create guardian invitation: {e}"
-                                )))),
+                                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
                             }
                         }
                         None => Some(Err(OpError::Failed(

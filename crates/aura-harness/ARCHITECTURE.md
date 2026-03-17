@@ -98,6 +98,24 @@ The correct split is:
 | Readiness waits and projection reads | `Observed` | product readiness coordinators and authoritative facts | harness-local timeout/trace bookkeeping only | scenario authors, CI |
 | Frontend-conformance raw mechanics | frontend-local only, never shared semantic ownership | frontend under test | conformance adapters only | shared semantic lane must not depend on them |
 
+### Capability-Gated Points
+
+- shared semantic command-plane submission and handle propagation must consume
+  the authoritative `aura-app` contract rather than inventing harness-local
+  semantic ownership
+- readiness waits and projection reads may track timeout/trace metadata
+  locally, but may not mutate or repair product semantic truth
+- frontend-conformance helpers are explicitly quarantined from the shared
+  semantic lane and may not bypass typed command/observation surfaces
+
+### Verification Hooks
+
+- `cargo check -p aura-harness`
+- `cargo test -p aura-harness -- --nocapture`
+- `just ci-actor-lifecycle`
+- `just ci-move-semantics`
+- `just ci-timeout-policy`
+
 ### Detailed Specifications
 
 ### InvariantHarnessDeterministicReplayInputs

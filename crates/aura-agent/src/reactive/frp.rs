@@ -23,8 +23,12 @@ use tokio::sync::{broadcast, RwLock};
 /// let doubled = count.map(|x| x * 2).await;
 /// let is_positive = count.map(|x| x > 0).await;
 /// ```
+struct DynamicShared<T: Clone + Send + Sync + 'static> {
+    state: RwLock<DynamicState<T>>,
+}
+
 pub struct Dynamic<T: Clone + Send + Sync + 'static> {
-    state: Arc<RwLock<DynamicState<T>>>,
+    shared: Arc<DynamicShared<T>>,
 }
 
 impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
@@ -33,22 +37,24 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let (tx, _) = broadcast::channel(64);
         let initial = Arc::new(initial);
         Self {
-            state: Arc::new(RwLock::new(DynamicState {
-                value: initial,
-                updates: tx,
-                tasks: Arc::new(TaskSupervisor::new()),
-            })),
+            shared: Arc::new(DynamicShared {
+                state: RwLock::new(DynamicState {
+                    value: initial,
+                    updates: tx,
+                    tasks: Arc::new(TaskSupervisor::new()),
+                }),
+            }),
         }
     }
 
     /// Get current value (async read lock)
     pub async fn get(&self) -> T {
-        self.state.read().await.value.as_ref().clone()
+        self.shared.state.read().await.value.as_ref().clone()
     }
 
     /// Get current value as a shared Arc (avoids cloning large state)
     pub async fn get_arc(&self) -> Arc<T> {
-        self.state.read().await.value.clone()
+        self.shared.state.read().await.value.clone()
     }
 
     /// Set value and notify subscribers
@@ -58,7 +64,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
 
     async fn set_arc(&self, value: Arc<T>) {
         let updates = {
-            let mut state = self.state.write().await;
+            let mut state = self.shared.state.write().await;
             state.value = value.clone();
             state.updates.clone()
         };
@@ -71,7 +77,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         F: FnOnce(&T) -> T,
     {
         let new_value = {
-            let current = self.state.read().await;
+            let current = self.shared.state.read().await;
             f(current.value.as_ref())
         };
         self.set(new_value).await;
@@ -79,7 +85,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
 
     /// Subscribe to value changes
     pub async fn subscribe(&self) -> broadcast::Receiver<Arc<T>> {
-        self.state.read().await.updates.subscribe()
+        self.shared.state.read().await.updates.subscribe()
     }
 
     /// Try to receive the latest update without blocking
@@ -109,14 +115,14 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         // Subscribe BEFORE spawning to ensure we don't miss any updates
         let mut rx = self.subscribe().await;
         let mapped_clone = mapped.clone();
-        let state = self.state.clone();
+        let state = Arc::clone(&self.shared);
         let f = Arc::new(f);
 
         // Use a oneshot channel to signal when the task is ready
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
 
         let tasks = {
-            let state = mapped.state.read().await;
+            let state = mapped.shared.state.read().await;
             state.tasks.clone()
         };
         tasks.spawn_cancellable_named("reactive.dynamic.map", async move {
@@ -132,7 +138,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     Err(RecvError::Lagged(_)) => {
                         // Re-sync from the latest state on lag to avoid stale values.
                         let latest = {
-                            let state = state.read().await;
+                            let state = state.state.read().await;
                             state.value.clone()
                         };
                         let transformed = f(latest.as_ref());
@@ -173,12 +179,12 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let mut rx_self = self.subscribe().await;
         let mut rx_other = other.subscribe().await;
         let combined_clone = combined.clone();
-        let self_state = self.state.clone();
-        let other_state = other.state.clone();
+        let self_state = Arc::clone(&self.shared);
+        let other_state = Arc::clone(&other.shared);
         let f = Arc::new(f);
 
         let tasks = {
-            let state = combined.state.read().await;
+            let state = combined.shared.state.read().await;
             state.tasks.clone()
         };
         tasks.spawn_cancellable_named("reactive.dynamic.combine", async move {
@@ -188,11 +194,11 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                         match res {
                             Ok(_) | Err(RecvError::Lagged(_)) => {
                                 let a = {
-                                    let state = self_state.read().await;
+                                    let state = self_state.state.read().await;
                                     state.value.clone()
                                 };
                                 let b = {
-                                    let state = other_state.read().await;
+                                    let state = other_state.state.read().await;
                                     state.value.clone()
                                 };
                                 let result = f(a.as_ref(), b.as_ref());
@@ -205,11 +211,11 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                         match res {
                             Ok(_) | Err(RecvError::Lagged(_)) => {
                                 let a = {
-                                    let state = self_state.read().await;
+                                    let state = self_state.state.read().await;
                                     state.value.clone()
                                 };
                                 let b = {
-                                    let state = other_state.read().await;
+                                    let state = other_state.state.read().await;
                                     state.value.clone()
                                 };
                                 let result = f(a.as_ref(), b.as_ref());
@@ -244,11 +250,11 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
 
         let mut rx = self.subscribe().await;
         let filtered_clone = filtered.clone();
-        let state = self.state.clone();
+        let state = Arc::clone(&self.shared);
         let predicate = Arc::new(predicate);
 
         let tasks = {
-            let state = filtered.state.read().await;
+            let state = filtered.shared.state.read().await;
             state.tasks.clone()
         };
         tasks.spawn_cancellable_named("reactive.dynamic.filter", async move {
@@ -261,7 +267,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     }
                     Err(RecvError::Lagged(_)) => {
                         let latest = {
-                            let state = state.read().await;
+                            let state = state.state.read().await;
                             state.value.clone()
                         };
                         if predicate(latest.as_ref()) {
@@ -294,11 +300,11 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let folded = Dynamic::new(init);
         let mut rx = self.subscribe().await;
         let folded_clone = folded.clone();
-        let state = self.state.clone();
+        let state = Arc::clone(&self.shared);
         let f = Arc::new(f);
 
         let tasks = {
-            let state = folded.state.read().await;
+            let state = folded.shared.state.read().await;
             state.tasks.clone()
         };
         tasks.spawn_cancellable_named("reactive.dynamic.fold", async move {
@@ -311,7 +317,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     }
                     Err(RecvError::Lagged(_)) => {
                         let latest = {
-                            let state = state.read().await;
+                            let state = state.state.read().await;
                             state.value.clone()
                         };
                         let acc = folded_clone.get().await;
@@ -330,14 +336,14 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
 impl<T: Clone + Send + Sync + 'static> Clone for Dynamic<T> {
     fn clone(&self) -> Self {
         Self {
-            state: self.state.clone(),
+            shared: Arc::clone(&self.shared),
         }
     }
 }
 
 impl<T: Clone + Send + Sync + 'static> Drop for Dynamic<T> {
     fn drop(&mut self) {
-        if let Ok(state) = self.state.try_read() {
+        if let Ok(state) = self.shared.state.try_read() {
             if Arc::strong_count(&state.tasks) == 1 {
                 state.tasks.shutdown();
             }
@@ -573,17 +579,22 @@ mod tests {
         let count_clone = count.clone();
         let sum_clone = sum.clone();
 
-        tokio::spawn(async move {
+        let worker = async move {
             while let Ok(n) = rx.recv().await {
                 count_clone.update(|c| c + 1).await;
                 sum_clone.update(|s| s + *n).await;
             }
-        });
+        };
 
-        numbers.set(5).await;
-        sleep(Duration::from_millis(10)).await;
-        numbers.set(15).await;
-        sleep(Duration::from_millis(10)).await;
+        let producer = async move {
+            numbers.set(5).await;
+            sleep(Duration::from_millis(10)).await;
+            numbers.set(15).await;
+            sleep(Duration::from_millis(10)).await;
+            drop(numbers);
+        };
+
+        let _ = tokio::join!(worker, producer);
 
         assert_eq!(count.get().await, 2);
         assert_eq!(sum.get().await, 20); // 5 + 15

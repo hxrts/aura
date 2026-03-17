@@ -780,8 +780,8 @@ cfg_if! {
                         }
                     })),
                 ));
-                controller.set_account_setup_state(account_ready, "", None);
                 install_harness_instrumentation(controller.clone());
+                controller.set_account_setup_state(account_ready, "", None);
 
                 if account_ready {
                     if let Err(error) = settings_workflows::refresh_settings_from_runtime(
@@ -891,8 +891,8 @@ cfg_if! {
                         )
                     })?;
                 let controller = Arc::new(UiController::new(app_core, clipboard));
-                controller.set_account_setup_state(false, "", None);
                 install_harness_instrumentation(controller.clone());
+                controller.set_account_setup_state(false, "", None);
                 let waiting_event = BootstrapEvent::new(
                     BootstrapSurface::Web,
                     BootstrapEventKind::ShellAwaitingAccount,

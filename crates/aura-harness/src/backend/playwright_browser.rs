@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
-use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse};
+use aura_app::ui::scenarios::{IntentAction, SemanticCommandRequest, SemanticCommandResponse};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -325,6 +325,7 @@ impl PlaywrightBrowserBackend {
         &mut self,
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
+        let reload_after_submit = matches!(request.intent, IntentAction::CreateAccount { .. });
         let payload = serde_json::to_value(&request)
             .context("failed to encode browser semantic command request")?;
         let response = self.with_session(|session| {
@@ -336,6 +337,18 @@ impl PlaywrightBrowserBackend {
                 }),
             )
         })?;
+        if reload_after_submit {
+            self.with_session(|session| {
+                session.rpc_call(
+                    "reload_page",
+                    json!({
+                        "instance_id": self.config.id,
+                        "reason": "create_account_bootstrap",
+                    }),
+                )?;
+                Ok(())
+            })?;
+        }
         serde_json::from_value(response)
             .context("failed to decode browser semantic command response")
     }

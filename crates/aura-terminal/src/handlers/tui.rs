@@ -13,7 +13,7 @@
 use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // Import app types from aura-app (pure layer)
@@ -54,6 +54,7 @@ use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
     context::{InitializedAppCore, IoContext},
     screens::run_app_with_context,
+    tasks::UiTaskRegistry,
 };
 
 /// Whether the TUI is running in demo or production mode
@@ -87,6 +88,11 @@ pub use aura_app::ui::types::{
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
 const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json";
+static TUI_TRACING_TASKS: OnceLock<UiTaskRegistry> = OnceLock::new();
+
+fn tui_tracing_tasks() -> &'static UiTaskRegistry {
+    TUI_TRACING_TASKS.get_or_init(UiTaskRegistry::new)
+}
 
 fn open_bootstrap_storage(base_path: &Path) -> BootstrapStorage {
     let crypto = Arc::new(RealCryptoHandler::new());
@@ -848,6 +854,7 @@ async fn handle_tui_launch(
         #[cfg(feature = "development")]
         let mut runtime_agent: Option<Arc<aura_agent::AuraAgent>> = None;
         let mut pending_runtime_bootstrap = false;
+        let startup_tasks = Arc::new(UiTaskRegistry::new());
 
         let app_core = match loaded_account {
             AccountLoadResult::Loaded { authority, context } => {
@@ -1013,7 +1020,7 @@ async fn handle_tui_launch(
                     let startup_core = app_core.raw().clone();
                     let startup_storage = storage.clone();
                     let startup_path = base_path.clone();
-                    tokio::spawn(async move {
+                    startup_tasks.spawn(async move {
                         match aura_app::ui::workflows::invitation::import_invitation_details(
                             &startup_core,
                             &device_enrollment_code,
@@ -1078,7 +1085,7 @@ async fn handle_tui_launch(
                 }
 
                 let ceremony_agent = agent.clone();
-                tokio::spawn(async move {
+                startup_tasks.spawn(async move {
                     let mut interval =
                         tokio::time::interval(tokio::time::Duration::from_millis(500));
                     loop {
@@ -1284,16 +1291,16 @@ async fn handle_tui_launch(
             continue;
         }
 
-        if !has_existing_account {
-            if matches!(
+        if !has_existing_account
+            && matches!(
                 try_load_account(storage.as_ref()).await?,
                 AccountLoadResult::Loaded { .. }
-            ) {
-                stdio.println(format_args!(
-                    "Reloading TUI with newly created bootstrap identity"
-                ));
-                continue;
-            }
+            )
+        {
+            stdio.println(format_args!(
+                "Reloading TUI with newly created bootstrap identity"
+            ));
+            continue;
         }
 
         break;
@@ -1356,7 +1363,7 @@ fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
     let storage_task = storage.clone();
     let log_key_task = log_key;
 
-    tokio::spawn(async move {
+    tui_tracing_tasks().spawn(async move {
         let mut buffer: Vec<u8> = Vec::new();
         while let Some(chunk) = rx.recv().await {
             buffer.extend_from_slice(&chunk);
@@ -1387,6 +1394,7 @@ fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use tempfile::tempdir;

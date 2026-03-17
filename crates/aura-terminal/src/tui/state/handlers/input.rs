@@ -80,18 +80,25 @@ pub fn handle_mouse_event(
                 Screen::Contacts => {
                     // Navigate down in contacts list (clamp to last item)
                     let max_index = state.contacts.contact_count.saturating_sub(1);
-                    state.contacts.selected_index =
-                        state.contacts.selected_index.saturating_add(1).min(max_index);
+                    state.contacts.selected_index = state
+                        .contacts
+                        .selected_index
+                        .saturating_add(1)
+                        .min(max_index);
                 }
                 Screen::Neighborhood => {
                     // No dedicated scroll region on Neighborhood; keep mouse wheel a no-op here.
                 }
                 Screen::Settings => {
                     // Navigate down in settings list (clamp to last section)
-                    let max_index =
-                        crate::tui::types::SettingsSection::all().len().saturating_sub(1);
-                    state.settings.selected_index =
-                        state.settings.selected_index.saturating_add(1).min(max_index);
+                    let max_index = crate::tui::types::SettingsSection::all()
+                        .len()
+                        .saturating_sub(1);
+                    state.settings.selected_index = state
+                        .settings
+                        .selected_index
+                        .saturating_add(1)
+                        .min(max_index);
                     state.settings.section = crate::tui::types::SettingsSection::from_index(
                         state.settings.selected_index,
                     );
@@ -132,7 +139,9 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
         match modal {
             // Invitation import modal (Contacts workflow)
             QueuedModal::ContactsImport(modal_state) => {
-                modal_state.code.push_str(truncate_paste(&modal_state.code, text));
+                modal_state
+                    .code
+                    .push_str(truncate_paste(&modal_state.code, text));
                 return;
             }
 
@@ -140,31 +149,43 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             QueuedModal::ChatCreate(modal_state) => {
                 // Paste into active field (name or topic)
                 if modal_state.active_field == 0 {
-                    modal_state.name.push_str(truncate_paste(&modal_state.name, text));
+                    modal_state
+                        .name
+                        .push_str(truncate_paste(&modal_state.name, text));
                 } else {
-                    modal_state.topic.push_str(truncate_paste(&modal_state.topic, text));
+                    modal_state
+                        .topic
+                        .push_str(truncate_paste(&modal_state.topic, text));
                 }
                 return;
             }
             QueuedModal::ChatTopic(modal_state) => {
-                modal_state.value.push_str(truncate_paste(&modal_state.value, text));
+                modal_state
+                    .value
+                    .push_str(truncate_paste(&modal_state.value, text));
                 return;
             }
 
             // Contact nickname modal
             QueuedModal::ContactsNickname(modal_state) => {
-                modal_state.value.push_str(truncate_paste(&modal_state.value, text));
+                modal_state
+                    .value
+                    .push_str(truncate_paste(&modal_state.value, text));
                 return;
             }
 
             // Settings nickname suggestion modal
             QueuedModal::SettingsNicknameSuggestion(modal_state) => {
-                modal_state.value.push_str(truncate_paste(&modal_state.value, text));
+                modal_state
+                    .value
+                    .push_str(truncate_paste(&modal_state.value, text));
                 return;
             }
             QueuedModal::NeighborhoodHomeCreate(modal_state) => {
                 if modal_state.active_field == 0 {
-                    modal_state.name.push_str(truncate_paste(&modal_state.name, text));
+                    modal_state
+                        .name
+                        .push_str(truncate_paste(&modal_state.name, text));
                 } else {
                     modal_state
                         .description
@@ -184,7 +205,10 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                         .limited_caps
                         .push_str(truncate_paste(&modal_state.limited_caps, text)),
                     other => {
-                        tracing::debug!(active_field = other, "unexpected active_field in capability config paste");
+                        tracing::debug!(
+                            active_field = other,
+                            "unexpected active_field in capability config paste"
+                        );
                     }
                 }
                 return;

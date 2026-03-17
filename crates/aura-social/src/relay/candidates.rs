@@ -4,7 +4,8 @@
 
 use crate::SocialTopology;
 use aura_core::{
-    effects::relay::{RelayCandidate, RelayContext}, types::identifiers::AuthorityId,
+    effects::relay::{RelayCandidate, RelayContext},
+    types::identifiers::AuthorityId,
 };
 use std::sync::Arc;
 

@@ -22,13 +22,18 @@ struct SimTimeState {
     paused: bool,
 }
 
+#[derive(Debug)]
+struct SimulationTimeShared {
+    state: Mutex<SimTimeState>,
+}
+
 /// Simulation-specific time control handler.
 ///
 /// This handler is deterministic: time only advances when the simulator calls
 /// `sleep_ms` or the explicit control APIs (`jump_to_time`).
 #[derive(Debug, Clone)]
 pub struct SimulationTimeHandler {
-    state: Arc<Mutex<SimTimeState>>,
+    shared: Arc<SimulationTimeShared>,
 }
 
 impl SimulationTimeHandler {
@@ -40,12 +45,14 @@ impl SimulationTimeHandler {
     /// Create with a specific starting timestamp (milliseconds since UNIX epoch).
     pub fn with_start_ms(base_ms: u64) -> Self {
         Self {
-            state: Arc::new(Mutex::new(SimTimeState {
-                base_ms,
-                offset_ms: 0,
-                acceleration: 1.0,
-                paused: false,
-            })),
+            shared: Arc::new(SimulationTimeShared {
+                state: Mutex::new(SimTimeState {
+                    base_ms,
+                    offset_ms: 0,
+                    acceleration: 1.0,
+                    paused: false,
+                }),
+            }),
         }
     }
 
@@ -56,34 +63,34 @@ impl SimulationTimeHandler {
         if factor <= 0.0 {
             return;
         }
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.shared.state.lock() {
             state.acceleration = factor;
         }
     }
 
     /// Pause simulated time.
     pub fn pause(&mut self) {
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.shared.state.lock() {
             state.paused = true;
         }
     }
 
     /// Resume simulated time.
     pub fn resume(&mut self) {
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.shared.state.lock() {
             state.paused = false;
         }
     }
 
     /// Jump to a specific simulated offset.
     pub fn jump_to_time(&mut self, target_time: Duration) {
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.shared.state.lock() {
             state.offset_ms = target_time.as_millis() as u64;
         }
     }
 
     fn timestamp_ms(&self) -> u64 {
-        let Ok(state) = self.state.lock() else {
+        let Ok(state) = self.shared.state.lock() else {
             return 0;
         };
         state.base_ms.saturating_add(state.offset_ms)
@@ -107,7 +114,7 @@ impl PhysicalTimeEffects for SimulationTimeHandler {
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         // Advance simulated time deterministically without waiting on OS time.
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.shared.state.lock() {
             if !state.paused {
                 let scaled = (ms as f64 * state.acceleration).max(0.0);
                 state.offset_ms = state.offset_ms.saturating_add(scaled as u64);

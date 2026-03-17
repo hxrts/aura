@@ -7,7 +7,7 @@ use aura_consensus::protocol::{
     ConsensusResultGuard, ExecuteGuard, NonceCommitGuard, SignRequestGuard, SignShareGuard,
 };
 use aura_core::{
-    identifiers::{AuthorityId, ContextId},
+    types::identifiers::{AuthorityId, ContextId},
     FlowCost,
 };
 

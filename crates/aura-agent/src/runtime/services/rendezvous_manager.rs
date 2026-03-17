@@ -1151,13 +1151,11 @@ impl RendezvousManager {
         })?;
 
         let local_authority_id = self.authority_id;
-        let lan_cache_tasks = tasks.group("lan_peer_cache");
         let commands = self.command_handle().await?;
 
-        let lan_tasks = tasks.group("lan_discovery");
-        lan_service.start(lan_tasks, move |peer: DiscoveredPeer| {
+        lan_service.start(tasks.clone(), move |peer: DiscoveredPeer| {
             let peer_clone = peer.clone();
-            let lan_cache_tasks = lan_cache_tasks.clone();
+            let lan_cache_tasks = tasks.clone();
             let commands = commands.clone();
 
             lan_cache_tasks.spawn_named("cache_discovered_peer", async move {
@@ -1515,12 +1513,10 @@ impl RendezvousManager {
                         reason: "service command actor missing".to_string(),
                     };
                 }
-                if self.config.lan_discovery.enabled {
-                    if !has_lan_discovery {
-                        return ServiceHealth::Unhealthy {
-                            reason: "lan discovery enabled but service missing".to_string(),
-                        };
-                    }
+                if self.config.lan_discovery.enabled && !has_lan_discovery {
+                    return ServiceHealth::Unhealthy {
+                        reason: "lan discovery enabled but service missing".to_string(),
+                    };
                 }
                 ServiceHealth::Healthy
             }

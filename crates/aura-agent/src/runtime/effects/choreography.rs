@@ -111,7 +111,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             .saturating_add(kb_units.saturating_mul(CHOREO_FLOW_COST_PER_KB));
 
         let guard_chain = create_send_guard_op(
-            GuardOperation::Custom("choreography:send".to_string()),
+            GuardOperation::Custom("message:send".to_string()),
             context_id,
             peer,
             FlowCost::new(flow_cost),
@@ -476,7 +476,7 @@ mod tests {
     use tokio::sync::Barrier;
     use uuid::Uuid;
 
-    async fn assert_completes_within<T, E: std::fmt::Debug>(
+    async fn assert_settles_within<T, E: std::fmt::Debug>(
         future: impl std::future::Future<Output = Result<T, E>>,
         timeout: Duration,
         message: &str,
@@ -488,9 +488,13 @@ mod tests {
             .expect("physical time should be available");
         let budget = aura_core::TimeoutBudget::from_start_and_timeout(&started_at, timeout)
             .expect("timeout budget should fit");
-        Ok(aura_core::execute_with_timeout_budget(&time, &budget, || future)
-            .await
-            .expect(message))
+        match aura_core::execute_with_timeout_budget(&time, &budget, || future).await {
+            Ok(value) => Ok(value),
+            Err(aura_core::TimeoutRunError::Operation(error)) => Err(error),
+            Err(aura_core::TimeoutRunError::Timeout(error)) => {
+                panic!("{message}: timeout budget exceeded: {error:?}")
+            }
+        }
     }
 
     fn test_effects(authority_id: AuthorityId) -> Arc<AuraEffectSystem> {
@@ -534,7 +538,8 @@ mod tests {
 
         let task_a_effects = Arc::clone(&effects);
         let task_a_barrier = Arc::clone(&barrier);
-        let task_a = tokio::spawn(async move {
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(async move {
             task_a_effects
                 .start_session(
                     session_a,
@@ -555,7 +560,7 @@ mod tests {
 
         let task_b_effects = Arc::clone(&effects);
         let task_b_barrier = Arc::clone(&barrier);
-        let task_b = tokio::spawn(async move {
+        tasks.spawn(async move {
             task_b_effects
                 .start_session(
                     session_b,
@@ -575,8 +580,16 @@ mod tests {
         });
 
         barrier.wait().await;
-        task_a.await.expect("task a");
-        task_b.await.expect("task b");
+        tasks
+            .join_next()
+            .await
+            .expect("task a joined")
+            .expect("task a");
+        tasks
+            .join_next()
+            .await
+            .expect("task b joined")
+            .expect("task b");
         assert_eq!(effects.choreography_state.read().active_session_count(), 0);
     }
 
@@ -593,7 +606,8 @@ mod tests {
 
         let task_a_effects = Arc::clone(&effects);
         let task_a_barrier = Arc::clone(&barrier);
-        let task_a = tokio::spawn(async move {
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(async move {
             task_a_effects
                 .start_session(session_a, vec![self_role, loopback_peer])
                 .await
@@ -613,7 +627,7 @@ mod tests {
 
         let task_b_effects = Arc::clone(&effects);
         let task_b_barrier = Arc::clone(&barrier);
-        let task_b = tokio::spawn(async move {
+        tasks.spawn(async move {
             task_b_effects
                 .start_session(session_b, vec![self_role, loopback_peer])
                 .await
@@ -632,8 +646,25 @@ mod tests {
         });
 
         barrier.wait().await;
-        let session_a_envelopes = task_a.await.expect("task a");
-        let session_b_envelopes = task_b.await.expect("task b");
+        let first = tasks
+            .join_next()
+            .await
+            .expect("first task joined")
+            .expect("first task result");
+        let second = tasks
+            .join_next()
+            .await
+            .expect("second task joined")
+            .expect("second task result");
+        let (session_a_envelopes, session_b_envelopes) = if first.iter().any(|env| {
+            env.metadata
+                .get("session-id")
+                .is_some_and(|value| value == &session_a.to_string())
+        }) {
+            (first, second)
+        } else {
+            (second, first)
+        };
         assert_eq!(
             session_a_envelopes.len(),
             1,
@@ -764,7 +795,8 @@ mod tests {
 
         let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
         let delayed_effects = Arc::clone(&effects);
-        tokio::spawn(async move {
+        let mut delayed_tasks = tokio::task::JoinSet::new();
+        delayed_tasks.spawn(async move {
             delayed_effects.time_handler.sleep_ms(10).await;
             let mut metadata = HashMap::new();
             metadata.insert(
@@ -782,13 +814,18 @@ mod tests {
             });
         });
 
-        let payload = assert_completes_within(
+        let payload = assert_settles_within(
             effects.receive_from_role_bytes(peer_role),
             Duration::from_millis(40),
             "session-local notify should wake receive before polling-sized timeout",
         )
-        .await
-        .expect("session-scoped receive succeeds");
+        .await;
+        delayed_tasks
+            .join_next()
+            .await
+            .expect("enqueue task joined")
+            .expect("enqueue task");
+        let payload = payload.expect("session-scoped receive succeeds");
         assert_eq!(payload, b"notified".to_vec());
 
         effects.end_session().await.expect("session ends");
@@ -810,7 +847,8 @@ mod tests {
 
         let task_a_effects = Arc::clone(&effects);
         let task_a_barrier = Arc::clone(&barrier);
-        let task_a = tokio::spawn(async move {
+        let mut tasks = tokio::task::JoinSet::new();
+        tasks.spawn(async move {
             task_a_effects
                 .start_session(session_a, vec![self_role, peer_a_role])
                 .await
@@ -826,7 +864,7 @@ mod tests {
 
         let task_b_effects = Arc::clone(&effects);
         let task_b_barrier = Arc::clone(&barrier);
-        let task_b = tokio::spawn(async move {
+        tasks.spawn(async move {
             task_b_effects
                 .start_session(session_b, vec![self_role, peer_b_role])
                 .await
@@ -840,30 +878,44 @@ mod tests {
             payload
         });
 
-        barrier.wait().await;
+        let enqueue = async {
+            barrier.wait().await;
+            for (session_id, source, payload) in [
+                (session_a, peer_a_authority, b"alpha".to_vec()),
+                (session_b, peer_b_authority, b"beta".to_vec()),
+            ] {
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "content-type".to_string(),
+                    "application/aura-choreography".to_string(),
+                );
+                metadata.insert("session-id".to_string(), session_id.to_string());
+                effects.requeue_envelope(TransportEnvelope {
+                    destination: authority_id,
+                    source,
+                    context: ContextId::new_from_entropy(hash(session_id.as_bytes())),
+                    payload,
+                    metadata,
+                    receipt: None,
+                });
+            }
+        };
 
-        for (session_id, source, payload) in [
-            (session_a, peer_a_authority, b"alpha".to_vec()),
-            (session_b, peer_b_authority, b"beta".to_vec()),
-        ] {
-            let mut metadata = HashMap::new();
-            metadata.insert(
-                "content-type".to_string(),
-                "application/aura-choreography".to_string(),
-            );
-            metadata.insert("session-id".to_string(), session_id.to_string());
-            effects.requeue_envelope(TransportEnvelope {
-                destination: authority_id,
-                source,
-                context: ContextId::new_from_entropy(hash(session_id.as_bytes())),
-                payload,
-                metadata,
-                receipt: None,
-            });
-        }
-
-        assert_eq!(task_a.await.expect("task a"), b"alpha".to_vec());
-        assert_eq!(task_b.await.expect("task b"), b"beta".to_vec());
+        enqueue.await;
+        let first = tasks
+            .join_next()
+            .await
+            .expect("first receive task joined")
+            .expect("first receive task");
+        let second = tasks
+            .join_next()
+            .await
+            .expect("second receive task joined")
+            .expect("second receive task");
+        assert!(matches!(
+            (first.as_slice(), second.as_slice()),
+            (b"alpha", b"beta") | (b"beta", b"alpha")
+        ));
         assert_eq!(effects.choreography_state.read().active_session_count(), 0);
     }
 
@@ -976,7 +1028,7 @@ mod tests {
             .expect("session starts");
         effects.set_timeout(20).await;
 
-        let error = assert_completes_within(
+        let error = assert_settles_within(
             effects.receive_from_role_bytes(peer_role),
             Duration::from_millis(100),
             "receive should resolve with a timeout error",
@@ -1011,7 +1063,8 @@ mod tests {
             .expect("session starts");
 
         let delayed_effects = Arc::clone(&effects);
-        tokio::spawn(async move {
+        let mut delayed_tasks = tokio::task::JoinSet::new();
+        delayed_tasks.spawn(async move {
             delayed_effects.time_handler.sleep_ms(10).await;
             delayed_effects
                 .choreography_state
@@ -1019,13 +1072,18 @@ mod tests {
                 .cancel_session(runtime_session_id);
         });
 
-        let error = assert_completes_within(
+        let error = assert_settles_within(
             effects.receive_from_role_bytes(peer_role),
             Duration::from_millis(100),
             "receive should resolve when session is cancelled",
         )
-        .await
-        .expect_err("receive should fail when session is cancelled");
+        .await;
+        delayed_tasks
+            .join_next()
+            .await
+            .expect("cancel task joined")
+            .expect("cancel task");
+        let error = error.expect_err("receive should fail when session is cancelled");
         assert!(matches!(error, ChoreographyError::SessionNotStarted));
     }
 }

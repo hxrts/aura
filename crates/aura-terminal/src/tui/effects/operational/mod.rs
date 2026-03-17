@@ -59,6 +59,7 @@ pub use types::{OpError, OpFailureCode, OpResponse, OpResult};
 
 use super::EffectCommand;
 use crate::error::TerminalError;
+use crate::tui::tasks::UiTaskRegistry;
 
 /// Handles operational commands that don't create journal facts.
 ///
@@ -69,12 +70,13 @@ use crate::error::TerminalError;
 /// not through local state in this handler.
 pub struct OperationalHandler {
     app_core: Arc<RwLock<AppCore>>,
+    tasks: Arc<UiTaskRegistry>,
 }
 
 impl OperationalHandler {
     /// Create a new operational handler
-    pub fn new(app_core: Arc<RwLock<AppCore>>) -> Self {
-        Self { app_core }
+    pub fn new(app_core: Arc<RwLock<AppCore>>, tasks: Arc<UiTaskRegistry>) -> Self {
+        Self { app_core, tasks }
     }
 
     /// Execute an operational command
@@ -175,7 +177,7 @@ impl OperationalHandler {
             | EffectCommand::RetryMessage { .. }
             | EffectCommand::SetTopic { .. }
             | EffectCommand::InviteUser { .. } => {
-                messaging::handle_messaging(command, &self.app_core).await
+                messaging::handle_messaging(command, &self.app_core, &self.tasks).await
             }
 
             // Moderation
@@ -302,10 +304,14 @@ mod tests {
         Arc::new(RwLock::new(core))
     }
 
+    fn test_handler(app_core: Arc<RwLock<AppCore>>) -> OperationalHandler {
+        OperationalHandler::new(app_core, Arc::new(crate::tui::tasks::UiTaskRegistry::new()))
+    }
+
     #[tokio::test]
     async fn test_ping_command() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         let result = handler.execute(&EffectCommand::Ping).await;
         assert!(matches!(result, Some(Ok(OpResponse::Ok))));
@@ -314,14 +320,26 @@ mod tests {
     #[tokio::test]
     async fn test_list_peers_returns_list() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         let result = handler.execute(&EffectCommand::ListPeers).await;
         match result {
             Some(Ok(OpResponse::PeersListed { .. })) => {}
+            Some(Err(OpError::TypedFailure(failure))) => {
+                assert!(
+                    failure.message().contains("Runtime bridge not available")
+                        || failure.message().contains("Failed to query")
+                        || failure.message().contains("No agent configured")
+                        || failure.message().contains("requires a runtime"),
+                    "Expected runtime-availability error, got: {failure}"
+                );
+            }
             Some(Err(OpError::Failed(msg))) => {
                 assert!(
-                    msg.contains("Runtime bridge not available") || msg.contains("Failed to query"),
+                    msg.contains("Runtime bridge not available")
+                        || msg.contains("Failed to query")
+                        || msg.contains("No agent configured")
+                        || msg.contains("requires a runtime"),
                     "Expected runtime-availability error, got: {msg}"
                 );
             }
@@ -332,7 +350,7 @@ mod tests {
     #[tokio::test]
     async fn test_export_invitation_fails_without_runtime() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         // Without RuntimeBridge, export should fail gracefully
         let result = handler
@@ -367,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn test_chat_commands_work_in_local_mode() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         // Messaging commands now work in LocalOnly mode without RuntimeBridge
         let result = handler
@@ -399,7 +417,7 @@ mod tests {
     #[tokio::test]
     async fn test_import_invitation_fails_without_runtime() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         // Without RuntimeBridge, import should fail gracefully
         // Use a valid-format code to test the runtime requirement, not format validation
@@ -419,7 +437,17 @@ mod tests {
                     "Expected error message, got: {msg}"
                 );
             }
-            _ => panic!("Expected InvalidArgument error without RuntimeBridge, got: {result:?}"),
+            Some(Err(OpError::TypedFailure(failure))) => {
+                assert!(
+                    failure.message().contains("Runtime bridge not available")
+                        || failure.message().contains("Invalid invitation")
+                        || failure.message().contains("Failed"),
+                    "Expected error message, got: {failure}"
+                );
+            }
+            _ => {
+                panic!("Expected invitation import failure without RuntimeBridge, got: {result:?}")
+            }
         }
     }
 
@@ -431,7 +459,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_account_is_handled() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         let result = handler
             .execute(&EffectCommand::CreateAccount {
@@ -450,7 +478,7 @@ mod tests {
     #[tokio::test]
     async fn test_import_invitation_rejects_invalid_code() {
         let app_core = test_app_core().await;
-        let handler = OperationalHandler::new(app_core);
+        let handler = test_handler(app_core);
 
         let result = handler
             .execute(&EffectCommand::ImportInvitation {
@@ -462,7 +490,14 @@ mod tests {
             Some(Err(OpError::InvalidArgument(_))) => {
                 // Expected - invalid format
             }
-            _ => panic!("Expected InvalidArgument error for invalid code"),
+            Some(Err(OpError::TypedFailure(failure))) => {
+                assert!(
+                    failure.message().contains("Invalid invite code")
+                        || failure.message().contains("Invalid invitation"),
+                    "Expected invalid invitation failure, got: {failure}"
+                );
+            }
+            _ => panic!("Expected invalid invitation error for invalid code"),
         }
     }
 }

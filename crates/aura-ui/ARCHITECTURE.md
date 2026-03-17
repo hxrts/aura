@@ -67,6 +67,24 @@ It must not use:
 | Parity-critical operation rendering | `Observed` | authoritative semantic facts from `aura-app` | `model.rs` projection state only | harness, shells |
 | Shared-flow completion helpers | `Observed` | upstream workflow/runtime coordinators | auxiliary UI facts/toasts/modal dismissal only | harness, shells |
 
+### Capability-Gated Points
+
+- shared semantic lifecycle and readiness must be consumed from
+  `aura-app::ui_contract` / `aura-app` authoritative workflow publication,
+  never authored locally in `aura-ui`
+- shared-flow completion helpers may dismiss UI state and surface observed
+  progress, but may not publish terminal semantic truth
+- keyboard and focus routing may trigger frontend-local transitions, but parity-
+  critical command ownership remains upstream in shell/workflow boundaries
+
+### Verification Hooks
+
+- `cargo check -p aura-ui`
+- `cargo test -p aura-ui semantic_snapshot_includes_runtime_events -- --nocapture`
+- `cargo test -p aura-ui restarting_operation_generates_new_operation_instance_id -- --nocapture`
+- `just ci-observed-layer-boundaries`
+- `just ci-shared-flow-policy`
+
 ### InvariantUiSnapshotReflectsSemanticState
 `aura-ui` exports observed semantic projections that match the shared contract
 rather than frontend-local incidental structure.

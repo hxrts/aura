@@ -6,12 +6,6 @@ cd "$repo_root"
 
 # Temporary exemptions (owner: architecture, doc: work/ownership.md)
 allowlist=(
-  '^crates/aura-agent/src/reactive/frp\.rs:.*tokio::spawn'
-  '^crates/aura-agent/src/reactive/scheduler\.rs:.*tokio::spawn'
-  '^crates/aura-agent/src/runtime/effects/choreography\.rs:.*tokio::spawn'
-  '^crates/aura-agent/src/runtime/effects/network\.rs:.*tokio::spawn'
-  '^crates/aura-app/src/workflows/messaging\.rs:.*tokio::spawn'
-  '^crates/aura-sync/src/core/metrics\.rs:.*thread::spawn'
   '^crates/aura-terminal/src/demo/signal_coordinator\.rs:.*tokio::spawn'
   '^crates/aura-terminal/src/demo/simulator\.rs:.*tokio::spawn'
   '^crates/aura-terminal/src/handlers/scenarios/simulation\.rs:.*tokio::spawn'

@@ -4,16 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# Temporary exemptions (owner: architecture, doc: work/ownership.md)
-allowlist=(
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_semantic_fact$'
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:replace_authoritative_semantic_facts_of_kind$'
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_phase$'
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_phase_with_instance$'
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_failure$'
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_failure_with_instance$'
-  '^crates/aura-app/src/workflows/semantic_facts\.rs:publish_authoritative_operation_cancellation$'
-)
+allowlist=()
 
 fail() {
   echo "capability-gated-mutation: $*" >&2

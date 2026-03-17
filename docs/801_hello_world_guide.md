@@ -45,6 +45,26 @@ Platform-specific presets are available for iOS (`AgentBuilder::ios()`), Android
 
 See [Project Structure](999_project_structure.md) for details on the 8-layer architecture and effect handler organization.
 
+## Ownership Declaration Before You Add New Parity-Critical Code
+
+Before adding a new parity-critical module or workflow, declare its ownership
+category in the crate `ARCHITECTURE.md`.
+
+Use this rule:
+
+- `Pure` for reducers, validators, and typed contracts
+- `MoveOwned` for handles, owner tokens, and ownership transfer/handoff
+- `ActorOwned` for long-lived mutable async state and coordinators
+- `Observed` for rendering, harness reads, and diagnostics
+
+Also declare:
+
+- which capability gates parity-critical mutation/publication
+- which module owns terminal lifecycle
+- which timeout/backoff policy the owner consumes
+
+If those points are not explicit, the new module is not ready to land.
+
 ## Hello World Protocol
 
 Create a simple ping-pong choreography. This protocol demonstrates basic message exchange between two devices.

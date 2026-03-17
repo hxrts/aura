@@ -9,6 +9,7 @@ use crate::{
     effects::{BackoffStrategy, JitterMode, PhysicalTimeEffects, RetryPolicy, TimeError},
     AuraError, ProtocolErrorCode,
 };
+use futures::{future::Either, pin_mut};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
@@ -157,8 +158,12 @@ impl TimeoutExecutionProfile {
         )
     }
 
-    pub fn apply_retry_policy(&self, policy: &RetryBudgetPolicy) -> TimeoutBudgetResult<RetryBudgetPolicy> {
-        let mut scaled = RetryBudgetPolicy::new(policy.max_attempts(), self.apply_backoff(policy.backoff())?);
+    pub fn apply_retry_policy(
+        &self,
+        policy: &RetryBudgetPolicy,
+    ) -> TimeoutBudgetResult<RetryBudgetPolicy> {
+        let mut scaled =
+            RetryBudgetPolicy::new(policy.max_attempts(), self.apply_backoff(policy.backoff())?);
         if let Some(timeout) = policy.per_attempt_timeout() {
             scaled = scaled.with_per_attempt_timeout(self.scale_duration(timeout)?);
         }
@@ -173,16 +178,12 @@ pub enum TimeoutBudgetError {
     InvalidPolicy { detail: String },
     #[error("time source unavailable: {detail}")]
     TimeSourceUnavailable { detail: String },
-    #[error(
-        "local timeout budget exhausted at {observed_at_ms}ms (deadline {deadline_at_ms}ms)"
-    )]
+    #[error("local timeout budget exhausted at {observed_at_ms}ms (deadline {deadline_at_ms}ms)")]
     DeadlineExceeded {
         deadline_at_ms: u64,
         observed_at_ms: u64,
     },
-    #[error(
-        "retry attempt budget exhausted after {attempts_used} attempts (max {max_attempts})"
-    )]
+    #[error("retry attempt budget exhausted after {attempts_used} attempts (max {max_attempts})")]
     AttemptBudgetExhausted {
         max_attempts: u32,
         attempts_used: u32,
@@ -435,6 +436,7 @@ pub struct RetryBudgetPolicy {
 }
 
 impl RetryBudgetPolicy {
+    #[must_use]
     pub fn new(max_attempts: u32, backoff: ExponentialBackoffPolicy) -> Self {
         Self {
             max_attempts,
@@ -443,6 +445,7 @@ impl RetryBudgetPolicy {
         }
     }
 
+    #[must_use]
     pub fn with_per_attempt_timeout(mut self, timeout: Duration) -> Self {
         self.per_attempt_timeout = Some(timeout);
         self
@@ -532,24 +535,29 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    let now = current_physical_time(time).await.map_err(TimeoutRunError::Timeout)?;
+    let now = current_physical_time(time)
+        .await
+        .map_err(TimeoutRunError::Timeout)?;
     let remaining = budget
         .remaining_at(&now)
         .map_err(TimeoutRunError::Timeout)?;
     let sleep_ms = duration_to_ms(remaining).map_err(TimeoutRunError::Timeout)?;
 
-    tokio::select! {
-        result = operation() => result.map_err(TimeoutRunError::Operation),
-        sleep = time.sleep_ms(sleep_ms) => {
+    let operation_future = operation();
+    let sleep_future = time.sleep_ms(sleep_ms);
+    pin_mut!(operation_future);
+    pin_mut!(sleep_future);
+    match futures::future::select(operation_future, sleep_future).await {
+        Either::Left((result, _sleep_future)) => result.map_err(TimeoutRunError::Operation),
+        Either::Right((sleep, _operation_future)) => {
             sleep.map_err(|error| TimeoutRunError::Timeout(time_error(error)))?;
             let observed_at_ms = current_physical_time(time)
                 .await
                 .map(|time| time.ts_ms)
                 .unwrap_or(budget.deadline_at_ms());
-            Err(TimeoutRunError::Timeout(TimeoutBudgetError::deadline_exceeded(
-                budget.deadline_at_ms(),
-                observed_at_ms,
-            )))
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::deadline_exceeded(budget.deadline_at_ms(), observed_at_ms),
+            ))
         }
     }
 }
@@ -568,9 +576,7 @@ where
     let mut attempts = policy.attempt_budget();
 
     loop {
-        let attempt = attempts
-            .record_attempt()
-            .map_err(RetryRunError::Timeout)?;
+        let attempt = attempts.record_attempt().map_err(RetryRunError::Timeout)?;
 
         let result = if let Some(timeout) = policy.per_attempt_timeout() {
             let now = current_physical_time(time)
@@ -605,8 +611,9 @@ where
 }
 
 fn duration_to_ms(duration: Duration) -> TimeoutBudgetResult<u64> {
-    u64::try_from(duration.as_millis())
-        .map_err(|_| TimeoutBudgetError::invalid_policy("duration does not fit in u64 milliseconds"))
+    u64::try_from(duration.as_millis()).map_err(|_| {
+        TimeoutBudgetError::invalid_policy("duration does not fit in u64 milliseconds")
+    })
 }
 
 async fn current_physical_time<TTime: PhysicalTimeEffects + Sync>(
@@ -620,12 +627,13 @@ fn time_error(error: TimeError) -> TimeoutBudgetError {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types, clippy::expect_used, clippy::redundant_clone)]
 mod tests {
     use super::{
         execute_with_retry_budget, execute_with_timeout_budget, AttemptBudget,
         ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError, TimeoutBudget,
-        TimeoutBudgetError, TimeoutExecutionClass, TimeoutExecutionProfile,
-        TimeoutRunError, TimeoutTimeSemantics,
+        TimeoutBudgetError, TimeoutExecutionClass, TimeoutExecutionProfile, TimeoutRunError,
+        TimeoutTimeSemantics,
     };
     use crate::{
         effects::{JitterMode, PhysicalTimeEffects, TimeError},
@@ -633,8 +641,8 @@ mod tests {
         ProtocolErrorCode,
     };
     use parking_lot::Mutex;
-    use std::{collections::VecDeque, sync::Arc};
     use std::time::Duration;
+    use std::{collections::VecDeque, sync::Arc};
 
     fn physical_time(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {
@@ -657,7 +665,10 @@ mod tests {
     }
 
     impl ScriptedTimeEffects {
-        fn new(times: impl IntoIterator<Item = PhysicalTime>, sleep_behavior: SleepBehavior) -> Self {
+        fn new(
+            times: impl IntoIterator<Item = PhysicalTime>,
+            sleep_behavior: SleepBehavior,
+        ) -> Self {
             Self {
                 times: Arc::new(Mutex::new(times.into_iter().collect())),
                 sleeps: Arc::new(Mutex::new(Vec::new())),
@@ -693,18 +704,21 @@ mod tests {
 
     #[test]
     fn timeout_budget_tracks_remaining_and_child_budget() {
-        let budget = TimeoutBudget::from_start_and_timeout(
-            &physical_time(1_000),
-            Duration::from_secs(5),
-        )
-        .expect("budget");
+        let budget =
+            TimeoutBudget::from_start_and_timeout(&physical_time(1_000), Duration::from_secs(5))
+                .expect("budget");
 
         assert_eq!(budget.started_at_ms(), 1_000);
         assert_eq!(budget.deadline_at_ms(), 6_000);
         assert_eq!(budget.timeout_ms(), 5_000);
-        assert_eq!(budget.time_semantics(), TimeoutTimeSemantics::LocalPhysicalBudget);
         assert_eq!(
-            budget.remaining_at(&physical_time(2_500)).expect("remaining"),
+            budget.time_semantics(),
+            TimeoutTimeSemantics::LocalPhysicalBudget
+        );
+        assert_eq!(
+            budget
+                .remaining_at(&physical_time(2_500))
+                .expect("remaining"),
             Duration::from_millis(3_500)
         );
         assert_eq!(
@@ -723,11 +737,9 @@ mod tests {
 
     #[test]
     fn timeout_budget_expires_with_typed_failure() {
-        let budget = TimeoutBudget::from_start_and_timeout(
-            &physical_time(1_000),
-            Duration::from_secs(5),
-        )
-        .expect("budget");
+        let budget =
+            TimeoutBudget::from_start_and_timeout(&physical_time(1_000), Duration::from_secs(5))
+                .expect("budget");
 
         let error = budget
             .remaining_at(&physical_time(6_500))
@@ -821,15 +833,22 @@ mod tests {
             JitterMode::Deterministic,
         )
         .expect("backoff");
-        let base_retry =
-            RetryBudgetPolicy::new(5, base_backoff.clone()).with_per_attempt_timeout(Duration::from_secs(8));
+        let base_retry = RetryBudgetPolicy::new(5, base_backoff.clone())
+            .with_per_attempt_timeout(Duration::from_secs(8));
 
         assert_eq!(production.class(), TimeoutExecutionClass::Production);
-        assert_eq!(production.scale_duration(Duration::from_secs(4)).expect("scaled"), Duration::from_secs(4));
+        assert_eq!(
+            production
+                .scale_duration(Duration::from_secs(4))
+                .expect("scaled"),
+            Duration::from_secs(4)
+        );
         assert_eq!(simulation.jitter(), JitterMode::None);
         assert_eq!(harness.scale_percent(), 25);
 
-        let scaled = harness.apply_retry_policy(&base_retry).expect("scaled policy");
+        let scaled = harness
+            .apply_retry_policy(&base_retry)
+            .expect("scaled policy");
         assert_eq!(scaled.max_attempts(), 5);
         assert_eq!(scaled.per_attempt_timeout(), Some(Duration::from_secs(2)));
         assert_eq!(scaled.backoff().initial_delay(), Duration::from_millis(500));
@@ -853,7 +872,9 @@ mod tests {
         assert!(base_failure_latency > base_timeout);
 
         for profile in profiles {
-            let scaled_timeout = profile.scale_duration(base_timeout).expect("scaled timeout");
+            let scaled_timeout = profile
+                .scale_duration(base_timeout)
+                .expect("scaled timeout");
             let scaled_success = profile
                 .scale_duration(base_success_latency)
                 .expect("scaled success latency");

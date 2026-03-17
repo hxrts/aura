@@ -61,6 +61,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_lock::Mutex;
+use aura_app::harness_mode_enabled;
 use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
 use aura_core::{
@@ -206,6 +207,7 @@ impl AppCoreContext {
 /// - Reads the current value first (catch-up).
 /// - Subscribes and forwards values to `on_value`.
 /// - On any error, emits `ERROR_SIGNAL` and retries.
+///
 /// Maximum outer retry attempts before giving up on a signal subscription.
 /// At 2s max backoff this is ~6+ minutes of retrying before the loop exits.
 const MAX_SUBSCRIPTION_RETRIES: u32 = 200;
@@ -213,13 +215,14 @@ const SUBSCRIPTION_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const SUBSCRIPTION_MAX_BACKOFF: Duration = Duration::from_secs(2);
 
 fn subscription_timeout_profile() -> TimeoutExecutionProfile {
-    if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+    if harness_mode_enabled() {
         TimeoutExecutionProfile::harness()
     } else {
         TimeoutExecutionProfile::production()
     }
 }
 
+#[allow(clippy::expect_used)]
 fn subscription_retry_policy() -> RetryBudgetPolicy {
     let profile = subscription_timeout_profile();
     let base = RetryBudgetPolicy::new(

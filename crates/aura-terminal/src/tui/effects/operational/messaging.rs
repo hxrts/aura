@@ -19,6 +19,7 @@ use tracing::error;
 
 use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
+use crate::tui::tasks::UiTaskRegistry;
 
 // Re-export workflow functions for convenience
 // Note: Primary functions accept typed ChannelId directly (typesafe API)
@@ -65,6 +66,7 @@ async fn resolve_channel_id(
 pub async fn handle_messaging(
     command: &EffectCommand,
     app_core: &Arc<RwLock<AppCore>>,
+    tasks: &Arc<UiTaskRegistry>,
 ) -> Option<OpResult> {
     match command {
         EffectCommand::CreateChannel {
@@ -190,10 +192,11 @@ pub async fn handle_messaging(
                 .as_deref()
                 .and_then(|context_id| context_id.parse::<aura_core::ContextId>().ok());
             let app_core = Arc::clone(app_core);
+            let tasks = Arc::clone(tasks);
             let target = target.clone();
             let channel = channel.clone();
             let operation_instance_id = operation_instance_id.clone();
-            tokio::spawn(async move {
+            tasks.spawn(async move {
                 if let Err(error) =
                     aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
                         &app_core,

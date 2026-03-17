@@ -43,7 +43,7 @@ web-dominator = ["wasm", "signals", "dep:dominator"]
 # Enable futures-signals based reactivity
 # Used by: native, web-dominator
 # Also enables tokio for signal forwarding tasks
-signals = ["dep:futures-signals", "dep:futures"]
+signals = ["dep:futures-signals"]
 
 # Enable callback-based reactivity (StateObserver trait)
 # Used by: ios, android, web-js
@@ -125,7 +125,7 @@ futures-signals = { version = "0.3", optional = true }
 
 # Optional: Async runtime for signal forwarding (signals feature)
 tokio = { workspace = true }
-futures = { version = "0.3", optional = true }
+futures = { version = "0.3" }
 
 # Optional: FFI for mobile
 uniffi = { version = "0.25", optional = true }
@@ -158,6 +158,7 @@ getrandom = { version = "0.2", features = ["js"] }
 uniffi = { version = "0.25", features = ["build"], optional = true }
 
 [dev-dependencies]
+futures = { workspace = true }
 proptest = { workspace = true }
 trybuild = { workspace = true }
 

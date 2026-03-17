@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-production_source="$(awk '/#\[cfg\(test\)\]/{exit} {print}' crates/aura-terminal/src/tui/harness_state.rs)"
+production_source="$(awk '/#\[cfg\(test\)\]/{exit} {print}' crates/aura-terminal/src/tui/harness_state/snapshot.rs)"
 
 if printf '%s\n' "$production_source" | rg -q 'RuntimeFact::(ContactLinkReady|PendingHomeInvitationReady|ChannelMembershipReady|RecipientPeersResolved|MessageDeliveryReady)'; then
   fail "TUI snapshot export may not synthesize parity-critical runtime facts"

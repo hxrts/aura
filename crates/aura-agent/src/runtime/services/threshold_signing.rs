@@ -895,7 +895,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig> {
-        self.shared.state
+        self.shared
+            .state
             .read()
             .await
             .contexts
@@ -904,7 +905,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState> {
-        self.shared.state
+        self.shared
+            .state
             .read()
             .await
             .contexts
@@ -919,7 +921,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
-        self.shared.state
+        self.shared
+            .state
             .read()
             .await
             .contexts
@@ -929,7 +932,8 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
-        self.shared.state
+        self.shared
+            .state
             .read()
             .await
             .contexts

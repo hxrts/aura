@@ -11,8 +11,8 @@ use crate::components::{
 use crate::model::{
     AccessDepth, AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
     CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMemberSelectionKey,
-    NeighborhoodMode, NotificationSelectionId, SettingsSection, ThresholdWizardStep, UiController,
-    UiModel, ScreenId, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
+    NeighborhoodMode, NotificationSelectionId, ScreenId, SettingsSection, ThresholdWizardStep,
+    UiController, UiModel, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
     DEFAULT_CAPABILITY_PARTIAL,
 };
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};

@@ -90,11 +90,17 @@ impl aura_core::ProtocolErrorCode for TransportCoordinationError {
             TransportCoordinationError::ConnectionLimitExceeded { .. } => {
                 "transport_connection_limit_exceeded"
             }
-            TransportCoordinationError::CapabilityCheckFailed { .. } => "transport_capability_check",
-            TransportCoordinationError::FlowBudgetExceeded { .. } => "transport_flow_budget_exceeded",
+            TransportCoordinationError::CapabilityCheckFailed { .. } => {
+                "transport_capability_check"
+            }
+            TransportCoordinationError::FlowBudgetExceeded { .. } => {
+                "transport_flow_budget_exceeded"
+            }
             TransportCoordinationError::NetworkOpenFailed { .. } => "transport_network_open_failed",
             TransportCoordinationError::TimeUnavailable { .. } => "transport_time_unavailable",
-            TransportCoordinationError::ConnectionNotFound { .. } => "transport_connection_not_found",
+            TransportCoordinationError::ConnectionNotFound { .. } => {
+                "transport_connection_not_found"
+            }
             TransportCoordinationError::SendFailed { .. } => "transport_send_failed",
             TransportCoordinationError::DisconnectFailed { .. } => "transport_disconnect_failed",
             TransportCoordinationError::Transport(_) => "transport_layer_error",
@@ -137,11 +143,9 @@ impl RetryingTransportManager {
                     .open(address)
                     .await
                     .map(|connection_id| ConnectionInfo { connection_id })
-                    .map_err(|error| {
-                        TransportCoordinationError::NetworkOpenFailed {
-                            address: address.to_string(),
-                            detail: error.to_string(),
-                        }
+                    .map_err(|error| TransportCoordinationError::NetworkOpenFailed {
+                        address: address.to_string(),
+                        detail: error.to_string(),
                     })
             })
             .await
@@ -247,12 +251,11 @@ where
             .await?;
 
         // Store connection state using injected time effects
-        let current_time =
-            self.effects.physical_time().await.map_err(|e| {
-                TransportCoordinationError::TimeUnavailable {
-                    detail: e.to_string(),
-                }
-            })?;
+        let current_time = self.effects.physical_time().await.map_err(|e| {
+            TransportCoordinationError::TimeUnavailable {
+                detail: e.to_string(),
+            }
+        })?;
         let now_ms = current_time.ts_ms;
 
         let connection_state = ConnectionState {
@@ -275,12 +278,11 @@ where
 
     /// Send data to connected peer - NO choreography
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
-        let current_time =
-            self.effects.physical_time().await.map_err(|e| {
-                TransportCoordinationError::TimeUnavailable {
-                    detail: e.to_string(),
-                }
-            })?;
+        let current_time = self.effects.physical_time().await.map_err(|e| {
+            TransportCoordinationError::TimeUnavailable {
+                detail: e.to_string(),
+            }
+        })?;
         let now_ms = current_time.ts_ms;
 
         {
@@ -346,12 +348,11 @@ where
         &self,
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
-        let current_time =
-            self.effects.physical_time().await.map_err(|e| {
-                TransportCoordinationError::TimeUnavailable {
-                    detail: e.to_string(),
-                }
-            })?;
+        let current_time = self.effects.physical_time().await.map_err(|e| {
+            TransportCoordinationError::TimeUnavailable {
+                detail: e.to_string(),
+            }
+        })?;
         let now_ms = current_time.ts_ms;
         let max_idle_ms = max_idle.as_millis() as u64;
         let mut to_remove = Vec::new();

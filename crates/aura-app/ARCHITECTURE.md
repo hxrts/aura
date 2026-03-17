@@ -84,6 +84,27 @@ Changes to `aura-app` ownership boundaries should ship with:
 - timeout/backoff invariant tests for local-budget propagation and typed
   timeout failure where the workflow owns timeout policy
 
+### Capability-Gated Points
+
+- authoritative semantic lifecycle publication in
+  `src/workflows/semantic_facts.rs`
+- authoritative readiness publication and replacement in
+  `src/workflows/semantic_facts.rs`
+- workflow-owned semantic operation phase/failure publication in
+  `src/workflows/messaging.rs`, `src/workflows/invitation.rs`, and related
+  parity-critical workflow modules
+- opaque shared command-plane and lifecycle surfaces in
+  `src/ui_contract.rs` and `src/scenario_contract.rs`
+
+### Verification Hooks
+
+- `cargo check -p aura-app`
+- `cargo test -p aura-app --lib concurrent_authoritative_fact_updates_do_not_lose_entries -- --nocapture`
+- `cargo test -p aura-app --lib shared_flow_support_contract_is_consistent -- --nocapture`
+- `cargo test -p aura-app --test compile_fail -- --nocapture`
+- `just ci-capability-boundaries`
+- `just ci-move-semantics`
+
 ### Detailed Specifications
 
 ### InvariantAppWorkflowPurity

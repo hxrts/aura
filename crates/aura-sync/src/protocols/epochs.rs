@@ -186,15 +186,12 @@ impl EpochRotationCoordinator {
             return Err(sync_protocol_error("epochs", failure.to_string()));
         }
 
-        let target_epoch = self
-            .current_epoch
-            .next()
-            .map_err(|e| {
-                let failure = RotationFailure::EpochOverflow {
-                    reason: e.to_string(),
-                };
-                sync_protocol_error("epochs", failure.to_string())
-            })?;
+        let target_epoch = self.current_epoch.next().map_err(|e| {
+            let failure = RotationFailure::EpochOverflow {
+                reason: e.to_string(),
+            };
+            sync_protocol_error("epochs", failure.to_string())
+        })?;
         let rotation_id = format!(
             "epoch-rotation-{}-{}-{}",
             self.device_id,
@@ -258,15 +255,12 @@ impl EpochRotationCoordinator {
 
     /// Commit epoch rotation
     pub fn commit_rotation(&mut self, rotation_id: &str) -> Result<Epoch, AuraError> {
-        let rotation = self
-            .pending_rotations
-            .get_mut(rotation_id)
-            .ok_or_else(|| {
-                let failure = RotationFailure::RotationNotFound {
-                    rotation_id: rotation_id.to_string(),
-                };
-                sync_protocol_error("epochs", failure.to_string())
-            })?;
+        let rotation = self.pending_rotations.get_mut(rotation_id).ok_or_else(|| {
+            let failure = RotationFailure::RotationNotFound {
+                rotation_id: rotation_id.to_string(),
+            };
+            sync_protocol_error("epochs", failure.to_string())
+        })?;
 
         if rotation.status != RotationStatus::Synchronizing {
             let failure = RotationFailure::InvalidStatus {
@@ -329,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn confirmation_mismatch_marks_rotation_failed() {
         let context_id = ContextId::new_from_entropy([1u8; 32]);
         let mut coordinator =
@@ -358,6 +353,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::expect_used)]
     fn invalid_commit_marks_rotation_failed() {
         let context_id = ContextId::new_from_entropy([2u8; 32]);
         let mut coordinator =

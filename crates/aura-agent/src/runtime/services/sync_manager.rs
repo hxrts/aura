@@ -427,30 +427,32 @@ impl SyncServiceManager {
         let service = snapshot.and_then(|snapshot| snapshot.service);
         self.shared.commands.lock().await.take();
 
-        let maintenance_shutdown_error = if let Some(task_group) =
-            self.shared.maintenance_tasks.lock().await.take()
-        {
-            match task_group.shutdown_with_timeout(Duration::from_secs(2)).await {
-                Ok(()) => None,
-                Err(crate::task_registry::TaskSupervisionError::ForcedAbort {
-                    aborted_tasks,
-                    ..
-                }) => {
-                    tracing::warn!(
-                        service = self.name(),
-                        aborted_tasks = ?aborted_tasks,
-                        "Sync service stop force-aborted owned background tasks"
-                    );
-                    None
+        let maintenance_shutdown_error =
+            if let Some(task_group) = self.shared.maintenance_tasks.lock().await.take() {
+                match task_group
+                    .shutdown_with_timeout(Duration::from_secs(2))
+                    .await
+                {
+                    Ok(()) => None,
+                    Err(crate::task_registry::TaskSupervisionError::ForcedAbort {
+                        aborted_tasks,
+                        ..
+                    }) => {
+                        tracing::warn!(
+                            service = self.name(),
+                            aborted_tasks = ?aborted_tasks,
+                            "Sync service stop force-aborted owned background tasks"
+                        );
+                        None
+                    }
+                    Err(error) => Some(ServiceError::shutdown_failed(
+                        self.name(),
+                        format!("failed to stop maintenance task group: {error}"),
+                    )),
                 }
-                Err(error) => Some(ServiceError::shutdown_failed(
-                    self.name(),
-                    format!("failed to stop maintenance task group: {error}"),
-                )),
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         // Stop the underlying service
         if let Some(service) = service.as_ref() {

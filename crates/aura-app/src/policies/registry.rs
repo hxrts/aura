@@ -90,30 +90,6 @@ impl PolicyRegistry {
         self.policies.remove(fact_type)
     }
 
-    /// Compatibility shim for string fact type registration.
-    pub fn register_str<P: DeliveryPolicy + 'static>(&mut self, fact_type: &str, policy: P) {
-        let typed = FactTypeId::from(fact_type);
-        self.register(&typed, policy);
-    }
-
-    /// Compatibility shim for string fact type lookup.
-    pub fn get_policy_str(&self, fact_type: &str) -> &BoxedPolicy {
-        let typed = FactTypeId::from(fact_type);
-        self.get_policy(&typed)
-    }
-
-    /// Compatibility shim for string fact type checks.
-    pub fn has_policy_str(&self, fact_type: &str) -> bool {
-        let typed = FactTypeId::from(fact_type);
-        self.has_policy(&typed)
-    }
-
-    /// Compatibility shim for string fact type unregistration.
-    pub fn unregister_str(&mut self, fact_type: &str) -> Option<BoxedPolicy> {
-        let typed = FactTypeId::from(fact_type);
-        self.unregister(&typed)
-    }
-
     /// Get the default policy
     pub fn default_policy(&self) -> &BoxedPolicy {
         &self.default_policy

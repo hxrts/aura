@@ -35,6 +35,32 @@ testing across all layers.
 - `Observed` diagnostics and fixtures remain downstream of the modeled semantic
   truth.
 
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Stateful mock handlers and in-memory effect doubles | `ActorOwned` (test-only) | individual mock/test harness owner | mock handler internals | tests and assertions |
+| Transfer/capability modeling helpers | `MoveOwned` | helper issuing the modeled token/handoff | explicit helper APIs | tests and assertions |
+| Deterministic time/network/simulation controllers | `ActorOwned` (test-only) | controller instance | controller internals | tests and diagnostics |
+| Fixtures, builders, and capture/assertion helpers | `Observed` / `Pure` | test harness caller | helper-local setup state only | tests and diagnostics |
+
+### Capability-Gated Points
+
+- mock/runtime bridge helpers that model authoritative lifecycle/readiness or
+  capability behavior for tests must do so explicitly and remain test-only
+- stateful effect doubles may expose mutation for deterministic control, but
+  those shortcuts must not become production-facing backdoors
+- mock transport/journal/time helpers should preserve the same capability and
+  ownership semantics the production code expects to consume
+
+### Verification Hooks
+
+- `cargo check -p aura-testkit`
+- `cargo test -p aura-testkit -- --nocapture`
+- targeted integration/property tests using the stateful handlers and
+  controllable time/network surfaces
+- `just ci-move-semantics`
+
 ### Detailed Specifications
 
 ### InvariantMockContractFidelity

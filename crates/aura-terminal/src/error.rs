@@ -148,9 +148,6 @@ impl From<aura_simulator::handlers::effect_composer::SimulationComposerError> fo
 impl From<crate::tui::effects::DispatchError> for TerminalError {
     fn from(err: crate::tui::effects::DispatchError) -> Self {
         match err {
-            crate::tui::effects::DispatchError::PermissionDenied { required } => {
-                TerminalError::Capability(format!("requires {}", required.as_biscuit_capability()))
-            }
             crate::tui::effects::DispatchError::NotFound { resource } => {
                 TerminalError::NotFound(resource)
             }

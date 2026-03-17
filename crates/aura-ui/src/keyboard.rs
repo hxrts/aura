@@ -8,8 +8,8 @@ use crate::model::{
     AccessDepth, AccessOverrideModalState, ActiveModal, AddDeviceModalState, AddDeviceWizardStep,
     CapabilityConfigModalState, CapabilityTier, ChannelRow, CreateChannelDetailsField,
     CreateChannelModalState, CreateChannelWizardStep, CreateInvitationModalState, ModalState,
-    SelectDeviceModalState, SelectedHome, SettingsSection, TextModalState,
-    ThresholdWizardModalState, ThresholdWizardStep, ToastState, UiModel, ScreenId,
+    ScreenId, SelectDeviceModalState, SelectedHome, SettingsSection, TextModalState,
+    ThresholdWizardModalState, ThresholdWizardStep, ToastState, UiModel,
 };
 use aura_app::ui::types::parse_chat_command;
 use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
@@ -1683,8 +1683,8 @@ mod tests {
     use crate::clipboard::{ClipboardPort, MemoryClipboard};
     use crate::model::{
         ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CreateChannelModalState,
-        CreateChannelWizardStep, CreateInvitationModalState, ModalState, SettingsSection,
-        TextModalState, ThresholdWizardModalState, ThresholdWizardStep, UiModel, ScreenId,
+        CreateChannelWizardStep, CreateInvitationModalState, ModalState, ScreenId, SettingsSection,
+        TextModalState, ThresholdWizardModalState, ThresholdWizardStep, UiModel,
     };
 
     fn modal_state(model: &UiModel) -> Option<ModalState> {

@@ -116,7 +116,7 @@ async fn wait_for_lan_peer(agent: &AuraAgent, peer_id: AuthorityId) -> TestResul
         .rendezvous()
         .ok_or_else(|| anyhow!("rendezvous service not enabled"))?;
 
-    timeout(LAN_DISCOVERY_TIMEOUT, async {
+    match timeout(LAN_DISCOVERY_TIMEOUT, async {
         loop {
             let peers = rendezvous.list_lan_discovered_peers().await;
             if peers.iter().any(|peer| peer.authority_id == peer_id) {
@@ -126,7 +126,17 @@ async fn wait_for_lan_peer(agent: &AuraAgent, peer_id: AuthorityId) -> TestResul
         }
     })
     .await
-    .map_err(|_| anyhow!("timed out waiting for LAN peer discovery"))
+    {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let running = rendezvous.is_lan_discovery_running().await;
+            let metrics = rendezvous.lan_metrics().await;
+            let peers = rendezvous.list_lan_discovered_peers().await;
+            Err(anyhow!(
+                "timed out waiting for LAN peer discovery; running={running} metrics={metrics:?} peers={peers:?}"
+            ))
+        }
+    }
 }
 
 async fn wait_for_envelope(

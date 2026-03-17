@@ -12,25 +12,29 @@ use std::sync::Arc;
 
 use crate::AppCore;
 
-/// UI wrapper around `AppCore` to discourage direct access to internals.
+/// UI wrapper around the shared `AppCore` boundary.
 #[derive(Clone)]
 pub struct UiAppCore {
-    inner: Arc<RwLock<AppCore>>,
+    shared: Arc<RwLock<AppCore>>,
 }
 
 impl UiAppCore {
-    pub fn new(inner: Arc<RwLock<AppCore>>) -> Self {
-        Self { inner }
+    pub fn new(shared: Arc<RwLock<AppCore>>) -> Self {
+        Self { shared }
+    }
+
+    pub fn shared(&self) -> &Arc<RwLock<AppCore>> {
+        &self.shared
     }
 
     pub fn raw(&self) -> &Arc<RwLock<AppCore>> {
-        &self.inner
+        self.shared()
     }
 }
 
 impl From<Arc<RwLock<AppCore>>> for UiAppCore {
-    fn from(inner: Arc<RwLock<AppCore>>) -> Self {
-        Self::new(inner)
+    fn from(shared: Arc<RwLock<AppCore>>) -> Self {
+        Self::new(shared)
     }
 }
 

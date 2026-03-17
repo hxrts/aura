@@ -40,16 +40,22 @@ where
 
         let sync_data = match request.crdt_type {
             CrdtType::Convergent => {
-                let handler = self.cv_handler.as_ref().ok_or(CrdtCoordinatorError::MissingHandler {
-                    crdt_type: CrdtType::Convergent,
-                })?;
+                let handler =
+                    self.cv_handler
+                        .as_ref()
+                        .ok_or(CrdtCoordinatorError::MissingHandler {
+                            crdt_type: CrdtType::Convergent,
+                        })?;
                 let state_bytes = self.serialize_state(handler.get_state())?;
                 CrdtSyncData::FullState(state_bytes)
             }
             CrdtType::Commutative => {
-                let handler = self.cm_handler.as_ref().ok_or(CrdtCoordinatorError::MissingHandler {
-                    crdt_type: CrdtType::Commutative,
-                })?;
+                let handler =
+                    self.cm_handler
+                        .as_ref()
+                        .ok_or(CrdtCoordinatorError::MissingHandler {
+                            crdt_type: CrdtType::Commutative,
+                        })?;
                 // Buffered operations not exposed by current handler; return empty set.
                 let _ = handler;
                 CrdtSyncData::Operations(Vec::new())
@@ -66,9 +72,12 @@ where
                 CrdtSyncData::Deltas(Vec::new())
             }
             CrdtType::Meet => {
-                let handler = self.mv_handler.as_ref().ok_or(CrdtCoordinatorError::MissingHandler {
-                    crdt_type: CrdtType::Meet,
-                })?;
+                let handler =
+                    self.mv_handler
+                        .as_ref()
+                        .ok_or(CrdtCoordinatorError::MissingHandler {
+                            crdt_type: CrdtType::Meet,
+                        })?;
                 let state_bytes = self.serialize_state(handler.get_state())?;
                 CrdtSyncData::Constraints(state_bytes)
             }
@@ -116,19 +125,15 @@ where
                     for crdt_op in operations {
                         let op: Op =
                             aura_core::util::serialization::from_slice(&crdt_op.operation_data)
-                                .map_err(|e| {
-                                    CrdtCoordinatorError::DeserializationFailed {
-                                        target: "commutative_operation",
-                                        detail: e.to_string(),
-                                    }
+                                .map_err(|e| CrdtCoordinatorError::DeserializationFailed {
+                                    target: "commutative_operation",
+                                    detail: e.to_string(),
                                 })?;
                         let ctx: CausalContext =
                             aura_core::util::serialization::from_slice(&crdt_op.causal_context)
-                                .map_err(|e| {
-                                    CrdtCoordinatorError::DeserializationFailed {
-                                        target: "causal_context",
-                                        detail: e.to_string(),
-                                    }
+                                .map_err(|e| CrdtCoordinatorError::DeserializationFailed {
+                                    target: "causal_context",
+                                    detail: e.to_string(),
                                 })?;
                         ops_with_ctx.push(OpWithCtx::new(op, ctx));
                     }
@@ -148,15 +153,13 @@ where
                     // Deserialize all deltas first to avoid borrowing conflicts
                     let mut deltas = Vec::new();
                     for delta_bytes in delta_bytes_vec {
-                        let delta: DeltaS::Delta = aura_core::util::serialization::from_slice(
-                            &delta_bytes,
-                        )
-                        .map_err(|e| {
-                            CrdtCoordinatorError::DeserializationFailed {
-                                target: "delta_state",
-                                detail: e.to_string(),
-                            }
-                        })?;
+                        let delta: DeltaS::Delta =
+                            aura_core::util::serialization::from_slice(&delta_bytes).map_err(
+                                |e| CrdtCoordinatorError::DeserializationFailed {
+                                    target: "delta_state",
+                                    detail: e.to_string(),
+                                },
+                            )?;
                         deltas.push(delta);
                     }
 

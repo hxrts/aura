@@ -305,7 +305,7 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
             FactValue::Bytes(bytes) => serde_json::from_slice(bytes),
             _ => Ok(serde_json::Value::Null),
         }
-        .map_err(|e| super::error::fact_encoding(e))?;
+        .map_err(super::error::fact_encoding)?;
 
         if let Some(dispute_window_ends) = evidence_json
             .get("dispute_window_ends_at_ms")

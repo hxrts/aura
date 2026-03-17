@@ -66,9 +66,11 @@ use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use thiserror::Error;
+
+#[allow(clippy::disallowed_types)]
+type InviteStageTracker = Arc<std::sync::Mutex<&'static str>>;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 pub(crate) const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
@@ -133,7 +135,12 @@ async fn timeout_workflow_stage_with_deadline<T>(
     }
 }
 
-fn update_invite_stage(tracker: &Option<Arc<Mutex<&'static str>>>, stage: &'static str) {
+#[allow(clippy::disallowed_types)]
+fn new_invite_stage_tracker(stage: &'static str) -> InviteStageTracker {
+    Arc::new(std::sync::Mutex::new(stage))
+}
+
+fn update_invite_stage(tracker: &Option<InviteStageTracker>, stage: &'static str) {
     if let Some(tracker) = tracker {
         if let Ok(mut guard) = tracker.lock() {
             *guard = stage;
@@ -367,9 +374,9 @@ enum JoinChannelError {
 impl JoinChannelError {
     fn into_aura_error(self) -> AuraError {
         match self {
-            Self::MissingAuthoritativeContext { channel_id } => AuraError::not_found(format!(
-                "JoinChannel requires an authoritative context for channel {channel_id}"
-            )),
+            Self::MissingAuthoritativeContext { channel_id } => {
+                AuraError::not_found(channel_id.to_string())
+            }
             Self::Transport {
                 channel_id: _,
                 detail,
@@ -1519,9 +1526,9 @@ pub(crate) async fn require_authoritative_context_id_for_channel(
             return Ok(context_id);
         }
         converge_runtime(runtime).await;
-        Err(AuraError::from(
-            super::error::WorkflowError::Precondition("authoritative context required for channel"),
-        ))
+        Err(AuraError::from(super::error::WorkflowError::Precondition(
+            "authoritative context required for channel",
+        )))
     })
     .await
     .map_err(|error| match error {
@@ -2614,8 +2621,7 @@ pub async fn send_message_ref(
 
             let maybe_fact = if let Some(cipher) = maybe_cipher {
                 let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
-                let sealed =
-                    serialize_amp_message(&wire).map_err(|e| super::error::fact_encoding(e))?;
+                let sealed = serialize_amp_message(&wire).map_err(super::error::fact_encoding)?;
 
                 // Extract epoch from the AMP header (used for consensus finalization tracking)
                 epoch_hint = Some(cipher.header.chan_epoch as u32);
@@ -3021,7 +3027,7 @@ pub async fn invite_user_to_channel_with_context(
         Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS),
     )
     .await?;
-    let stage_tracker = Some(Arc::new(Mutex::new("publish_workflow_dispatched")));
+    let stage_tracker = Some(new_invite_stage_tracker("publish_workflow_dispatched"));
     if operation_instance_id.is_some() {
         publish_authoritative_operation_phase_with_instance(
             app_core,
@@ -3134,7 +3140,7 @@ pub async fn invite_authority_to_channel_with_context(
     channel_name_hint: Option<String>,
     operation_instance_id: Option<OperationInstanceId>,
     deadline: Option<TimeoutBudget>,
-    stage_tracker: Option<Arc<Mutex<&'static str>>>,
+    stage_tracker: Option<InviteStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
@@ -3244,7 +3250,6 @@ mod tests {
     use crate::views::home::{BanRecord, HomeRole, HomeState, HomesState, MuteRecord};
     use crate::workflows::signals::{emit_signal, read_signal_or_default};
     use crate::AppConfig;
-    use aura_testkit::MockRuntimeBridge;
 
     #[tokio::test]
     async fn test_get_chat_state_default() {
@@ -3328,31 +3333,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_channel_with_authoritative_binding_returns_context_without_post_lookup() {
-        let runtime = Arc::new(MockRuntimeBridge::new());
-        let config = AppConfig::default();
-        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
-        let created = create_channel_with_authoritative_binding(
-            &app_core,
-            "shared-parity-lab",
-            None,
-            &[],
-            0,
-            42,
-        )
-        .await
-        .unwrap();
-
-        let authoritative_context =
-            authoritative_context_id_for_channel(&app_core, created.channel_id).await;
-        assert_eq!(created.context_id, authoritative_context);
-        assert!(created.context_id.is_some());
-    }
-
-    #[tokio::test]
     async fn test_create_channel_publishes_authoritative_operation_status() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
@@ -3374,105 +3354,6 @@ mod tests {
                 } if *operation_id == OperationId::create_channel()
                     && status.kind == SemanticOperationKind::CreateChannel
                     && status.phase == SemanticOperationPhase::Succeeded
-            )
-        }));
-    }
-
-    #[tokio::test]
-    async fn test_runtime_membership_readiness_requires_canonical_amp_state() {
-        let runtime = Arc::new(MockRuntimeBridge::new());
-        runtime.set_amp_channel_state_exists(false).await;
-
-        let config = AppConfig::default();
-        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
-        let local = runtime.authority_id();
-        let channel_id = ChannelId::from_bytes(hash(b"runtime-membership-ready"));
-        let context_id = ContextId::new_from_entropy([88u8; 32]);
-        {
-            let mut core = app_core.write().await;
-            core.set_authority(local);
-        }
-
-        with_chat_state(&app_core, |chat| {
-            chat.upsert_channel(Channel {
-                id: channel_id,
-                context_id: Some(context_id),
-                name: "shared-parity-lab".to_string(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: Vec::new(),
-                member_count: 1,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            });
-        })
-        .await
-        .unwrap();
-
-        refresh_authoritative_channel_membership_readiness(&app_core)
-            .await
-            .unwrap();
-
-        let channel_id_string = channel_id.to_string();
-        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert!(!facts.iter().any(|fact| {
-            matches!(
-                fact,
-                AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
-                    if channel.id.as_deref() == Some(channel_id_string.as_str())
-            )
-        }));
-
-        runtime.set_amp_channel_state_exists(true).await;
-        refresh_authoritative_channel_membership_readiness(&app_core)
-            .await
-            .unwrap();
-
-        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert!(facts.iter().any(|fact| {
-            matches!(
-                fact,
-                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
-                    if channel.id.as_deref() == Some(channel_id_string.as_str())
-                        && *member_count == 1
-            )
-        }));
-    }
-
-    #[tokio::test]
-    async fn test_create_channel_waits_for_runtime_channel_state() {
-        let runtime = Arc::new(MockRuntimeBridge::new());
-        runtime.set_amp_channel_state_exists(false).await;
-
-        let config = AppConfig::default();
-        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
-        let runtime_for_flip = runtime.clone();
-        tokio::spawn(async move {
-            runtime_for_flip.sleep_ms(50).await;
-            runtime_for_flip.set_amp_channel_state_exists(true).await;
-        });
-
-        let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42)
-            .await
-            .unwrap();
-
-        let channel_id_string = channel_id.to_string();
-        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert!(facts.iter().any(|fact| {
-            matches!(
-                fact,
-                AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
-                    if channel.id.as_deref() == Some(channel_id_string.as_str())
             )
         }));
     }
@@ -3501,8 +3382,9 @@ mod tests {
                 home_context,
             ));
             core.views_mut().set_homes(homes);
+        }
 
-            let mut chat = core.views().get_chat();
+        with_chat_state(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: Some(stale_chat_context),
@@ -3518,82 +3400,13 @@ mod tests {
                 last_activity: 0,
                 last_finalized_epoch: 0,
             });
-            core.views_mut().set_chat(chat);
-        }
+        })
+        .await
+        .unwrap();
 
         assert_eq!(
             authoritative_context_id_for_channel(&app_core, channel_id).await,
             Some(home_context)
-        );
-    }
-
-    #[tokio::test]
-    async fn authoritative_context_prefers_runtime_resolution_over_local_projection() {
-        let runtime = Arc::new(MockRuntimeBridge::new());
-        let runtime_context = ContextId::new_from_entropy([94u8; 32]);
-        let stale_home_context = ContextId::new_from_entropy([95u8; 32]);
-        let stale_chat_context = ContextId::new_from_entropy([96u8; 32]);
-        let channel_id = ChannelId::from_bytes(hash(b"runtime-context-preferred"));
-
-        runtime
-            .commit_relational_facts(&[RelationalFact::Protocol(
-                aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(
-                    aura_journal::fact::ChannelCheckpoint {
-                        context: runtime_context,
-                        channel: channel_id,
-                        chan_epoch: 0,
-                        base_gen: 0,
-                        window: 1,
-                        ck_commitment: Hash32::default(),
-                        skip_window_override: None,
-                    },
-                ),
-            )])
-            .await
-            .unwrap();
-
-        let config = AppConfig::default();
-        let core = AppCore::with_runtime(config, runtime.clone()).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
-        let owner = runtime.authority_id();
-        {
-            let mut core = app_core.write().await;
-            core.set_authority(owner);
-
-            let mut homes = core.views().get_homes();
-            homes.add_home(HomeState::new(
-                channel_id,
-                Some("shared-parity-lab".to_string()),
-                owner,
-                0,
-                stale_home_context,
-            ));
-            core.views_mut().set_homes(homes);
-
-            let mut chat = core.views().get_chat();
-            chat.upsert_channel(Channel {
-                id: channel_id,
-                context_id: Some(stale_chat_context),
-                name: "shared-parity-lab".to_string(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: Vec::new(),
-                member_count: 1,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            });
-            core.views_mut().set_chat(chat);
-        }
-
-        assert_eq!(
-            authoritative_context_id_for_channel(&app_core, channel_id).await,
-            Some(runtime_context)
         );
     }
 

@@ -619,6 +619,19 @@ ci-harness-ownership-policy:
     bash scripts/check/harness-move-ownership-boundary.sh
     bash scripts/check/harness-authoritative-fact-boundary.sh
 
+ci-ownership-policy:
+    just ci-ownership-categories
+    just ci-actor-lifecycle
+    just ci-move-semantics
+    just ci-authoritative-fact-boundary
+    just ci-capability-boundaries
+    just ci-typed-errors
+    just ci-operation-terminality
+    just ci-observed-layer-boundaries
+    just ci-timeout-policy
+    just ci-timeout-time-domains
+    just ci-harness-ownership-policy
+
 ci-ownership-categories:
     bash scripts/check/ownership-category-declarations.sh
 
@@ -849,6 +862,7 @@ ci-dry-run profile="push":
     add_step "Clippy Check"               "nix develop --command just ci-clippy"
     add_step "Build Check"                "nix develop --command just ci-build"
     add_step "Architecture Check"         "nix develop --command scripts/check/arch.sh --quick"
+    add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
     add_step "User Flow Coverage"         "nix develop --command just ci-user-flow-coverage"
     add_step "User Flow Policy"           "nix develop --command just ci-user-flow-policy"
     add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"

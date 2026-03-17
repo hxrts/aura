@@ -12,7 +12,7 @@ use crate::AppCore;
 pub async fn read_signal<T>(
     app_core: &Arc<RwLock<AppCore>>,
     signal: &Signal<T>,
-    name: &str,
+    _name: &str,
 ) -> Result<T, AuraError>
 where
     T: Clone + Send + Sync + 'static,
@@ -20,7 +20,7 @@ where
     let core = app_core.read().await;
     core.read(signal)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to read {name}: {e}")))
+        .map_err(|e| AuraError::internal(e.to_string()))
 }
 
 /// Read a signal or return its Default value on error.
@@ -37,7 +37,7 @@ pub async fn emit_signal<T>(
     app_core: &Arc<RwLock<AppCore>>,
     signal: &Signal<T>,
     value: T,
-    name: &str,
+    _name: &str,
 ) -> Result<(), AuraError>
 where
     T: Clone + Send + Sync + 'static,
@@ -45,5 +45,5 @@ where
     let core = app_core.read().await;
     core.emit(signal, value)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit {name}: {e}")))
+        .map_err(|e| AuraError::internal(e.to_string()))
 }

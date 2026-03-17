@@ -135,8 +135,8 @@ impl InvitationsCallbacks {
                                 operation.succeed().await;
                             }
                             if let Err(e) = copy_to_clipboard(&code) {
-                            tracing::debug!(error = %e, "clipboard copy failed; code still available in UI");
-                        }
+                                tracing::debug!(error = %e, "clipboard copy failed; code still available in UI");
+                            }
                             send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code })
                                 .await;
                         }

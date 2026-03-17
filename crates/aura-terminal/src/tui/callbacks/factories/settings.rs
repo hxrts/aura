@@ -96,8 +96,8 @@ impl SettingsCallbacks {
                 Ok(config) => config,
                 Err(error) => {
                     enqueue_ui_update_required(
-                        ctx.clone(),
-                        tx.clone(),
+                        ctx,
+                        tx,
                         UiUpdate::operation_failed(
                             UiOperation::UpdateThreshold,
                             crate::error::TerminalError::Input(error),
@@ -107,8 +107,9 @@ impl SettingsCallbacks {
                 }
             };
             let cmd = EffectCommand::UpdateThreshold { config };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
+            let task_ctx = ctx.clone();
+            spawn_ctx(ctx, async move {
+                match task_ctx.dispatch(cmd).await {
                     Ok(_) => {
                         send_ui_update_required(
                             &tx,

@@ -1,11 +1,11 @@
 use super::AuraEffectSystem;
 use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::{TransportEffects, TransportError};
-use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::{AuthorityId, ContextId};
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_core::{AuthorityId, ContextId};
 use aura_effects::time::PhysicalTimeHandler;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_effects::transport::TransportConfig;
@@ -40,14 +40,14 @@ where
 {
     let time = PhysicalTimeHandler::new();
     let started_at = time.physical_time().await.map_err(|_| timeout_reason())?;
-    let budget =
-        TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| timeout_reason())?;
-    Ok(execute_with_timeout_budget(&time, &budget, f)
+    let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout)
+        .map_err(|_| timeout_reason())?;
+    execute_with_timeout_budget(&time, &budget, f)
         .await
         .map_err(|error| match error {
             TimeoutRunError::Timeout(_) => timeout_reason(),
             TimeoutRunError::Operation(error) => error,
-        })?)
+        })
 }
 // Implementation of TransportEffects
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -429,7 +429,10 @@ where
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use crate::runtime::services::{RendezvousManager, RendezvousManagerConfig};
+    use crate::runtime::services::{
+        RendezvousManager, RendezvousManagerConfig, RuntimeService, RuntimeServiceContext,
+    };
+    use crate::runtime::TaskSupervisor;
     use aura_rendezvous::RendezvousDescriptor;
     use std::sync::Arc;
 
@@ -468,6 +471,13 @@ mod tests {
             Arc::new(effects.time_effects().clone()),
         );
         effects.attach_rendezvous_manager(manager.clone());
+        let service_context = RuntimeServiceContext::new(
+            Arc::new(TaskSupervisor::new()),
+            Arc::new(effects.time_effects().clone()),
+        );
+        RuntimeService::start(&manager, &service_context)
+            .await
+            .unwrap();
 
         manager
             .cache_descriptor(descriptor(
@@ -489,5 +499,6 @@ mod tests {
 
         let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
         assert_eq!(resolved.as_deref(), Some("127.0.0.1:55002"));
+        RuntimeService::stop(&manager).await.unwrap();
     }
 }

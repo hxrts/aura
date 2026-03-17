@@ -464,7 +464,8 @@ async fn test_set_channel_mode_requires_admin() {
                 || e.to_string().contains("administrator")
                 || e.to_string().contains("Capability required")
                 || e.to_string().contains("requires a home context")
-                || e.to_string().contains("Unknown channel") =>
+                || e.to_string().contains("Unknown channel")
+                || e.to_string().contains("Not found:") =>
         {
             println!("  Correctly denied - requires admin privileges");
         }

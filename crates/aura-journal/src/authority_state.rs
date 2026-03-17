@@ -17,7 +17,9 @@ use async_trait::async_trait;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::threshold::{SignableOperation, SigningContext};
 use aura_core::tree::TreeOp;
-use aura_core::{types::authority::TreeStateSummary, AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{
+    types::authority::TreeStateSummary, AuraError, Authority, AuthorityId, Hash32, Result,
+};
 // Using aura-core type aliases for cryptographic types
 use aura_core::types::authority::{
     Ed25519Signature as Signature, Ed25519VerifyingKey as PublicKey,

@@ -380,6 +380,11 @@ pub const SEMANTIC_COMMAND_SUPPORT: &[SemanticCommandSupport] = &[
         tui: FlowAvailability::Supported,
     },
     SemanticCommandSupport {
+        intent: IntentKind::CreateChannel,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
         intent: IntentKind::StartDeviceEnrollment,
         web: FlowAvailability::Supported,
         tui: FlowAvailability::Supported,
@@ -396,6 +401,11 @@ pub const SEMANTIC_COMMAND_SUPPORT: &[SemanticCommandSupport] = &[
     },
     SemanticCommandSupport {
         intent: IntentKind::RemoveSelectedDevice,
+        web: FlowAvailability::Supported,
+        tui: FlowAvailability::Supported,
+    },
+    SemanticCommandSupport {
+        intent: IntentKind::SwitchAuthority,
         web: FlowAvailability::Supported,
         tui: FlowAvailability::Supported,
     },
@@ -934,13 +944,11 @@ impl IntentAction {
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
-                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
                         BarrierDeclaration::Screen(ScreenId::Settings),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
-                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::Screen(ScreenId::Settings),
@@ -1116,13 +1124,11 @@ impl IntentAction {
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
-                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
                         BarrierDeclaration::Screen(ScreenId::Chat),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
-                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
@@ -1155,13 +1161,11 @@ impl IntentAction {
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
-                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
                         BarrierDeclaration::Screen(ScreenId::Contacts),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
-                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::OperationState {
@@ -1203,13 +1207,11 @@ impl IntentAction {
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
-                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
                         BarrierDeclaration::Screen(ScreenId::Chat),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
-                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                         BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageDeliveryReady),
                     ],
                     before_next_intent: vec![

@@ -35,6 +35,27 @@ verification capabilities.
 - Capability semantics may be modeled and checked here, but runtime mutation
   remains outside this crate.
 
+### Ownership Inventory
+
+| Path | Category | Authoritative owner | May mutate | Observe only |
+|------|----------|---------------------|------------|--------------|
+| Quint bridge schema/import/export logic | `Pure` | `aura-quint` bridge modules | bridge transforms only | verification callers |
+| Verification runners/evaluators/results | `Observed` | evaluation workflow entrypoints | local workflow state only | tests, reports, callers |
+| Verification artifact handoff and result transfer | `MoveOwned` | explicit caller/return path | typed transfer points only | diagnostics and reports |
+
+### Capability-Gated Points
+
+- capability semantics may be modeled in verification inputs/results, but
+  `aura-quint` must not expose runtime mutation shortcuts
+- bridge validation and artifact transfer should stay explicit and typed rather
+  than relying on hidden mutable ownership
+
+### Verification Hooks
+
+- `cargo check -p aura-quint`
+- `cargo test -p aura-quint -- --nocapture`
+- `just test-crate aura-quint`
+
 ### Detailed Specifications
 
 ### InvariantQuintIrDeterminism

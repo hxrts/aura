@@ -22,5 +22,5 @@ pub use command_parser::{
     AuraEvent, CommandAuthorizationLevel, EffectCommand, EventFilter, EventSubscription,
     ThresholdConfig,
 };
-pub use dispatcher::{CapabilityPolicy, CommandDispatcher, DispatchError};
+pub use dispatcher::{CommandDispatcher, DispatchError};
 pub use operational::{OpError, OpFailureCode, OpResponse, OpResult, OperationalHandler};

@@ -11,7 +11,7 @@ fail() {
 
 observation_files=(
   crates/aura-harness/src/tool_api.rs
-  crates/aura-terminal/src/tui/harness_state.rs
+  crates/aura-terminal/src/tui/harness_state/snapshot.rs
   crates/aura-ui/src/model.rs
   crates/aura-web/src/harness_bridge.rs
 )

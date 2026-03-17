@@ -90,6 +90,7 @@ fn harness_context() -> Option<HarnessContext> {
     }
 }
 
+/// Return whether the process is running with harness-mode determinism enabled.
 pub fn harness_mode_enabled() -> bool {
     harness_context().is_some()
 }

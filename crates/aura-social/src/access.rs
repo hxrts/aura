@@ -280,8 +280,8 @@ fn default_access_level_for_hops(hops: Option<u32>) -> AccessLevel {
 mod tests {
     use super::*;
     use aura_core::{
-        identifiers::{AuthorityId, ContextId},
         time::{PhysicalTime, TimeStamp},
+        types::identifiers::{AuthorityId, ContextId},
     };
     use std::collections::BTreeSet;
 

@@ -2,7 +2,7 @@
 //!
 //! Helper functions for vector clock operations used in CRDT coordination.
 
-use aura_core::{types::identifiers::DeviceId, time::VectorClock};
+use aura_core::{time::VectorClock, types::identifiers::DeviceId};
 
 /// Merge source vector clock into target, taking the maximum for each actor.
 pub fn merge_vector_clocks(target: &mut VectorClock, other: &VectorClock) {

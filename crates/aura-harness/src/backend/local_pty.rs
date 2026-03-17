@@ -220,7 +220,7 @@ impl LocalPtyBackend {
         session
             .reader_thread
             .as_ref()
-            .is_none_or(|thread| !thread.is_finished())
+            .map_or(true, |thread| !thread.is_finished())
     }
 
     fn ensure_session_alive(&self, session: &RunningSession, context: &str) -> Result<()> {
@@ -1869,12 +1869,12 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::thread;
     use std::time::Duration;
 
     use super::*;
     use crate::config::InstanceMode;
 
+    #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -1959,28 +1959,23 @@ mod tests {
         needle: &str,
         timeout: Duration,
     ) -> String {
-        const POLL_INTERVAL_MS: u128 = 30;
-        let max_attempts_u128 = timeout
-            .as_millis()
-            .max(POLL_INTERVAL_MS)
-            .div_ceil(POLL_INTERVAL_MS);
-        let max_attempts = usize::try_from(max_attempts_u128).unwrap_or(usize::MAX);
+        const POLL_INTERVAL: Duration = Duration::from_millis(30);
 
-        for attempt in 0..max_attempts {
+        let mut last_screen = String::new();
+        crate::timeouts::blocking_wait_until(timeout, POLL_INTERVAL, || {
             let screen = match backend.snapshot() {
                 Ok(screen) => screen,
                 Err(error) => panic!("snapshot failed: {error}"),
             };
             if screen.contains(needle) {
-                return screen;
+                return Some(screen);
             }
-            if attempt + 1 == max_attempts {
-                panic!("timed out waiting for screen to contain {needle:?}; got: {screen:?}");
-            }
-            blocking_sleep(Duration::from_millis(POLL_INTERVAL_MS as u64));
-        }
-
-        panic!("wait_for_screen_contains reached unreachable state");
+            last_screen = screen;
+            None
+        })
+        .unwrap_or_else(|| {
+            panic!("timed out waiting for screen to contain {needle:?}; got: {last_screen:?}")
+        })
     }
 
     #[test]

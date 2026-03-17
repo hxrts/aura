@@ -470,40 +470,46 @@ struct NetworkCondition {
     expires_at_tick: u64,
 }
 
+struct SimulationScenarioShared {
+    state: Mutex<ScenarioState>,
+}
+
 /// Simulation-specific scenario management handler
 pub struct SimulationScenarioHandler {
-    state: Arc<Mutex<ScenarioState>>,
+    shared: Arc<SimulationScenarioShared>,
 }
 
 impl SimulationScenarioHandler {
     /// Create a new scenario handler
     pub fn new(seed: u64) -> Self {
         Self {
-            state: Arc::new(Mutex::new(ScenarioState {
-                scenarios: HashMap::new(),
-                active_injections: Vec::new(),
-                checkpoints: HashMap::new(),
-                events: Vec::new(),
-                metrics: HashMap::new(),
-                enable_randomization: false,
-                injection_probability: 0.1,
-                max_concurrent_injections: 3,
-                total_injections: 0,
-                trigger_counts: HashMap::new(),
-                seed,
-                chat_groups: HashMap::new(),
-                message_history: HashMap::new(),
-                participant_data_loss: HashMap::new(),
-                recovery_state: HashMap::new(),
-                current_tick: 0,
-                network_conditions: Vec::new(),
-            })),
+            shared: Arc::new(SimulationScenarioShared {
+                state: Mutex::new(ScenarioState {
+                    scenarios: HashMap::new(),
+                    active_injections: Vec::new(),
+                    checkpoints: HashMap::new(),
+                    events: Vec::new(),
+                    metrics: HashMap::new(),
+                    enable_randomization: false,
+                    injection_probability: 0.1,
+                    max_concurrent_injections: 3,
+                    total_injections: 0,
+                    trigger_counts: HashMap::new(),
+                    seed,
+                    chat_groups: HashMap::new(),
+                    message_history: HashMap::new(),
+                    participant_data_loss: HashMap::new(),
+                    recovery_state: HashMap::new(),
+                    current_tick: 0,
+                    network_conditions: Vec::new(),
+                }),
+            }),
         }
     }
 
     /// Register a scenario for potential injection
     pub fn register_scenario(&self, scenario: ScenarioDefinition) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -513,7 +519,7 @@ impl SimulationScenarioHandler {
 
     /// Enable or disable random scenario injection
     pub fn set_randomization(&self, enable: bool, probability: f64) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -524,7 +530,7 @@ impl SimulationScenarioHandler {
 
     /// Manually trigger a specific scenario
     pub fn trigger_scenario(&self, scenario_id: &str) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
         Self::cleanup_expired_injections_locked(&mut state);
@@ -533,7 +539,7 @@ impl SimulationScenarioHandler {
 
     /// Advance simulated time by ticks
     pub fn wait_ticks(&self, ticks: u64) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -565,7 +571,7 @@ impl SimulationScenarioHandler {
         participants: Vec<String>,
         duration_ticks: u64,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -625,7 +631,7 @@ impl SimulationScenarioHandler {
 
     /// Create a lightweight checkpoint of simulation state
     pub fn create_checkpoint(&self, label: &str) -> Result<String, TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -645,7 +651,7 @@ impl SimulationScenarioHandler {
         &self,
         checkpoint_id: &str,
     ) -> Result<ScenarioCheckpointSnapshot, TestingError> {
-        let state = self.state.lock().map_err(|e| {
+        let state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
         let checkpoint = state
@@ -664,7 +670,7 @@ impl SimulationScenarioHandler {
         &self,
         snapshot: ScenarioCheckpointSnapshot,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
         state
@@ -1438,7 +1444,7 @@ impl SimulationScenarioHandler {
 
     /// Get statistics about scenario injections
     pub fn get_injection_stats(&self) -> Result<HashMap<String, String>, TestingError> {
-        let state = self.state.lock().map_err(|e| {
+        let state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1469,7 +1475,7 @@ impl SimulationScenarioHandler {
 
     /// Clean up expired injections
     fn cleanup_expired_injections(&self) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
         Self::cleanup_expired_injections_locked(&mut state);
@@ -1598,7 +1604,7 @@ impl SimulationScenarioHandler {
         creator: &str,
         initial_members: Vec<String>,
     ) -> Result<String, TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1633,7 +1639,7 @@ impl SimulationScenarioHandler {
         sender: &str,
         message: &str,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1678,7 +1684,7 @@ impl SimulationScenarioHandler {
         loss_type: &str,
         recovery_required: bool,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1686,7 +1692,7 @@ impl SimulationScenarioHandler {
         let pre_loss_count: usize = state
             .message_history
             .values()
-            .map(|messages| {
+            .map(|messages: &Vec<ChatMessage>| {
                 messages
                     .iter()
                     .filter(|_msg| {
@@ -1722,7 +1728,7 @@ impl SimulationScenarioHandler {
         expected_message_count: usize,
         include_pre_recovery: bool,
     ) -> Result<bool, TestingError> {
-        let state = self.state.lock().map_err(|e| {
+        let state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1763,7 +1769,7 @@ impl SimulationScenarioHandler {
         guardians: Vec<String>,
         threshold: usize,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1800,7 +1806,7 @@ impl SimulationScenarioHandler {
         target: &str,
         validation_steps: Vec<String>,
     ) -> Result<bool, TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1822,7 +1828,7 @@ impl SimulationScenarioHandler {
 
     /// Get chat group statistics
     pub fn get_chat_stats(&self) -> Result<HashMap<String, String>, TestingError> {
-        let state = self.state.lock().map_err(|e| {
+        let state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1871,7 +1877,7 @@ impl TestingEffects for SimulationScenarioHandler {
         checkpoint_id: &str,
         label: &str,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1908,7 +1914,7 @@ impl TestingEffects for SimulationScenarioHandler {
     }
 
     async fn restore_checkpoint(&self, checkpoint_id: &str) -> Result<(), TestingError> {
-        let state = self.state.lock().map_err(|e| {
+        let state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -1926,7 +1932,7 @@ impl TestingEffects for SimulationScenarioHandler {
         // Restore limited state values captured in snapshot
         if let Some(tick_str) = checkpoint.state_snapshot.get("current_tick") {
             if let Ok(tick) = tick_str.parse::<u64>() {
-                let mut state_mut = self.state.lock().map_err(|e| {
+                let mut state_mut = self.shared.state.lock().map_err(|e| {
                     TestingError::SystemError(aura_core::AuraError::internal(format!(
                         "Lock error: {e}"
                     )))
@@ -1943,7 +1949,7 @@ impl TestingEffects for SimulationScenarioHandler {
         component: &str,
         path: &str,
     ) -> Result<Box<dyn Any + Send>, TestingError> {
-        let state = self.state.lock().map_err(|e| {
+        let state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -2053,7 +2059,7 @@ impl TestingEffects for SimulationScenarioHandler {
         value: f64,
         unit: &str,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
@@ -2074,7 +2080,7 @@ impl SimulationScenarioHandler {
         event_type: &str,
         event_data: HashMap<String, String>,
     ) -> Result<(), TestingError> {
-        let mut state = self.state.lock().map_err(|e| {
+        let mut state = self.shared.state.lock().map_err(|e| {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 

@@ -967,26 +967,21 @@ mod tests {
     fn test_concurrent_access() {
         let collector = Arc::new(MetricsCollector::new());
         let base_now = 1_000_000u64;
-        let mut handles = vec![];
-
-        for i in 0..10 {
-            let collector_clone = collector.clone();
-            let handle = thread::spawn(move || {
-                let now = base_now + i as u64;
-                collector_clone.record_sync_start(&format!("session_{i}"), now);
-                collector_clone.record_sync_completion(
-                    &format!("session_{i}"),
-                    i as u64,
-                    (i as u64) * 100,
-                    now + 50,
-                );
-            });
-            handles.push(handle);
-        }
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
+        thread::scope(|scope| {
+            for i in 0..10 {
+                let collector_clone = collector.clone();
+                scope.spawn(move || {
+                    let now = base_now + i as u64;
+                    collector_clone.record_sync_start(&format!("session_{i}"), now);
+                    collector_clone.record_sync_completion(
+                        &format!("session_{i}"),
+                        i as u64,
+                        (i as u64) * 100,
+                        now + 50,
+                    );
+                });
+            }
+        });
 
         let snapshot = collector.export_snapshot(base_now + 9 + 50);
         assert_eq!(snapshot.operational.sync_sessions_total, 10);

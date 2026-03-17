@@ -532,6 +532,21 @@ check_type_references() {
             # Generic conceptual terms
             Generic|Unanimous|Percentage|Routine|SuspiciousActivity|ConfirmedCompromise|MessageBubble|SessionDelegation)
                 ((skipped++)) || true; continue ;;
+            # Ownership model categories (architectural concepts, not Rust types)
+            Pure|MoveOwned|ActorOwned|Observed|Submitted|Succeeded)
+                ((skipped++)) || true; continue ;;
+            # Planned error variant names (documented design, not yet implemented)
+            RuntimeUnavailable|ConnectivityRequired|Precondition)
+                ((skipped++)) || true; continue ;;
+            # OTA/module lifecycle types (planned flow coverage, not yet implemented)
+            PublishSyntheticOtaRelease|StageOtaCandidate|TriggerBootloaderHandoff|ConfirmCandidateHealth|RollbackOtaCandidate|OtaReleasePublished|OtaArtifactAvailable|OtaStaged|OtaCompatibilityBlocked|OtaCandidateLaunched|OtaHealthConfirmed|OtaRolledBack|PublishCandidateOtaRelease|ApproveOtaCutover|OtaCandidatePublished|OtaPromotionStateChanged|OtaRehearsalPassed)
+                ((skipped++)) || true; continue ;;
+            # Module lifecycle types (planned flow coverage, not yet implemented)
+            PublishSyntheticModuleRelease|StageModuleCandidate|PrepareModuleAdmission|CommitModuleCutover|RollbackModuleCutover|ModuleReleasePublished|ModuleArtifactAvailable|ModuleVerified|ModuleStaged|ModuleAdmissionPrepared|ModuleCutoverCommitted|ModuleRolledBack|PublishCandidateModuleRelease|ApproveModuleCutover|ModuleCandidatePublished|ModulePromotionStateChanged|ModuleHealthConfirmed|ModuleRehearsalPassed)
+                ((skipped++)) || true; continue ;;
+            # Harness command types (documented design, not yet implemented as Rust types)
+            SendKeys|SendKey|ClickButton|FillInput|FillField)
+                ((skipped++)) || true; continue ;;
         esac
 
         # Skip if it's clearly from a Lean/Quint skill file (external concepts)

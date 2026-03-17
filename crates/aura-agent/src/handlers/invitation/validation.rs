@@ -1,4 +1,15 @@
 use super::*;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+enum InvitationValidationError {
+    #[error("invitation {invitation_id} is not pending")]
+    NotPending { invitation_id: InvitationId },
+    #[error("invitation {invitation_id} expired")]
+    Expired { invitation_id: InvitationId },
+    #[error("only sender can cancel invitation {invitation_id}")]
+    CancelNotSender { invitation_id: InvitationId },
+}
 
 pub(super) struct InvitationValidationHandler<'a> {
     handler: &'a InvitationHandler,
@@ -34,10 +45,12 @@ impl<'a> InvitationValidationHandler<'a> {
                     sender = %invitation.sender_id,
                     "Invitation is not pending"
                 );
-                return Err(AgentError::invalid(format!(
-                    "Invitation {} is not pending (status: {:?}, sender: {})",
-                    invitation_id, invitation.status, invitation.sender_id
-                )));
+                return Err(AgentError::invalid(
+                    InvitationValidationError::NotPending {
+                        invitation_id: invitation_id.clone(),
+                    }
+                    .to_string(),
+                ));
             }
 
             if invitation.is_expired(now_ms) {
@@ -47,10 +60,12 @@ impl<'a> InvitationValidationHandler<'a> {
                     now_ms = now_ms,
                     "Invitation has expired"
                 );
-                return Err(AgentError::invalid(format!(
-                    "Invitation {} has expired (expires_at: {:?}, now: {})",
-                    invitation_id, invitation.expires_at, now_ms
-                )));
+                return Err(AgentError::invalid(
+                    InvitationValidationError::Expired {
+                        invitation_id: invitation_id.clone(),
+                    }
+                    .to_string(),
+                ));
             }
         } else {
             tracing::debug!(
@@ -73,10 +88,12 @@ impl<'a> InvitationValidationHandler<'a> {
             .await
         {
             if !invitation.is_pending() {
-                return Err(AgentError::invalid(format!(
-                    "Invitation {} is not pending (status: {:?})",
-                    invitation_id, invitation.status
-                )));
+                return Err(AgentError::invalid(
+                    InvitationValidationError::NotPending {
+                        invitation_id: invitation_id.clone(),
+                    }
+                    .to_string(),
+                ));
             }
         }
 
@@ -94,17 +111,21 @@ impl<'a> InvitationValidationHandler<'a> {
             .await
         {
             if !invitation.is_pending() {
-                return Err(AgentError::invalid(format!(
-                    "Invitation {} is not pending (status: {:?})",
-                    invitation_id, invitation.status
-                )));
+                return Err(AgentError::invalid(
+                    InvitationValidationError::NotPending {
+                        invitation_id: invitation_id.clone(),
+                    }
+                    .to_string(),
+                ));
             }
 
             if invitation.sender_id != self.handler.context.authority.authority_id() {
-                return Err(AgentError::invalid(format!(
-                    "Only sender can cancel invitation {}",
-                    invitation_id
-                )));
+                return Err(AgentError::invalid(
+                    InvitationValidationError::CancelNotSender {
+                        invitation_id: invitation_id.clone(),
+                    }
+                    .to_string(),
+                ));
             }
         }
 

@@ -9,7 +9,11 @@ fail() {
   exit 1
 }
 
-mapfile -t raw_impls < <(rg -l 'impl RawUiBackend for' crates/aura-harness/src/backend)
+raw_impls=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  raw_impls+=("$path")
+done < <(rg -l 'impl RawUiBackend for' crates/aura-harness/src/backend)
 expected=(
   'crates/aura-harness/src/backend/local_pty.rs'
   'crates/aura-harness/src/backend/playwright_browser.rs'
@@ -25,7 +29,11 @@ for path in "${expected[@]}"; do
     || fail "raw backend impl must stay quarantined to $path"
 done
 
-mapfile -t raw_accessors < <(rg -l 'as_raw_ui_mut\(' crates/aura-harness/src)
+raw_accessors=()
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  raw_accessors+=("$path")
+done < <(rg -l 'as_raw_ui_mut\(' crates/aura-harness/src)
 for path in "${raw_accessors[@]}"; do
   case "$path" in
     crates/aura-harness/src/backend/mod.rs|crates/aura-harness/src/coordinator.rs)

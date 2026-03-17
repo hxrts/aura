@@ -87,9 +87,7 @@ pub async fn handle_settings(
         EffectCommand::UpdateThreshold { config } => {
             match update_threshold(app_core, config.threshold_k(), config.threshold_n()).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to update threshold: {e}"
-                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
 

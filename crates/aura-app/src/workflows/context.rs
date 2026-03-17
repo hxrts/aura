@@ -65,7 +65,7 @@ fn resolution_from_home(
 ) -> Result<ActiveHomeResolution, AuraError> {
     let context_id = home_state
         .context_id
-        .ok_or_else(|| AuraError::not_found(format!("Home {home_id} has no context ID")))?;
+        .ok_or_else(|| AuraError::not_found(home_id.to_string()))?;
     Ok(ActiveHomeResolution {
         home_id,
         context_id,

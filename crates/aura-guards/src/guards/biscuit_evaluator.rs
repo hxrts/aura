@@ -56,11 +56,12 @@ impl BiscuitGuardEvaluator {
         budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<GuardResult, GuardError> {
-        let can_charge = budget
-            .can_charge(flow_cost)
-            .map_err(|e| GuardError::FlowBudgetEvaluationFailed {
-                detail: e.to_string(),
-            })?;
+        let can_charge =
+            budget
+                .can_charge(flow_cost)
+                .map_err(|e| GuardError::FlowBudgetEvaluationFailed {
+                    detail: e.to_string(),
+                })?;
         if !can_charge {
             return Err(GuardError::BudgetExceeded {
                 required: u64::from(flow_cost),

@@ -580,9 +580,9 @@ impl ScenarioConfig {
             );
         }
 
-        let steps = self
-            .compatibility_steps()
-            .expect("validated non-semantic scenarios must expose compatibility steps");
+        let Some(steps) = self.compatibility_steps() else {
+            bail!("validated non-semantic scenarios must expose compatibility steps");
+        };
         let mut step_ids = HashSet::new();
         for step in steps {
             if step.id.trim().is_empty() {

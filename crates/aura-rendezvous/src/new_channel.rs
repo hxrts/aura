@@ -755,7 +755,10 @@ mod tests {
         let context = ContextId::new_from_entropy([3u8; 32]);
         let mut channel = SecureChannel::new([4u8; 32], context, local, remote, 5, None);
 
-        let error = channel.rotate(5).expect_err("same epoch should fail");
+        let error = match channel.rotate(5) {
+            Ok(()) => panic!("same epoch should fail"),
+            Err(error) => error,
+        };
         assert!(error.to_string().contains("greater than current epoch"));
         assert_eq!(
             channel.state(),

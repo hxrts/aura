@@ -25,11 +25,11 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::TransportEnvelope;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
-use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::types::identifiers::AuthorityId;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_guards::GuardContextProvider;
 #[cfg(not(target_arch = "wasm32"))]
@@ -38,7 +38,7 @@ use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::amp::get_channel_state;
-use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use aura_rendezvous::{DescriptorBuilder, RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
 use std::collections::{BTreeMap, VecDeque};
@@ -559,6 +559,19 @@ impl RuntimeSystem {
                 .await?;
         }
 
+        if let Err(error) = self
+            .maintenance_service
+            .publish_initial_lan_descriptor()
+            .await
+        {
+            tracing::warn!(
+                event = "runtime.service.lifecycle.reconcile_failed",
+                service = self.maintenance_service.name(),
+                error = %error,
+                "Runtime startup reconciliation failed to republish the initial LAN descriptor"
+            );
+        }
+
         Ok(())
     }
 
@@ -676,20 +689,20 @@ impl RuntimeSystem {
             .await
             .map_err(|error| match error {
                 TimeoutRunError::Timeout(_) => {
-                tracing::warn!(
-                    event = "runtime.shutdown.service_timeout",
-                    service = service.name(),
-                    timeout_ms = SERVICE_STOP_TIMEOUT.as_millis() as u64,
-                    "Runtime service stop timed out"
-                );
-                ServiceError::new(
-                    service.name(),
-                    ServiceErrorKind::Timeout,
-                    format!(
-                        "service stop timed out after {}ms",
-                        SERVICE_STOP_TIMEOUT.as_millis()
-                    ),
-                )
+                    tracing::warn!(
+                        event = "runtime.shutdown.service_timeout",
+                        service = service.name(),
+                        timeout_ms = SERVICE_STOP_TIMEOUT.as_millis() as u64,
+                        "Runtime service stop timed out"
+                    );
+                    ServiceError::new(
+                        service.name(),
+                        ServiceErrorKind::Timeout,
+                        format!(
+                            "service stop timed out after {}ms",
+                            SERVICE_STOP_TIMEOUT.as_millis()
+                        ),
+                    )
                 }
                 TimeoutRunError::Operation(error) => ServiceError::new(
                     service.name(),
@@ -935,15 +948,15 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
     effects: Arc<AuraEffectSystem>,
     lan_transport: Arc<LanTransportService>,
 ) {
-    let tcp_accept_group = parent_tasks.group("tcp");
-    let tcp_connection_group = tcp_accept_group.group("connections");
     let listener = lan_transport.listener();
     let websocket_listener = lan_transport.websocket_listener();
     let metrics = lan_transport.metrics_handle();
     let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
         Arc::new(effects.time_effects().clone());
     let websocket_effects = effects.clone();
-    tcp_accept_group.spawn_cancellable_named("accept_loop", async move {
+    let tcp_accept_group = parent_tasks.clone();
+    let tcp_connection_group = tcp_accept_group.clone();
+    tcp_accept_group.spawn_cancellable_named("tcp_accept_loop", async move {
         loop {
             let (mut stream, addr) = match listener.accept().await {
                 Ok((stream, addr)) => (stream, addr),
@@ -981,7 +994,7 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                     metrics.last_accept_ms = now_ms;
                 }
             }
-            connection_group.spawn_named(format!("connection.{addr}"), async move {
+            connection_group.spawn_named(format!("tcp_connection.{addr}"), async move {
                 let mut len_buf = [0u8; 4];
                 if let Err(err) = stream.read_exact(&mut len_buf).await {
                     tracing::debug!(error = %err, addr = %addr, "LAN transport read len failed");
@@ -1073,12 +1086,12 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
         }
     });
 
-    let websocket_accept_group = parent_tasks.group("websocket");
-    let websocket_connection_group = websocket_accept_group.group("connections");
     let metrics = lan_transport.metrics_handle();
     let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
         Arc::new(websocket_effects.time_effects().clone());
-    websocket_accept_group.spawn_cancellable_named("accept_loop", async move {
+    let websocket_accept_group = parent_tasks.clone();
+    let websocket_connection_group = websocket_accept_group.clone();
+    websocket_accept_group.spawn_cancellable_named("websocket_accept_loop", async move {
         loop {
             let (stream, addr) = match websocket_listener.accept().await {
                 Ok((stream, addr)) => (stream, addr),
@@ -1092,7 +1105,7 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
             let metrics = metrics.clone();
             let time_effects = time_effects.clone();
             let connection_group = websocket_connection_group.clone();
-            connection_group.spawn_named(format!("connection.{addr}"), async move {
+            connection_group.spawn_named(format!("websocket_connection.{addr}"), async move {
                 let websocket = match accept_async(stream).await {
                     Ok(websocket) => websocket,
                     Err(err) => {
@@ -1353,6 +1366,18 @@ pub(crate) async fn publish_lan_descriptor_with(
     rendezvous_manager: &RendezvousManager,
     lan_transport: &LanTransportService,
 ) -> Result<(), ServiceError> {
+    async fn install_lan_descriptor(
+        rendezvous_manager: &RendezvousManager,
+        descriptor: RendezvousDescriptor,
+    ) -> Result<(), ServiceError> {
+        rendezvous_manager
+            .cache_descriptor(descriptor.clone())
+            .await
+            .map_err(|error| ServiceError::startup_failed("rendezvous_cache", error.to_string()))?;
+        rendezvous_manager.set_lan_descriptor(descriptor).await;
+        Ok(())
+    }
+
     let authority_context = AuthorityContext::new_with_device(authority_id, device_id);
     let handler = RendezvousHandler::new(authority_context.clone())
         .map_err(|e| ServiceError::startup_failed("rendezvous_handler", e.to_string()))?;
@@ -1391,33 +1416,62 @@ pub(crate) async fn publish_lan_descriptor_with(
         return Ok(());
     }
 
-    let result = handler
-        .publish_descriptor(&effects, context_id, hints, [0u8; 32], 0)
+    match handler
+        .publish_descriptor(&effects, context_id, hints.clone(), [0u8; 32], 0)
         .await
-        .map_err(|e| ServiceError::startup_failed("rendezvous_publish", e.to_string()))?;
-
-    if result.success {
-        if let Some(descriptor) = result.descriptor {
-            let descriptor = RendezvousDescriptor {
-                device_id: Some(device_id),
-                ..descriptor
-            };
-            rendezvous_manager
-                .cache_descriptor(descriptor.clone())
-                .await
-                .map_err(|error| {
-                    ServiceError::startup_failed("rendezvous_cache", error.to_string())
-                })?;
-            rendezvous_manager.set_lan_descriptor(descriptor).await;
-        } else {
+    {
+        Ok(result) if result.success => {
+            if let Some(descriptor) = result.descriptor {
+                let descriptor = RendezvousDescriptor {
+                    device_id: Some(device_id),
+                    ..descriptor
+                };
+                install_lan_descriptor(rendezvous_manager, descriptor).await?;
+                return Ok(());
+            }
             tracing::warn!("LAN descriptor publish succeeded without descriptor payload");
         }
-    } else {
-        tracing::warn!(
-            error = %result.error.unwrap_or_else(|| "unknown error".to_string()),
-            "LAN descriptor publish failed"
-        );
+        Ok(result) => {
+            tracing::warn!(
+                error = %result.error.unwrap_or_else(|| "unknown error".to_string()),
+                "LAN descriptor publish failed"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "LAN descriptor publish errored; falling back to runtime-local descriptor"
+            );
+        }
     }
+
+    let now_ms = effects
+        .time_effects()
+        .physical_time()
+        .await
+        .map_err(|error| {
+            ServiceError::startup_failed(
+                "rendezvous_publish",
+                format!("failed to read physical time for LAN descriptor fallback: {error}"),
+            )
+        })?
+        .ts_ms;
+    let descriptor = DescriptorBuilder::new(
+        authority_id,
+        rendezvous_manager.config().descriptor_validity.as_millis() as u64,
+        None,
+    )
+    .build(context_id, hints, [0u8; 32], now_ms);
+    let descriptor = RendezvousDescriptor {
+        device_id: Some(device_id),
+        ..descriptor
+    };
+    tracing::warn!(
+        authority = %authority_id,
+        context_id = %context_id,
+        "Installed runtime-local LAN descriptor fallback"
+    );
+    install_lan_descriptor(rendezvous_manager, descriptor).await?;
 
     Ok(())
 }

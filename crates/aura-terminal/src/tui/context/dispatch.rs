@@ -68,9 +68,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to create account: {}", e);
-                Err(TerminalError::Operation(format!(
-                    "Failed to create account: {e}"
-                )))
+                Err(TerminalError::Operation(e.to_string()))
             }
         }
     }
@@ -93,9 +91,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to create account with device enrollment: {}", e);
-                Err(TerminalError::Operation(format!(
-                    "Failed to create account with device enrollment: {e}"
-                )))
+                Err(TerminalError::Operation(e.to_string()))
             }
         }
     }
@@ -123,9 +119,7 @@ impl AccountFilesHelper {
                     "Failed to create account with device enrollment runtime identity: {}",
                     e
                 );
-                Err(TerminalError::Operation(format!(
-                    "Failed to create account with device enrollment runtime identity: {e}"
-                )))
+                Err(TerminalError::Operation(e.to_string()))
             }
         }
     }
@@ -148,9 +142,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to restore recovered account: {}", e);
-                Err(TerminalError::Operation(format!(
-                    "Failed to restore recovered account: {e}"
-                )))
+                Err(TerminalError::Operation(e.to_string()))
             }
         }
     }
@@ -164,7 +156,7 @@ impl AccountFilesHelper {
 
         crate::handlers::tui::export_account_backup(&self.base_path, Some(&self.device_id_str))
             .await
-            .map_err(|e| TerminalError::Operation(format!("Failed to export backup: {e}")))
+            .map_err(|e| TerminalError::Operation(e.to_string()))
     }
 
     pub async fn import_account_backup(&self, backup_code: &str) -> TerminalResult<()> {
@@ -176,9 +168,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to import backup: {}", e);
-                Err(TerminalError::Operation(format!(
-                    "Failed to import backup: {e}"
-                )))
+                Err(TerminalError::Operation(e.to_string()))
             }
         }
     }
@@ -511,9 +501,11 @@ mod tests {
     use async_lock::RwLock;
     use aura_app::ui::prelude::*;
     use aura_app::ui::signals::ERROR_SIGNAL;
-    use aura_core::effects::PhysicalTimeEffects;
     use aura_core::effects::reactive::ReactiveEffects;
-    use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError};
+    use aura_core::effects::PhysicalTimeEffects;
+    use aura_core::{
+        execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
+    };
     use aura_effects::time::PhysicalTimeHandler;
 
     use crate::handlers::tui::TuiMode;

@@ -180,6 +180,7 @@ pub use crate::views::{
     Channel, ChannelType, ChatState, ContactsState, HomeState, InvitationsState, Message,
     NeighborhoodState, RecoveryState, ViewState,
 };
+pub use crate::workflows::harness_determinism::harness_mode_enabled;
 
 #[cfg(feature = "callbacks")]
 pub use crate::bridge::callback::StateObserver;

@@ -1,65 +1,17 @@
 //! # Command Dispatcher
 //!
-//! Maps IRC-style commands to effect system commands with capability checking.
+//! Maps IRC-style commands to effect system commands.
 //!
-//! ## Capability Checking
-//!
-//! The dispatcher supports configurable capability checking via `CapabilityPolicy`:
-//!
-//! - `AllowAll` - Permits all commands (for development/testing)
-//! - `DenyNonPublic` - Denies commands requiring capabilities (restrictive default)
-//! - `Custom(fn)` - Delegate to a custom capability checker
-//!
-//! For Biscuit integration, create a custom checker that calls RuntimeBridge:
-//!
-//! ```ignore
-//! let checker = |cap: &CommandCapability| -> bool {
-//!     if *cap == CommandCapability::None { return true; }
-//!     // Check via RuntimeBridge.has_command_capability(cap.as_str())
-//!     runtime.has_command_capability(cap.as_str())
-//! };
-//! let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::Custom(Box::new(checker)));
-//! ```
+//! Authorization belongs to the runtime-backed dispatch path. This dispatcher is
+//! a pure mapping helper for chat commands plus current-channel context.
 
-use crate::tui::commands::{ChatCommand, CommandCapability};
+use crate::tui::commands::ChatCommand;
 
 use super::command_parser::EffectCommand;
-
-/// Policy for checking command capabilities
-pub enum CapabilityPolicy {
-    /// Allow all commands regardless of capability requirements
-    AllowAll,
-    /// Deny all commands that require non-None capabilities
-    DenyNonPublic,
-    /// Use a custom capability checker function
-    Custom(Box<dyn Fn(&CommandCapability) -> bool + Send + Sync>),
-}
-
-impl Default for CapabilityPolicy {
-    fn default() -> Self {
-        // Production-safe default: deny commands with non-None capability requirement
-        Self::DenyNonPublic
-    }
-}
-
-impl std::fmt::Debug for CapabilityPolicy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AllowAll => write!(f, "AllowAll"),
-            Self::DenyNonPublic => write!(f, "DenyNonPublic"),
-            Self::Custom(_) => write!(f, "Custom(...)"),
-        }
-    }
-}
 
 /// Error that can occur during command dispatch
 #[derive(Debug, Clone, PartialEq)]
 pub enum DispatchError {
-    /// User lacks required capability
-    PermissionDenied {
-        /// Required capability
-        required: CommandCapability,
-    },
     /// Target user/channel not found
     NotFound {
         /// What was not found
@@ -82,13 +34,6 @@ pub enum DispatchError {
 impl std::fmt::Display for DispatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::PermissionDenied { required } => {
-                write!(
-                    f,
-                    "Permission denied: requires '{}' capability",
-                    required.as_biscuit_capability()
-                )
-            }
             Self::NotFound { resource } => write!(f, "Not found: {resource}"),
             Self::InvalidParameter { param, reason } => {
                 write!(f, "Invalid parameter '{param}': {reason}")
@@ -109,51 +54,15 @@ impl std::error::Error for DispatchError {}
 pub struct CommandDispatcher {
     /// Current channel context
     current_channel: Option<String>,
-    /// Capability checking policy
-    capability_policy: CapabilityPolicy,
 }
 
 impl CommandDispatcher {
-    /// Create a new command dispatcher with default policy (DenyNonPublic)
+    /// Create a new command dispatcher.
     #[must_use]
     pub fn new() -> Self {
         Self {
             current_channel: None,
-            capability_policy: CapabilityPolicy::default(),
         }
-    }
-
-    /// Create a dispatcher with a specific capability policy
-    #[must_use]
-    pub fn with_policy(policy: CapabilityPolicy) -> Self {
-        Self {
-            current_channel: None,
-            capability_policy: policy,
-        }
-    }
-
-    /// Create a dispatcher with RuntimeBridge-backed capability checking.
-    ///
-    /// This is a convenience constructor for integrating with Biscuit token
-    /// verification via RuntimeBridge. Pass a closure that checks capabilities
-    /// against Biscuit tokens.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let dispatcher = CommandDispatcher::with_biscuit_policy(Box::new(|cap| {
-    ///     runtime_bridge.has_command_capability(cap.as_str())
-    /// }));
-    /// ```
-    #[must_use]
-    pub fn with_biscuit_policy(
-        checker: Box<dyn Fn(&CommandCapability) -> bool + Send + Sync>,
-    ) -> Self {
-        Self::with_policy(CapabilityPolicy::Custom(checker))
-    }
-
-    /// Set the capability policy
-    pub fn set_policy(&mut self, policy: CapabilityPolicy) {
-        self.capability_policy = policy;
     }
 
     /// Set the current channel context
@@ -172,42 +81,8 @@ impl CommandDispatcher {
         self.current_channel.as_deref()
     }
 
-    /// Check if a command is allowed based on the configured capability policy.
-    ///
-    /// The check delegates to the configured `CapabilityPolicy`:
-    /// - `AllowAll`: Always permits (used when IoContext handles authorization)
-    /// - `DenyNonPublic`: Denies commands requiring capabilities
-    /// - `Custom(fn)`: Delegates to custom checker (for Biscuit integration)
-    pub fn check_capability(&self, command: &ChatCommand) -> Result<(), DispatchError> {
-        let capability = command.required_capability();
-
-        // Commands with no capability requirement always pass
-        if capability == CommandCapability::None {
-            return Ok(());
-        }
-
-        // Check based on policy
-        let allowed = match &self.capability_policy {
-            CapabilityPolicy::AllowAll => true,
-            CapabilityPolicy::DenyNonPublic => false,
-            CapabilityPolicy::Custom(checker) => checker(&capability),
-        };
-
-        if allowed {
-            Ok(())
-        } else {
-            Err(DispatchError::PermissionDenied {
-                required: capability,
-            })
-        }
-    }
-
     /// Dispatch an IRC command to an effect command
     pub fn dispatch(&self, command: ChatCommand) -> Result<EffectCommand, DispatchError> {
-        // First check capability
-        self.check_capability(&command)?;
-
-        // Then map to effect command
         self.map_command(command)
     }
 
@@ -567,112 +442,5 @@ mod tests {
 
         dispatcher.clear_current_channel();
         assert_eq!(dispatcher.current_channel(), None);
-    }
-
-    // =========================================================================
-    // Capability Policy Tests
-    // =========================================================================
-
-    #[test]
-    fn test_default_policy_denies_non_public() {
-        let dispatcher = CommandDispatcher::new();
-
-        // Default policy (DenyNonPublic) should deny commands requiring capabilities
-        let cmd = ChatCommand::Msg {
-            target: "alice".to_string(),
-            text: "hello".to_string(),
-        };
-
-        let result = dispatcher.dispatch(cmd);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_deny_non_public_policy() {
-        let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::DenyNonPublic);
-
-        // Commands requiring capabilities should be denied
-        let cmd = ChatCommand::Msg {
-            target: "alice".to_string(),
-            text: "hello".to_string(),
-        };
-
-        let result = dispatcher.dispatch(cmd);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            DispatchError::PermissionDenied { .. }
-        ));
-    }
-
-    #[test]
-    fn test_deny_non_public_allows_help() {
-        let dispatcher = CommandDispatcher::with_policy(CapabilityPolicy::DenyNonPublic);
-
-        // Help command has no capability requirement, even though the UI
-        // handles it locally instead of routing it into the effect layer.
-        let cmd = ChatCommand::Help { command: None };
-
-        let result = dispatcher.check_capability(&cmd);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_custom_policy() {
-        // Custom policy that allows only specific capabilities
-        let checker = |cap: &CommandCapability| -> bool {
-            matches!(
-                cap,
-                CommandCapability::SendDm | CommandCapability::ViewMembers
-            )
-        };
-
-        let dispatcher =
-            CommandDispatcher::with_policy(CapabilityPolicy::Custom(Box::new(checker)));
-
-        // SendDm should be allowed
-        let msg_cmd = ChatCommand::Msg {
-            target: "alice".to_string(),
-            text: "hello".to_string(),
-        };
-        assert!(dispatcher.dispatch(msg_cmd).is_ok());
-
-        // ModerateKick should be denied
-        let mut dispatcher_with_channel = CommandDispatcher::with_policy(CapabilityPolicy::Custom(
-            Box::new(|cap: &CommandCapability| {
-                matches!(
-                    cap,
-                    CommandCapability::SendDm | CommandCapability::ViewMembers
-                )
-            }),
-        ));
-        dispatcher_with_channel.set_current_channel("general");
-
-        let kick_cmd = ChatCommand::Kick {
-            target: "spammer".to_string(),
-            reason: None,
-        };
-        let result = dispatcher_with_channel.dispatch(kick_cmd);
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            DispatchError::PermissionDenied { .. }
-        ));
-    }
-
-    #[test]
-    fn test_set_policy() {
-        let mut dispatcher = CommandDispatcher::new();
-
-        // Start with DenyNonPublic
-        let cmd = ChatCommand::Msg {
-            target: "alice".to_string(),
-            text: "hello".to_string(),
-        };
-        assert!(dispatcher.dispatch(cmd.clone()).is_err());
-
-        // Change to AllowAll
-        dispatcher.set_policy(CapabilityPolicy::AllowAll);
-        assert!(dispatcher.dispatch(cmd).is_ok());
     }
 }

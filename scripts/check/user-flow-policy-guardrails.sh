@@ -126,7 +126,7 @@ is_sleep_guard_path() {
     crates/aura-harness/src/coordinator.rs|\
     crates/aura-harness/src/executor.rs|\
     crates/aura-harness/playwright-driver/playwright_driver.mjs|\
-    crates/aura-terminal/src/tui/harness_state.rs|\
+    crates/aura-terminal/src/tui/harness_state/snapshot.rs|\
     crates/aura-web/src/harness_bridge.rs)
       return 0
       ;;
@@ -139,7 +139,7 @@ is_sleep_guard_path() {
 is_row_index_guard_path() {
   case "$1" in
     crates/aura-app/src/ui_contract.rs|\
-    crates/aura-terminal/src/tui/harness_state.rs)
+    crates/aura-terminal/src/tui/harness_state/snapshot.rs)
       return 0
       ;;
     *)

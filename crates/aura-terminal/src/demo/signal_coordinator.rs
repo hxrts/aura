@@ -34,6 +34,7 @@ use aura_core::Hash32;
 use tokio::sync::mpsc;
 
 use super::{AgentEvent, AgentResponse, SimulatedBridge};
+use crate::tui::tasks::UiTaskRegistry;
 
 /// Coordinates demo mode using signals instead of events
 pub struct DemoSignalCoordinator {
@@ -54,6 +55,9 @@ pub struct DemoSignalCoordinator {
 
     /// Track last recovery state to detect changes
     last_recovery_state: Arc<tokio::sync::Mutex<Option<String>>>,
+
+    /// Owned background task boundary for the coordinator loops.
+    tasks: Arc<UiTaskRegistry>,
 }
 
 impl DemoSignalCoordinator {
@@ -71,24 +75,26 @@ impl DemoSignalCoordinator {
             response_rx: Arc::new(tokio::sync::Mutex::new(response_rx)),
             last_message_count: Arc::new(tokio::sync::Mutex::new(0)),
             last_recovery_state: Arc::new(tokio::sync::Mutex::new(None)),
+            tasks: Arc::new(UiTaskRegistry::new()),
         }
     }
 
     /// Start the coordinator tasks
-    ///
-    /// Returns handles to the spawned tasks for lifecycle management.
-    pub fn start(self: Arc<Self>) -> (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>) {
+    pub fn start(self: Arc<Self>) {
         let coordinator_clone = self.clone();
-        let action_detector = tokio::spawn(async move {
+        self.tasks.spawn(async move {
             coordinator_clone.run_action_detector().await;
         });
 
         let coordinator_clone = self.clone();
-        let response_handler = tokio::spawn(async move {
+        self.tasks.spawn(async move {
             coordinator_clone.run_response_handler().await;
         });
+    }
 
-        (action_detector, response_handler)
+    /// Stop the coordinator and abort owned loops.
+    pub fn stop(&self) {
+        self.tasks.shutdown();
     }
 
     /// Best-effort current time (ms) sourced from the runtime/effects system.

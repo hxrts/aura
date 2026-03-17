@@ -253,8 +253,16 @@ mod unit_tests {
         let joined_ab = oplog1.join(&oplog2);
         let joined_ba = oplog2.join(&oplog1);
 
-        let ops_ab: Vec<AttestedOp> = joined_ab.get_all_operations().into_iter().cloned().collect();
-        let ops_ba: Vec<AttestedOp> = joined_ba.get_all_operations().into_iter().cloned().collect();
+        let ops_ab: Vec<AttestedOp> = joined_ab
+            .get_all_operations()
+            .into_iter()
+            .cloned()
+            .collect();
+        let ops_ba: Vec<AttestedOp> = joined_ba
+            .get_all_operations()
+            .into_iter()
+            .cloned()
+            .collect();
         let state_ab = reduce(&ops_ab).unwrap();
         let state_ba = reduce(&ops_ba).unwrap();
 

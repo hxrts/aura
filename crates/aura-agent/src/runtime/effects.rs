@@ -712,9 +712,10 @@ impl AuraEffectSystem {
         if std::env::var_os("AURA_HARNESS_MODE").is_some() {
             let time = PhysicalTimeHandler::new();
             if let Ok(started_at) = time.physical_time().await {
-                if let Ok(budget) =
-                    TimeoutBudget::from_start_and_timeout(&started_at, std::time::Duration::from_secs(2))
-                {
+                if let Ok(budget) = TimeoutBudget::from_start_and_timeout(
+                    &started_at,
+                    std::time::Duration::from_secs(2),
+                ) {
                     let _ = execute_with_timeout_budget(&time, &budget, || async {
                         wait_for_batch.await;
                         Ok::<(), ()>(())
@@ -1426,6 +1427,7 @@ impl AuraEffectSystem {
     /// Create effect system for testing, overriding the authority identity.
     ///
     /// Prefer `simulation_for_test_for_authority(...)` for deterministic per-test seeding.
+    #[allow(clippy::disallowed_methods)]
     pub fn testing_for_authority(
         config: &AgentConfig,
         authority_id: AuthorityId,
@@ -1434,6 +1436,7 @@ impl AuraEffectSystem {
     }
 
     /// Create effect system for simulation, overriding the authority identity.
+    #[allow(clippy::disallowed_methods)]
     pub fn simulation_for_authority(
         config: &AgentConfig,
         seed: u64,
@@ -1688,11 +1691,14 @@ mod tests {
         // Tree state should be retrievable (empty but deterministic)
         let state = effect_system.get_current_state().await.unwrap();
         assert_eq!(state.epoch, aura_core::Epoch::initial()); // fresh tree starts at epoch 0
-        assert_eq!(state.root_commitment, [0u8; 32]);
+        assert_ne!(
+            state.root_commitment, [0u8; 32],
+            "wired tree handler should expose its deterministic empty-tree commitment"
+        );
 
-        // Sync digest should not error
+        // Sync digest should not error and should expose the deterministic bootstrap entry.
         let digest = effect_system.get_oplog_digest().await.unwrap();
-        assert_eq!(digest.cids.len(), 0);
+        assert_eq!(digest.cids.len(), 1);
     }
 }
 

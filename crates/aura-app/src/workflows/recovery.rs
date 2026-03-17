@@ -22,8 +22,7 @@ use crate::{
 use async_lock::RwLock;
 use aura_core::{
     types::{AuthorityId, FrostThreshold},
-    AttemptBudget,
-    AuraError, CeremonyId, Hash32,
+    AttemptBudget, AuraError, CeremonyId, Hash32,
 };
 use aura_journal::fact::RelationalFact;
 use aura_journal::ProtocolRelationalFact;

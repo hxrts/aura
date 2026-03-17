@@ -2412,6 +2412,7 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
     },
 ];
 
+/// Keep `docs/997_flow_coverage.md` aligned with this canonical shared-flow mapping.
 pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNeighborhood,
@@ -2953,6 +2954,14 @@ fn parity_list_signature(snapshot: &UiSnapshot) -> Vec<ParityListSignature> {
             let mut items = list
                 .items
                 .iter()
+                .filter(|item| {
+                    !(snapshot.screen == ScreenId::Settings
+                        && list.id == ListId::SettingsSections
+                        && !matches!(
+                            classify_settings_section_item_id(&item.id),
+                            Some(SettingsSectionSurfaceId::Shared(_))
+                        ))
+                })
                 .map(|item| (item.id.clone(), item.selected, item.confirmation))
                 .collect::<Vec<_>>();
             items.sort_by(|left, right| {
@@ -2974,6 +2983,14 @@ fn parity_selection_signature(snapshot: &UiSnapshot) -> Vec<(ListId, String)> {
         .selections
         .iter()
         .filter(|selection| relevant_lists.contains(&selection.list))
+        .filter(|selection| {
+            !(snapshot.screen == ScreenId::Settings
+                && selection.list == ListId::SettingsSections
+                && !matches!(
+                    classify_settings_section_item_id(&selection.item_id),
+                    Some(SettingsSectionSurfaceId::Shared(_))
+                ))
+        })
         .map(|selection| (selection.list, selection.item_id.clone()))
         .collect::<Vec<_>>();
     selections.sort_by(|left, right| {
@@ -3643,6 +3660,10 @@ mod tests {
 
     #[test]
     fn shared_flow_source_area_metadata_points_to_existing_paths() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
         let source_area_unique: HashSet<_> = SHARED_FLOW_SOURCE_AREAS
             .iter()
             .map(|area| (area.flow, area.path))
@@ -3657,11 +3678,12 @@ mod tests {
         }
 
         for area in SHARED_FLOW_SOURCE_AREAS {
+            let path = workspace_root.join(area.path);
             assert!(
-                Path::new(area.path).exists(),
+                path.exists(),
                 "shared flow {:?} source area path does not exist: {}",
                 area.flow,
-                area.path
+                path.display()
             );
         }
     }
@@ -4350,7 +4372,8 @@ mod tests {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let web_model_path = repo_root.join("crates/aura-ui/src/model.rs");
         let tui_types_path = repo_root.join("crates/aura-terminal/src/tui/types.rs");
-        let tui_export_path = repo_root.join("crates/aura-terminal/src/tui/harness_state.rs");
+        let tui_export_path =
+            repo_root.join("crates/aura-terminal/src/tui/harness_state/snapshot.rs");
 
         let web_model = std::fs::read_to_string(&web_model_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", web_model_path.display()));
@@ -4373,8 +4396,10 @@ mod tests {
         );
 
         assert!(
-            tui_types.contains("settings_section_item_id("),
-            "tui settings must use shared settings_section_item_id helper"
+            tui_types.contains("fn surface_id(self)")
+                && tui_types.contains("SettingsSectionSurfaceId::Shared")
+                && tui_types.contains("SettingsSectionSurfaceId::FrontendSpecific"),
+            "tui settings must classify settings sections through shared surface ids"
         );
         assert!(
             tui_types.contains("SharedSettingsSectionId::GuardianThreshold")

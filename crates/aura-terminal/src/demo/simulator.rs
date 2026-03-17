@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
@@ -38,6 +37,7 @@ use serde::Serialize;
 
 use crate::error::TerminalResult;
 use crate::ids;
+use crate::tui::tasks::UiTaskRegistry;
 
 #[derive(Debug, Clone, Serialize)]
 struct GuardianAcceptance {
@@ -85,7 +85,7 @@ pub struct DemoSimulator {
     carol: Arc<AuraAgent>,
     mobile: Arc<AuraAgent>,
     social_peers: Vec<NamedDemoPeer>,
-    event_loop_handle: Option<JoinHandle<()>>,
+    event_loop_tasks: Arc<UiTaskRegistry>,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
@@ -154,7 +154,7 @@ impl DemoSimulator {
             carol,
             mobile,
             social_peers: Vec::new(),
-            event_loop_handle: None,
+            event_loop_tasks: Arc::new(UiTaskRegistry::new()),
             shutdown_tx: None,
         })
     }
@@ -307,7 +307,7 @@ impl DemoSimulator {
         let mobile = self.mobile.clone();
         let social_peers = self.social_peers.clone();
         let bob_authority = self.bob_authority;
-        self.event_loop_handle = Some(tokio::spawn(async move {
+        self.event_loop_tasks.spawn(async move {
             let mut mirrored_echoes: HashSet<(String, String)> = HashSet::new();
             let mut tick = interval(Duration::from_millis(100));
             loop {
@@ -372,7 +372,7 @@ impl DemoSimulator {
                     }
                 }
             }
-        }));
+        });
 
         Ok(())
     }
@@ -381,9 +381,7 @@ impl DemoSimulator {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
         }
-        if let Some(handle) = self.event_loop_handle.take() {
-            let _ = handle.await;
-        }
+        self.event_loop_tasks.shutdown();
         Ok(())
     }
 }
@@ -1057,8 +1055,9 @@ pub fn spawn_amp_inbox_listener(
     effects: Arc<AuraEffectSystem>,
     bob_authority: AuthorityId,
     peers: Vec<EchoPeer>,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
+) -> Arc<UiTaskRegistry> {
+    let tasks = Arc::new(UiTaskRegistry::new());
+    tasks.spawn(async move {
         let mut seen_payloads: HashSet<(aura_core::Hash32, AuthorityId)> = HashSet::new();
         let mut tick = interval(Duration::from_millis(50));
 
@@ -1147,7 +1146,8 @@ pub fn spawn_amp_inbox_listener(
                 }
             }
         }
-    })
+    });
+    tasks
 }
 
 #[cfg(test)]

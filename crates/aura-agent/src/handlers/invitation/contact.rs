@@ -39,9 +39,8 @@ impl<'a> InvitationContactHandler<'a> {
             invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
         };
-        let payload = serde_json::to_vec(&acceptance).map_err(|e| {
-            AgentError::internal(format!("serialize contact invitation acceptance: {e}"))
-        })?;
+        let payload =
+            serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
 
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -63,7 +62,7 @@ impl<'a> InvitationContactHandler<'a> {
                 .first()
                 .map(|addr| {
                     if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                        addr.to_string()
+                        addr.clone()
                     } else {
                         format!("ws://{addr}")
                     }
@@ -94,12 +93,10 @@ impl<'a> InvitationContactHandler<'a> {
             receipt: None,
         };
 
-        effects.send_envelope(envelope).await.map_err(|e| {
-            AgentError::effects(format!(
-                "send contact invitation acceptance to {}: {e}",
-                invitation.sender_id
-            ))
-        })?;
+        effects
+            .send_envelope(envelope)
+            .await
+            .map_err(|e| AgentError::effects(e.to_string()))?;
 
         Ok(())
     }
@@ -220,7 +217,7 @@ impl<'a> InvitationContactHandler<'a> {
                         contact_fact.to_bytes(),
                     )
                     .await
-                    .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+                    .map_err(|e| AgentError::effects(e.to_string()))?;
 
                 effects.await_next_view_update().await;
 
@@ -260,7 +257,7 @@ impl<'a> InvitationContactHandler<'a> {
                 effects
                     .commit_relational_facts(vec![fact])
                     .await
-                    .map_err(|e| AgentError::effects(format!("commit chat fact: {e}")))?;
+                    .map_err(|e| AgentError::effects(e.to_string()))?;
                 effects.await_next_view_update().await;
 
                 processed = processed.saturating_add(1);

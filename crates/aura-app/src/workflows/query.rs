@@ -117,7 +117,7 @@ pub async fn get_user_info_by_authority_id(
     contacts
         .contact(&authority_id)
         .cloned()
-        .ok_or_else(|| AuraError::not_found(format!("User '{authority_id}' not found")))
+        .ok_or_else(|| AuraError::not_found(authority_id.to_string()))
 }
 
 /// Resolve a user target string to a contact.
@@ -171,7 +171,7 @@ pub async fn resolve_contact(
     if matching.len() == 1 {
         Ok(matching[0].clone())
     } else if matching.is_empty() {
-        Err(AuraError::not_found(format!("User '{target}' not found")))
+        Err(AuraError::not_found(target.to_string()))
     } else {
         let names: Vec<_> = matching.iter().map(effective_name).collect();
         Err(AuraError::invalid(format!(

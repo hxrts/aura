@@ -1,6 +1,5 @@
 //! Runtime access helpers for workflows.
 
-use async_trait::async_trait;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -8,16 +7,17 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_lock::RwLock;
+use futures::{
+    future::{select, Either},
+    pin_mut,
+};
 
 use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::{
-    effects::{PhysicalTimeEffects, TimeError},
-    execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
-    time::PhysicalTime,
-    AuraError, RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
-    TimeoutExecutionProfile, TimeoutRunError,
+    time::PhysicalTime, AuraError, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
+    TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile, TimeoutRunError,
 };
 
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
@@ -58,31 +58,6 @@ fn harness_convergence_step_timeout_ms() -> u64 {
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|timeout_ms| *timeout_ms > 0)
         .unwrap_or(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS)
-}
-
-struct RuntimeTimeEffects<'a> {
-    runtime: &'a Arc<dyn RuntimeBridge>,
-}
-
-#[async_trait]
-impl PhysicalTimeEffects for RuntimeTimeEffects<'_> {
-    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
-        self.runtime
-            .current_time_ms()
-            .await
-            .map(|ts_ms| PhysicalTime {
-                ts_ms,
-                uncertainty: None,
-            })
-            .map_err(|error| TimeError::OperationFailed {
-                reason: error.to_string(),
-            })
-    }
-
-    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
-        self.runtime.sleep_ms(ms).await;
-        Ok(())
-    }
 }
 
 /// Shared timeout scaling profile for workflow-owned local deadlines.
@@ -126,8 +101,33 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    let time = RuntimeTimeEffects { runtime };
-    execute_with_timeout_budget(&time, budget, operation).await
+    let now = runtime_current_physical_time(runtime)
+        .await
+        .map_err(TimeoutRunError::Timeout)?;
+    let remaining = budget
+        .remaining_at(&now)
+        .map_err(TimeoutRunError::Timeout)?;
+    let sleep_ms = duration_to_ms(remaining).map_err(TimeoutRunError::Timeout)?;
+
+    let operation_future = operation();
+    let sleep_future = async {
+        runtime.sleep_ms(sleep_ms).await;
+    };
+    pin_mut!(operation_future);
+    pin_mut!(sleep_future);
+
+    match select(operation_future, sleep_future).await {
+        Either::Left((result, _sleep_future)) => result.map_err(TimeoutRunError::Operation),
+        Either::Right(((), _operation_future)) => {
+            let observed_at_ms = runtime
+                .current_time_ms()
+                .await
+                .unwrap_or(budget.deadline_at_ms());
+            Err(TimeoutRunError::Timeout(
+                TimeoutBudgetError::deadline_exceeded(budget.deadline_at_ms(), observed_at_ms),
+            ))
+        }
+    }
 }
 
 /// Build a runtime-backed retry policy scaled for the active workflow lane.
@@ -159,8 +159,40 @@ where
     F: FnMut(u32) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
-    let time = RuntimeTimeEffects { runtime };
-    execute_with_retry_budget(&time, policy, operation).await
+    let mut attempts = policy.attempt_budget();
+    let mut operation = operation;
+
+    loop {
+        let attempt = attempts.record_attempt().map_err(RetryRunError::Timeout)?;
+
+        let result = if let Some(timeout) = policy.per_attempt_timeout() {
+            let now = runtime_current_physical_time(runtime)
+                .await
+                .map_err(RetryRunError::Timeout)?;
+            let budget = TimeoutBudget::from_start_and_timeout(&now, timeout)
+                .map_err(RetryRunError::Timeout)?;
+            execute_with_runtime_timeout_budget(runtime, &budget, || operation(attempt)).await
+        } else {
+            operation(attempt).await.map_err(TimeoutRunError::Operation)
+        };
+
+        match result {
+            Ok(value) => return Ok(value),
+            Err(TimeoutRunError::Timeout(error)) => return Err(RetryRunError::Timeout(error)),
+            Err(TimeoutRunError::Operation(error)) => {
+                if !attempts.can_attempt() {
+                    return Err(RetryRunError::AttemptsExhausted {
+                        attempts_used: attempts.attempts_used(),
+                        last_error: error,
+                    });
+                }
+
+                let delay_ms = duration_to_ms(policy.delay_for_attempt(attempt))
+                    .map_err(RetryRunError::Timeout)?;
+                runtime.sleep_ms(delay_ms).await;
+            }
+        }
+    }
 }
 
 /// Get the runtime bridge or return a consistent error.
@@ -194,6 +226,25 @@ pub async fn cooperative_yield() {
     YieldOnce(false).await;
 }
 
+async fn runtime_current_physical_time(
+    runtime: &Arc<dyn RuntimeBridge>,
+) -> Result<PhysicalTime, TimeoutBudgetError> {
+    runtime
+        .current_time_ms()
+        .await
+        .map(|ts_ms| PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        })
+        .map_err(|error| TimeoutBudgetError::time_source_unavailable(error.to_string()))
+}
+
+fn duration_to_ms(duration: Duration) -> Result<u64, TimeoutBudgetError> {
+    u64::try_from(duration.as_millis()).map_err(|_| {
+        TimeoutBudgetError::invalid_policy("duration does not fit in u64 milliseconds")
+    })
+}
+
 /// Ask the runtime to perform a bounded convergence pass suitable for harness-mode real-runtime
 /// execution. The runtime bridge owns the actual harness profile policy.
 pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
@@ -205,26 +256,32 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
     let backoff_ms = harness_convergence_backoff_ms();
     let step_timeout_ms = harness_convergence_step_timeout_ms();
 
-    let run_step =
-        |future: Pin<Box<dyn Future<Output = Result<(), IntentError>> + Send>>| async move {
-            let requested = Duration::from_millis(step_timeout_ms);
-            match workflow_timeout_budget(runtime, requested).await {
-                Ok(budget) => {
-                    let _ =
-                        execute_with_runtime_timeout_budget(runtime, &budget, || future).await;
-                }
-                Err(_) => {
-                    let _ = future.await;
-                }
+    async fn run_step<F>(runtime: &Arc<dyn RuntimeBridge>, step_timeout_ms: u64, future: F)
+    where
+        F: Future<Output = Result<(), IntentError>>,
+    {
+        let requested = Duration::from_millis(step_timeout_ms);
+        match workflow_timeout_budget(runtime, requested).await {
+            Ok(budget) => {
+                let _ = execute_with_runtime_timeout_budget(runtime, &budget, || future).await;
             }
-    };
+            Err(_) => {
+                let _ = future.await;
+            }
+        }
+    }
 
     for round in 0..rounds {
         if harness_mode_enabled() {
-            run_step(Box::pin(runtime.trigger_discovery())).await;
-            run_step(Box::pin(runtime.process_ceremony_messages())).await;
+            run_step(runtime, step_timeout_ms, runtime.trigger_discovery()).await;
+            run_step(
+                runtime,
+                step_timeout_ms,
+                runtime.process_ceremony_messages(),
+            )
+            .await;
         }
-        run_step(Box::pin(runtime.trigger_sync())).await;
+        run_step(runtime, step_timeout_ms, runtime.trigger_sync()).await;
         cooperative_yield().await;
 
         if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {
@@ -327,7 +384,7 @@ mod tests {
             .expect_err("offline runtime should not satisfy peer connectivity");
 
         let message = error.to_string();
-        assert!(message.contains("Missing connectivity prerequisite"));
+        assert!(message.contains("Connectivity prerequisite not met"));
         assert!(message.contains("test_flow"));
     }
 

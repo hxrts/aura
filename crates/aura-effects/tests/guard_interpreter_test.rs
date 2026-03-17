@@ -2,7 +2,7 @@
 
 use aura_core::{
     effects::guard::{EffectCommand, GuardOutcome},
-    identifiers::{AuthorityId, ContextId},
+    types::identifiers::{AuthorityId, ContextId},
     FlowCost,
 };
 

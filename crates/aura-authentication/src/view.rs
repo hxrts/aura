@@ -329,7 +329,10 @@ impl AuthViewReducer {
             }
 
             AuthFactDelta::RecoveryFailed { request_id, reason } => {
-                let account_id = view.pending_recoveries.get(&request_id).map(|r| r.account_id);
+                let account_id = view
+                    .pending_recoveries
+                    .get(&request_id)
+                    .map(|r| r.account_id);
                 view.recent_recovery_failures.push(RecoveryFailureRecord {
                     request_id: request_id.clone(),
                     account_id,

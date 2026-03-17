@@ -9,6 +9,7 @@ use aura_agent::SharedTransport;
 use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
+use futures::future::join_all;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -282,29 +283,22 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         }),
     };
 
-    let mut guardian_tasks = Vec::with_capacity(guardian_services.len());
-    for service in guardian_services.into_iter() {
+    let guardian_tasks = guardian_services.into_iter().map(|service| {
         let invite = invitation.clone();
-        guardian_tasks.push(tokio::spawn(async move {
-            service.execute_guardian_setup_guardian(invite, true).await
-        }));
-    }
+        async move { service.execute_guardian_setup_guardian(invite, true).await }
+    });
 
-    let initiator_task = tokio::spawn(async move {
+    let initiator_task = async move {
         initiator_service
             .execute_guardian_setup_initiator_with_id(&setup_id, account_id, guardians, 2)
             .await
-    });
+    };
 
     let response = initiator_task
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Guardian setup join failed: {e}")))?
         .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
 
-    for task in guardian_tasks {
-        task.await
-            .map_err(|e| TerminalError::Operation(format!("Guardian setup join failed: {e}")))?
-            .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
+    for result in join_all(guardian_tasks).await {
+        result.map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
     }
 
     if !response.success {

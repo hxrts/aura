@@ -566,12 +566,11 @@ pub async fn install_authoritative_readiness_hook(
 
     let chat_app_core = Arc::clone(app_core);
     let chat_spawner = spawner.clone();
-    let chat_reactive = reactive.clone();
     let chat_in_flight = Arc::new(AtomicBool::new(false));
     let chat_pending = Arc::new(AtomicBool::new(false));
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let mut stream = chat_reactive.subscribe(&*CHAT_SIGNAL);
+        let mut stream = reactive.subscribe(&*CHAT_SIGNAL);
         loop {
             let Ok(_) = stream.recv().await else {
                 break;

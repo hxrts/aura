@@ -149,7 +149,7 @@ pub async fn set_channel_mode(
                         .find(|(_, home)| home.name.eq_ignore_ascii_case(&channel_name))
                         .map(|(home_id, _)| *home_id)
                 })
-                .ok_or_else(|| AuraError::not_found(format!("Unknown channel: {channel_name}")))?,
+                .ok_or_else(|| AuraError::not_found(channel_name.clone()))?,
         }
     };
 
@@ -223,9 +223,7 @@ pub async fn set_channel_mode_resolved(
     }
 
     let Some(home_id) = target_home_id else {
-        return Err(AuraError::permission_denied(format!(
-            "Set channel mode requires a home context (channel: {resolved_channel})"
-        )));
+        return Err(AuraError::permission_denied(resolved_channel.to_string()));
     };
 
     let home = homes.home_mut(&home_id).ok_or_else(|| {
@@ -307,10 +305,7 @@ mod tests {
         home::HomeState,
     };
     use crate::AppConfig;
-    use aura_core::{
-        crypto::hash::hash,
-        AuthorityId, ChannelId, ContextId,
-    };
+    use aura_core::{crypto::hash::hash, AuthorityId, ChannelId, ContextId};
 
     #[tokio::test]
     async fn test_get_settings_default() {
@@ -417,6 +412,6 @@ mod tests {
         let error = set_channel_mode(&app_core, target_channel_name, "+m".to_string())
             .await
             .expect_err("mode update should fail without a channel-scoped home context");
-        assert!(error.to_string().contains("requires a home context"));
+        assert!(error.to_string().contains(&target_channel_id.to_string()));
     }
 }

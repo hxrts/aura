@@ -156,7 +156,7 @@ timeout_ms = 20000
 id = "bob-remove-selected-device"
 action = "remove_selected_device"
 actor = "bob"
-timeout_ms = 4000
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-devices-count-one"

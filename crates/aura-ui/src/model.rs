@@ -662,13 +662,18 @@ impl UiModel {
     }
 
     fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
-        if let Some(operation) = self.operations.iter_mut().find(|op| op.id == operation_id) {
-            if state == OperationState::Submitting {
+        if let Some(index) = self.operations.iter().position(|op| op.id == operation_id) {
+            let instance_id = if state == OperationState::Submitting {
                 self.operation_instance_key = self.operation_instance_key.saturating_add(1);
-                operation.instance_id =
-                    OperationInstanceId(format!("op-{}", self.operation_instance_key));
-            }
-            operation.state = state;
+                OperationInstanceId(format!("op-{}", self.operation_instance_key))
+            } else {
+                self.operations[index].instance_id.clone()
+            };
+            self.operations[index] = OperationSnapshot {
+                id: operation_id,
+                instance_id,
+                state,
+            };
             return;
         }
         self.operation_instance_key = self.operation_instance_key.saturating_add(1);
@@ -2286,7 +2291,7 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NeighborhoodMode, UiModel, ScreenId};
+    use super::{NeighborhoodMode, ScreenId, UiModel};
     use aura_app::ui::contract::{OperationId, OperationState, RuntimeEventKind};
     use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
 
@@ -2316,7 +2321,10 @@ mod tests {
     #[test]
     fn semantic_snapshot_includes_tracked_operation_state() {
         let mut model = UiModel::new("authority-local".to_string());
-        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        model.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Submitting,
+        );
 
         let snapshot = model.semantic_snapshot();
         let operation_state = snapshot
@@ -2331,7 +2339,10 @@ mod tests {
     #[test]
     fn restarting_operation_generates_new_operation_instance_id() {
         let mut model = UiModel::new("authority-local".to_string());
-        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        model.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Submitting,
+        );
         let Some(first_instance) = model
             .semantic_snapshot()
             .operations
@@ -2342,8 +2353,14 @@ mod tests {
         };
         let first_instance = first_instance.instance_id;
 
-        model.set_operation_state(OperationId::invitation_accept(), OperationState::Succeeded);
-        model.set_operation_state(OperationId::invitation_accept(), OperationState::Submitting);
+        model.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Succeeded,
+        );
+        model.set_authoritative_operation_state(
+            OperationId::invitation_accept(),
+            OperationState::Submitting,
+        );
         let Some(second_instance) = model
             .semantic_snapshot()
             .operations

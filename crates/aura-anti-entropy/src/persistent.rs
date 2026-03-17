@@ -218,8 +218,8 @@ impl SyncEffects for PersistentSyncHandler {
             })?;
 
         for op in ops {
-            let op_hash = tree_storage::op_hash(&op)
-                .map_err(|e| SyncError::VerificationFailed {
+            let op_hash =
+                tree_storage::op_hash(&op).map_err(|e| SyncError::VerificationFailed {
                     target: "persisted_op_hash",
                     detail: e.to_string(),
                 })?;

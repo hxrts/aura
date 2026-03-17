@@ -200,7 +200,9 @@ impl CommandReasonCode {
     }
 }
 
-fn classify_command_error(error: &aura_core::AuraError) -> (CommandOutcomeStatus, CommandReasonCode) {
+fn classify_command_error(
+    error: &aura_core::AuraError,
+) -> (CommandOutcomeStatus, CommandReasonCode) {
     use aura_core::AuraError;
 
     // Primary classification: match on the typed error variant.
@@ -211,20 +213,28 @@ fn classify_command_error(error: &aura_core::AuraError) -> (CommandOutcomeStatus
                 || msg.contains("missing current channel")
                 || msg.contains("missing channel scope")
             {
-                (CommandOutcomeStatus::Invalid, CommandReasonCode::MissingActiveContext)
-            } else if msg.contains("parse error")
-                || msg.contains("missing required argument")
-            {
-                (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+                (
+                    CommandOutcomeStatus::Invalid,
+                    CommandReasonCode::MissingActiveContext,
+                )
+            } else if msg.contains("parse error") || msg.contains("missing required argument") {
+                (
+                    CommandOutcomeStatus::Invalid,
+                    CommandReasonCode::InvalidArgument,
+                )
             } else if msg.contains("stale snapshot") || msg.contains("invalid state") {
-                (CommandOutcomeStatus::Failed, CommandReasonCode::InvalidState)
+                (
+                    CommandOutcomeStatus::Failed,
+                    CommandReasonCode::InvalidState,
+                )
             } else {
-                (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
+                (
+                    CommandOutcomeStatus::Invalid,
+                    CommandReasonCode::InvalidArgument,
+                )
             }
         }
-        AuraError::NotFound { .. } => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
-        }
+        AuraError::NotFound { .. } => (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound),
         AuraError::PermissionDenied { .. } => {
             let msg = error.to_string().to_ascii_lowercase();
             if msg.contains("not a member") {
@@ -234,14 +244,20 @@ fn classify_command_error(error: &aura_core::AuraError) -> (CommandOutcomeStatus
             } else if msg.contains("banned") || msg.contains("ban ") {
                 (CommandOutcomeStatus::Denied, CommandReasonCode::Banned)
             } else {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::PermissionDenied)
+                (
+                    CommandOutcomeStatus::Denied,
+                    CommandReasonCode::PermissionDenied,
+                )
             }
         }
         _ => {
             // Fallback: string match for errors that don't use typed variants yet.
             let msg = error.to_string().to_ascii_lowercase();
             if msg.contains("permission denied") || msg.contains("only moderators") {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::PermissionDenied)
+                (
+                    CommandOutcomeStatus::Denied,
+                    CommandReasonCode::PermissionDenied,
+                )
             } else if msg.contains("not found") || msg.contains("unknown") {
                 (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
             } else if msg.contains("muted") {
@@ -261,15 +277,17 @@ fn classify_chat_command_error(
     use aura_app::ui::workflows::chat_commands::CommandError;
 
     match error {
-        CommandError::NotACommand => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
-        }
+        CommandError::NotACommand => (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::InvalidArgument,
+        ),
         CommandError::UnknownCommand(_) => {
             (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
         }
-        CommandError::MissingArgument { .. } | CommandError::InvalidArgument { .. } => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
-        }
+        CommandError::MissingArgument { .. } | CommandError::InvalidArgument { .. } => (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::InvalidArgument,
+        ),
     }
 }
 
@@ -282,15 +300,18 @@ fn classify_command_resolver_error(
         CommandResolverError::UnknownTarget { .. } => {
             (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
         }
-        CommandResolverError::AmbiguousTarget { .. } => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
-        }
-        CommandResolverError::StaleSnapshot { .. } => {
-            (CommandOutcomeStatus::Failed, CommandReasonCode::InvalidState)
-        }
-        CommandResolverError::ParseError { .. } => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::InvalidArgument)
-        }
+        CommandResolverError::AmbiguousTarget { .. } => (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::InvalidArgument,
+        ),
+        CommandResolverError::StaleSnapshot { .. } => (
+            CommandOutcomeStatus::Failed,
+            CommandReasonCode::InvalidState,
+        ),
+        CommandResolverError::ParseError { .. } => (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::InvalidArgument,
+        ),
         CommandResolverError::MissingCurrentChannel { .. } => (
             CommandOutcomeStatus::Invalid,
             CommandReasonCode::MissingActiveContext,
@@ -460,6 +481,7 @@ impl CallbackRegistry {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use aura_app::ui::types::{InvitationBridgeStatus, InvitationInfo};

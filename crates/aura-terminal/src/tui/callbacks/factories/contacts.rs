@@ -93,9 +93,9 @@ impl ContactsCallbacks {
                 let tx = tx.clone();
                 let operation_instance_id = operation
                     .as_ref()
-                    .map(|operation| operation.harness_handle().instance_id.clone());
+                    .map(|operation| operation.harness_handle().instance_id);
                 let app_core = ctx.app_core_raw().clone();
-                spawn_ctx(ctx.clone(), async move {
+                spawn_ctx(ctx, async move {
                     if let Some(operation) = operation {
                         let _ = operation.relinquish_to_workflow(
                             SemanticOperationTransferScope::InviteActorToChannel,
@@ -172,12 +172,7 @@ impl ContactsCallbacks {
             let parsed_authority_id = match authority_id.parse::<AuthorityId>() {
                 Ok(id) => id,
                 Err(error) => {
-                    enqueue_invalid_lan_authority_toast(
-                        ctx.clone(),
-                        tx.clone(),
-                        authority_id,
-                        error.to_string(),
-                    );
+                    enqueue_invalid_lan_authority_toast(ctx, tx, authority_id, error.to_string());
                     return;
                 }
             };

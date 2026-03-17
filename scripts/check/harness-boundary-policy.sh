@@ -34,7 +34,11 @@ active_ref_roots=(
   docs/804_testing_guide.md
 )
 
-mapfile -t referenced_scenarios < <(
+referenced_scenarios=()
+while IFS= read -r scenario; do
+  [[ -n "$scenario" ]] || continue
+  referenced_scenarios+=("$scenario")
+done < <(
   rg -o --no-filename 'scenarios/harness/[A-Za-z0-9._/-]+\.toml' "${active_ref_roots[@]}" \
     | sort -u
 )
@@ -46,7 +50,11 @@ for scenario in "${referenced_scenarios[@]}"; do
   fi
 done
 
-mapfile -t semantic_scenarios < <(
+semantic_scenarios=()
+while IFS= read -r scenario; do
+  [[ -n "$scenario" ]] || continue
+  semantic_scenarios+=("$scenario")
+done < <(
   find scenarios/harness -maxdepth 1 -name '*.toml' | sort | while read -r scenario; do
     if ! rg -q '^(schema_version|execution_mode|required_capabilities)\s*=' "$scenario"; then
       printf '%s\n' "$scenario"

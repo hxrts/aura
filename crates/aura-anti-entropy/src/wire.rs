@@ -143,9 +143,8 @@ pub fn serialize_message(msg: &SyncWireMessage) -> Result<Vec<u8>, SyncError> {
 }
 
 pub fn deserialize_message(bytes: &[u8]) -> Result<SyncWireMessage, SyncError> {
-    aura_core::util::serialization::from_slice(bytes)
-        .map_err(|e| SyncError::NetworkError {
-            operation: "deserialize_wire_message",
-            detail: e.to_string(),
-        })
+    aura_core::util::serialization::from_slice(bytes).map_err(|e| SyncError::NetworkError {
+        operation: "deserialize_wire_message",
+        detail: e.to_string(),
+    })
 }

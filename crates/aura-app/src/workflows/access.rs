@@ -53,11 +53,13 @@ async fn send_relational_fact_with_retry(
             runtime
                 .send_chat_fact(peer, context_id, fact)
                 .await
-                .map_err(|error| AuraError::from(super::error::WorkflowError::DeliveryFailed {
-                    peer: peer.to_string(),
-                    attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
-                    detail: error.to_string(),
-                }))
+                .map_err(|error| {
+                    AuraError::from(super::error::WorkflowError::DeliveryFailed {
+                        peer: peer.to_string(),
+                        attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
+                        detail: error.to_string(),
+                    })
+                })
         }
     })
     .await
@@ -85,7 +87,7 @@ async fn resolve_scope_by_channel_id(
     let home_state = homes
         .home_state(&home_id)
         .cloned()
-        .ok_or_else(|| AuraError::not_found(format!("Home not found: {home_id}")))?;
+        .ok_or_else(|| AuraError::not_found(home_id.to_string()))?;
 
     let context_id = home_state
         .context_id

@@ -7,8 +7,8 @@
 //! - No-Observable-Without-Charge invariant
 
 use aura_core::{
-    flow::{FlowBudget, FlowCost},
     semilattice::JoinSemilattice,
+    types::flow::{FlowBudget, FlowCost},
     types::Epoch,
 };
 

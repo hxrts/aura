@@ -35,7 +35,7 @@ pub async fn handle_sync(
 
             match result {
                 Ok(_) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!("Sync failed: {e}")))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
 
@@ -47,9 +47,7 @@ pub async fn handle_sync(
                 Ok(_) => Some(Ok(OpResponse::PeerStateRequested {
                     peer_id: peer_id.clone(),
                 })),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to sync from peer {peer_id}: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
 

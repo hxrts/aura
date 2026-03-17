@@ -1035,6 +1035,14 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
         });
     }
 
+    if let Some(existing) = browser_app_url_from_process_env() {
+        return Ok(BrowserAppUrlProvision {
+            url: existing,
+            server: None,
+            log_path: None,
+        });
+    }
+
     let port = choose_available_loopback_port(4173, 32)?;
     let script = harness_repo_root().join("scripts/web/serve-static.sh");
     let artifact_root = config
@@ -1049,7 +1057,7 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
     let log_file_err = log_file.try_clone()?;
     let child = Command::new(&script)
         .arg(port.to_string())
-        .env("AURA_HARNESS_WEB_BUILD_PROFILE", "debug")
+        .env("AURA_HARNESS_WEB_BUILD_PROFILE", "release")
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .spawn()
@@ -1081,6 +1089,14 @@ fn browser_app_url_from_env(instance: &crate::config::InstanceConfig) -> Option<
             .then(|| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })
+}
+
+fn browser_app_url_from_process_env() -> Option<String> {
+    ["AURA_HARNESS_BROWSER_APP_URL", "AURA_WEB_APP_URL"]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn owned_web_server_ready_timeout() -> Duration {
@@ -1295,6 +1311,7 @@ mod tests {
     use std::net::TcpListener;
     use std::path::PathBuf;
 
+    #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);

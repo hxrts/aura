@@ -51,9 +51,10 @@ impl ScenarioRunner {
             return ScenarioLintReport { warnings, errors };
         }
 
-        let compatibility_steps = scenario
-            .compatibility_steps()
-            .expect("non-semantic scenarios must expose compatibility steps");
+        let Some(compatibility_steps) = scenario.compatibility_steps() else {
+            errors.push("non-semantic scenarios must expose compatibility steps".to_string());
+            return ScenarioLintReport { warnings, errors };
+        };
 
         for step in compatibility_steps {
             if let Some(instance) = step.instance.as_deref() {

@@ -28,18 +28,14 @@ pub async fn handle_contacts(
             let now = super::time::current_time_ms(app_core).await;
             match update_contact_nickname(app_core, contact_id, nickname, now).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to update contact nickname: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
         EffectCommand::RemoveContact { contact_id } => {
             let now = super::time::current_time_ms(app_core).await;
             match remove_contact(app_core, contact_id, now).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to remove contact: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
         EffectCommand::ToggleContactGuardian { contact_id } => {
@@ -53,9 +49,7 @@ pub async fn handle_contacts(
                     contact_id: contact_id.clone(),
                     is_guardian: false,
                 })),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to toggle guardian status: {e}"
-                )))),
+                Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }
         _ => None,

@@ -313,12 +313,16 @@ pub struct ReactiveScheduler {
     update_tx: broadcast::Sender<ViewUpdate>,
     /// Shutdown signal
     shutdown_rx: mpsc::Receiver<()>,
-    /// Statistics
-    stats: Arc<RwLock<SchedulerStats>>,
+    /// Shared mutable scheduler state.
+    shared: Arc<ReactiveSchedulerShared>,
     /// Fact registry for domain reducers
     fact_registry: Arc<FactRegistry>,
     /// Time effects for simulator-controllable sleeps
     time_effects: Arc<dyn PhysicalTimeEffects>,
+}
+
+struct ReactiveSchedulerShared {
+    stats: RwLock<SchedulerStats>,
 }
 
 impl ReactiveScheduler {
@@ -349,7 +353,9 @@ impl ReactiveScheduler {
             fact_rx,
             update_tx: update_tx.clone(),
             shutdown_rx,
-            stats: Arc::new(RwLock::new(SchedulerStats::default())),
+            shared: Arc::new(ReactiveSchedulerShared {
+                stats: RwLock::new(SchedulerStats::default()),
+            }),
             fact_registry,
             time_effects,
         };
@@ -465,7 +471,7 @@ impl ReactiveScheduler {
 
         // Emit final statistics if enabled
         if self.config.collect_stats {
-            let stats = self.stats.read().await;
+            let stats = self.shared.stats.read().await;
             let avg_latency = if stats.batch_count > 0 {
                 stats.total_batch_latency_ms / stats.batch_count as f64
             } else {
@@ -522,7 +528,7 @@ impl ReactiveScheduler {
                 .map(|t| t.ts_ms)
                 .unwrap_or(0);
             let batch_latency = (batch_end_ms.saturating_sub(batch_start_ms)) as f64;
-            let mut stats = self.stats.write().await;
+            let mut stats = self.shared.stats.write().await;
             stats.batch_count += 1;
             stats.facts_processed += fact_count as u64;
             stats.total_batch_latency_ms += batch_latency;
@@ -916,41 +922,40 @@ mod tests {
         // Subscribe to updates
         let _update_rx = scheduler.subscribe();
 
-        // Spawn scheduler
-        tokio::spawn(scheduler.run());
+        let scheduler_task = scheduler.run();
+        let exercise = async {
+            let facts = vec![make_test_fact(
+                1,
+                FactContent::Relational(RelationalFact::Generic {
+                    context_id: test_context_id(),
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![1, 2, 3],
+                    },
+                }),
+            )];
+            fact_tx.send(FactSource::Journal(facts)).await.unwrap();
 
-        // Send some facts
-        let facts = vec![make_test_fact(
-            1,
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: test_context_id(),
-                envelope: aura_core::types::facts::FactEnvelope {
-                    type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
-                    schema_version: 1,
-                    encoding: aura_core::types::facts::FactEncoding::DagCbor,
-                    payload: vec![1, 2, 3],
-                },
-            }),
-        )];
-        fact_tx.send(FactSource::Journal(facts)).await.unwrap();
-
-        // Wait (bounded) for update to avoid startup/timing flakes.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-        let time = aura_effects::time::PhysicalTimeHandler::new();
-        loop {
-            if *update_count.read().await == 1 {
-                break;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+            let time = aura_effects::time::PhysicalTimeHandler::new();
+            loop {
+                if *update_count.read().await == 1 {
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "timed out waiting for scheduler to apply fact"
+                );
+                time.sleep_ms(10).await.unwrap();
             }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "timed out waiting for scheduler to apply fact"
-            );
-            time.sleep_ms(10).await.unwrap();
-        }
 
-        // Shutdown
-        shutdown_tx.send(()).await.unwrap();
-        drop(fact_tx); // Close channel to allow scheduler to exit
+            shutdown_tx.send(()).await.unwrap();
+            drop(fact_tx); // Close channel to allow scheduler to exit
+        };
+
+        let _ = tokio::join!(scheduler_task, exercise);
     }
 
     fn scheduler_with_registry(
@@ -1067,41 +1072,40 @@ mod tests {
         });
         scheduler.register_view(view);
 
-        // Spawn scheduler
-        tokio::spawn(scheduler.run());
+        let scheduler_task = scheduler.run();
+        let exercise = async {
+            for i in 0..5 {
+                fact_tx
+                    .send(FactSource::Journal(vec![make_test_fact(
+                        i,
+                        FactContent::Relational(RelationalFact::Generic {
+                            context_id: test_context_id(),
+                            envelope: aura_core::types::facts::FactEnvelope {
+                                type_id: aura_core::types::facts::FactTypeId::from(
+                                    format!("test_fact_{}", i).as_str(),
+                                ),
+                                schema_version: 1,
+                                encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                                payload: vec![i as u8],
+                            },
+                        }),
+                    )]))
+                    .await
+                    .unwrap();
+            }
 
-        // Send facts rapidly
-        for i in 0..5 {
-            fact_tx
-                .send(FactSource::Journal(vec![make_test_fact(
-                    i,
-                    FactContent::Relational(RelationalFact::Generic {
-                        context_id: test_context_id(),
-                        envelope: aura_core::types::facts::FactEnvelope {
-                            type_id: aura_core::types::facts::FactTypeId::from(
-                                format!("test_fact_{}", i).as_str(),
-                            ),
-                            schema_version: 1,
-                            encoding: aura_core::types::facts::FactEncoding::DagCbor,
-                            payload: vec![i as u8],
-                        },
-                    }),
-                )]))
+            aura_effects::time::PhysicalTimeHandler::new()
+                .sleep_ms(30)
                 .await
                 .unwrap();
-        }
 
-        // Wait for batch window to expire
-        aura_effects::time::PhysicalTimeHandler::new()
-            .sleep_ms(30)
-            .await
-            .unwrap();
+            assert_eq!(*update_count.read().await, 5);
 
-        // All 5 facts should be batched into one update
-        assert_eq!(*update_count.read().await, 5);
+            shutdown_tx.send(()).await.unwrap();
+            drop(fact_tx);
+        };
 
-        // Shutdown
-        shutdown_tx.send(()).await.unwrap();
+        let _ = tokio::join!(scheduler_task, exercise);
     }
 
     #[test]

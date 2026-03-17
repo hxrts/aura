@@ -34,6 +34,13 @@ use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
 /// - Fact registry for domain extensibility
 /// - Publication channel for reactive updates
 /// - Authorization policy for journal operations
+struct JournalSubsystemShared {
+    fact_publish_tx: Mutex<Option<mpsc::Sender<FactSource>>>,
+    view_update_tx: Mutex<Option<broadcast::Sender<ViewUpdate>>>,
+    indexed_keys: Arc<Mutex<HashSet<String>>>,
+    cached_journal: Arc<AsyncMutex<Option<aura_core::Journal>>>,
+}
+
 pub struct JournalSubsystem {
     /// Indexed journal handler for efficient fact lookups
     ///
@@ -45,17 +52,6 @@ pub struct JournalSubsystem {
     /// Maps fact types to reducers and validators.
     fact_registry: Arc<FactRegistry>,
 
-    /// Reactive scheduler publication channel
-    ///
-    /// Protected by parking_lot::Mutex for synchronous access.
-    /// Only the channel sender clone is accessed (brief operation).
-    fact_publish_tx: Mutex<Option<mpsc::Sender<FactSource>>>,
-
-    /// Reactive scheduler view update subscription
-    ///
-    /// Used to wait for fact processing completion.
-    view_update_tx: Mutex<Option<broadcast::Sender<ViewUpdate>>>,
-
     /// Biscuit authorization policy for journal operations
     ///
     /// Tuple of (token, bridge) for capability-based authorization.
@@ -63,18 +59,8 @@ pub struct JournalSubsystem {
 
     /// Verification key for journal signatures
     journal_verifying_key: Option<Vec<u8>>,
-
-    /// Journal keys already mirrored into the indexed journal.
-    ///
-    /// Facts are append-only, so we can safely skip keys we have already
-    /// indexed instead of reindexing the entire journal on every persist.
-    indexed_keys: Arc<Mutex<HashSet<String>>>,
-
-    /// Cached copy of the append-only journal for fast runtime reads/merges.
-    ///
-    /// This avoids reloading and deserializing the full stored journal on every
-    /// fact append in hot runtime paths such as AMP membership repair.
-    cached_journal: Arc<AsyncMutex<Option<aura_core::Journal>>>,
+    /// Shared runtime mutation boundary for publication and indexing state.
+    shared: Arc<JournalSubsystemShared>,
 }
 
 impl JournalSubsystem {
@@ -84,12 +70,14 @@ impl JournalSubsystem {
         Self {
             indexed_journal: Arc::new(IndexedJournalHandler::with_capacity(capacity)),
             fact_registry,
-            fact_publish_tx: Mutex::new(None),
-            view_update_tx: Mutex::new(None),
             journal_policy: None,
             journal_verifying_key: None,
-            indexed_keys: Arc::new(Mutex::new(HashSet::new())),
-            cached_journal: Arc::new(AsyncMutex::new(None)),
+            shared: Arc::new(JournalSubsystemShared {
+                fact_publish_tx: Mutex::new(None),
+                view_update_tx: Mutex::new(None),
+                indexed_keys: Arc::new(Mutex::new(HashSet::new())),
+                cached_journal: Arc::new(AsyncMutex::new(None)),
+            }),
         }
     }
 
@@ -104,12 +92,14 @@ impl JournalSubsystem {
         Self {
             indexed_journal,
             fact_registry,
-            fact_publish_tx: Mutex::new(fact_publish_tx),
-            view_update_tx: Mutex::new(None),
             journal_policy,
             journal_verifying_key,
-            indexed_keys: Arc::new(Mutex::new(HashSet::new())),
-            cached_journal: Arc::new(AsyncMutex::new(None)),
+            shared: Arc::new(JournalSubsystemShared {
+                fact_publish_tx: Mutex::new(fact_publish_tx),
+                view_update_tx: Mutex::new(None),
+                indexed_keys: Arc::new(Mutex::new(HashSet::new())),
+                cached_journal: Arc::new(AsyncMutex::new(None)),
+            }),
         }
     }
 
@@ -127,7 +117,7 @@ impl JournalSubsystem {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<aura_core::Journal, aura_core::AuraError>>,
     {
-        let mut cache = self.cached_journal.lock().await;
+        let mut cache = self.shared.cached_journal.lock().await;
         if let Some(journal) = cache.as_ref() {
             return Ok(journal.clone());
         }
@@ -139,7 +129,7 @@ impl JournalSubsystem {
 
     /// Replace the shared runtime journal cache with the latest persisted state.
     pub async fn update_cached_journal(&self, journal: &aura_core::Journal) {
-        *self.cached_journal.lock().await = Some(journal.clone());
+        *self.shared.cached_journal.lock().await = Some(journal.clone());
     }
 
     /// Index only journal facts that have not been mirrored yet.
@@ -149,7 +139,7 @@ impl JournalSubsystem {
         authority: Option<aura_core::AuthorityId>,
         timestamp: Option<aura_core::time::TimeStamp>,
     ) -> usize {
-        let mut indexed_keys = self.indexed_keys.lock();
+        let mut indexed_keys = self.shared.indexed_keys.lock();
         let mut added = 0usize;
 
         for (key, value) in journal.facts.iter() {
@@ -198,18 +188,18 @@ impl JournalSubsystem {
     /// Facts committed to the journal will be published to this channel
     /// for processing by the reactive scheduler.
     pub fn attach_fact_sink(&self, tx: mpsc::Sender<FactSource>) {
-        *self.fact_publish_tx.lock() = Some(tx);
+        *self.shared.fact_publish_tx.lock() = Some(tx);
     }
 
     /// Detach the fact sink
     #[allow(dead_code)]
     pub fn detach_fact_sink(&self) {
-        *self.fact_publish_tx.lock() = None;
+        *self.shared.fact_publish_tx.lock() = None;
     }
 
     /// Check if a fact sink is attached
     pub fn has_fact_sink(&self) -> bool {
-        self.fact_publish_tx.lock().is_some()
+        self.shared.fact_publish_tx.lock().is_some()
     }
 
     /// Publish facts to the reactive scheduler
@@ -218,7 +208,7 @@ impl JournalSubsystem {
     /// Returns Err if the sink channel is closed.
     #[allow(dead_code)]
     pub async fn publish_facts(&self, source: FactSource) -> Result<(), JournalSubsystemError> {
-        let tx = self.fact_publish_tx.lock().clone();
+        let tx = self.shared.fact_publish_tx.lock().clone();
         if let Some(tx) = tx {
             tx.send(source)
                 .await
@@ -232,20 +222,24 @@ impl JournalSubsystem {
     /// This allows commit operations to wait for the reactive scheduler
     /// to process their facts before returning.
     pub fn attach_view_update_sender(&self, tx: broadcast::Sender<ViewUpdate>) {
-        *self.view_update_tx.lock() = Some(tx);
+        *self.shared.view_update_tx.lock() = Some(tx);
     }
 
     /// Subscribe to view updates for awaiting fact processing
     ///
     /// Returns None if no view update sender is attached.
     pub fn subscribe_view_updates(&self) -> Option<broadcast::Receiver<ViewUpdate>> {
-        self.view_update_tx.lock().as_ref().map(|tx| tx.subscribe())
+        self.shared
+            .view_update_tx
+            .lock()
+            .as_ref()
+            .map(|tx| tx.subscribe())
     }
 
     /// Check if view update subscription is available
     #[allow(dead_code)]
     pub fn has_view_update_sender(&self) -> bool {
-        self.view_update_tx.lock().is_some()
+        self.shared.view_update_tx.lock().is_some()
     }
 }
 
@@ -262,12 +256,9 @@ impl Clone for JournalSubsystem {
         Self {
             indexed_journal: self.indexed_journal.clone(),
             fact_registry: self.fact_registry.clone(),
-            fact_publish_tx: Mutex::new(self.fact_publish_tx.lock().clone()),
-            view_update_tx: Mutex::new(self.view_update_tx.lock().clone()),
             journal_policy: self.journal_policy.clone(),
             journal_verifying_key: self.journal_verifying_key.clone(),
-            indexed_keys: self.indexed_keys.clone(),
-            cached_journal: self.cached_journal.clone(),
+            shared: Arc::clone(&self.shared),
         }
     }
 }

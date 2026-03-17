@@ -10,10 +10,6 @@ use aura_app::ui_contract::{
     SemanticFailureDomain, SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
     SemanticOperationStatus,
 };
-#[cfg(test)]
-use aura_core::effects::time::PhysicalTimeEffects;
-#[cfg(test)]
-use aura_effects::time::PhysicalTimeHandler;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -192,8 +188,8 @@ impl Drop for SubmittedOperationOwner {
             SemanticFailureDomain::Command,
             SemanticFailureCode::InternalError,
         )
-        .with_detail(detail.clone());
-        let status = SemanticOperationStatus::failed(self.kind, error.clone());
+        .with_detail(detail);
+        let status = SemanticOperationStatus::failed(self.kind, error);
 
         send_ui_update_now_or_spawn(
             &self.tasks,
@@ -204,7 +200,6 @@ impl Drop for SubmittedOperationOwner {
                 status,
             ),
         );
-
     }
 }
 

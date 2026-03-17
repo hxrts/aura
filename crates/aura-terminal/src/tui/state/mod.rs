@@ -79,13 +79,9 @@ impl OperationTracker {
     }
 
     fn set_state(&mut self, operation_id: OperationId, state: OperationState) {
-        let needs_new_instance = self
-            .entries
-            .get(&operation_id)
-            .is_some_and(|entry| {
-                Self::terminal_transition_requires_new_instance(entry.state, state)
-            })
-            || matches!(state, OperationState::Submitting)
+        let needs_new_instance = self.entries.get(&operation_id).is_some_and(|entry| {
+            Self::terminal_transition_requires_new_instance(entry.state, state)
+        }) || matches!(state, OperationState::Submitting)
             || !self.entries.contains_key(&operation_id);
         if needs_new_instance {
             let instance_id = self.next_instance_id(&operation_id);

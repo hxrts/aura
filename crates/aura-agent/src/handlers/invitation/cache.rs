@@ -47,13 +47,12 @@ impl<'a> InvitationCacheHandler<'a> {
         invitation: &Invitation,
     ) -> AgentResult<()> {
         let key = Self::created_invitation_key(authority_id, &invitation.invitation_id);
-        let bytes = serde_json::to_vec(invitation).map_err(|e| {
-            crate::core::AgentError::internal(format!("serialize created invitation: {e}"))
-        })?;
+        let bytes = serde_json::to_vec(invitation)
+            .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
         effects
             .store(&key, bytes)
             .await
-            .map_err(|e| crate::core::AgentError::effects(format!("store invitation: {e}")))?;
+            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
         Ok(())
     }
 
@@ -75,13 +74,12 @@ impl<'a> InvitationCacheHandler<'a> {
         shareable: &ShareableInvitation,
     ) -> AgentResult<()> {
         let key = Self::imported_invitation_key(authority_id, &shareable.invitation_id);
-        let bytes = serde_json::to_vec(shareable).map_err(|e| {
-            crate::core::AgentError::internal(format!("serialize shareable invitation: {e}"))
-        })?;
+        let bytes = serde_json::to_vec(shareable)
+            .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
         effects
             .store(&key, bytes)
             .await
-            .map_err(|e| crate::core::AgentError::effects(format!("store invitation: {e}")))?;
+            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
         Ok(())
     }
 

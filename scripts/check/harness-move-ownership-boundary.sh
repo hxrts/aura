@@ -4,14 +4,18 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# Temporary exemptions (owner: architecture, doc: work/ownership.md)
-allowlist=(
+# Approved boundary modules and compile-fail ownership tests.
+approved_sites=(
+  '^crates/aura-app/src/ui_contract\.rs:'
   '^crates/aura-app/src/scenario_contract\.rs:'
   '^crates/aura-app/src/workflows/harness_determinism\.rs:'
+  '^crates/aura-app/tests/ui/ui_operation_handle_private_fields\.rs:'
   '^crates/aura-harness/src/backend/local_pty\.rs:'
   '^crates/aura-harness/src/backend/mod\.rs:'
   '^crates/aura-harness/src/executor\.rs:'
   '^crates/aura-terminal/src/tui/harness_state\.rs:'
+  '^crates/aura-terminal/src/tui/harness_state/mod\.rs:'
+  '^crates/aura-terminal/src/tui/semantic_lifecycle\.rs:'
   '^crates/aura-terminal/src/tui/screens/app/shell\.rs:'
 )
 
@@ -30,14 +34,14 @@ fail() {
 # objects.
 
 violations=()
-legacy_exemptions=0
+approved_hits=0
 
 while IFS= read -r match; do
   allowed=0
-  for pattern in "${allowlist[@]}"; do
+  for pattern in "${approved_sites[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
-      legacy_exemptions=$((legacy_exemptions + 1))
+      approved_hits=$((approved_hits + 1))
       break
     fi
   done
@@ -61,4 +65,4 @@ if (( ${#violations[@]} > 0 )); then
   fail "shared semantic move ownership escapes approved handle / receipt boundary modules"
 fi
 
-echo "harness move ownership boundary: clean (${legacy_exemptions} temporary exemptions)"
+echo "harness move ownership boundary: clean (${approved_hits} approved boundary hits)"

@@ -217,7 +217,11 @@ impl IoContextBuilder {
         // maintain the API contract.
         let _mode = self.mode.ok_or(ContextBuildError::MissingField("mode"))?;
 
-        let operational = Arc::new(OperationalHandler::new(app_core.raw().clone()));
+        let tasks = Arc::new(UiTaskRegistry::new());
+        let operational = Arc::new(OperationalHandler::new(
+            app_core.raw().clone(),
+            tasks.clone(),
+        ));
         let snapshots = SnapshotHelper::new(app_core.raw().clone(), device_id.clone());
         let toasts = ToastHelper::new();
 
@@ -229,7 +233,6 @@ impl IoContextBuilder {
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
-        let tasks = Arc::new(UiTaskRegistry::new());
         let requested_authority_switch = Arc::new(std::sync::Mutex::new(None));
 
         let dispatch = DispatchHelper::new(
@@ -595,11 +598,7 @@ impl IoContext {
                     .process_ceremony_acceptances()
                     .await
                     .map(|_| ())
-                    .map_err(|e| {
-                        TerminalError::Operation(format!(
-                            "Failed to process demo Mobile ceremonies: {e}"
-                        ))
-                    })
+                    .map_err(|e| TerminalError::Operation(e.to_string()))
             }
         } else {
             #[must_use]
@@ -676,7 +675,7 @@ impl IoContext {
             let _ = settings_workflows::refresh_settings_from_runtime(&app_core).await;
             let _ = system_workflows::refresh_account(&app_core).await;
         };
-        tokio::spawn(bootstrap);
+        self.tasks.spawn(bootstrap);
         Ok(())
     }
 
@@ -1254,21 +1253,11 @@ impl IoContext {
         self.toasts.clear_all().await;
     }
 
-    // =========================================================================
-    // Capability checking (best-effort, snapshot-based)
-    // =========================================================================
-
     #[must_use]
     pub fn get_current_role(&self) -> Option<aura_app::ui::types::home::HomeRole> {
         let snapshot = self.snapshots.try_state_snapshot()?;
         let home_state = snapshot.homes.current_home()?;
         Some(home_state.my_role)
-    }
-
-    #[must_use]
-    pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
-        // Delegate to portable authorization logic in aura-app
-        aura_app::ui::authorization::role_has_capability(self.get_current_role(), capability)
     }
 
     /// Check if the current user can execute a command based on its authorization level.

@@ -15,7 +15,8 @@ use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snaps
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
-    effects::amp::ChannelLeaveParams, types::identifiers::{ChannelId, ContextId},
+    effects::amp::ChannelLeaveParams,
+    types::identifiers::{ChannelId, ContextId},
     AuraError, RetryRunError,
 };
 use aura_journal::{fact::RelationalFact, DomainFact};
@@ -52,11 +53,13 @@ async fn send_moderation_fact_with_retry(
             runtime
                 .send_chat_fact(peer, context_id, fact)
                 .await
-                .map_err(|error| AuraError::from(super::error::WorkflowError::DeliveryFailed {
-                    peer: peer.to_string(),
-                    attempts: MODERATION_FACT_SEND_MAX_ATTEMPTS,
-                    detail: error.to_string(),
-                }))
+                .map_err(|error| {
+                    AuraError::from(super::error::WorkflowError::DeliveryFailed {
+                        peer: peer.to_string(),
+                        attempts: MODERATION_FACT_SEND_MAX_ATTEMPTS,
+                        detail: error.to_string(),
+                    })
+                })
         }
     })
     .await
@@ -117,9 +120,7 @@ async fn resolve_channel_id(
             if chat.channel(&channel_id).is_some() || homes.home_state(&channel_id).is_some() {
                 Ok(channel_id)
             } else {
-                Err(AuraError::not_found(format!(
-                    "Unknown channel scope: {channel_id}"
-                )))
+                Err(AuraError::not_found(channel_id.to_string()))
             }
         }
         ChannelSelector::Name(name) => chat
@@ -132,7 +133,7 @@ async fn resolve_channel_id(
                     .find(|(_, home)| home.name.eq_ignore_ascii_case(&name))
                     .map(|(home_id, _)| *home_id)
             })
-            .ok_or_else(|| AuraError::not_found(format!("Unknown channel scope: {channel}"))),
+            .ok_or_else(|| AuraError::not_found(channel.to_string())),
     }
 }
 
@@ -268,15 +269,13 @@ async fn resolve_scope_by_channel_id(
         let context_id = chat
             .channel(&channel_id)
             .and_then(|channel| channel.context_id)
-            .ok_or_else(|| AuraError::not_found(format!("Unknown channel scope: {channel_id}")))?;
+            .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
 
         if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
             return from_home(best_id, &best_home);
         }
 
-        return Err(AuraError::permission_denied(format!(
-            "Moderation requires a moderator home for context {context_id}"
-        )));
+        return Err(AuraError::permission_denied(context_id.to_string()));
     }
 
     if let Some(current_home) = homes.current_home() {
@@ -342,10 +341,7 @@ where
     }
 
     let Some(home) = homes.home_mut(&scope.home_id) else {
-        return Err(AuraError::not_found(format!(
-            "Moderation scope home {} not found",
-            scope.home_id
-        )));
+        return Err(AuraError::not_found(scope.home_id.to_string()));
     };
     update(home);
     core.views_mut().set_homes(homes);
@@ -856,6 +852,6 @@ mod tests {
         let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
             .await
             .expect_err("unknown channel scope must fail");
-        assert!(error.to_string().contains("Unknown channel scope"));
+        assert!(error.to_string().contains(&unknown.to_string()));
     }
 }

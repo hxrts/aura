@@ -288,7 +288,7 @@ impl<'a> InvitationChannelHandler<'a> {
             effects
                 .commit_relational_facts(vec![fact])
                 .await
-                .map_err(|e| AgentError::effects(format!("commit invited channel fact: {e}")))?;
+                .map_err(|e| AgentError::effects(e.to_string()))?;
         }
 
         self.handler
@@ -345,7 +345,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 aura_journal::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
             ))
             .await
-            .map_err(|e| AgentError::effects(format!("insert AMP bootstrap fact: {e}")))?;
+            .map_err(|e| AgentError::effects(e.to_string()))?;
         effects.await_next_view_update().await;
 
         Ok(())

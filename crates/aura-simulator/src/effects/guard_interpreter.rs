@@ -111,9 +111,13 @@ impl SimulationState {
 ///
 /// This interpreter maintains internal state and records all effects as events,
 /// enabling full replay and inspection of execution traces.
+struct SimulationInterpreterShared {
+    state: Arc<Mutex<SimulationState>>,
+}
+
 pub struct SimulationEffectInterpreter {
     /// Shared simulation state
-    state: Arc<Mutex<SimulationState>>,
+    shared: Arc<SimulationInterpreterShared>,
     /// Current authority ID for context
     authority_id: AuthorityId,
     /// Source network address for this interpreter
@@ -129,7 +133,9 @@ impl SimulationEffectInterpreter {
         source_address: NetworkAddress,
     ) -> Self {
         Self {
-            state: Arc::new(Mutex::new(SimulationState::new(seed, initial_time))),
+            shared: Arc::new(SimulationInterpreterShared {
+                state: Arc::new(Mutex::new(SimulationState::new(seed, initial_time))),
+            }),
             authority_id,
             source_address,
         }
@@ -142,7 +148,7 @@ impl SimulationEffectInterpreter {
         source_address: NetworkAddress,
     ) -> Self {
         Self {
-            state,
+            shared: Arc::new(SimulationInterpreterShared { state }),
             authority_id,
             source_address,
         }
@@ -150,12 +156,16 @@ impl SimulationEffectInterpreter {
 
     /// Get a read lock on the state for inspection
     pub fn state(&self) -> MutexGuard<'_, SimulationState> {
-        self.state.lock().expect("Simulator state lock poisoned")
+        self.shared
+            .state
+            .lock()
+            .expect("Simulator state lock poisoned")
     }
 
     /// Get a clone of the current state
     pub fn snapshot_state(&self) -> SimulationState {
-        self.state
+        self.shared
+            .state
             .lock()
             .expect("Simulator state lock poisoned")
             .clone()
@@ -163,7 +173,7 @@ impl SimulationEffectInterpreter {
 
     /// Get all recorded events
     pub fn events(&self) -> Vec<SimulationEvent> {
-        self.state.lock().unwrap().events.clone()
+        self.shared.state.lock().unwrap().events.clone()
     }
 
     /// Get events of a specific type
@@ -171,7 +181,8 @@ impl SimulationEffectInterpreter {
         &self,
         filter: impl Fn(&SimulationEvent) -> bool,
     ) -> Vec<SimulationEvent> {
-        self.state
+        self.shared
+            .state
             .lock()
             .unwrap()
             .events
@@ -183,7 +194,7 @@ impl SimulationEffectInterpreter {
 
     /// Replay events from a previous execution
     pub async fn replay(&self, events: Vec<SimulationEvent>) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.shared.state.lock().unwrap();
 
         // Clear current state
         state.events.clear();
@@ -239,13 +250,13 @@ impl SimulationEffectInterpreter {
 
     /// Set initial flow budget for testing
     pub fn set_initial_budget(&self, authority: AuthorityId, budget: FlowCost) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.shared.state.lock().unwrap();
         state.set_budget(authority, budget);
     }
 
     /// Advance simulation time
     pub fn advance_time(&self, new_time: TimeStamp) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.shared.state.lock().unwrap();
         state.advance_time(new_time);
     }
 }
@@ -253,7 +264,7 @@ impl SimulationEffectInterpreter {
 #[async_trait]
 impl EffectInterpreter for SimulationEffectInterpreter {
     async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.shared.state.lock().unwrap();
 
         match cmd {
             EffectCommand::ChargeBudget {
@@ -410,8 +421,8 @@ impl EffectInterpreter for SimulationEffectInterpreter {
 mod tests {
     use super::*;
     use aura_core::{
-        identifiers::{AuthorityId, ContextId},
         time::{PhysicalTime, TimeStamp},
+        AuthorityId, ContextId,
     };
 
     #[tokio::test]

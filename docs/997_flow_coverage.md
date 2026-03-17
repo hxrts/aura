@@ -26,7 +26,7 @@ The harness coverage model has two explicit lanes:
 | Shared Semantic Scenarios | 5 |
 | Mixed-Runtime Scenarios (TUI + Web distinct keys) | 2 |
 | Frontend-Conformance Scenarios | 5 |
-| Core User Flow Domains | 9 |
+| Core User Flow Domains | 13 |
 
 ## Coverage Classes
 
@@ -64,13 +64,21 @@ harness scenarios in this inventory now use the semantic scenario format.
 | Flow Domain | Main Coverage | Secondary Coverage | Runtime Context |
 |------------|----------------|--------------------|-----------------|
 | Startup and onboarding readiness | `real-runtime-mixed-startup-smoke.toml` | `quint-semantic-observation-smoke.toml` | TUI + Web |
-| Invitation create/accept + channel messaging | Scenario 13 | None | TUI + Web |
-| Device add/remove | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
-| Settings navigation parity | `shared-settings-parity.toml` | `shared-notifications-and-authority.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | TUI + Web |
+| Navigate neighborhood | `real-runtime-mixed-startup-smoke.toml` | Scenario 7 | TUI + Web |
+| Navigate chat | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Navigate contacts | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Navigate notifications | `shared-notifications-and-authority.toml` | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Navigate settings | `shared-settings-parity.toml` | `shared-notifications-and-authority.toml`, `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | TUI + Web |
+| Create invitation | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Accept invitation | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Create home | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Join channel | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Send chat message | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
+| Add device | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
+| Remove device | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
+| Switch authority | `shared-notifications-and-authority.toml` | `shared-settings-parity.toml` | TUI + Web |
 | Global navigation/help | Scenario 4 | None | TUI frontend-conformance |
 | Neighborhood keypath navigation | Scenario 7 | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
-| Notifications navigation | `shared-notifications-and-authority.toml` | None | TUI + Web |
-| Switch authority | `shared-notifications-and-authority.toml` | None | TUI + Web |
 | Semantic observation contract | `semantic-observation-browser-smoke.toml` | `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | Browser + TUI |
 
 ## Frontend-Conformance Coverage

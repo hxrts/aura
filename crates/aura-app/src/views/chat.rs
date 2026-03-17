@@ -984,6 +984,6 @@ mod tests {
         let messages = state.messages_for_channel(&canonical_id);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].channel_id, canonical_id);
-        assert_eq!(messages[0].content, "msg-1");
+        assert_eq!(messages[0].content, "Hello");
     }
 }

@@ -10,7 +10,10 @@ use aura_core::{
     MemberId, OperationId, SessionId,
 };
 use std::io;
-use std::sync::{Arc, Mutex};
+#[allow(clippy::disallowed_types)]
+use std::sync::Arc;
+#[allow(clippy::disallowed_types)]
+use std::sync::Mutex;
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
@@ -370,6 +373,7 @@ fn test_legacy_authority_from_device_request_requires_metadata() {
     );
 }
 
+#[allow(clippy::disallowed_types)]
 #[derive(Clone, Default)]
 struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
 

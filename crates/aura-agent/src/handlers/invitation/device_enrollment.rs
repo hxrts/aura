@@ -152,12 +152,12 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             )
             .await
             .map_err(|error| AgentError::internal(error.to_string()))?;
-            session.queue_send_bytes(to_vec(&request).map_err(|error| {
-                AgentError::internal(format!("device enrollment request encode failed: {error}"))
-            })?);
-            session.queue_send_bytes(to_vec(&confirm).map_err(|error| {
-                AgentError::internal(format!("device enrollment confirm encode failed: {error}"))
-            })?);
+            session.queue_send_bytes(
+                to_vec(&request).map_err(|error| AgentError::internal(error.to_string()))?,
+            );
+            session.queue_send_bytes(
+                to_vec(&confirm).map_err(|error| AgentError::internal(error.to_string()))?,
+            );
 
             let loop_result = loop {
                 let round = session
@@ -258,9 +258,9 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             )
             .await
             .map_err(|error| AgentError::internal(error.to_string()))?;
-            session.queue_send_bytes(to_vec(&accept).map_err(|error| {
-                AgentError::internal(format!("device enrollment accept encode failed: {error}"))
-            })?);
+            session.queue_send_bytes(
+                to_vec(&accept).map_err(|error| AgentError::internal(error.to_string()))?,
+            );
 
             let loop_result = loop {
                 let round = session

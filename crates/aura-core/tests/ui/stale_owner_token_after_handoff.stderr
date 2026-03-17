@@ -11,8 +11,8 @@ error[E0382]: borrow of moved value: `token`
 note: `OwnerToken::<Scope, TokenId>::handoff` takes ownership of the receiver `self`, which moves `token`
  --> src/ownership.rs
   |
-  |     pub fn handoff<Recipient>(self, recipient: Recipient) -> OwnershipTransfer<Scope, TokenId, Recipient> {
-  |                               ^^^^
+  |         self,
+  |         ^^^^
 help: you can `clone` the value and consume it, but this might not be your desired behavior
   |
 6 |     let _transfer = token.clone().handoff("owner-b");

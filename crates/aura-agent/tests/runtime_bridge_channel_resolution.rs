@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_lock::RwLock;
 use aura_agent::AgentBuilder;
 use aura_app::core::{AppConfig, AppCore};
@@ -35,7 +35,9 @@ async fn create_channel_produces_runtime_resolvable_channel_context() -> Result<
     let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42).await?;
     let runtime = {
         let core = app_core.read().await;
-        core.runtime().cloned().expect("runtime bridge")
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| anyhow!("runtime bridge unavailable"))?
     };
 
     let resolved = runtime.resolve_amp_channel_context(channel_id).await?;
@@ -84,7 +86,9 @@ async fn create_channel_in_active_home_context_produces_runtime_resolvable_chann
     let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42).await?;
     let runtime = {
         let core = app_core.read().await;
-        core.runtime().cloned().expect("runtime bridge")
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| anyhow!("runtime bridge unavailable"))?
     };
 
     let resolved = runtime.resolve_amp_channel_context(channel_id).await?;

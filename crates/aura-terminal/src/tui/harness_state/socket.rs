@@ -1,5 +1,6 @@
 //! Socket infrastructure for harness command ingress.
 
+use crate::tui::tasks::UiTaskRegistry;
 use crate::tui::updates::{
     HarnessCommandReceiptHandle, HarnessCommandSender, HarnessCommandSubmission,
 };
@@ -7,8 +8,8 @@ use aura_app::ui::contract::{HarnessUiCommand, HarnessUiCommandReceipt};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{
     execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
-    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
-    TimeoutExecutionProfile, TimeoutRunError,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
+    TimeoutRunError,
 };
 use aura_effects::time::PhysicalTimeHandler;
 use parking_lot::Mutex;
@@ -25,6 +26,7 @@ static COMMAND_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static ACTIVE_HARNESS_COMMAND_SENDER: OnceLock<Mutex<Option<HarnessCommandSender>>> =
     OnceLock::new();
 static HARNESS_COMMAND_LISTENER_STARTED: OnceLock<()> = OnceLock::new();
+static HARNESS_COMMAND_LISTENER_TASKS: OnceLock<UiTaskRegistry> = OnceLock::new();
 
 struct HarnessSocketGuard {
     path: PathBuf,
@@ -65,6 +67,10 @@ fn active_harness_command_sender() -> &'static Mutex<Option<HarnessCommandSender
     ACTIVE_HARNESS_COMMAND_SENDER.get_or_init(|| Mutex::new(None))
 }
 
+fn harness_command_listener_tasks() -> &'static UiTaskRegistry {
+    HARNESS_COMMAND_LISTENER_TASKS.get_or_init(UiTaskRegistry::new)
+}
+
 pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {
     if HARNESS_COMMAND_LISTENER_STARTED.get().is_some() {
         return Ok(());
@@ -72,7 +78,7 @@ pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {
     let Some((listener, guard)) = bind_harness_command_listener()? else {
         return Ok(());
     };
-    tokio::spawn(async move {
+    harness_command_listener_tasks().spawn(async move {
         let _guard = guard;
         forward_harness_commands_from_listener(listener).await;
         tracing::debug!("harness command listener exited");
@@ -89,7 +95,7 @@ pub(crate) fn clear_harness_command_sender() {
     *active_harness_command_sender().lock() = None;
 }
 
-async fn forward_harness_commands_from_listener(listener: UnixListener) {
+pub(super) async fn forward_harness_commands_from_listener(listener: UnixListener) {
     loop {
         let Ok((stream, _addr)) = listener.accept().await else {
             break;
@@ -104,8 +110,7 @@ async fn forward_harness_commands_from_listener(listener: UnixListener) {
 const HARNESS_COMMAND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const HARNESS_COMMAND_RETRY_INITIAL_DELAY: std::time::Duration =
     std::time::Duration::from_millis(50);
-const HARNESS_COMMAND_RETRY_MAX_DELAY: std::time::Duration =
-    std::time::Duration::from_millis(500);
+const HARNESS_COMMAND_RETRY_MAX_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 const HARNESS_COMMAND_RETRY_ATTEMPTS: u32 = 200;
 
 fn harness_timeout_profile() -> TimeoutExecutionProfile {
@@ -123,8 +128,11 @@ async fn harness_read_budget(time: &PhysicalTimeHandler) -> io::Result<TimeoutBu
         .physical_time()
         .await
         .map_err(|error| io::Error::other(format!("failed to read physical time: {error}")))?;
-    TimeoutBudget::from_start_and_timeout(&started_at, scaled_harness_duration(HARNESS_COMMAND_READ_TIMEOUT)?)
-        .map_err(|error| io::Error::other(format!("failed to create harness read budget: {error}")))
+    TimeoutBudget::from_start_and_timeout(
+        &started_at,
+        scaled_harness_duration(HARNESS_COMMAND_READ_TIMEOUT)?,
+    )
+    .map_err(|error| io::Error::other(format!("failed to create harness read budget: {error}")))
 }
 
 fn harness_command_retry_policy() -> io::Result<RetryBudgetPolicy> {
@@ -229,13 +237,12 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
     let receipt = match execute_with_retry_budget(&time, &retry_policy, |_| {
         let command = command.clone();
         async move {
-            let command_tx =
-                active_harness_command_sender()
-                    .lock()
-                    .clone()
-                    .ok_or_else(|| {
-                        io::Error::other("TUI harness command plane is temporarily unavailable")
-                    })?;
+            let command_tx = active_harness_command_sender()
+                .lock()
+                .clone()
+                .ok_or_else(|| {
+                    io::Error::other("TUI harness command plane is temporarily unavailable")
+                })?;
 
             let (receipt_tx, receipt_rx) = tokio::sync::oneshot::channel();
             command_tx
@@ -251,7 +258,9 @@ async fn process_harness_command_stream(mut stream: UnixStream) -> bool {
                 })?;
 
             receipt_rx.await.map_err(|error| {
-                io::Error::other(format!("harness command dropped before application: {error}"))
+                io::Error::other(format!(
+                    "harness command dropped before application: {error}"
+                ))
             })
         }
     })
@@ -276,7 +285,3 @@ async fn write_harness_command_receipt(
     stream.write_all(&payload).await?;
     stream.flush().await
 }
-
-// Re-export forward_harness_commands_from_listener for tests in mod.rs.
-#[cfg(test)]
-pub(super) use forward_harness_commands_from_listener as forward_harness_commands_from_listener_fn;

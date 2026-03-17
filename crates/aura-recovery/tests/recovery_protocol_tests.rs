@@ -238,12 +238,16 @@ fn ceremony_status_committed() {
 #[test]
 fn ceremony_status_aborted() {
     let status = CeremonyStatus::Aborted {
-        reason: "Timeout".to_string(),
+        reason: aura_recovery::guardian_ceremony::CeremonyAbortReason::Manual {
+            reason: "Timeout".to_string(),
+        },
     };
 
     assert!(matches!(
         status,
-        CeremonyStatus::Aborted { reason } if reason == "Timeout"
+        CeremonyStatus::Aborted {
+            reason: aura_recovery::guardian_ceremony::CeremonyAbortReason::Manual { reason }
+        } if reason == "Timeout"
     ));
 }
 

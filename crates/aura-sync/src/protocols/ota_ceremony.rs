@@ -40,23 +40,32 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::threshold::{
     policy_for, AgreementMode, CeremonyFlow, SigningContext, ThresholdSignature,
 };
 use aura_core::types::Epoch;
+use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 use uuid::Uuid;
 
 use super::ota::{UpgradeKind, UpgradeProposal as OTAProposal};
 
-static OTA_CEREMONY_MUTATION_CAPABILITY: LazyLock<ActorIngressMutationCapability> =
-    LazyLock::new(|| ActorIngressMutationCapability::new("aura-sync:ota-ceremony"));
-static OTA_CEREMONY_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
-    LazyLock::new(|| LifecyclePublicationCapability::new("aura-sync:ota-facts"));
+static OTA_CEREMONY_MUTATION_CAPABILITY: OnceLock<ActorIngressMutationCapability> = OnceLock::new();
+static OTA_CEREMONY_PUBLICATION_CAPABILITY: OnceLock<LifecyclePublicationCapability> =
+    OnceLock::new();
+
+fn ota_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
+    OTA_CEREMONY_MUTATION_CAPABILITY
+        .get_or_init(|| ActorIngressMutationCapability::new("aura-sync:ota-ceremony"))
+}
+
+fn ota_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
+    OTA_CEREMONY_PUBLICATION_CAPABILITY
+        .get_or_init(|| LifecyclePublicationCapability::new("aura-sync:ota-facts"))
+}
 
 // =============================================================================
 // CEREMONY TYPES
@@ -479,11 +488,11 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
     }
 
     fn ota_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
-        &OTA_CEREMONY_MUTATION_CAPABILITY
+        ota_ceremony_mutation_capability()
     }
 
     fn ota_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
-        &OTA_CEREMONY_PUBLICATION_CAPABILITY
+        ota_ceremony_publication_capability()
     }
 
     fn insert_ceremony(
@@ -583,7 +592,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             ceremony_id,
             &proposal,
         )
-            .await?;
+        .await?;
 
         Ok(ceremony_id)
     }
@@ -667,7 +676,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             ceremony_id,
             &commitment,
         )
-            .await?;
+        .await?;
 
         // Emit threshold reached fact if applicable
         if threshold_reached {

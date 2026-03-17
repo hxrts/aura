@@ -514,6 +514,7 @@ pub fn check_biscuit_access(
 
 use async_trait::async_trait;
 use aura_core::effects::{StorageCoreEffects, StorageError, StorageExtendedEffects, StorageStats};
+#[allow(clippy::disallowed_types)]
 use std::sync::RwLock;
 
 /// Storage handler wrapper that enforces Biscuit authorization on all operations
@@ -534,6 +535,7 @@ use std::sync::RwLock;
 /// // All operations now require valid Biscuit authorization
 /// handler.store("key", data).await?;
 /// ```
+#[allow(clippy::disallowed_types)]
 pub struct AuthorizedStorageHandler<S: StorageCoreEffects + StorageExtendedEffects> {
     /// Inner storage handler
     inner: S,
@@ -545,6 +547,7 @@ pub struct AuthorizedStorageHandler<S: StorageCoreEffects + StorageExtendedEffec
     budget: RwLock<FlowBudget>,
 }
 
+#[allow(clippy::disallowed_types)]
 impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S> {
     /// Create a new authorized storage handler
     pub fn new(inner: S, evaluator: BiscuitStorageEvaluator, budget: FlowBudget) -> Self {
@@ -573,30 +576,27 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
 
     /// Set the Biscuit token for authorization
     pub fn set_token(&self, token: Biscuit) -> Result<(), StorageError> {
-        let mut guard = self
-            .token
-            .write()
-            .map_err(|_| StorageError::WriteFailed("authorized storage token lock poisoned".into()))?;
+        let mut guard = self.token.write().map_err(|_| {
+            StorageError::WriteFailed("authorized storage token lock poisoned".into())
+        })?;
         *guard = Some(token);
         Ok(())
     }
 
     /// Clear the authorization token
     pub fn clear_token(&self) -> Result<(), StorageError> {
-        let mut guard = self
-            .token
-            .write()
-            .map_err(|_| StorageError::WriteFailed("authorized storage token lock poisoned".into()))?;
+        let mut guard = self.token.write().map_err(|_| {
+            StorageError::WriteFailed("authorized storage token lock poisoned".into())
+        })?;
         *guard = None;
         Ok(())
     }
 
     /// Get the remaining flow budget
     pub fn remaining_budget(&self) -> Result<u64, StorageError> {
-        let guard = self
-            .budget
-            .read()
-            .map_err(|_| StorageError::ReadFailed("authorized storage budget lock poisoned".into()))?;
+        let guard = self.budget.read().map_err(|_| {
+            StorageError::ReadFailed("authorized storage budget lock poisoned".into())
+        })?;
         Ok(guard.headroom())
     }
 
@@ -606,18 +606,16 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
         resource: &StorageResource,
         permission: &StoragePermission,
     ) -> Result<(), StorageError> {
-        let token_guard = self
-            .token
-            .read()
-            .map_err(|_| StorageError::ReadFailed("authorized storage token lock poisoned".into()))?;
+        let token_guard = self.token.read().map_err(|_| {
+            StorageError::ReadFailed("authorized storage token lock poisoned".into())
+        })?;
         let token = token_guard.as_ref().ok_or_else(|| {
             StorageError::PermissionDenied("No authorization token set".to_string())
         })?;
 
-        let mut budget_guard = self
-            .budget
-            .write()
-            .map_err(|_| StorageError::WriteFailed("authorized storage budget lock poisoned".into()))?;
+        let mut budget_guard = self.budget.write().map_err(|_| {
+            StorageError::WriteFailed("authorized storage budget lock poisoned".into())
+        })?;
         let decision = self
             .evaluator
             .evaluate_access(token, resource, permission, &mut budget_guard)

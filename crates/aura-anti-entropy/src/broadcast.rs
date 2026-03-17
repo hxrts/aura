@@ -334,7 +334,10 @@ impl SyncEffects for BroadcasterHandler {
         if !send_errors.is_empty() && send_errors.len() == peers.len() {
             return Err(SyncError::NetworkError {
                 operation: "broadcast_op",
-                detail: format!("failed to send operation to any peer: {} errors", send_errors.len()),
+                detail: format!(
+                    "failed to send operation to any peer: {} errors",
+                    send_errors.len()
+                ),
             });
         }
 

@@ -21,6 +21,7 @@ import {
   RECOVERY_METHODS,
 } from "./method_sets.js";
 import {
+  normalizeScreenText,
   normalizeDomState,
   uiSnapshotRenderRevision,
   uiSnapshotRevision,
@@ -762,49 +763,63 @@ function installPageNavigationReset(session) {
 }
 
 async function assertRootStructure(session, reason) {
-  let structure = await withOperationTimeout(
-    `root_structure_${reason}`,
-    session.page.evaluate(() => {
-      if (
-        typeof window.__AURA_HARNESS_OBSERVE__?.root_structure === "function"
-      ) {
-        return window.__AURA_HARNESS_OBSERVE__.root_structure();
+  const deadlineMs = Date.now() + 2000;
+  let lastError = null;
+
+  while (Date.now() < deadlineMs) {
+    try {
+      const structure = await withOperationTimeout(
+        `root_structure_${reason}`,
+        session.page.evaluate(() => {
+          if (
+            typeof window.__AURA_HARNESS_OBSERVE__?.root_structure === "function"
+          ) {
+            return window.__AURA_HARNESS_OBSERVE__.root_structure();
+          }
+          return null;
+        }),
+        2000,
+      );
+
+      if (!structure || typeof structure !== "object") {
+        lastError = new Error(`root structure export unavailable during ${reason}`);
+      } else {
+        const appRootCount = Number(structure.app_root_count ?? 0);
+        const modalRegionCount = Number(structure.modal_region_count ?? 0);
+        const onboardingRootCount = Number(structure.onboarding_root_count ?? 0);
+        const toastRegionCount = Number(structure.toast_region_count ?? 0);
+        const activeScreenRootCount = Number(structure.active_screen_root_count ?? 0);
+        const onboardingShell =
+          onboardingRootCount === 1 &&
+          appRootCount === 0 &&
+          modalRegionCount === 0 &&
+          toastRegionCount === 0 &&
+          activeScreenRootCount === 0;
+        const appShell =
+          onboardingRootCount === 0 &&
+          appRootCount === 1 &&
+          modalRegionCount === 1 &&
+          toastRegionCount === 1 &&
+          activeScreenRootCount === 1;
+        if (onboardingShell || appShell) {
+          return;
+        }
+        lastError = new Error(
+          `invalid root structure during ${reason}: ${JSON.stringify(structure)}`,
+        );
       }
-      return null;
-    }),
-    2000,
+    } catch (error) {
+      if (isNavigationTransitionError(error)) {
+        throw error;
+      }
+      lastError = error;
+    }
+    await delay(100);
+  }
+
+  throw (
+    lastError ?? new Error(`root structure export unavailable during ${reason}`)
   );
-
-  if (!structure || typeof structure !== "object") {
-    throw new Error(`root structure export unavailable during ${reason}`);
-  }
-
-  if (!structure || typeof structure !== "object") {
-    throw new Error(`root structure export unavailable during ${reason}`);
-  }
-
-  const appRootCount = Number(structure.app_root_count ?? 0);
-  const modalRegionCount = Number(structure.modal_region_count ?? 0);
-  const onboardingRootCount = Number(structure.onboarding_root_count ?? 0);
-  const toastRegionCount = Number(structure.toast_region_count ?? 0);
-  const activeScreenRootCount = Number(structure.active_screen_root_count ?? 0);
-  const onboardingShell =
-    onboardingRootCount === 1 &&
-    appRootCount === 0 &&
-    modalRegionCount === 0 &&
-    toastRegionCount === 0 &&
-    activeScreenRootCount === 0;
-  const appShell =
-    onboardingRootCount === 0 &&
-    appRootCount === 1 &&
-    modalRegionCount === 1 &&
-    toastRegionCount === 1 &&
-    activeScreenRootCount === 1;
-  if (!onboardingShell && !appShell) {
-    throw new Error(
-      `invalid root structure during ${reason}: ${JSON.stringify(structure)}`,
-    );
-  }
 }
 
 function isNavigationTransitionError(error) {
@@ -813,6 +828,20 @@ function isNavigationTransitionError(error) {
     message.includes("Execution context was destroyed") ||
     message.includes("most likely because of a navigation") ||
     message.includes("Target page, context or browser has been closed")
+  );
+}
+
+function isUiStateWaitInvalidation(error) {
+  const message = String(error?.message ?? error ?? "");
+  return message.startsWith("ui_state_wait_invalidated:");
+}
+
+function isUiStateRecoveryCandidate(error) {
+  const message = String(error?.message ?? error ?? "");
+  return (
+    isUiStateWaitInvalidation(error) ||
+    isNavigationTransitionError(error) ||
+    message.includes("root structure export unavailable during ui_state")
   );
 }
 
@@ -1955,24 +1984,48 @@ async function readStructuredUiState(
   );
   const payload = await withOperationTimeout(
     `ui_state_structured_${reason}`,
-    session.page.evaluate(() => {
-      if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
-        return window.__AURA_UI_STATE_JSON__;
-      }
-      if (
-        window.__AURA_UI_STATE_CACHE__ &&
-        typeof window.__AURA_UI_STATE_CACHE__ === "object"
-      ) {
-        return window.__AURA_UI_STATE_CACHE__;
-      }
-      if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
-        return window.__AURA_HARNESS_OBSERVE__.ui_state();
-      }
-      if (typeof window.__AURA_UI_STATE__ === "function") {
-        return window.__AURA_UI_STATE__();
-      }
-      return null;
-    }),
+    (async () => {
+      try {
+        await session.page.waitForFunction(
+          () => {
+            if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
+              return true;
+            }
+            if (
+              window.__AURA_UI_STATE_CACHE__ &&
+              typeof window.__AURA_UI_STATE_CACHE__ === "object"
+            ) {
+              return true;
+            }
+            if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
+              return true;
+            }
+            return typeof window.__AURA_UI_STATE__ === "function";
+          },
+          null,
+          { timeout: timeoutMs },
+        );
+      } catch {}
+
+      return session.page.evaluate(() => {
+        if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
+          return window.__AURA_UI_STATE_JSON__;
+        }
+        if (
+          window.__AURA_UI_STATE_CACHE__ &&
+          typeof window.__AURA_UI_STATE_CACHE__ === "object"
+        ) {
+          return window.__AURA_UI_STATE_CACHE__;
+        }
+        if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
+          return window.__AURA_HARNESS_OBSERVE__.ui_state();
+        }
+        if (typeof window.__AURA_UI_STATE__ === "function") {
+          return window.__AURA_UI_STATE__();
+        }
+        return null;
+      });
+    })(),
     timeoutMs,
   );
   const parsed = tryParseUiStateValue(payload);
@@ -2003,7 +2056,7 @@ async function readStructuredUiStateWithNavigationRecovery(
       storeResult: false,
     });
   } catch (error) {
-    if (!isNavigationTransitionError(error)) {
+    if (!isUiStateRecoveryCandidate(error)) {
       throw error;
     }
     resetObservationState(session, `structured_navigation_recovery:${reason}`);
@@ -2014,6 +2067,9 @@ async function readStructuredUiStateWithNavigationRecovery(
       session,
       `structured_navigation_${reason}`,
     );
+    await ensureHarnessWithTimeout(session.page, UI_STATE_TIMEOUT_MS);
+    await installHarnessMutationQueue(session.page);
+    await installDomObserver(session.page, session);
     await assertRootStructure(session, `ui_state_after_navigation_${reason}`);
     return readStructuredUiState(
       session,
@@ -2188,6 +2244,7 @@ async function snapshot(params) {
 async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
+  const recoveryTimeoutMs = Math.min(UI_STATE_TIMEOUT_MS, 4000);
   const recentConsole = consoleTailText(session, 8).replace(/\n/g, " | ");
   console.error(
     `[driver] ui_state start instance=${instanceId} cache_type=${typeof session.uiStateCache} cache_json=${typeof session.uiStateCacheJson} heartbeat_seq=${session.renderHeartbeat?.render_seq ?? "none"} console_tail=${recentConsole}`,
@@ -2211,9 +2268,28 @@ async function uiState(params) {
   try {
     await assertRootStructure(session, "ui_state");
   } catch (error) {
-    throw new Error(
-      `ui_state observation failed before recovery instance=${instanceId} error=${error?.message ?? String(error)}`,
-    );
+    if (!isUiStateRecoveryCandidate(error)) {
+      throw new Error(
+        `ui_state observation failed before recovery instance=${instanceId} error=${error?.message ?? String(error)}`,
+      );
+    }
+
+    const recovered = await readStructuredUiStateWithNavigationRecovery(
+      session,
+      instanceId,
+      "ui_state_root_structure",
+      recoveryTimeoutMs,
+    ).catch((recoveryError) => {
+      throw new Error(
+        `ui_state observation failed before recovery instance=${instanceId} error=${error?.message ?? String(error)} recovery_error=${recoveryError?.message ?? String(recoveryError)}`,
+      );
+    });
+    const staleReason = uiStateStalenessReason(session, recovered);
+    if (staleReason) {
+      throw new Error(`structured_ui_state_stale:${staleReason}`);
+    }
+    storeUiState(session, recovered, "ui_state_root_structure_recovery");
+    return recovered;
   }
 
   console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
@@ -2265,13 +2341,99 @@ async function waitForUiState(params) {
     };
   }
 
-  if (!session.uiStateCache || typeof session.uiStateCache !== "object") {
-    await uiState({ instance_id: instanceId });
-  }
+  const deadlineMs = Date.now() + timeoutMs;
 
-  const result = await waitForUiStateVersion(session, afterVersion, timeoutMs);
-  await ensureUiStateRenderConvergence(session, result.snapshot, "event_wait");
-  return result;
+  while (true) {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    if (!session.uiStateCache || typeof session.uiStateCache !== "object") {
+      try {
+        const snapshot = await uiState({ instance_id: instanceId });
+        const version = uiSnapshotRevision(snapshot);
+        if (version > afterVersion) {
+          await ensureUiStateRenderConvergence(session, snapshot, "event_wait");
+          return { snapshot, version };
+        }
+      } catch (error) {
+        if (!isUiStateRecoveryCandidate(error)) {
+          throw error;
+        }
+
+        const recovered = await readStructuredUiStateWithNavigationRecovery(
+          session,
+          instanceId,
+          "wait_for_ui_state_navigation",
+          remainingMs,
+        );
+        const staleReason = uiStateStalenessReason(session, recovered);
+        if (!staleReason) {
+          storeUiState(session, recovered, "wait_for_ui_state_recovery");
+          const recoveredVersion = uiSnapshotRevision(recovered);
+          if (recoveredVersion > afterVersion) {
+            await ensureUiStateRenderConvergence(
+              session,
+              recovered,
+              "event_wait_recovery",
+            );
+            return {
+              snapshot: recovered,
+              version: recoveredVersion,
+            };
+          }
+        }
+      }
+    }
+
+    try {
+      const result = await waitForUiStateVersion(
+        session,
+        afterVersion,
+        remainingMs,
+      );
+      await ensureUiStateRenderConvergence(
+        session,
+        result.snapshot,
+        "event_wait",
+      );
+      return result;
+    } catch (error) {
+      if (!isUiStateRecoveryCandidate(error)) {
+        throw error;
+      }
+
+      if (Date.now() >= deadlineMs) {
+        throw new Error(
+          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_revision=${uiSnapshotRevision(
+            session.uiStateCache,
+          )} invalidation=${String(error?.message ?? error)}`,
+        );
+      }
+
+      const recovered = await readStructuredUiStateWithNavigationRecovery(
+        session,
+        instanceId,
+        "wait_for_ui_state_navigation",
+        Math.max(1, deadlineMs - Date.now()),
+      );
+      const staleReason = uiStateStalenessReason(session, recovered);
+      if (staleReason) {
+        continue;
+      }
+
+      storeUiState(session, recovered, "wait_for_ui_state_recovery");
+      const recoveredVersion = uiSnapshotRevision(recovered);
+      if (recoveredVersion > afterVersion) {
+        await ensureUiStateRenderConvergence(
+          session,
+          recovered,
+          "event_wait_recovery",
+        );
+        return {
+          snapshot: recovered,
+          version: recoveredVersion,
+        };
+      }
+    }
+  }
 }
 
 async function recoverUiState(params) {

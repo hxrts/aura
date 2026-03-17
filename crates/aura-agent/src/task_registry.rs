@@ -26,7 +26,7 @@ use futures::FutureExt;
 use parking_lot::Mutex;
 #[cfg(target_arch = "wasm32")]
 use parking_lot::Mutex;
-use tokio::sync::mpsc::{self, error::TryRecvError};
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::Notify;
 #[cfg(not(target_arch = "wasm32"))]
@@ -454,13 +454,12 @@ impl TaskGroup {
                 group: group_name.clone(),
                 active_tasks: self.active_tasks(),
             })?;
-        let budget =
-            TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| {
-                TaskSupervisionError::Timeout {
-                    group: group_name.clone(),
-                    active_tasks: self.active_tasks(),
-                }
-            })?;
+        let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| {
+            TaskSupervisionError::Timeout {
+                group: group_name.clone(),
+                active_tasks: self.active_tasks(),
+            }
+        })?;
         let result = execute_with_timeout_budget(&time, &budget, || async {
             loop {
                 self.reconcile_exits();
@@ -474,11 +473,12 @@ impl TaskGroup {
 
         match result {
             Ok(()) => Ok(()),
-            Err(TimeoutRunError::Timeout(_)) | Err(TimeoutRunError::Operation(_)) => Err(
-                TaskSupervisionError::Timeout {
-                group: group_name,
-                active_tasks: self.active_tasks(),
-            }),
+            Err(TimeoutRunError::Timeout(_)) | Err(TimeoutRunError::Operation(_)) => {
+                Err(TaskSupervisionError::Timeout {
+                    group: group_name,
+                    active_tasks: self.active_tasks(),
+                })
+            }
         }
     }
 
@@ -612,7 +612,7 @@ impl TaskGroup {
                 &outcome,
             );
 
-            let _ = exit_tx.send(TaskExit {
+            let _ = exit_tx.try_send(TaskExit {
                 task_id,
                 task_name: task_name_for_wrapper,
                 outcome,
@@ -654,7 +654,7 @@ impl TaskGroup {
                     &outcome,
                 );
 
-                let _ = exit_tx.send(TaskExit {
+                let _ = exit_tx.try_send(TaskExit {
                     task_id,
                     task_name: task_name_for_wrapper,
                     outcome,
@@ -666,25 +666,20 @@ impl TaskGroup {
 
     fn reconcile_exits(&self) {
         let mut exit_rx = self.shared.exit_rx.lock();
-        loop {
-            match exit_rx.try_recv() {
-                Ok(exit) => {
-                    let removed = self.shared.tasks.lock().remove(&exit.task_id);
-                    if removed.is_none() {
-                        continue;
-                    }
+        while let Ok(exit) = exit_rx.try_recv() {
+            let removed = self.shared.tasks.lock().remove(&exit.task_id);
+            if removed.is_none() {
+                continue;
+            }
 
-                    if matches!(exit.outcome, TaskOutcome::Cancelled | TaskOutcome::Panicked) {
-                        tracing::warn!(
-                            event = "runtime.task.exit_non_success",
-                            task_group = %self.shared.name,
-                            task_name = %exit.task_name,
-                            outcome = ?exit.outcome,
-                            "Supervised task exited abnormally"
-                        );
-                    }
-                }
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            if matches!(exit.outcome, TaskOutcome::Cancelled | TaskOutcome::Panicked) {
+                tracing::warn!(
+                    event = "runtime.task.exit_non_success",
+                    task_group = %self.shared.name,
+                    task_name = %exit.task_name,
+                    outcome = ?exit.outcome,
+                    "Supervised task exited abnormally"
+                );
             }
         }
     }
@@ -726,7 +721,7 @@ impl TaskGroup {
                 &outcome,
             );
 
-            let _ = exit_tx.send(TaskExit {
+            let _ = exit_tx.try_send(TaskExit {
                 task_id,
                 task_name: task_name_for_wrapper,
                 outcome,

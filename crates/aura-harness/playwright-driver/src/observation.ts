@@ -1,6 +1,6 @@
 import type { DriverSession, UiSnapshotPayload } from './contracts.js';
 
-function normalizeScreenText(value: unknown): string {
+export function normalizeScreenText(value: unknown): string {
   return String(value ?? '')
     .split('\n')
     .map((line) => line.replace(/\s+/g, ' ').trim())
@@ -53,7 +53,11 @@ export function uiStateStalenessReason(
   }
   const heartbeatRenderRevision = Number(session.renderHeartbeat?.render_seq ?? 0);
   const snapshotRenderRevision = uiSnapshotRenderRevision(snapshot);
-  if (heartbeatRenderRevision > 0 && heartbeatRenderRevision > snapshotRenderRevision) {
+  if (
+    heartbeatRenderRevision > 0 &&
+    snapshotRenderRevision > 0 &&
+    heartbeatRenderRevision > snapshotRenderRevision
+  ) {
     return `heartbeat_ahead:${heartbeatRenderRevision}:${snapshotRenderRevision}`;
   }
   return null;

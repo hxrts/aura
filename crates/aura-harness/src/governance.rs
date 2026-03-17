@@ -365,8 +365,9 @@ pub fn validate_settings_surface_contract() -> Result<()> {
         .context("failed to read crates/aura-ui/src/model.rs")?;
     let tui_types = fs::read_to_string("crates/aura-terminal/src/tui/types.rs")
         .context("failed to read crates/aura-terminal/src/tui/types.rs")?;
-    let tui_export = fs::read_to_string("crates/aura-terminal/src/tui/harness_state.rs")
-        .context("failed to read crates/aura-terminal/src/tui/harness_state.rs")?;
+    let tui_export =
+        fs::read_to_string("crates/aura-terminal/src/tui/harness_state/snapshot.rs")
+            .context("failed to read crates/aura-terminal/src/tui/harness_state/snapshot.rs")?;
 
     for needle in [
         "pub enum SharedSettingsSectionId",

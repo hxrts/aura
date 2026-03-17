@@ -36,8 +36,8 @@ use super::super::TuiState;
 use account::handle_account_setup_key_queue;
 use ceremony::{handle_guardian_setup_key_queue, handle_mfa_setup_key_queue};
 use chat::{
-    handle_chat_create_key_queue, handle_chat_member_select_key_queue,
-    handle_chat_topic_key_queue, handle_confirm_modal_key_queue, handle_help_modal_key_queue,
+    handle_chat_create_key_queue, handle_chat_member_select_key_queue, handle_chat_topic_key_queue,
+    handle_confirm_modal_key_queue, handle_help_modal_key_queue,
 };
 use contacts::{
     handle_contact_select_key_queue, handle_create_invitation_key_queue,

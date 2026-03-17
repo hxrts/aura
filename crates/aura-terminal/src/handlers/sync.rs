@@ -125,12 +125,7 @@ async fn handle_daemon_mode(
 
                 // Get health info
                 let health = manager.health().await;
-                println!(
-                    "[tick {}] Sync daemon {} (uptime: {}s)",
-                    tick_count,
-                    health,
-                    uptime_secs,
-                );
+                println!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
 
                 // Get metrics periodically
                 if tick_count % 5 == 0 {

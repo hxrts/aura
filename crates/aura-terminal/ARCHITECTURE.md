@@ -89,6 +89,24 @@ Changes to parity-critical TUI ownership boundaries should ship with:
 - boundary tests showing relinquished callback ownership does not continue to
   author semantic truth after handoff
 
+### Capability-Gated Points
+
+- shared semantic command ingress and receipt handling through the real TUI
+  update/event loop
+- authoritative semantic lifecycle/readiness mirroring consumed from
+  `aura-app::ui_contract` and `aura-app::workflows::semantic_facts`, never
+  authored locally
+- callback factories and subscription bridges that may adapt authoritative
+  operation state for rendering, but may not publish terminal semantic truth
+
+### Verification Hooks
+
+- `cargo check -p aura-terminal`
+- `cargo test -p aura-terminal harness_command_invite_actor_to_channel_emits_dispatch_followup -- --nocapture`
+- `cargo test -p aura-terminal authoritative_submitting_after_terminal_allocates_new_instance -- --nocapture`
+- `just ci-observed-layer-boundaries`
+- `just ci-actor-lifecycle`
+
 ### Detailed Specifications
 
 ### InvariantTerminalUiBoundary

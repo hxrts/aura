@@ -11,9 +11,9 @@ use aura_core::{
         },
         NetworkAddress,
     },
-    identifiers::{AuthorityId, ContextId},
     journal::{Cap, Fact},
     time::TimeStamp,
+    types::identifiers::{AuthorityId, ContextId},
     FlowCost,
 };
 use aura_simulator::effects::SimulationEffectInterpreter;

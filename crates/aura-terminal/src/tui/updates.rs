@@ -23,9 +23,9 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! // In callback:
+//! // In a callback owned by an existing task supervisor:
 //! let tx = update_tx.clone();
-//! tokio::spawn(async move {
+//! task_owner.spawn(async move {
 //!     let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(name));
 //! });
 //!
@@ -73,10 +73,8 @@ pub type HarnessCommandReceiver = tokio::sync::mpsc::Receiver<HarnessCommandSubm
 /// if the channel buffer is full. If both fail (channel closed), the update is
 /// silently dropped — the UI is shutting down.
 pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
-    if tx.try_send(update.clone()).is_err() {
-        if tx.send(update).await.is_err() {
-            tracing::debug!("UI update channel closed during shutdown");
-        }
+    if tx.try_send(update.clone()).is_err() && tx.send(update).await.is_err() {
+        tracing::debug!("UI update channel closed during shutdown");
     }
 }
 

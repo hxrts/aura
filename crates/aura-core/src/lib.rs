@@ -124,13 +124,13 @@ pub use domain::journal;
 
 // === Public API Re-exports ===
 
-pub use time::TimeDomain;
 pub use time::timeout::{
-    AttemptBudget, ExponentialBackoffPolicy, RetryBudgetPolicy, TimeoutBudget,
-    TimeoutBudgetError, TimeoutBudgetResult, TimeoutExecutionClass,
-    TimeoutExecutionProfile, TimeoutRunError, TimeoutTimeSemantics,
-    RetryRunError, execute_with_retry_budget, execute_with_timeout_budget,
+    execute_with_retry_budget, execute_with_timeout_budget, AttemptBudget,
+    ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
+    TimeoutBudgetResult, TimeoutExecutionClass, TimeoutExecutionProfile, TimeoutRunError,
+    TimeoutTimeSemantics,
 };
+pub use time::TimeDomain;
 
 // Core algebraic types
 pub use byzantine::{
@@ -156,13 +156,12 @@ pub use conformance::{
 };
 pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use ownership::{
-    ActorIngressMutationCapability, AuthorizedActorIngressMutation,
-    AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
-    LifecyclePublicationCapability, OpaqueOperationHandle, OperationLifecycle,
-    OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain,
-    OwnershipResult, OwnershipTransfer, OwnershipTransferCapability, OwnerToken,
-    ReadinessPublicationCapability, Terminality, issue_operation_handle,
-    issue_owner_token, ownership_capability_token_request_for,
+    issue_operation_handle, issue_owner_token, ownership_capability_token_request_for,
+    ActorIngressMutationCapability, AuthorizedActorIngressMutation, AuthorizedLifecyclePublication,
+    AuthorizedReadinessPublication, LifecyclePublicationCapability, OpaqueOperationHandle,
+    OperationLifecycle, OwnerToken, OwnershipCapability, OwnershipCategory, OwnershipError,
+    OwnershipErrorDomain, OwnershipResult, OwnershipTransfer, OwnershipTransferCapability,
+    ReadinessPublicationCapability, Terminality,
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,

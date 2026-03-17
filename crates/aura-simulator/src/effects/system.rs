@@ -41,6 +41,10 @@ pub struct FaultConfig {
 ///
 /// This provides deterministic behavior for testing, fault injection capabilities,
 /// and controllable time progression for simulating distributed protocol scenarios.
+struct SimulationSystemShared {
+    injected_faults: Mutex<HashMap<String, FaultConfig>>,
+}
+
 pub struct SimulationEffectSystem {
     device_id: DeviceId,
     seed: u64,
@@ -55,7 +59,7 @@ pub struct SimulationEffectSystem {
 
     // Simulation state
     fault_injection_enabled: bool,
-    injected_faults: Arc<Mutex<HashMap<String, FaultConfig>>>,
+    shared: Arc<SimulationSystemShared>,
 }
 
 impl SimulationEffectSystem {
@@ -71,7 +75,9 @@ impl SimulationEffectSystem {
             storage: MemoryStorageHandler::new(),
             network: InMemoryTransportHandler::new(TransportConfig::default()),
             fault_injection_enabled: false,
-            injected_faults: Arc::new(Mutex::new(HashMap::new())),
+            shared: Arc::new(SimulationSystemShared {
+                injected_faults: Mutex::new(HashMap::new()),
+            }),
         }
     }
 
@@ -105,7 +111,8 @@ impl SimulationEffectSystem {
     /// Inject a fault for testing
     pub fn inject_fault(&self, operation: &str, config: FaultConfig) {
         if self.fault_injection_enabled {
-            self.injected_faults
+            self.shared
+                .injected_faults
                 .lock()
                 .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"))
                 .insert(operation.to_string(), config);
@@ -114,7 +121,8 @@ impl SimulationEffectSystem {
 
     /// Clear all injected faults
     pub fn clear_faults(&self) {
-        self.injected_faults
+        self.shared
+            .injected_faults
             .lock()
             .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"))
             .clear();
@@ -127,6 +135,7 @@ impl SimulationEffectSystem {
         }
 
         let faults = self
+            .shared
             .injected_faults
             .lock()
             .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"));
@@ -614,6 +623,7 @@ impl SimulationEffectSystem {
             current_time: self.time.get_time(),
             fault_injection_enabled: self.fault_injection_enabled,
             active_fault_count: self
+                .shared
                 .injected_faults
                 .lock()
                 .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"))

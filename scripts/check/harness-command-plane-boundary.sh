@@ -25,7 +25,11 @@ allowed_ts_files=(
   "crates/aura-harness/playwright-driver/src/method_sets.ts"
 )
 
-mapfile -t rust_hits < <(
+rust_hits=()
+while IFS= read -r file; do
+  [[ -n "$file" ]] || continue
+  rust_hits+=("$file")
+done < <(
   rg -l 'fn submit_semantic_command\(|submit_semantic_command_via_ui\(' \
     crates/aura-harness crates/aura-web 2>/dev/null | sort -u
 )
@@ -36,7 +40,11 @@ for file in "${rust_hits[@]}"; do
   fi
 done
 
-mapfile -t ts_hits < <(
+ts_hits=()
+while IFS= read -r file; do
+  [[ -n "$file" ]] || continue
+  ts_hits+=("$file")
+done < <(
   rg -l 'submit_semantic_command' crates/aura-harness/playwright-driver 2>/dev/null | sort -u
 )
 

@@ -6,21 +6,6 @@ cd "$repo_root"
 
 # Temporary exemptions (owner: architecture, doc: work/ownership.md)
 allowlist=(
-  '^crates/aura-app/src/workflows/access\.rs:'
-  '^crates/aura-app/src/workflows/context\.rs:'
-  '^crates/aura-app/src/workflows/messaging\.rs:'
-  '^crates/aura-app/src/workflows/moderation\.rs:'
-  '^crates/aura-app/src/workflows/moderator\.rs:'
-  '^crates/aura-app/src/workflows/query\.rs:'
-  '^crates/aura-app/src/workflows/settings\.rs:'
-  '^crates/aura-app/src/workflows/signals\.rs:'
-  '^crates/aura-agent/src/handlers/invitation/cache\.rs:'
-  '^crates/aura-agent/src/handlers/invitation/channel\.rs:'
-  '^crates/aura-agent/src/handlers/invitation/contact\.rs:'
-  '^crates/aura-agent/src/handlers/invitation/device_enrollment\.rs:'
-  '^crates/aura-agent/src/handlers/invitation/guardian\.rs:'
-  '^crates/aura-agent/src/handlers/invitation/validation\.rs:'
-  '^crates/aura-terminal/src/tui/context/initialized_app_core\.rs:'
 )
 
 fail() {

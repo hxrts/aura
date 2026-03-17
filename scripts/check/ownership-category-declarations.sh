@@ -55,7 +55,10 @@ for row in "${required_inventory_rows[@]}"; do
     || fail "testing guide ownership inventory missing row: $row"
 done
 
-mapfile -t crate_dirs < <(find crates -mindepth 1 -maxdepth 1 -type d | sort)
+crate_dirs=()
+while IFS= read -r crate_dir; do
+  crate_dirs+=("$crate_dir")
+done < <(find crates -mindepth 1 -maxdepth 1 -type d | sort)
 (( ${#crate_dirs[@]} > 0 )) || fail "no crate directories found under crates/"
 
 missing_arch=()
@@ -84,9 +87,23 @@ for crate_dir in "${crate_dirs[@]}"; do
   fi
 
   case "$crate_name" in
-    aura-agent|aura-app|aura-terminal|aura-web|aura-harness)
+    aura-agent|aura-app|aura-terminal|aura-web|aura-harness|aura-ui|aura-simulator|aura-testkit)
       if ! rg -q '^## Ownership Inventory|^### Ownership Inventory' "$arch_file"; then
         violations+=("$arch_file: high-risk crate missing Ownership Inventory section")
+      fi
+      ;;
+  esac
+
+  case "$crate_name" in
+    aura-authentication|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-social|aura-sync)
+      lib_file="$src_dir/lib.rs"
+      if [[ ! -f "$lib_file" ]]; then
+        violations+=("$crate_dir: Layer 5 crate missing src/lib.rs for OPERATION_CATEGORIES enforcement")
+      elif ! rg -q 'pub const OPERATION_CATEGORIES' "$lib_file"; then
+        violations+=("$lib_file: Layer 5 crate missing OPERATION_CATEGORIES declaration")
+      fi
+      if ! rg -q 'OPERATION_CATEGORIES' "$arch_file"; then
+        violations+=("$arch_file: Layer 5 crate must document OPERATION_CATEGORIES linkage")
       fi
       ;;
   esac

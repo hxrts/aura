@@ -14,7 +14,7 @@ hits="$(rg --no-heading -n 'publish_.*override' \
   crates/aura-ui/src \
   crates/aura-web/src || true)"
 
-filtered_hits="$(printf '%s\n' "$hits" | grep -v 'crates/aura-terminal/src/tui/harness_state.rs' || true)"
+filtered_hits="$(printf '%s\n' "$hits" | grep -v 'crates/aura-terminal/src/tui/harness_state/' || true)"
 if [ -n "$filtered_hits" ]; then
   echo "$filtered_hits" >&2
   fail "new parity-critical export helpers may not depend on override caches outside the quarantined TUI harness export module"

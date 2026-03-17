@@ -80,7 +80,7 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
             fact(2, FactContent::Relational(renamed.to_generic())),
         ])
         .await
-        .expect("reactive facts published");
+        .unwrap_or_else(|error| panic!("reactive facts published: {error}"));
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -144,7 +144,7 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
             fact(2, FactContent::Relational(updated_added.to_generic())),
         ])
         .await
-        .expect("reactive facts published");
+        .unwrap_or_else(|error| panic!("reactive facts published: {error}"));
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -211,7 +211,7 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
             fact(2, FactContent::Relational(fallback_named.to_generic())),
         ])
         .await
-        .expect("reactive facts published");
+        .unwrap_or_else(|error| panic!("reactive facts published: {error}"));
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -277,7 +277,7 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
             fact(2, FactContent::Relational(binding)),
         ])
         .await
-        .expect("reactive facts published");
+        .unwrap_or_else(|error| panic!("reactive facts published: {error}"));
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,
@@ -334,7 +334,7 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
     pipeline
         .publish_journal_facts(vec![fact(1, FactContent::Relational(bad))])
         .await
-        .expect("reactive facts published");
+        .unwrap_or_else(|error| panic!("reactive facts published: {error}"));
 
     let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
         Ok(Ok(update)) => update,

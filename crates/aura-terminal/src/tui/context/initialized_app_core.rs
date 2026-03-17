@@ -20,7 +20,7 @@ impl InitializedAppCore {
     pub async fn new(app_core: Arc<RwLock<AppCore>>) -> Result<Self, AuraError> {
         AppCore::init_signals_with_hooks(&app_core)
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to init signals: {e}")))?;
+            .map_err(|e| AuraError::internal(e.to_string()))?;
 
         let runtime = {
             let core = app_core.read().await;

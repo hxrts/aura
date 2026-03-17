@@ -372,19 +372,21 @@ pub async fn finalize_runtime_account_bootstrap(
             &require_runtime(app_core).await?,
             &retry_policy,
             |_attempt| async {
-            let runtime = {
-                let core = app_core.read().await;
-                core.runtime().cloned()
-            };
-            if let Some(runtime) = runtime {
-                if runtime.bootstrap_signing_keys().await.is_ok() {
-                    return Ok(());
+                let runtime = {
+                    let core = app_core.read().await;
+                    core.runtime().cloned()
+                };
+                if let Some(runtime) = runtime {
+                    if runtime.bootstrap_signing_keys().await.is_ok() {
+                        return Ok(());
+                    }
                 }
-            }
-            Err(AuraError::from(crate::workflows::error::WorkflowError::Precondition(
-                "runtime signing keys not yet bootstrapped",
-            )))
-        },
+                Err(AuraError::from(
+                    crate::workflows::error::WorkflowError::Precondition(
+                        "runtime signing keys not yet bootstrapped",
+                    ),
+                ))
+            },
         )
         .await
         .map_err(|error| match error {

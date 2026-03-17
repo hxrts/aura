@@ -3,10 +3,9 @@
 //! This module provides portable authorization checking for commands and operations.
 //! It includes:
 //! - `CommandAuthorizationLevel`: Classification of commands by sensitivity
-//! - `CommandCapability` helpers: Role-based capability checking
 //! - `require_*` helpers: Pre-check functions for authorization
 
-use crate::{views::home::HomeRole, workflows::chat_commands::CommandCapability, StateSnapshot};
+use crate::{views::home::HomeRole, StateSnapshot};
 use aura_core::AuraError;
 
 // ============================================================================
@@ -99,46 +98,6 @@ pub fn require_admin(snapshot: Option<&StateSnapshot>, operation: &str) -> Resul
     }
 }
 
-/// Check if the given role can use a command capability.
-///
-/// This is a pure function that checks role-to-capability mapping.
-/// All users can use basic capabilities; elevated capabilities require Member/Moderator role.
-pub fn role_has_capability(role: Option<HomeRole>, capability: &CommandCapability) -> bool {
-    // None capability requires no permission
-    if matches!(capability, CommandCapability::None) {
-        return true;
-    }
-
-    // If no role (not in a home), only allow basic communication
-    let Some(role) = role else {
-        return matches!(
-            capability,
-            CommandCapability::SendDm | CommandCapability::UpdateContact
-        );
-    };
-
-    match capability {
-        CommandCapability::None => true,
-        // Basic capabilities - all roles can use
-        CommandCapability::SendDm
-        | CommandCapability::SendMessage
-        | CommandCapability::UpdateContact
-        | CommandCapability::ViewMembers
-        | CommandCapability::JoinChannel
-        | CommandCapability::LeaveContext => true,
-        // Moderation capabilities require moderator designation.
-        CommandCapability::ModerateKick
-        | CommandCapability::ModerateBan
-        | CommandCapability::ModerateMute
-        | CommandCapability::ManageChannel
-        | CommandCapability::PinContent => matches!(role, HomeRole::Moderator),
-        // Invites remain a home membership/governance operation.
-        CommandCapability::Invite => matches!(role, HomeRole::Moderator | HomeRole::Member),
-        // Grant/revoke moderator designation is a home-governance action.
-        CommandCapability::GrantModerator => matches!(role, HomeRole::Moderator | HomeRole::Member),
-    }
-}
-
 /// Check authorization level against a user's role.
 ///
 /// Returns an error message if the authorization check fails.
@@ -218,85 +177,6 @@ mod tests {
             "public access"
         );
         assert_eq!(CommandAuthorizationLevel::Admin.label(), "ADMIN");
-    }
-
-    #[test]
-    fn test_role_has_capability_none() {
-        assert!(role_has_capability(None, &CommandCapability::None));
-        assert!(role_has_capability(
-            Some(HomeRole::Participant),
-            &CommandCapability::None
-        ));
-    }
-
-    #[test]
-    fn test_role_has_capability_basic() {
-        // All roles can send messages
-        assert!(role_has_capability(
-            Some(HomeRole::Participant),
-            &CommandCapability::SendMessage
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Moderator),
-            &CommandCapability::SendMessage
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Member),
-            &CommandCapability::SendMessage
-        ));
-    }
-
-    #[test]
-    fn test_role_has_capability_no_home() {
-        // Without a role (not in home), only DM and contact updates allowed
-        assert!(role_has_capability(None, &CommandCapability::SendDm));
-        assert!(role_has_capability(None, &CommandCapability::UpdateContact));
-        assert!(!role_has_capability(None, &CommandCapability::SendMessage));
-        assert!(!role_has_capability(None, &CommandCapability::ModerateKick));
-    }
-
-    #[test]
-    fn test_role_has_capability_moderation() {
-        // Kick/Ban/Mute are moderator-only capabilities.
-        assert!(!role_has_capability(
-            Some(HomeRole::Participant),
-            &CommandCapability::ModerateKick
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Moderator),
-            &CommandCapability::ModerateKick
-        ));
-        assert!(!role_has_capability(
-            Some(HomeRole::Member),
-            &CommandCapability::ModerateKick
-        ));
-
-        assert!(!role_has_capability(
-            Some(HomeRole::Participant),
-            &CommandCapability::GrantModerator
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Moderator),
-            &CommandCapability::GrantModerator
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Member),
-            &CommandCapability::GrantModerator
-        ));
-
-        // Invites are home-governance actions for members or moderators.
-        assert!(!role_has_capability(
-            Some(HomeRole::Participant),
-            &CommandCapability::Invite
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Moderator),
-            &CommandCapability::Invite
-        ));
-        assert!(role_has_capability(
-            Some(HomeRole::Member),
-            &CommandCapability::Invite
-        ));
     }
 
     #[test]

@@ -283,15 +283,7 @@ impl RuntimeMaintenanceService {
         if let (Some(rendezvous_manager), Some(lan_transport)) =
             (self.rendezvous_manager.clone(), self.lan_transport.clone())
         {
-            if let Err(error) = publish_lan_descriptor_with(
-                self.effects.clone(),
-                self.authority_id,
-                self.device_id,
-                &rendezvous_manager,
-                lan_transport.as_ref(),
-            )
-            .await
-            {
+            if let Err(error) = self.publish_initial_lan_descriptor().await {
                 tracing::warn!(
                     event = "runtime.service.lifecycle.post_start_failed",
                     service = self.name(),
@@ -381,6 +373,24 @@ impl RuntimeMaintenanceService {
         }
 
         Ok(())
+    }
+
+    pub async fn publish_initial_lan_descriptor(&self) -> Result<(), ServiceError> {
+        let (Some(rendezvous_manager), Some(lan_transport)) = (
+            self.rendezvous_manager.as_ref(),
+            self.lan_transport.as_ref(),
+        ) else {
+            return Ok(());
+        };
+
+        publish_lan_descriptor_with(
+            self.effects.clone(),
+            self.authority_id,
+            self.device_id,
+            rendezvous_manager,
+            lan_transport.as_ref(),
+        )
+        .await
     }
 }
 

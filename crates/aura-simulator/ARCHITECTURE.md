@@ -53,6 +53,21 @@ delays or inherent failures.
 | Differential/parity artifact comparison | `Observed` | upstream artifacts and comparison contracts | local comparison state only | verification outputs, diagnostics |
 | Quint / external verification bridge inputs | `Observed` | external artifact/schema producers | bridge adaptation only | simulator comparison/reporting |
 
+### Capability-Gated Points
+
+- Fault injection configuration is simulator-owned and may mutate only through
+  simulator control surfaces.
+- Shared inbox/state transfer into simulator handlers is explicit and scoped to
+  simulation harness/composer boundaries.
+- Differential and parity outputs are observed artifacts and must not become a
+  new semantic-truth source for production flows.
+
+### Verification Hooks
+
+- `cargo check -p aura-simulator`
+- `cargo test -p aura-simulator --lib`
+- `just test-crate aura-simulator`
+
 ### Detailed Specifications
 
 ### InvariantSimulationDeterministicReplay

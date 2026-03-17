@@ -130,3 +130,9 @@ impl AgentContext {
         }
     }
 }
+
+impl Default for AgentContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}

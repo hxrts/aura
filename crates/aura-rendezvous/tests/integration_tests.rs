@@ -62,6 +62,7 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
         transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
         handshake_psk_commitment: [42u8; 32],
         public_key: [0u8; 32],
+        device_id: None,
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
@@ -261,7 +262,7 @@ async fn test_channel_establishment_flow() {
 }
 
 #[tokio::test]
-async fn test_channel_establishment_requires_descriptor() {
+async fn test_channel_establishment_uses_explicit_context_over_descriptor_context() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
@@ -289,8 +290,20 @@ async fn test_channel_establishment_requires_descriptor() {
         )
         .await;
 
-    // Should fail - no descriptor
-    assert!(result.is_err());
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            panic!("peer descriptor remains valid for channel establishment: {error}")
+        }
+    };
+    assert!(matches!(outcome.decision, GuardDecision::Allow));
+    assert!(
+        outcome
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, EffectCommand::SendHandshake { .. })),
+        "establish channel should still issue a handshake send effect"
+    );
 }
 
 #[tokio::test]
@@ -719,6 +732,7 @@ fn test_transport_hint_serialization() {
         transport_hints: vec![hint.clone()],
         handshake_psk_commitment: [0u8; 32],
         public_key: [0u8; 32],
+        device_id: None,
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
@@ -750,6 +764,7 @@ fn test_relay_transport_hint() {
         transport_hints: vec![hint],
         handshake_psk_commitment: [0u8; 32],
         public_key: [0u8; 32],
+        device_id: None,
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],

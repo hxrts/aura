@@ -41,7 +41,6 @@ thread_local! {
 
 const WEB_STORAGE_PREFIX: &str = "aura_";
 const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
-const HARNESS_PENDING_CREATE_ACCOUNT_KEY: &str = "__AURA_HARNESS_PENDING_CREATE_ACCOUNT__";
 
 fn sanitize_storage_segment(raw: &str) -> String {
     raw.chars()
@@ -71,93 +70,44 @@ fn harness_storage_prefix(window: &web_sys::Window) -> String {
     WEB_STORAGE_PREFIX.to_string()
 }
 
-fn install_pending_harness_command_loop(controller: Arc<UiController>) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::wrap(Box::new(move || {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let pending = Reflect::get(
-            window.as_ref(),
-            &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
-        )
-        .ok()
-        .and_then(|value| value.as_string())
-        .filter(|value| !value.trim().is_empty());
-        let Some(nickname) = pending else {
-            return;
-        };
-        let _ = Reflect::delete_property(
-            window.as_ref(),
-            &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
+fn submit_create_account_in_background(controller: Arc<UiController>, nickname: String) {
+    spawn_local(async move {
+        web_sys::console::log_1(
+            &format!("[web-harness] create_account start nickname={nickname}").into(),
         );
-        let controller = controller.clone();
-        spawn_local(async move {
-            web_sys::console::log_1(
-                &format!("[web-harness] create_account start nickname={nickname}").into(),
-            );
-            controller.set_account_setup_state(false, nickname.clone(), None);
-            let has_runtime = {
-                let core = controller.app_core().read().await;
-                core.runtime().is_some()
-            };
-            let result: Result<(), String> = if has_runtime {
-                account_workflows::initialize_runtime_account(
-                    controller.app_core(),
-                    nickname.clone(),
-                )
+        controller.set_account_setup_state(false, nickname.clone(), None);
+        let has_runtime = {
+            let core = controller.app_core().read().await;
+            core.runtime().is_some()
+        };
+        let result: Result<(), String> =
+            account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
                 .await
-                .map_err(|error| error.to_string())
-            } else {
-                super::stage_initial_web_account_bootstrap(&nickname)
-                    .await
-                    .and_then(|()| super::reload_page())
-                    .map_err(|error| error.to_string())
-            };
+                .map_err(|error| error.to_string());
 
-            match result {
-                Ok(()) => {
-                    if has_runtime {
-                        if let Some(window) = web_sys::window() {
-                            if let Ok(Some(storage)) = window.local_storage() {
-                                let storage_key = format!(
-                                    "{}selected_authority",
-                                    harness_storage_prefix(&window)
-                                );
-                                let _ = storage.set_item(&storage_key, &controller.authority_id());
-                            }
+        match result {
+            Ok(()) => {
+                if has_runtime {
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            let storage_key =
+                                format!("{}selected_authority", harness_storage_prefix(&window));
+                            let _ = storage.set_item(&storage_key, &controller.authority_id());
                         }
-                        controller.set_account_setup_state(true, "", None);
                     }
-                    web_sys::console::log_1(
-                        &format!("[web-harness] create_account ok nickname={nickname}").into(),
-                    );
+                    controller.set_account_setup_state(true, "", None);
                 }
-                Err(error) => {
-                    web_sys::console::error_1(
-                        &format!("[web-harness] create_account error {error}").into(),
-                    );
-                }
+                web_sys::console::log_1(
+                    &format!("[web-harness] create_account ok nickname={nickname}").into(),
+                );
             }
-        });
-    }) as Box<dyn FnMut()>);
-    let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
-        callback.as_ref().unchecked_ref(),
-        25,
-    );
-    callback.forget();
-}
-
-fn queue_pending_create_account(nickname: &str) -> Result<SemanticCommandResponse, JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("window is not available"))?;
-    Reflect::set(
-        window.as_ref(),
-        &JsValue::from_str(HARNESS_PENDING_CREATE_ACCOUNT_KEY),
-        &JsValue::from_str(nickname),
-    )?;
-    Ok(SemanticCommandResponse::accepted_without_value())
+            Err(error) => {
+                web_sys::console::error_1(
+                    &format!("[web-harness] create_account error {error}").into(),
+                );
+            }
+        }
+    });
 }
 
 fn browser_screen(screen: ScreenId) -> Option<ScreenId> {
@@ -254,7 +204,27 @@ async fn submit_semantic_command(
             controller.set_screen(target);
             Ok(SemanticCommandResponse::accepted_without_value())
         }
-        IntentAction::CreateAccount { account_name } => queue_pending_create_account(&account_name),
+        IntentAction::CreateAccount { account_name } => {
+            controller.set_account_setup_state(false, account_name.clone(), None);
+            let has_runtime = {
+                let core = controller.app_core().read().await;
+                core.runtime().is_some()
+            };
+            if has_runtime {
+                submit_create_account_in_background(controller, account_name);
+            } else {
+                web_sys::console::log_1(
+                    &format!("[web-harness] create_account stage nickname={account_name}").into(),
+                );
+                super::stage_initial_web_account_bootstrap(&account_name)
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                web_sys::console::log_1(
+                    &format!("[web-harness] create_account staged nickname={account_name}").into(),
+                );
+            }
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
         IntentAction::CreateHome { home_name } => {
             context_workflows::create_home(controller.app_core(), Some(home_name), None)
                 .await
@@ -324,7 +294,7 @@ async fn submit_semantic_command(
         }
         IntentAction::SwitchAuthority { authority_id } => {
             controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(browser_settings_section(SettingsSection::Authority));
+            controller.set_settings_section(aura_ui::model::SettingsSection::Authority);
             if selected_authority_id(&controller).as_deref() == Some(authority_id.as_str()) {
                 return Ok(SemanticCommandResponse::accepted_without_value());
             }
@@ -667,7 +637,6 @@ fn serialized_published_ui_snapshot(
 pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
     let harness = Object::new();
     let observe = Object::new();
-    install_pending_harness_command_loop(controller.clone());
 
     let send_keys_controller = controller.clone();
     let send_keys = Closure::wrap(Box::new(move |keys: JsValue| -> JsValue {

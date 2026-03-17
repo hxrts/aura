@@ -364,18 +364,19 @@ impl QuintVerificationEffects for QuintEffectHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handler::QuintEffectHandler;
     use aura_core::effects::{Property, PropertyKind};
 
     #[test]
-    fn test_quint_evaluator_creation() {
-        let evaluator = QuintEvaluator::new();
+    fn test_quint_effect_handler_creation() {
+        let evaluator = QuintEffectHandler::new();
         assert!(!evaluator.config.verbose);
         assert_eq!(evaluator.config.max_evaluation_time_ms, 30_000);
     }
 
     #[tokio::test]
     async fn test_property_evaluation() {
-        let evaluator = QuintEvaluator::new();
+        let evaluator = QuintEffectHandler::new();
         let property = Property::new(
             "test_prop",
             "Test Property",
@@ -394,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verification_run() {
-        let evaluator = QuintEvaluator::new();
+        let evaluator = QuintEffectHandler::new();
         let property = Property::new(
             "test_prop",
             "Test Property",

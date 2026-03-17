@@ -334,9 +334,12 @@ impl RecoveryState {
 
     /// Get all active (non-completed/failed) recoveries.
     pub fn active_recoveries(&self) -> impl Iterator<Item = &RecoveryOperationState> {
-        self.recoveries
-            .values()
-            .filter(|r| !matches!(r.status, RecoveryStatus::Completed | RecoveryStatus::Failed(_)))
+        self.recoveries.values().filter(|r| {
+            !matches!(
+                r.status,
+                RecoveryStatus::Completed | RecoveryStatus::Failed(_)
+            )
+        })
     }
 
     /// Check if there's any active operation for a context.
@@ -350,7 +353,10 @@ impl RecoveryState {
                 )
             })
             || self.recovery_for_context(context_id).is_some_and(|r| {
-                !matches!(r.status, RecoveryStatus::Completed | RecoveryStatus::Failed(_))
+                !matches!(
+                    r.status,
+                    RecoveryStatus::Completed | RecoveryStatus::Failed(_)
+                )
             })
     }
 }

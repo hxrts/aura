@@ -30,6 +30,7 @@ use aura_app::ceremonies::{
     ChannelError, GuardianSetupError, MfaSetupError, RecoveryError, MIN_CHANNEL_PARTICIPANTS,
     MIN_MFA_DEVICES,
 };
+use aura_app::harness_mode_enabled;
 use aura_app::ui::contract::OperationState;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
@@ -42,14 +43,14 @@ use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
-use aura_core::{
-    execute_with_retry_budget, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
-    TimeoutExecutionProfile,
-};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
+use aura_core::{
+    execute_with_retry_budget, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
+    TimeoutExecutionProfile,
+};
 use aura_effects::time::PhysicalTimeHandler;
 
 use crate::error::TerminalError;
@@ -82,8 +83,9 @@ async fn effect_sleep(duration: std::time::Duration) {
         .await;
 }
 
+#[allow(clippy::expect_used)]
 fn shell_retry_policy() -> RetryBudgetPolicy {
-    let profile = if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+    let profile = if harness_mode_enabled() {
         TimeoutExecutionProfile::harness()
     } else {
         TimeoutExecutionProfile::production()
@@ -410,12 +412,9 @@ fn execute_harness_followup_command(
                 return Err("Chat callbacks are unavailable".to_string());
             };
             let channels = shared_channels.read().clone();
-            let committed_channel_id = selected_channel
-                .read()
-                .clone()
-                .filter(|channel_id| {
-                    channels.is_empty() || channels.iter().any(|channel| channel.id == *channel_id)
-                });
+            let committed_channel_id = selected_channel.read().clone().filter(|channel_id| {
+                channels.is_empty() || channels.iter().any(|channel| channel.id == *channel_id)
+            });
             let visible_message_channel_id = shared_messages
                 .read()
                 .last()
@@ -458,22 +457,7 @@ fn execute_harness_followup_command(
                 .filter(|binding| binding.channel_id == channel.id);
             let context_id = selected_binding
                 .and_then(|binding| binding.context_id)
-                .or_else(|| channel.context_id.clone())
-                .or_else(|| {
-                channel
-                    .id
-                    .parse::<aura_core::ChannelId>()
-                    .ok()
-                    .and_then(|channel_id| {
-                        futures::executor::block_on(
-                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                                app_ctx.app_core.raw(),
-                                channel_id,
-                            ),
-                        )
-                    })
-                    .map(|id| id.to_string())
-            });
+                .or_else(|| channel.context_id.clone());
             let Some(context_id) = context_id else {
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",
@@ -497,7 +481,7 @@ fn execute_harness_followup_command(
                 return Err("Contact callbacks are unavailable".to_string());
             };
             let channels = shared_channels.read().clone();
-            let channel_id_string = channel_id.to_string();
+            let channel_id_string = channel_id.clone();
             let Some(channel) = channels
                 .iter()
                 .find(|channel| channel.id == channel_id_string)
@@ -512,21 +496,7 @@ fn execute_harness_followup_command(
                 .filter(|binding| binding.channel_id == channel.id);
             let context_id = selected_binding
                 .and_then(|binding| binding.context_id)
-                .or_else(|| channel.context_id.clone())
-                .or_else(|| {
-                channel_id
-                    .parse::<aura_core::ChannelId>()
-                    .ok()
-                    .and_then(|channel_id| {
-                        futures::executor::block_on(
-                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                                app_ctx.app_core.raw(),
-                                channel_id,
-                            ),
-                        )
-                    })
-                    .map(|id| id.to_string())
-            });
+                .or_else(|| channel.context_id.clone());
             let Some(context_id) = context_id else {
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",
@@ -825,7 +795,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
     let shared_devices = use_devices_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
-    let callbacks_ref = hooks.use_ref(|| Arc::new(parking_lot::RwLock::new(props.callbacks.clone())));
+    let callbacks_ref =
+        hooks.use_ref(|| Arc::new(parking_lot::RwLock::new(props.callbacks.clone())));
     let shared_callbacks = callbacks_ref.read().clone();
     *shared_callbacks.write() = props.callbacks.clone();
 
@@ -916,50 +887,51 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 let mut tui = tui.clone();
                 let shutdown = shutdown.clone();
                 async move {
-                if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                    return Ok::<(), String>(());
-                }
-
-                let mut stream = {
-                    let core = app_core.raw().read().await;
-                    core.subscribe(&*ERROR_SIGNAL)
-                };
-
-                while let Ok(err_opt) = stream.recv().await {
                     if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                        return Ok(());
+                        return Ok::<(), String>(());
                     }
-                    let Some(err) = err_opt else { continue };
-                    let msg = format_error(&err);
-                    tui.with_mut(|state| {
-                        // Prefer routing errors into the account setup modal when it is active.
-                        let routed = matches!(
-                            state.modal_queue.current(),
-                            Some(QueuedModal::AccountSetup(_))
-                        );
-                        if routed {
-                            state.modal_queue.update_active(|modal| {
-                                if let QueuedModal::AccountSetup(ref mut s) = modal {
-                                    s.set_error(msg.clone());
-                                }
-                            });
-                        }
 
-                        if !routed {
-                            let toast_id = state.next_toast_id;
-                            state.next_toast_id += 1;
-                            let toast = crate::tui::state::QueuedToast::new(
-                                toast_id,
-                                msg,
-                                crate::tui::state::ToastLevel::Error,
+                    let mut stream = {
+                        let core = app_core.raw().read().await;
+                        core.subscribe(&*ERROR_SIGNAL)
+                    };
+
+                    while let Ok(err_opt) = stream.recv().await {
+                        if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                            return Ok(());
+                        }
+                        let Some(err) = err_opt else { continue };
+                        let msg = format_error(&err);
+                        tui.with_mut(|state| {
+                            // Prefer routing errors into the account setup modal when it is active.
+                            let routed = matches!(
+                                state.modal_queue.current(),
+                                Some(QueuedModal::AccountSetup(_))
                             );
-                            state.toast_queue.enqueue(toast);
-                        }
-                    });
-                }
+                            if routed {
+                                state.modal_queue.update_active(|modal| {
+                                    if let QueuedModal::AccountSetup(ref mut s) = modal {
+                                        s.set_error(msg.clone());
+                                    }
+                                });
+                            }
 
-                Err("ERROR_SIGNAL subscription stream ended".to_string())
-            }})
+                            if !routed {
+                                let toast_id = state.next_toast_id;
+                                state.next_toast_id += 1;
+                                let toast = crate::tui::state::QueuedToast::new(
+                                    toast_id,
+                                    msg,
+                                    crate::tui::state::ToastLevel::Error,
+                                );
+                                state.toast_queue.enqueue(toast);
+                            }
+                        });
+                    }
+
+                    Err("ERROR_SIGNAL subscription stream ended".to_string())
+                }
+            })
             .await;
 
             match result {
@@ -1025,15 +997,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 if shutdown.load(std::sync::atomic::Ordering::Acquire) {
                     break;
                 }
-                let timestamp_ms = match aura_app::ui::workflows::time::current_time_ms(&app_core)
-                    .await
-                {
-                    Ok(ts) => ts,
-                    Err(e) => {
-                        tracing::debug!(error = %e, "current_time_ms failed in peer discovery");
-                        0
-                    }
-                };
+                let timestamp_ms =
+                    match aura_app::ui::workflows::time::current_time_ms(&app_core).await {
+                        Ok(ts) => ts,
+                        Err(e) => {
+                            tracing::debug!(error = %e, "current_time_ms failed in peer discovery");
+                            0
+                        }
+                    };
                 if let Err(e) = network_workflows::discover_peers(&app_core, timestamp_ms).await {
                     tracing::debug!(error = %e, "discover_peers failed");
                 }
@@ -1049,7 +1020,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // the UI is idle on a screen. Shared-flow receive steps otherwise depend too
     // heavily on incidental user actions to drive runtime convergence.
     // =========================================================================
-    if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+    if harness_mode_enabled() {
         hooks.use_future({
             let app_core = app_ctx.app_core.raw().clone();
             let shutdown = bg_shutdown.read().clone();
@@ -1092,7 +1063,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut screen = screen.clone();
             let mut should_exit = should_exit.clone();
             let app_ctx_for_commands = app_ctx.clone();
-            let shared_callbacks_for_commands = shared_callbacks.clone();
+            let shared_callbacks_for_commands = shared_callbacks;
             let mut tui = tui.clone();
             let shared_contacts_for_commands = shared_contacts.clone();
             let shared_channels_for_commands = shared_channels.clone();
@@ -2386,7 +2357,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_devices_for_dispatch = shared_devices;
         // Clone shared selection state for immediate sync on channel navigation
         let tui_selected_for_events = tui_selected_for_chat_screen.clone();
-        let selected_channel_binding_for_events = selected_channel_binding_for_chat_screen.clone();
+        let selected_channel_binding_for_events = selected_channel_binding_for_chat_screen;
         // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
             if let Some(input_transition) = transition_from_terminal_event(
@@ -2882,21 +2853,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let context_id = selected_binding
                                             .and_then(|binding| binding.context_id)
                                             .or_else(|| channel.context_id.clone())
-                                            .or_else(|| {
-                                                channel
-                                                    .id
-                                                    .parse::<aura_core::ChannelId>()
-                                                    .ok()
-                                                    .and_then(|channel_id| {
-                                                        futures::executor::block_on(
-                                                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                                                                app_ctx_for_dispatch.app_core.raw(),
-                                                                channel_id,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .map(|id| id.to_string())
-                                            });
+                                            ;
                                         let Some(context_id) = context_id else {
                                             new_state.toast_error(format!(
                                                 "Selected channel lacks authoritative context: {}",
@@ -2919,7 +2876,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         channel_id,
                                     } => {
                                         let channels = shared_channels_for_dispatch.read().clone();
-                                        let channel_id_string = channel_id.to_string();
+                                        let channel_id_string = channel_id.clone();
                                         let Some(channel) =
                                             channels.iter().find(|channel| channel.id == channel_id_string)
                                         else {
@@ -2935,21 +2892,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let context_id = selected_binding
                                             .and_then(|binding| binding.context_id)
                                             .or_else(|| channel.context_id.clone())
-                                            .or_else(|| {
-                                                channel
-                                                    .id
-                                                    .parse::<aura_core::ChannelId>()
-                                                    .ok()
-                                                    .and_then(|channel_id| {
-                                                        futures::executor::block_on(
-                                                            aura_app::ui::workflows::messaging::authoritative_context_id_for_channel(
-                                                                app_ctx_for_dispatch.app_core.raw(),
-                                                                channel_id,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .map(|id| id.to_string())
-                                            });
+                                            ;
                                         let Some(context_id) = context_id else {
                                             new_state.toast_error(format!(
                                                 "Selected channel lacks authoritative context: {}",

@@ -34,7 +34,6 @@ use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
     ThresholdSigningEffects, TransportEffects, TransportEnvelope,
 };
-use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_core::hash::hash;
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
@@ -44,6 +43,7 @@ use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::Prestate;
+use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
@@ -103,8 +103,8 @@ where
             error.to_string(),
         ))
     })?;
-    let budget =
-        TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(TimeoutRunError::Timeout)?;
+    let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout)
+        .map_err(TimeoutRunError::Timeout)?;
     execute_with_timeout_budget(time, &budget, || operation).await
 }
 
@@ -302,7 +302,7 @@ impl AgentRuntimeBridge {
 
         let context = default_context_id_for_authority(peer);
         let mut descriptor = rendezvous.get_descriptor(context, peer).await;
-        if descriptor.as_ref().is_none_or(|descriptor| {
+        if descriptor.as_ref().map_or(true, |descriptor| {
             !descriptor
                 .transport_hints
                 .iter()
@@ -390,7 +390,7 @@ impl AgentRuntimeBridge {
             if envelope
                 .metadata
                 .get("content-type")
-                .is_none_or(|value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
             {
                 return Err(IntentError::network_error(
                     "Fact sync response had unexpected content type".to_string(),
@@ -434,7 +434,7 @@ impl AgentRuntimeBridge {
             if envelope
                 .metadata
                 .get("content-type")
-                .is_none_or(|value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
             {
                 return Err(IntentError::network_error(
                     "Fact sync response had unexpected content type".to_string(),
@@ -1695,14 +1695,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ));
         }
 
-        Err(IntentError::network_error(format!(
-            "{}",
-            last_error.unwrap_or_else(|| {
-                format!(
-                    "peer channel for {peer} in {context} did not establish after bounded convergence"
-                )
-            })
-        )))
+        Err(IntentError::network_error(last_error.unwrap_or_else(|| {
+            format!("peer channel for {peer} in {context} did not establish after bounded convergence")
+        })))
     }
 
     // =========================================================================
@@ -3527,7 +3522,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     ttl_ms,
                 ),
             )
-            .await {
+            .await
+            {
                 Err(TimeoutRunError::Timeout(_)) => {
                     return Err(IntentError::internal_error(format!(
                         "invitation_service.invite_to_channel timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
@@ -3567,7 +3563,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to create channel invitation: {}", e))
             }
         })?
-        ?;
+        ;
 
         Ok(convert_invitation_to_bridge_info(&invitation))
     }

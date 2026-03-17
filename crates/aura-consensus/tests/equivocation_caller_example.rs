@@ -9,7 +9,7 @@ use aura_consensus::{
 };
 use aura_core::{
     frost::PartialSignature,
-    identifiers::{AuthorityId, ContextId},
+    types::identifiers::{AuthorityId, ContextId},
     Hash32,
 };
 

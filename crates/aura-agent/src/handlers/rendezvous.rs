@@ -311,10 +311,7 @@ impl RendezvousHandler {
             Some(descriptor) => descriptor,
             None => match self.rendezvous_manager.as_ref() {
                 Some(manager) => {
-                    let descriptor = manager
-                        .get_descriptor(context_id, peer)
-                        .await
-                        .or_else(|| None);
+                    let descriptor = manager.get_descriptor(context_id, peer).await;
                     let descriptor = match descriptor {
                         Some(value) => Some(value),
                         None => manager.get_any_descriptor_for_authority(peer).await,

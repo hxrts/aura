@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_lock::Mutex;
 use parking_lot::RwLock;
 
 use iocraft::prelude::*;
@@ -21,8 +22,8 @@ use aura_app::ui::types::{ChatState, ContactsState, HomesState};
 use aura_app::ui_contract::{
     bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind,
 };
-use aura_core::AuthorityId;
 use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::AuthorityId;
 use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::chat_scope::{
@@ -30,21 +31,23 @@ use crate::tui::chat_scope::{
 };
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::semantic_lifecycle::authoritative_operation_status_update;
+use crate::tui::tasks::UiTaskRegistry;
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
-fn publish_ui_update(tx: &UiUpdateSender, update: UiUpdate) {
+fn publish_ui_update(tasks: &Arc<UiTaskRegistry>, tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_err() {
         let tx = tx.clone();
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             let _ = tx.send(update).await;
         });
     }
 }
 
 fn publish_ui_updates_ordered(
+    tasks: &Arc<UiTaskRegistry>,
     tx: &UiUpdateSender,
-    ordered_gate: &Arc<tokio::sync::Mutex<()>>,
+    ordered_gate: &Arc<Mutex<()>>,
     updates: Vec<UiUpdate>,
 ) {
     if updates.is_empty() {
@@ -53,7 +56,7 @@ fn publish_ui_updates_ordered(
 
     let tx = tx.clone();
     let ordered_gate = Arc::clone(ordered_gate);
-    tokio::spawn(async move {
+    tasks.spawn(async move {
         let _guard = ordered_gate.lock().await;
         for update in updates {
             if tx.try_send(update.clone()).is_err() {
@@ -218,7 +221,9 @@ pub fn use_nav_status_signals(
                 if consecutive_failures > 200 {
                     break;
                 }
-                let _ = time.sleep_ms(Duration::from_millis(1000).as_millis() as u64).await;
+                let _ = time
+                    .sleep_ms(Duration::from_millis(1000).as_millis() as u64)
+                    .await;
             }
         }
     });
@@ -289,10 +294,12 @@ pub fn use_discovered_peers_subscription(
     let shared: SharedDiscoveredPeers = shared_ref.read().clone();
     let last_lan_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
     let last_lan_count = last_lan_count_ref.read().clone();
+    let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let peers = shared.clone();
+        let tasks = tasks;
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let lan_peers: Vec<_> = peers_state
@@ -309,7 +316,7 @@ pub fn use_discovered_peers_subscription(
                 if let Some(ref tx) = update_tx {
                     let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
                     if previous != new_count {
-                        publish_ui_update(tx, UiUpdate::LanPeersCountChanged(new_count));
+                        publish_ui_update(&tasks, tx, UiUpdate::LanPeersCountChanged(new_count));
                     }
                 }
             })
@@ -339,10 +346,12 @@ pub fn use_contacts_subscription(
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
     let last_contact_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
     let last_contact_count = last_contact_count_ref.read().clone();
+    let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
+        let tasks = tasks;
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
@@ -355,7 +364,7 @@ pub fn use_contacts_subscription(
                 if let Some(ref tx) = update_tx {
                     let previous = last_contact_count.swap(new_count, Ordering::Relaxed);
                     if previous != new_count {
-                        publish_ui_update(tx, UiUpdate::ContactCountChanged(new_count));
+                        publish_ui_update(&tasks, tx, UiUpdate::ContactCountChanged(new_count));
                     }
                 }
             })
@@ -393,11 +402,13 @@ pub fn use_devices_subscription(
 ) -> SharedDevices {
     let shared_devices_ref = hooks.use_ref(SharedDevices::new);
     let shared_devices: SharedDevices = shared_devices_ref.read().clone();
+    let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let devices = shared_devices.clone();
-        let update_tx = update_tx.clone();
+        let update_tx = update_tx;
+        let tasks = tasks;
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let list: Vec<Device> = settings_state
@@ -413,7 +424,7 @@ pub fn use_devices_subscription(
                 *devices.write() = list;
                 if settings_state.devices.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
-                        publish_ui_update(tx, UiUpdate::RuntimeBootstrapFinalized);
+                        publish_ui_update(&tasks, tx, UiUpdate::RuntimeBootstrapFinalized);
                     }
                 }
             })
@@ -535,6 +546,7 @@ fn scoped_channel_snapshot(
 fn publish_scoped_channels(
     channels: &SharedChannels,
     selected_channel_id: Option<&str>,
+    tasks: &Arc<UiTaskRegistry>,
     update_tx: &Option<UiUpdateSender>,
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
@@ -595,6 +607,7 @@ fn publish_scoped_channels(
             return;
         }
         publish_ui_update(
+            tasks,
             tx,
             UiUpdate::ChatStateUpdated {
                 channel_count,
@@ -615,6 +628,7 @@ pub fn use_channels_subscription(
 ) -> SharedChannels {
     let shared_channels_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_channels: SharedChannels = shared_channels_ref.read().clone();
+    let tasks = app_ctx.tasks();
     let active_scope_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
     let active_scope: Arc<RwLock<Option<String>>> = active_scope_ref.read().clone();
     let latest_chat_state_ref = hooks.use_ref(|| Arc::new(RwLock::new(ChatState::default())));
@@ -651,16 +665,13 @@ pub fn use_channels_subscription(
         let latest_homes_state = latest_homes_state.clone();
         let latest_discovered_peers = latest_discovered_peers.clone();
         let selected_channel_id = selected_channel_id.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = {
                     let previous = latest_chat_state.read();
                     let selected_channel = selected_channel_id.read().clone();
-                    merge_transient_channels(
-                        &chat_state,
-                        &previous,
-                        selected_channel.as_deref(),
-                    )
+                    merge_transient_channels(&chat_state, &previous, selected_channel.as_deref())
                 };
                 if let Some(authority_id) = *shared_authority_id.read() {
                     stabilized.ensure_note_to_self_channel(authority_id);
@@ -697,6 +708,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -729,6 +741,7 @@ pub fn use_channels_subscription(
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
@@ -750,6 +763,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -782,6 +796,7 @@ pub fn use_channels_subscription(
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -797,6 +812,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -829,6 +845,7 @@ pub fn use_channels_subscription(
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 *latest_contacts_state.write() = contacts_state.clone();
@@ -842,6 +859,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -874,6 +892,7 @@ pub fn use_channels_subscription(
         let latest_discovered_peers_handle = latest_discovered_peers.clone();
         let shared_authority_id_handle = shared_authority_id.clone();
         let selected_channel_id_handle = selected_channel_id.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
                 *latest_homes_state_handle.write() = homes_state.clone();
@@ -888,6 +907,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count_handle,
                     &last_message_count_handle,
@@ -920,6 +940,7 @@ pub fn use_channels_subscription(
         let latest_discovered_peers = latest_discovered_peers.clone();
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
                 latest_transport_peer_count.store(count, Ordering::Relaxed);
@@ -933,6 +954,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -953,18 +975,6 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let active_scope = active_scope.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
-        let last_channel_signature = last_channel_signature.clone();
-        let latest_transport_peer_count = latest_transport_peer_count.clone();
-        let latest_contacts_state = latest_contacts_state.clone();
-        let latest_homes_state = latest_homes_state.clone();
-        let latest_discovered_peers = latest_discovered_peers.clone();
-        let shared_authority_id = shared_authority_id.clone();
-        let selected_channel_id = selected_channel_id.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let discovered_peer_ids = peers_state
@@ -984,6 +994,7 @@ pub fn use_channels_subscription(
                 publish_scoped_channels(
                     &channels,
                     selected_channel.as_deref(),
+                    &tasks,
                     &update_tx,
                     &last_channel_count,
                     &last_message_count,
@@ -1047,7 +1058,8 @@ pub fn use_authoritative_semantic_facts_subscription(
 ) {
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let ordered_gate = Arc::new(tokio::sync::Mutex::new(()));
+        let ordered_gate = Arc::new(Mutex::new(()));
+        let tasks = app_ctx.tasks();
         async move {
             subscribe_signal_with_retry(
                 app_core,
@@ -1073,7 +1085,7 @@ pub fn use_authoritative_semantic_facts_subscription(
                         replace_kinds: authoritative_runtime_replace_kinds(),
                         facts,
                     });
-                    publish_ui_updates_ordered(tx, &ordered_gate, updates);
+                    publish_ui_updates_ordered(&tasks, tx, &ordered_gate, updates);
                 },
             )
             .await;
@@ -1194,8 +1206,10 @@ pub fn use_notifications_subscription(
     let invite_count = Arc::new(AtomicUsize::new(0));
     let recovery_count = Arc::new(AtomicUsize::new(0));
     let last_total = Arc::new(AtomicUsize::new(usize::MAX));
+    let tasks = app_ctx.tasks();
 
-    let send_total = |tx: &Option<UiUpdateSender>,
+    let send_total = |tasks: &Arc<UiTaskRegistry>,
+                      tx: &Option<UiUpdateSender>,
                       invites: &Arc<AtomicUsize>,
                       recovery: &Arc<AtomicUsize>,
                       last_total: &Arc<AtomicUsize>| {
@@ -1203,7 +1217,7 @@ pub fn use_notifications_subscription(
             let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
             let previous = last_total.swap(total, Ordering::Relaxed);
             if previous != total {
-                publish_ui_update(tx, UiUpdate::NotificationsCountChanged(total));
+                publish_ui_update(tasks, tx, UiUpdate::NotificationsCountChanged(total));
             }
         }
     };
@@ -1215,10 +1229,17 @@ pub fn use_notifications_subscription(
         let recovery_count = recovery_count.clone();
         let last_total = last_total.clone();
         let update_tx = update_tx.clone();
+        let tasks = tasks.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
                 invite_count.store(state.pending_received_count(), Ordering::Relaxed);
-                send_total(&update_tx, &invite_count, &recovery_count, &last_total);
+                send_total(
+                    &tasks,
+                    &update_tx,
+                    &invite_count,
+                    &recovery_count,
+                    &last_total,
+                );
             })
             .await;
         }
@@ -1227,10 +1248,17 @@ pub fn use_notifications_subscription(
     // Recovery requests
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
+        let tasks = tasks;
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
                 recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
-                send_total(&update_tx, &invite_count, &recovery_count, &last_total);
+                send_total(
+                    &tasks,
+                    &update_tx,
+                    &invite_count,
+                    &recovery_count,
+                    &last_total,
+                );
             })
             .await;
         }
@@ -1374,8 +1402,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", source_path.display()));
 
         assert!(source.contains("selected_channel_id: Arc<RwLock<Option<String>>>"));
-        assert!(!source.contains("all_channels()\n                        .next()"));
-        assert!(!source.contains("guard.get(selected_idx)"));
+        assert!(source.contains("let selected_channel = selected_channel_id.read().clone();"));
+        assert!(source.contains("selected_channel.as_deref()"));
     }
 
     #[test]

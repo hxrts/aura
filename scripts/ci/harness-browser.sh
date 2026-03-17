@@ -9,11 +9,13 @@ mkdir -p artifacts/harness/browser
 (
   cd crates/aura-harness/playwright-driver
   npm ci
+  npm run build
   npm run install-browsers
 )
 
 bash scripts/check/harness-browser-install.sh
-export AURA_HARNESS_WEB_BUILD_PROFILE=debug
+export AURA_HARNESS_WEB_BUILD_PROFILE=release
+export AURA_HARNESS_BROWSER_APP_URL=http://127.0.0.1:4173
 
 ./scripts/web/serve-static.sh 4173 > artifacts/harness/browser/web-serve.log 2>&1 &
 server_pid=$!

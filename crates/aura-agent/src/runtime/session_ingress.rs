@@ -1,6 +1,7 @@
 //! Canonical host-side ingress for owned Telltale VM sessions.
 
 #![allow(dead_code)] // Phase 1A migrates session callers onto the ingress incrementally.
+#![allow(clippy::result_large_err, clippy::incompatible_msrv)]
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

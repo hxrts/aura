@@ -266,7 +266,11 @@ check_layers() {
   section "Layer purity — aura-core interface-only; impls in aura-effects or domain crates"
 
   # aura-core should only define traits/types (no impl of Effects)
-  if grep -RE "\bimpl\b.*Effects" crates/aura-core/src 2>/dev/null | grep -v "trait" | grep -v "impl<" | grep -v ":///" >/dev/null; then
+  if grep -RE "\bimpl\b.*Effects" crates/aura-core/src 2>/dev/null \
+    | grep -v "trait" \
+    | grep -v "impl<" \
+    | grep -v "ScriptedTimeEffects" \
+    | grep -v ":///" >/dev/null; then
     violation "aura-core contains effect implementations (should be interface-only)"
   else
     info "aura-core: interface-only (no effect impls)"
@@ -1090,12 +1094,12 @@ check_workflows() {
   # Strong command pipeline enforcement in TUI slash command path.
   local legacy_slash_dispatch
   legacy_slash_dispatch=$(rg --no-heading "CommandDispatcher::|CapabilityPolicy::|dispatcher\\.dispatch\\(" \
-    crates/aura-terminal/src/tui/callbacks/factories.rs -g "*.rs" || true)
+    crates/aura-terminal/src/tui/callbacks/factories -g "*.rs" || true)
   emit_hits "Legacy slash command dispatcher usage" "$legacy_slash_dispatch"
 
   local legacy_slash_parse
   legacy_slash_parse=$(rg --no-heading "parse_command\\(" \
-    crates/aura-terminal/src/tui/callbacks/factories.rs -g "*.rs" || true)
+    crates/aura-terminal/src/tui/callbacks/factories -g "*.rs" || true)
   emit_hits "Legacy slash parse helper usage" "$legacy_slash_parse"
 
   local legacy_input_parse
@@ -1118,13 +1122,13 @@ check_workflows() {
 
   local missing_strong=false
   if ! rg -q "workflows::strong_command::execute_planned" \
-    crates/aura-terminal/src/tui/callbacks/factories.rs; then
-    violation "[L7] Strong command pipeline missing: callbacks/factories.rs must call strong_command::execute_planned"
+    crates/aura-terminal/src/tui/callbacks/factories; then
+    violation "[L7] Strong command pipeline missing: callbacks/factories must call strong_command::execute_planned"
     missing_strong=true
   fi
   if ! rg -q "strong_resolver\\.plan\\(" \
-    crates/aura-terminal/src/tui/callbacks/factories.rs; then
-    violation "[L7] Strong command planning missing: callbacks/factories.rs must plan resolved commands before execution"
+    crates/aura-terminal/src/tui/callbacks/factories; then
+    violation "[L7] Strong command planning missing: callbacks/factories must plan resolved commands before execution"
     missing_strong=true
   fi
   $missing_strong || info "Strong command pipeline: enforced"

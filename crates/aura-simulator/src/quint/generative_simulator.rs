@@ -145,21 +145,29 @@ pub struct TestAction {
 /// what Quint chose during model checking or simulation.
 #[derive(Debug)]
 pub struct SeededRandomProvider {
-    /// Queue of pre-determined random values
-    values: Arc<Mutex<Vec<u64>>>,
     /// Fallback seed for when queue is empty
     fallback_seed: u64,
+    /// Shared deterministic random state.
+    shared: Arc<SeededRandomProviderShared>,
+}
+
+#[derive(Debug)]
+struct SeededRandomProviderShared {
+    /// Queue of pre-determined random values
+    values: Mutex<Vec<u64>>,
     /// Current position in fallback sequence
-    fallback_counter: Arc<Mutex<u64>>,
+    fallback_counter: Mutex<u64>,
 }
 
 impl SeededRandomProvider {
     /// Create a new seeded random provider
     pub fn new(seed: u64) -> Self {
         Self {
-            values: Arc::new(Mutex::new(Vec::new())),
             fallback_seed: seed,
-            fallback_counter: Arc::new(Mutex::new(0)),
+            shared: Arc::new(SeededRandomProviderShared {
+                values: Mutex::new(Vec::new()),
+                fallback_counter: Mutex::new(0),
+            }),
         }
     }
 
@@ -177,20 +185,22 @@ impl SeededRandomProvider {
         }
 
         Self {
-            values: Arc::new(Mutex::new(values)),
             fallback_seed: seed,
-            fallback_counter: Arc::new(Mutex::new(0)),
+            shared: Arc::new(SeededRandomProviderShared {
+                values: Mutex::new(values),
+                fallback_counter: Mutex::new(0),
+            }),
         }
     }
 
     /// Get next value from queue or fallback
     fn next_value(&self) -> u64 {
-        let mut values = self.values.lock().unwrap();
+        let mut values = self.shared.values.lock().unwrap();
         if let Some(v) = values.pop() {
             v
         } else {
             // Use simple LCG fallback
-            let mut counter = self.fallback_counter.lock().unwrap();
+            let mut counter = self.shared.fallback_counter.lock().unwrap();
             *counter = counter.wrapping_add(1);
             self.fallback_seed
                 .wrapping_mul(6364136223846793005)
@@ -200,7 +210,7 @@ impl SeededRandomProvider {
 
     /// Add values to the queue
     pub fn push_values(&self, values: impl IntoIterator<Item = u64>) {
-        let mut queue = self.values.lock().unwrap();
+        let mut queue = self.shared.values.lock().unwrap();
         queue.extend(values);
     }
 }

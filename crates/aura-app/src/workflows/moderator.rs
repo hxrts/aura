@@ -43,7 +43,9 @@ async fn send_moderator_fact_with_retry(
             runtime
                 .send_chat_fact(peer, context_id, fact)
                 .await
-                .map_err(|error| AuraError::from(super::error::runtime_call("Send moderator fact", error)))
+                .map_err(|error| {
+                    AuraError::from(super::error::runtime_call("Send moderator fact", error))
+                })
         }
     })
     .await
@@ -210,15 +212,13 @@ async fn resolve_scope_by_channel_id(
         let context_id = chat
             .channel(&channel_id)
             .and_then(|channel| channel.context_id)
-            .ok_or_else(|| AuraError::not_found(format!("Unknown channel scope: {channel_id}")))?;
+            .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
 
         if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
             return from_home(best_id, &best_home);
         }
 
-        return Err(AuraError::permission_denied(format!(
-            "Moderator operation requires a moderator home for context {context_id}"
-        )));
+        return Err(AuraError::permission_denied(context_id.to_string()));
     }
 
     if let Ok(active_home_id) =
@@ -274,9 +274,7 @@ pub async fn grant_moderator_resolved(
             ));
         }
     } else {
-        return Err(AuraError::not_found(format!(
-            "Cannot designate non-member as moderator: {target_id}"
-        )));
+        return Err(AuraError::not_found(target_id.to_string()));
     }
 
     if !scope.peers.contains(&target_id) {
@@ -319,13 +317,13 @@ pub async fn grant_moderator_resolved(
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
     }
-    let home_state = homes.home_mut(&scope.home_id).ok_or_else(|| {
-        AuraError::not_found(format!("Resolved home scope missing: {}", scope.home_id))
-    })?;
+    let home_state = homes
+        .home_mut(&scope.home_id)
+        .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
 
     let member = home_state
         .member_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Member not found: {target_id}")))?;
+        .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
 
     if matches!(member.role, HomeRole::Moderator) {
         return Err(AuraError::invalid(
@@ -377,9 +375,7 @@ pub async fn revoke_moderator_resolved(
             return Err(AuraError::invalid("Target is not a moderator"));
         }
     } else {
-        return Err(AuraError::not_found(format!(
-            "Cannot revoke moderator from unknown member: {target_id}"
-        )));
+        return Err(AuraError::not_found(target_id.to_string()));
     }
 
     if !scope.peers.contains(&target_id) {
@@ -419,13 +415,13 @@ pub async fn revoke_moderator_resolved(
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
     }
-    let home_state = homes.home_mut(&scope.home_id).ok_or_else(|| {
-        AuraError::not_found(format!("Resolved home scope missing: {}", scope.home_id))
-    })?;
+    let home_state = homes
+        .home_mut(&scope.home_id)
+        .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
 
     let member = home_state
         .member_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Member not found: {target_id}")))?;
+        .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
 
     if !matches!(member.role, HomeRole::Moderator) {
         return Err(AuraError::invalid("Target is not a moderator"));
@@ -656,6 +652,6 @@ mod tests {
         let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
             .await
             .expect_err("unknown channel scope must fail");
-        assert!(error.to_string().contains("Unknown channel scope"));
+        assert!(error.to_string().contains(&unknown.to_string()));
     }
 }

@@ -19,7 +19,6 @@ export const ACTION_METHODS: ReadonlySet<DriverMethod> = new Set([
   'click_button',
   'fill_input',
   'submit_semantic_command',
-  'reload_page',
   'inject_message'
 ]);
 

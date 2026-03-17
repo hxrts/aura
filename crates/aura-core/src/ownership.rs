@@ -124,9 +124,7 @@ impl From<OwnershipError> for AuraError {
             OwnershipError::TerminalRegression { detail } => {
                 AuraError::internal(format!("terminal_regression: {detail}"))
             }
-            OwnershipError::Timeout { detail } => {
-                AuraError::terminal(format!("timeout: {detail}"))
-            }
+            OwnershipError::Timeout { detail } => AuraError::terminal(format!("timeout: {detail}")),
         }
     }
 }
@@ -192,7 +190,12 @@ impl<Phase, Output, Error> AuthorizedLifecyclePublication<Phase, Output, Error> 
         &self.lifecycle
     }
 
-    pub fn into_parts(self) -> (LifecyclePublicationCapability, OperationLifecycle<Phase, Output, Error>) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        LifecyclePublicationCapability,
+        OperationLifecycle<Phase, Output, Error>,
+    ) {
         (self.capability, self.lifecycle)
     }
 }
@@ -209,10 +212,7 @@ pub struct AuthorizedReadinessPublication<Payload> {
 }
 
 impl<Payload> AuthorizedReadinessPublication<Payload> {
-    pub fn authorize(
-        capability: &ReadinessPublicationCapability,
-        payload: Payload,
-    ) -> Self {
+    pub fn authorize(capability: &ReadinessPublicationCapability, payload: Payload) -> Self {
         Self {
             capability: capability.clone(),
             payload,
@@ -244,10 +244,7 @@ pub struct AuthorizedActorIngressMutation<Mutation> {
 }
 
 impl<Mutation> AuthorizedActorIngressMutation<Mutation> {
-    pub fn authorize(
-        capability: &ActorIngressMutationCapability,
-        mutation: Mutation,
-    ) -> Self {
+    pub fn authorize(capability: &ActorIngressMutationCapability, mutation: Mutation) -> Self {
         Self {
             capability: capability.clone(),
             mutation,
@@ -401,7 +398,10 @@ impl<Scope, TokenId> OwnerToken<Scope, TokenId> {
         (self.token_id, self.scope)
     }
 
-    pub fn handoff<Recipient>(self, recipient: Recipient) -> OwnershipTransfer<Scope, TokenId, Recipient> {
+    pub fn handoff<Recipient>(
+        self,
+        recipient: Recipient,
+    ) -> OwnershipTransfer<Scope, TokenId, Recipient> {
         OwnershipTransfer {
             token_id: self.token_id,
             scope: self.scope,
@@ -439,7 +439,10 @@ impl<Scope, TokenId, Recipient> OwnershipTransfer<Scope, TokenId, Recipient> {
         (self.token_id, self.scope, self.recipient)
     }
 
-    pub fn retarget<NextRecipient>(self, recipient: NextRecipient) -> OwnershipTransfer<Scope, TokenId, NextRecipient> {
+    pub fn retarget<NextRecipient>(
+        self,
+        recipient: NextRecipient,
+    ) -> OwnershipTransfer<Scope, TokenId, NextRecipient> {
         OwnershipTransfer {
             token_id: self.token_id,
             scope: self.scope,
@@ -542,14 +545,15 @@ impl<Phase, Output, Error> Terminality for OperationLifecycle<Phase, Output, Err
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        ActorIngressMutationCapability, AuthorizedActorIngressMutation,
-        AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
-        LifecyclePublicationCapability, OperationLifecycle, OwnershipCapability,
-        OwnershipCategory, OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
-        OwnershipTransferCapability, ReadinessPublicationCapability, Terminality,
-        issue_operation_handle, issue_owner_token,
+        issue_operation_handle, issue_owner_token, ActorIngressMutationCapability,
+        AuthorizedActorIngressMutation, AuthorizedLifecyclePublication,
+        AuthorizedReadinessPublication, LifecyclePublicationCapability, OperationLifecycle,
+        OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain,
+        OwnershipTransfer, OwnershipTransferCapability, ReadinessPublicationCapability,
+        Terminality,
     };
     use crate::{effects::CapabilityKey, AuraError, ProtocolErrorCode};
 
@@ -566,8 +570,7 @@ mod tests {
         struct Invite;
         let capability = ActorIngressMutationCapability::new("actor:ingress");
 
-        let handle =
-            issue_operation_handle::<Invite, _, _>(&capability, "invitation_create", 7u64);
+        let handle = issue_operation_handle::<Invite, _, _>(&capability, "invitation_create", 7u64);
         assert_eq!(handle.handle_id(), &"invitation_create");
         assert_eq!(handle.instance_id(), &7u64);
         let (handle_id, instance_id) = handle.into_parts();
@@ -596,15 +599,13 @@ mod tests {
         assert_eq!(progress.phase(), Some(&"waiting"));
         assert!(!progress.is_terminal());
 
-        let success = OperationLifecycle::<&'static str, &'static str, &'static str>::succeeded(
-            "done",
-        );
+        let success =
+            OperationLifecycle::<&'static str, &'static str, &'static str>::succeeded("done");
         assert!(success.is_succeeded());
         assert!(success.is_terminal());
         assert_eq!(success.output(), Some(&"done"));
 
-        let failed =
-            OperationLifecycle::<&'static str, (), &'static str>::failed("timeout");
+        let failed = OperationLifecycle::<&'static str, (), &'static str>::failed("timeout");
         assert!(failed.is_failed());
         assert!(failed.is_terminal());
         assert_eq!(failed.error(), Some(&"timeout"));
@@ -669,10 +670,11 @@ mod tests {
     #[test]
     fn lifecycle_publication_requires_capability_wrapper() {
         let capability = LifecyclePublicationCapability::new("semantic:lifecycle");
-        let publication = AuthorizedLifecyclePublication::<&'static str, (), &'static str>::authorize(
-            &capability,
-            OperationLifecycle::submitted(),
-        );
+        let publication =
+            AuthorizedLifecyclePublication::<&'static str, (), &'static str>::authorize(
+                &capability,
+                OperationLifecycle::submitted(),
+            );
 
         assert_eq!(publication.capability().as_str(), "semantic:lifecycle");
         assert!(publication.lifecycle().is_submitted());
@@ -681,10 +683,8 @@ mod tests {
     #[test]
     fn readiness_publication_requires_capability_wrapper() {
         let capability = ReadinessPublicationCapability::new("semantic:readiness");
-        let publication = AuthorizedReadinessPublication::authorize(
-            &capability,
-            "channel_membership_ready",
-        );
+        let publication =
+            AuthorizedReadinessPublication::authorize(&capability, "channel_membership_ready");
 
         assert_eq!(publication.capability().as_str(), "semantic:readiness");
         assert_eq!(publication.payload(), &"channel_membership_ready");

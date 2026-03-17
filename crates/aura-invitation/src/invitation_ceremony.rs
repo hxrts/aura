@@ -49,23 +49,33 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
+use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::{AuraError, AuraResult, Hash32};
 use aura_journal::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use crate::facts::{CeremonyRelationshipId, InvitationFact};
 use crate::InvitationOffer;
 
-static INVITATION_CEREMONY_MUTATION_CAPABILITY: LazyLock<ActorIngressMutationCapability> =
-    LazyLock::new(|| ActorIngressMutationCapability::new("aura-invitation:ceremony"));
-static INVITATION_CEREMONY_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
-    LazyLock::new(|| LifecyclePublicationCapability::new("aura-invitation:ceremony-facts"));
+static INVITATION_CEREMONY_MUTATION_CAPABILITY: OnceLock<ActorIngressMutationCapability> =
+    OnceLock::new();
+static INVITATION_CEREMONY_PUBLICATION_CAPABILITY: OnceLock<LifecyclePublicationCapability> =
+    OnceLock::new();
+
+fn invitation_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
+    INVITATION_CEREMONY_MUTATION_CAPABILITY
+        .get_or_init(|| ActorIngressMutationCapability::new("aura-invitation:ceremony"))
+}
+
+fn invitation_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
+    INVITATION_CEREMONY_PUBLICATION_CAPABILITY
+        .get_or_init(|| LifecyclePublicationCapability::new("aura-invitation:ceremony-facts"))
+}
 
 // =============================================================================
 // CEREMONY TYPES
@@ -306,11 +316,11 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     }
 
     fn invitation_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
-        &INVITATION_CEREMONY_MUTATION_CAPABILITY
+        invitation_ceremony_mutation_capability()
     }
 
     fn invitation_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
-        &INVITATION_CEREMONY_PUBLICATION_CAPABILITY
+        invitation_ceremony_publication_capability()
     }
 
     fn insert_ceremony(
@@ -518,7 +528,10 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         }
 
         // Remove terminal ceremony state to prevent unbounded growth.
-        self.remove_ceremony(Self::invitation_ceremony_mutation_capability(), &ceremony_id);
+        self.remove_ceremony(
+            Self::invitation_ceremony_mutation_capability(),
+            &ceremony_id,
+        );
 
         Ok(relationship_id)
     }
@@ -545,7 +558,10 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         }
 
         // Remove terminal ceremony state to prevent unbounded growth.
-        self.remove_ceremony(Self::invitation_ceremony_mutation_capability(), &ceremony_id);
+        self.remove_ceremony(
+            Self::invitation_ceremony_mutation_capability(),
+            &ceremony_id,
+        );
 
         Ok(())
     }

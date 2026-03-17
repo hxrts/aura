@@ -44,26 +44,30 @@ impl ChatCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let app_core = ctx.app_core_raw().clone();
-            let operation_instance_id = operation.harness_handle().instance_id.clone();
-            spawn_ctx(ctx.clone(), async move {
+            let operation_instance_id = operation.harness_handle().instance_id;
+            spawn_ctx(ctx, async move {
                 let mut operation = Some(operation);
                 let accept = std::panic::AssertUnwindSafe(
                     aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_instance(
                         &app_core,
-                        Some(operation_instance_id.clone()),
+                        Some(operation_instance_id),
                     ),
                 )
                 .catch_unwind();
                 match accept.await {
                     Ok(Ok(_)) => {
-                        let _ = operation.take().expect("operation owner").relinquish_to_workflow(
-                            SemanticOperationTransferScope::AcceptPendingChannelInvitation,
-                        );
+                        if let Some(operation) = operation.take() {
+                            let _ = operation.relinquish_to_workflow(
+                                SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+                            );
+                        }
                     }
                     Ok(Err(error)) => {
-                        let _ = operation.take().expect("operation owner").relinquish_to_workflow(
-                            SemanticOperationTransferScope::AcceptPendingChannelInvitation,
-                        );
+                        if let Some(operation) = operation.take() {
+                            let _ = operation.relinquish_to_workflow(
+                                SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+                            );
+                        }
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error(
@@ -85,17 +89,17 @@ impl ChatCallbacks {
                         } else {
                             "accept_pending_channel_invitation callback panicked".to_string()
                         };
-                        operation
-                            .take()
-                            .expect("operation owner")
-                            .fail_with(
-                                SemanticOperationError::new(
-                                    SemanticFailureDomain::Command,
-                                    SemanticFailureCode::InternalError,
+                        if let Some(operation) = operation.take() {
+                            operation
+                                .fail_with(
+                                    SemanticOperationError::new(
+                                        SemanticFailureDomain::Command,
+                                        SemanticFailureCode::InternalError,
+                                    )
+                                    .with_detail(detail.clone()),
                                 )
-                                .with_detail(detail.clone()),
-                            )
-                            .await;
+                                .await;
+                        }
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),

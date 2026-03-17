@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-#[cfg(test)]
 use aura_app::scenario_contract::ActionPrecondition;
 use aura_app::scenario_contract::{
     ActorId, AuthoritativeTransitionFact, AuthoritativeTransitionKind, BarrierDeclaration,
@@ -110,6 +109,7 @@ struct ScenarioContext {
     vars: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
     current_channel_name: BTreeMap<String, String>,
+    current_channel_id: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
@@ -376,12 +376,19 @@ fn ensure_post_operation_convergence_satisfied_for_binding(
     if remaining.is_empty() {
         return Ok(());
     }
-    bail!(
-        "step {} convergence-contract violation for {:?}: pending {:?}",
-        step_id,
-        binding,
-        remaining
-    );
+    bail!("step {step_id} convergence-contract violation for {binding:?}: pending {remaining:?}");
+}
+
+fn ensure_post_operation_convergence_satisfied(
+    step: &SemanticStep,
+    context: &ScenarioContext,
+    instance_id: &str,
+) -> Result<()> {
+    let SemanticAction::Intent(intent) = &step.action else {
+        return Ok(());
+    };
+    let binding = semantic_binding_for_intent(intent);
+    ensure_post_operation_convergence_satisfied_for_binding(&step.id, binding, context, instance_id)
 }
 
 impl Default for ExecutionBudgets {
@@ -444,7 +451,7 @@ impl ScenarioExecutor {
         }
         let compatibility_steps = scenario
             .compatibility_steps()
-            .expect("non-semantic scenarios must expose compatibility steps")
+            .ok_or_else(|| anyhow!("non-semantic scenarios must expose compatibility steps"))?
             .to_vec();
         let machine = SequentialStateMachine::from_steps(&compatibility_steps);
         let mut current = machine
@@ -1237,7 +1244,7 @@ fn execute_semantic_step(
                                             instance_id
                                         )
                                     })?;
-                                context.vars.insert(var.to_string(), code);
+                                context.vars.insert(var.clone(), code);
                             }
                             RuntimeEventKind::DeviceEnrollmentCodeReady => {
                                 let code = snapshot
@@ -1259,7 +1266,7 @@ fn execute_semantic_step(
                                             instance_id
                                         )
                                     })?;
-                                context.vars.insert(var.to_string(), code);
+                                context.vars.insert(var.clone(), code);
                             }
                             _ => {}
                         }
@@ -1385,13 +1392,9 @@ fn execute_semantic_intent(
     let binding = semantic_binding_for_intent(&intent);
     let instance_id = resolve_required_semantic_instance(step)?;
     let metadata_step = semantic_metadata_step(step);
+    enforce_action_preconditions(step, tool_api, context, &intent, step_budget_ms)?;
     ensure_shared_binding_prerequisites(binding, context, &instance_id)?;
-    ensure_post_operation_convergence_satisfied_for_binding(
-        &metadata_step.id,
-        binding,
-        context,
-        &instance_id,
-    )?;
+    ensure_post_operation_convergence_satisfied(step, context, &instance_id)?;
 
     match &intent {
         IntentAction::CreateAccount { .. } | IntentAction::CreateHome { .. } => {
@@ -1429,7 +1432,7 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
-            let _ = channel_id;
+            context.current_channel_id.insert(instance_id.clone(), channel_id);
             record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
@@ -1540,7 +1543,7 @@ fn execute_semantic_intent(
                 "accept_contact_invitation",
                 response,
             )?;
-            record_submission_handle(context, &instance_id, operation_handle.clone());
+            record_submission_handle(context, &instance_id, operation_handle);
             let mut contact_link_step = semantic_wait_step(&metadata_step);
             contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
             let remaining_ms = deadline
@@ -1598,11 +1601,16 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
-            let _ = capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?;
+            if let Some(channel_id) =
+                capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?
+            {
+                context.current_channel_id.insert(instance_id.clone(), channel_id);
+            }
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let channel_name = context
                 .current_channel_name
                 .get(&instance_id)
@@ -1612,11 +1620,11 @@ fn execute_semantic_intent(
                         "invite_actor_to_channel requires an authoritative current channel binding"
                     )
                 })?;
-            let explicit_channel_id = capture_authoritative_channel_id(
-                tool_api,
-                &instance_id,
-                &channel_name,
-            )?
+            let explicit_channel_id = context
+                .current_channel_id
+                .get(&instance_id)
+                .cloned()
+                .or_else(|| capture_authoritative_channel_id(tool_api, &instance_id, &channel_name).ok().flatten())
                 .ok_or_else(|| {
                     anyhow!(
                         "invite_actor_to_channel could not resolve authoritative channel id for {channel_name}"
@@ -1641,7 +1649,7 @@ fn execute_semantic_intent(
             )?;
             record_submission_handle(context, &instance_id, operation_handle.clone());
             if let Some(handle) = operation_handle {
-                convergence_stage(
+                if convergence_stage(
                     &metadata_step,
                     "invite_actor_to_channel_operation",
                     wait_for_operation_handle_state(
@@ -1652,13 +1660,35 @@ fn execute_semantic_intent(
                         &handle,
                         OperationState::Succeeded,
                     ),
-                )?;
+                )
+                .is_err()
+                {
+                    let remaining_ms = deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis()
+                        .max(1) as u64;
+                    let mut invitation_ready_step = semantic_wait_step(&metadata_step);
+                    invitation_ready_step.runtime_event_kind =
+                        Some(RuntimeEventKind::InvitationCodeReady);
+                    convergence_stage(
+                        &metadata_step,
+                        "invitation_code_ready",
+                        wait_for_semantic_state(
+                            &invitation_ready_step,
+                            tool_api,
+                            context,
+                            &instance_id,
+                            remaining_ms,
+                        ),
+                    )?;
+                }
             }
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
         IntentAction::AcceptPendingChannelInvitation => {
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let contract = intent.contract();
             let response = submit_shared_intent(
                 &metadata_step,
@@ -1674,7 +1704,7 @@ fn execute_semantic_intent(
             )?;
             record_submission_handle(context, &instance_id, operation_handle.clone());
             if let Some(handle) = operation_handle {
-                convergence_stage(
+                if convergence_stage(
                     &metadata_step,
                     "accept_pending_channel_invitation_operation",
                     wait_for_operation_handle_state(
@@ -1685,7 +1715,49 @@ fn execute_semantic_intent(
                         &handle,
                         OperationState::Succeeded,
                     ),
-                )?;
+                )
+                .is_err()
+                {
+                    let remaining_ms = deadline
+                        .saturating_duration_since(Instant::now())
+                        .as_millis()
+                        .max(1) as u64;
+                    let mut invitation_accepted_step = semantic_wait_step(&metadata_step);
+                    invitation_accepted_step.runtime_event_kind =
+                        Some(RuntimeEventKind::InvitationAccepted);
+                    if convergence_stage(
+                        &metadata_step,
+                        "invitation_accepted",
+                        wait_for_semantic_state(
+                            &invitation_accepted_step,
+                            tool_api,
+                            context,
+                            &instance_id,
+                            remaining_ms,
+                        ),
+                    )
+                    .is_err()
+                    {
+                        let remaining_ms = deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_millis()
+                            .max(1) as u64;
+                        let mut channel_membership_ready_step = semantic_wait_step(&metadata_step);
+                        channel_membership_ready_step.runtime_event_kind =
+                            Some(RuntimeEventKind::ChannelMembershipReady);
+                        convergence_stage(
+                            &metadata_step,
+                            "channel_membership_ready",
+                            wait_for_semantic_state(
+                                &channel_membership_ready_step,
+                                tool_api,
+                                context,
+                                &instance_id,
+                                remaining_ms,
+                            ),
+                        )?;
+                    }
+                }
             }
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
@@ -1707,6 +1779,68 @@ fn execute_semantic_intent(
         }
         IntentAction::OpenScreen(_) | IntentAction::OpenSettingsSection(_) => unreachable!(),
     }
+}
+
+fn enforce_action_preconditions(
+    step: &SemanticStep,
+    tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
+    intent: &IntentAction,
+    step_budget_ms: u64,
+) -> Result<()> {
+    let instance_id = resolve_required_semantic_instance(step)?;
+    let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+    let contract = intent.contract();
+    let failures = action_precondition_failures(&contract, &snapshot);
+    if failures.is_empty() {
+        return Ok(());
+    }
+    let wait_step = action_precondition_wait_step(step, &contract);
+    let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+    if let Err(wait_error) =
+        wait_for_semantic_state(&wait_step, tool_api, context, &instance_id, timeout_ms)
+    {
+        let failures = fetch_ui_snapshot(tool_api, &instance_id)
+            .map(|snapshot| action_precondition_failures(&contract, &snapshot))
+            .unwrap_or(failures);
+        if failures.is_empty() {
+            return Err(wait_error);
+        }
+        bail!(
+            "step {} precondition violation for {:?} on instance {}: {}",
+            step.id,
+            intent.kind(),
+            instance_id,
+            failures.join(", ")
+        );
+    }
+    bail!(
+        "step {} precondition violation for {:?} on instance {}: {}",
+        step.id,
+        intent.kind(),
+        instance_id,
+        failures.join(", ")
+    );
+}
+
+fn action_precondition_wait_step(
+    step: &SemanticStep,
+    contract: &SharedActionContract,
+) -> CompatibilityStep {
+    let mut wait_step = semantic_metadata_step(step);
+    wait_step.action = CompatibilityAction::WaitFor;
+    wait_step.quiescence = None;
+    for precondition in &contract.preconditions {
+        match precondition {
+            ActionPrecondition::Readiness(readiness) => wait_step.readiness = Some(*readiness),
+            ActionPrecondition::Quiescence(quiescence) => {
+                wait_step.quiescence = Some(quiescence.clone());
+            }
+            ActionPrecondition::Screen(screen) => wait_step.screen_id = Some(*screen),
+            ActionPrecondition::RuntimeEvent(kind) => wait_step.runtime_event_kind = Some(*kind),
+        }
+    }
+    wait_step
 }
 
 fn resolve_intent_templates(
@@ -1880,8 +2014,7 @@ fn format_toast_kind(value: ToastKind) -> String {
     .to_string()
 }
 
-#[cfg(test)]
-fn unsatisfied_action_preconditions(
+fn action_precondition_failures(
     contract: &SharedActionContract,
     snapshot: &UiSnapshot,
 ) -> Vec<String> {
@@ -1911,6 +2044,13 @@ fn unsatisfied_action_preconditions(
 }
 
 #[cfg(test)]
+fn unsatisfied_action_preconditions(
+    contract: &SharedActionContract,
+    snapshot: &UiSnapshot,
+) -> Vec<String> {
+    action_precondition_failures(contract, snapshot)
+}
+
 #[cfg(test)]
 fn wait_contract_matches_barrier(
     contract: &WaitContractRef<'_>,
@@ -3678,8 +3818,7 @@ fn dispatch_payload_in_lane(
 ) -> Result<serde_json::Value> {
     if matches!(lane, ExecutionLane::SharedSemantic) && shared_semantic_raw_ui_request(&request) {
         bail!(
-            "shared semantic lane may not issue raw UI request {:?}; move this flow to the semantic command plane or frontend-conformance coverage",
-            request
+            "shared semantic lane may not issue raw UI request {request:?}; move this flow to the semantic command plane or frontend-conformance coverage"
         );
     }
     match tool_api.handle_request(request) {
@@ -3745,13 +3884,15 @@ mod tests {
         RunSection, ScreenSource,
     };
     use crate::coordinator::HarnessCoordinator;
+    use aura_app::ui::scenarios::ScenarioAction;
     use aura_app::ui::contract::{
         ConfirmationState, FieldId, ListId, ListItemSnapshot, ListSnapshot, OperationId,
         OperationInstanceId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
         UiReadiness, UiSnapshot,
     };
-    use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot};
+    use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot, QuiescenceState};
 
+    #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -4065,6 +4206,24 @@ mod tests {
                 .any(|failure| failure.contains("runtime_event=")),
             "unexpected runtime-event failure, got {failures:?}"
         );
+    }
+
+    #[test]
+    fn action_precondition_wait_step_tracks_all_declared_preconditions() {
+        let step = SemanticStep {
+            id: "wait-before-remove-device".to_string(),
+            action: ScenarioAction::Intent(IntentAction::RemoveSelectedDevice),
+            actor: Some(ActorId("bob".to_string())),
+            timeout_ms: Some(4000),
+        };
+        let wait_step =
+            action_precondition_wait_step(&step, &IntentAction::RemoveSelectedDevice.contract());
+
+        assert!(matches!(wait_step.action, CompatibilityAction::WaitFor));
+        assert_eq!(wait_step.screen_id, Some(ScreenId::Settings));
+        assert_eq!(wait_step.readiness, Some(UiReadiness::Ready));
+        assert_eq!(wait_step.quiescence, Some(QuiescenceState::Settled));
+        assert_eq!(wait_step.instance.as_deref(), Some("bob"));
     }
 
     #[test]

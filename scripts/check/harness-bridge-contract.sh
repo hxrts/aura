@@ -39,7 +39,11 @@ rg -q 'pub struct HarnessShellStructureSnapshot' "$ui_contract" \
 rg -q 'pub fn validate_harness_shell_structure' "$ui_contract" \
   || fail "missing harness shell structure validator"
 
-mapfile -t contract_methods < <(
+contract_methods=()
+while IFS= read -r method; do
+  [[ -n "$method" ]] || continue
+  contract_methods+=("$method")
+done < <(
   awk '
     /pub const BROWSER_HARNESS_BRIDGE_METHODS/ { in_block=1; next }
     in_block && /name: "/ {
@@ -52,9 +56,23 @@ mapfile -t contract_methods < <(
   ' "$ui_contract" | sort -u
 )
 
-mapfile -t exported_action_methods < <(extract_bridge_methods harness)
-mapfile -t exported_observation_methods < <(extract_bridge_methods observe)
-mapfile -t exported_methods < <(
+exported_action_methods=()
+while IFS= read -r method; do
+  [[ -n "$method" ]] || continue
+  exported_action_methods+=("$method")
+done < <(extract_bridge_methods harness)
+
+exported_observation_methods=()
+while IFS= read -r method; do
+  [[ -n "$method" ]] || continue
+  exported_observation_methods+=("$method")
+done < <(extract_bridge_methods observe)
+
+exported_methods=()
+while IFS= read -r method; do
+  [[ -n "$method" ]] || continue
+  exported_methods+=("$method")
+done < <(
   printf '%s\n' "${exported_action_methods[@]}" "${exported_observation_methods[@]}" \
     | awk 'NF { print }' \
     | rg '^(send_keys|send_key|navigate_screen|snapshot|ui_state|read_clipboard|submit_semantic_command|get_authority_id|tail_log|root_structure|inject_message)$' \
@@ -67,7 +85,11 @@ if [[ "${contract_methods[*]}" != "${exported_methods[*]}" ]]; then
   fail "browser harness bridge metadata does not match exported method surface"
 fi
 
-mapfile -t observation_methods < <(
+observation_methods=()
+while IFS= read -r method; do
+  [[ -n "$method" ]] || continue
+  observation_methods+=("$method")
+done < <(
   awk '
     /pub const BROWSER_OBSERVATION_SURFACE_METHODS/ { in_block=1; next }
     in_block && /name: "/ {

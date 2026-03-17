@@ -6,15 +6,6 @@ cd "$repo_root"
 
 # Temporary exemptions (owner: architecture, doc: work/ownership.md)
 allowlist=(
-  '^crates/aura-terminal/src/tui/context/io_context\.rs:'
-  '^crates/aura-terminal/src/tui/context/dispatch\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/context\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/contacts\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/invitations\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/messaging\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/recovery\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/settings\.rs:'
-  '^crates/aura-terminal/src/tui/effects/operational/sync\.rs:'
 )
 
 fail() {

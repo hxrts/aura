@@ -8,9 +8,9 @@ use aura_core::{
         guard::{EffectCommand, EffectInterpreter, EffectResult, JournalEntry, SimulationEvent},
         NetworkAddress,
     },
-    identifiers::{AuthorityId, ContextId},
     journal::Fact,
     time::{PhysicalTime, TimeStamp},
+    types::identifiers::{AuthorityId, ContextId},
     AuraError, FlowCost,
 };
 use aura_simulator::effects::{SimulationEffectInterpreter, SimulationState};

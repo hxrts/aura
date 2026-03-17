@@ -201,6 +201,13 @@ impl TestAgent {
             .expect("No current home available in test")
     }
 
+    async fn read_homes(&self) -> aura_app::views::HomesState {
+        let core = self.app_core.read().await;
+        core.read(&*HOMES_SIGNAL)
+            .await
+            .expect("Failed to read HOMES_SIGNAL")
+    }
+
     async fn read_neighborhood(&self) -> aura_app::views::NeighborhoodState {
         let core = self.app_core.read().await;
         core.read(&*NEIGHBORHOOD_SIGNAL)
@@ -620,12 +627,19 @@ async fn test_home_lifecycle_flow() {
         .await
         .expect("Bob account creation");
 
-    // Read initial home state
+    // Read initial homes state
     println!("Initial home state:");
-    let bob_home = env.get_agent("bob").read_home().await;
-    println!("  Home ID: {id}", id = bob_home.id);
-    println!("  Home name: {name}", name = bob_home.name);
-    println!("  Members: {count}", count = bob_home.members.len());
+    let bob_homes = env.get_agent("bob").read_homes().await;
+    println!("  Home count: {count}", count = bob_homes.count());
+    println!(
+        "  Current home ID: {current_home_id:?}",
+        current_home_id = bob_homes.current_home_id()
+    );
+    assert_eq!(
+        bob_homes.count(),
+        0,
+        "Account creation alone should not auto-materialize a home"
+    );
 
     // Note: Home creation commands would be added here when implemented
     // For now, we verify the signal infrastructure is in place
@@ -911,11 +925,19 @@ async fn test_social_graph_contact_home_view() {
         println!("  - {name} (id: {id})", name = c.nickname, id = c.id);
     }
 
-    // Read home state
-    let bob_home = env.get_agent("bob").read_home().await;
-    println!("\nBob's home:");
-    println!("  ID: {id}", id = bob_home.id);
-    println!("  Name: {name}", name = bob_home.name);
+    // Read homes state
+    let bob_homes = env.get_agent("bob").read_homes().await;
+    println!("\nBob's homes:");
+    println!("  Count: {count}", count = bob_homes.count());
+    println!(
+        "  Current home ID: {current_home_id:?}",
+        current_home_id = bob_homes.current_home_id()
+    );
+    assert_eq!(
+        bob_homes.count(),
+        0,
+        "Importing contacts alone should not auto-materialize a home"
+    );
 
     // The contact-home view in UI would filter contacts based on home membership
     // This test verifies the signals are available for such a view

@@ -4,10 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# Temporary exemptions (owner: architecture, doc: work/ownership.md)
-allowlist=(
-  '^crates/aura-ui/src/model\.rs:'
-)
+allowlist=()
 
 fail() {
   echo "move-owned-transfer-only: $*" >&2

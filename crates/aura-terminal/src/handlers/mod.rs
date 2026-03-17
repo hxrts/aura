@@ -414,5 +414,4 @@ impl CliHandler {
             .await
             .map_err(|e| TerminalError::Operation(format!("TUI command failed: {e}")))
     }
-
 }

@@ -119,14 +119,14 @@ async fn timeout_prepare_invitation_stage<T>(
         Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
     )
     .map_err(|error| AgentError::runtime(error.to_string()))?;
-    Ok(execute_with_timeout_budget(effects, &budget, || future)
+    execute_with_timeout_budget(effects, &budget, || future)
         .await
         .map_err(|error| match error {
             TimeoutRunError::Timeout(_) => AgentError::runtime(format!(
                 "invitation.prepare stage `{stage}` timed out after {INVITATION_PREPARE_STAGE_TIMEOUT_MS}ms"
             )),
             TimeoutRunError::Operation(error) => error,
-        })?)
+        })
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -262,8 +262,10 @@ impl InvitationHandler {
                 return 0;
             };
 
-            return match execute_with_timeout_budget(effects, &budget, || effects.current_timestamp())
-                .await
+            return match execute_with_timeout_budget(effects, &budget, || {
+                effects.current_timestamp()
+            })
+            .await
             {
                 Ok(value) => value,
                 Err(TimeoutRunError::Operation(_)) | Err(TimeoutRunError::Timeout(_)) => 0,
@@ -543,11 +545,15 @@ impl InvitationHandler {
         let invitation_context = if let Some(context_id) = context_override {
             context_id
         } else {
-            timeout_prepare_invitation_stage(effects.as_ref(), "resolve_invitation_context", async {
-                Ok(self
-                    .resolve_invitation_context(effects.as_ref(), &invitation_type)
-                    .await)
-            })
+            timeout_prepare_invitation_stage(
+                effects.as_ref(),
+                "resolve_invitation_context",
+                async {
+                    Ok(self
+                        .resolve_invitation_context(effects.as_ref(), &invitation_type)
+                        .await)
+                },
+            )
             .await?
         };
         tracing::debug!(
@@ -2774,7 +2780,10 @@ mod tests {
             device_id: authority.device_id(),
             ..Default::default()
         };
-        Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap())
+        Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority.authority_id())
+                .unwrap(),
+        )
     }
 
     fn canonical_home_id(seed: u8) -> ChannelId {
@@ -2973,27 +2982,35 @@ mod tests {
 
     #[tokio::test]
     async fn invitation_can_be_accepted() {
-        let authority_context = create_test_authority(93);
-        let effects = effects_for(&authority_context);
-        let handler = InvitationHandler::new(authority_context).unwrap();
-
+        let sender_context = create_test_authority(93);
         let receiver_id = AuthorityId::new_from_entropy([94u8; 32]);
+        let receiver_context = AuthorityContext::new(receiver_id);
 
-        let invitation = handler
+        let sender_effects = effects_for(&sender_context);
+        let receiver_effects = effects_for(&receiver_context);
+        let sender_handler = InvitationHandler::new(sender_context).unwrap();
+        let receiver_handler = InvitationHandler::new(receiver_context).unwrap();
+
+        let invitation = sender_handler
             .create_invitation(
-                effects.clone(),
+                sender_effects,
                 receiver_id,
-                InvitationType::Guardian {
-                    subject_authority: AuthorityId::new_from_entropy([95u8; 32]),
+                InvitationType::Contact {
+                    nickname: Some("receiver".to_string()),
                 },
                 None,
                 None,
             )
             .await
             .unwrap();
+        let code = InvitationServiceApi::export_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
 
-        let result = handler
-            .accept_invitation(effects.clone(), &invitation.invitation_id)
+        let result = receiver_handler
+            .accept_invitation(receiver_effects, &imported.invitation_id)
             .await
             .unwrap();
 
@@ -3113,7 +3130,7 @@ mod tests {
             } => {
                 assert_eq!(owner_id, own_authority);
                 assert_eq!(contact_id, sender_id);
-                assert_eq!(nickname, "Alice");
+                assert_eq!(nickname, sender_id.to_string());
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }
@@ -3150,7 +3167,7 @@ mod tests {
         let invitation = sender_handler
             .create_invitation(
                 sender_effects.clone(),
-                sender_id,
+                receiver_id,
                 InvitationType::Contact { nickname: None },
                 Some("Contact invitation from sender".to_string()),
                 None,
@@ -3168,7 +3185,13 @@ mod tests {
             .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
             .await
             .unwrap();
-
+        receiver_handler
+            .notify_contact_invitation_acceptance(
+                receiver_effects.as_ref(),
+                &imported.invitation_id,
+            )
+            .await
+            .unwrap();
         let processed = sender_handler
             .process_contact_invitation_acceptances(sender_effects.clone())
             .await
@@ -3394,7 +3417,7 @@ mod tests {
         let invitation = sender_handler
             .create_invitation(
                 sender_effects.clone(),
-                sender_id,
+                receiver_id,
                 InvitationType::Contact { nickname: None },
                 Some("Contact invitation".to_string()),
                 None,
@@ -3431,6 +3454,13 @@ mod tests {
             .unwrap();
         receiver_handler
             .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+        receiver_handler
+            .notify_contact_invitation_acceptance(
+                receiver_effects.as_ref(),
+                &imported.invitation_id,
+            )
             .await
             .unwrap();
 

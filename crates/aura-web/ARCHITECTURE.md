@@ -86,6 +86,23 @@ The correct split is:
 | Render-convergence and projection publication | `Observed` | browser projection/export path | bridge/publication code only | Playwright/harness |
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
 
+### Capability-Gated Points
+
+- harness bridge command ingress and compatibility-gated semantic command
+  execution in `src/harness_bridge.rs`
+- browser-side semantic projection and render-heartbeat publication in
+  `src/harness_bridge.rs`
+- browser clipboard and bootstrap adapters that may trigger upstream workflows,
+  but may not author terminal semantic lifecycle locally
+
+### Verification Hooks
+
+- `cargo check -p aura-web`
+- browser harness contract tests
+- Playwright semantic bridge tests
+- `just ci-observed-layer-boundaries`
+- `just ci-actor-lifecycle`
+
 ### InvariantBrowserHarnessBridgePublishesSemanticState
 The browser shell exports structured observed semantic UI projections and render
 convergence signals for harness observation.

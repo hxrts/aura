@@ -125,8 +125,8 @@ impl LanDiscoveryService {
     where
         F: Fn(DiscoveredPeer) + Send + Sync + 'static,
     {
-        self.start_announcer(tasks.group("announcer"));
-        self.start_listener(tasks.group("listener"), on_discovered);
+        self.start_announcer(tasks.clone());
+        self.start_listener(tasks, on_discovered);
     }
 
     /// Set the descriptor to announce.
@@ -227,9 +227,9 @@ impl LanDiscoveryService {
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("run", fut)
+                tasks.spawn_local_named("lan_announcer", fut);
             } else {
-                tasks.spawn_named("run", fut)
+                tasks.spawn_named("lan_announcer", fut);
             }
         }
     }
@@ -315,9 +315,9 @@ impl LanDiscoveryService {
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("run", fut)
+                tasks.spawn_local_named("lan_listener", fut);
             } else {
-                tasks.spawn_named("run", fut)
+                tasks.spawn_named("lan_listener", fut);
             }
         }
     }

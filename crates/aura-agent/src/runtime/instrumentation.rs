@@ -24,6 +24,7 @@ impl RuntimeSessionEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 pub enum RuntimeVmEvent {
     ConcurrencyProfileSelected,
     ConcurrencyProfileFallback,

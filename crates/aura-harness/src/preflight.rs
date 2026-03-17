@@ -408,6 +408,7 @@ mod tests {
         ScenarioConfig,
     };
 
+    #[allow(clippy::disallowed_methods)]
     fn unique_test_root(label: &str) -> std::path::PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);

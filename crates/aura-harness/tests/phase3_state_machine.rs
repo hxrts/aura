@@ -1,16 +1,17 @@
 #![allow(missing_docs)]
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::executor::{ExecutionMode, ScenarioExecutor};
 use aura_harness::tool_api::ToolApi;
 
+#[allow(clippy::disallowed_types)]
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
-    static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+    static TEST_MUTEX: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
     TEST_MUTEX
-        .get_or_init(|| Mutex::new(()))
+        .get_or_init(|| std::sync::Mutex::new(()))
         .lock()
         .unwrap_or_else(|error| error.into_inner())
 }

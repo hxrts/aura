@@ -8,9 +8,9 @@ use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
     TransportEffects, TransportError,
 };
+use aura_core::types::identifiers::AuthorityId;
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_effects::time::PhysicalTimeHandler;
-use aura_core::types::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
 use cfg_if::cfg_if;
 #[cfg(target_arch = "wasm32")]
@@ -42,12 +42,12 @@ where
     let started_at = time.physical_time().await.map_err(|_| timeout_error())?;
     let budget =
         TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| timeout_error())?;
-    Ok(execute_with_timeout_budget(&time, &budget, f)
+    execute_with_timeout_budget(&time, &budget, f)
         .await
         .map_err(|error| match error {
             TimeoutRunError::Timeout(_) => timeout_error(),
             TimeoutRunError::Operation(error) => error,
-        })?)
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -502,7 +502,7 @@ mod tests {
             .expect("bind listener");
         let addr = listener.local_addr().expect("local addr");
 
-        let receiver = tokio::spawn(async move {
+        let receiver = async move {
             // open() does a connectivity check, consuming one accept.
             let (_warmup, _) = listener.accept().await.expect("accept warmup");
             let (mut stream, _) = listener.accept().await.expect("accept payload");
@@ -512,7 +512,7 @@ mod tests {
             let mut payload = vec![0u8; payload_len];
             stream.read_exact(&mut payload).await.expect("read payload");
             payload
-        });
+        };
 
         let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
         let effects = AuraEffectSystem::production(production_config_for_tests(), authority_id)
@@ -527,16 +527,18 @@ mod tests {
         );
 
         let payload = b"typed-handle-payload".to_vec();
-        effects
-            .send(&connection_id, payload.clone())
-            .await
-            .expect("send payload");
-        effects
-            .close(&connection_id)
-            .await
-            .expect("close connection");
+        let sender = async {
+            effects
+                .send(&connection_id, payload.clone())
+                .await
+                .expect("send payload");
+            effects
+                .close(&connection_id)
+                .await
+                .expect("close connection");
+        };
 
-        let received = receiver.await.expect("join receiver");
+        let (_, received) = tokio::join!(sender, receiver);
         assert_eq!(received, payload);
 
         let close_err = effects

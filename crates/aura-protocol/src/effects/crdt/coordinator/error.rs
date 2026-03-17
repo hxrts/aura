@@ -7,9 +7,15 @@ use aura_core::AuraError;
 #[derive(Debug, thiserror::Error)]
 pub enum CrdtCoordinatorError {
     #[error("serialization failed for {target}: {detail}")]
-    SerializationFailed { target: &'static str, detail: String },
+    SerializationFailed {
+        target: &'static str,
+        detail: String,
+    },
     #[error("deserialization failed for {target}: {detail}")]
-    DeserializationFailed { target: &'static str, detail: String },
+    DeserializationFailed {
+        target: &'static str,
+        detail: String,
+    },
     #[error("CRDT type mismatch: expected {expected:?}, got {actual:?}")]
     TypeMismatch {
         expected: CrdtType,

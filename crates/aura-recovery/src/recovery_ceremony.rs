@@ -42,18 +42,28 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::types::identifiers::AuthorityId;
+use aura_core::{ActorIngressMutationCapability, LifecyclePublicationCapability};
 use aura_core::{AuraError, AuraResult, Hash32};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
-static RECOVERY_CEREMONY_MUTATION_CAPABILITY: LazyLock<ActorIngressMutationCapability> =
-    LazyLock::new(|| ActorIngressMutationCapability::new("aura-recovery:approval-ceremony"));
-static RECOVERY_CEREMONY_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
-    LazyLock::new(|| LifecyclePublicationCapability::new("aura-recovery:approval-facts"));
+static RECOVERY_CEREMONY_MUTATION_CAPABILITY: OnceLock<ActorIngressMutationCapability> =
+    OnceLock::new();
+static RECOVERY_CEREMONY_PUBLICATION_CAPABILITY: OnceLock<LifecyclePublicationCapability> =
+    OnceLock::new();
+
+fn recovery_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
+    RECOVERY_CEREMONY_MUTATION_CAPABILITY
+        .get_or_init(|| ActorIngressMutationCapability::new("aura-recovery:approval-ceremony"))
+}
+
+fn recovery_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
+    RECOVERY_CEREMONY_PUBLICATION_CAPABILITY
+        .get_or_init(|| LifecyclePublicationCapability::new("aura-recovery:approval-facts"))
+}
 
 // =============================================================================
 // CEREMONY TYPES
@@ -401,11 +411,11 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
     }
 
     fn recovery_ceremony_mutation_capability() -> &'static ActorIngressMutationCapability {
-        &RECOVERY_CEREMONY_MUTATION_CAPABILITY
+        recovery_ceremony_mutation_capability()
     }
 
     fn recovery_ceremony_publication_capability() -> &'static LifecyclePublicationCapability {
-        &RECOVERY_CEREMONY_PUBLICATION_CAPABILITY
+        recovery_ceremony_publication_capability()
     }
 
     fn insert_ceremony(
@@ -491,7 +501,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             &guardians,
             threshold,
         )
-            .await?;
+        .await?;
 
         Ok(ceremony_id)
     }
@@ -584,7 +594,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             ceremony_id,
             &approval,
         )
-            .await?;
+        .await?;
 
         // Emit quorum reached fact if applicable
         if quorum_reached {

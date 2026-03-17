@@ -4,8 +4,8 @@ mod commands;
 mod snapshot;
 mod socket;
 
-pub use commands::TuiSemanticInputs;
 pub(crate) use commands::apply_harness_command;
+pub use commands::TuiSemanticInputs;
 pub use snapshot::maybe_export_ui_snapshot;
 pub(crate) use socket::{
     clear_harness_command_sender, ensure_harness_command_listener, register_harness_command_sender,
@@ -16,7 +16,7 @@ mod tests {
     use super::commands::{apply_harness_command, TuiSemanticInputs};
     use super::snapshot::authoritative_ui_snapshot;
     use super::socket::{
-        clear_harness_command_sender, forward_harness_commands_from_listener_fn as forward_harness_commands_from_listener,
+        clear_harness_command_sender, forward_harness_commands_from_listener,
         register_harness_command_sender,
     };
     use crate::tui::screens::Screen;
@@ -24,6 +24,7 @@ mod tests {
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::state::DispatchCommand;
     use crate::tui::state::InvitationKind;
+    use crate::tui::tasks::UiTaskRegistry;
     use crate::tui::types::{Channel as TuiChannel, Device as TuiDevice, SettingsSection};
     use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
@@ -33,8 +34,10 @@ mod tests {
     };
     use aura_app::ui::types::StateSnapshot;
     use aura_app::ui_contract::RuntimeFact;
-    use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError};
     use aura_core::effects::PhysicalTimeEffects;
+    use aura_core::{
+        execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
+    };
     use aura_effects::time::PhysicalTimeHandler;
     use std::os::unix::net::UnixListener as StdUnixListener;
     use std::path::Path;
@@ -116,6 +119,11 @@ mod tests {
             None,
             aura_core::threshold::AgreementMode::CoordinatorSoftSafe,
             false,
+        );
+        state.set_authoritative_operation_state(
+            OperationId::device_enrollment(),
+            None,
+            OperationState::Submitting,
         );
         state.show_modal(QueuedModal::SettingsDeviceEnrollment(modal));
 
@@ -262,7 +270,7 @@ mod tests {
         assert!(matches!(
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id })]
-                if device_id.to_string() == "device:removable"
+                if device_id == "device:removable"
         ));
     }
 
@@ -433,7 +441,7 @@ mod tests {
         let followup = apply_harness_command(
             &mut state,
             HarnessUiCommand::CreateContactInvitation {
-                receiver_authority_id: authority_id.to_string(),
+                receiver_authority_id: authority_id.clone(),
             },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
@@ -616,7 +624,7 @@ mod tests {
         assert!(matches!(
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::SelectChannel { channel_id })]
-                if channel_id.to_string() == "channel:shared"
+                if channel_id == "channel:shared"
         ));
     }
 
@@ -663,11 +671,12 @@ mod tests {
 
         let (command_tx, mut command_rx) = harness_command_channel();
         register_harness_command_sender(command_tx);
-        let bridge_task = tokio::spawn(async move {
+        let bridge_tasks = UiTaskRegistry::new();
+        bridge_tasks.spawn(async move {
             forward_harness_commands_from_listener(listener).await;
         });
 
-        let apply_task = tokio::spawn(async move {
+        let apply_task = async move {
             let time = PhysicalTimeHandler::new();
             let started_at = time
                 .physical_time()
@@ -702,50 +711,52 @@ mod tests {
                 }
                 other => panic!("unexpected harness command submission: {other:?}"),
             }
-        });
-
-        let mut stream = UnixStream::connect(&socket_path)
-            .await
-            .unwrap_or_else(|error| panic!("failed to connect {}: {error}", socket_path.display()));
-        let command = HarnessUiCommand::NavigateScreen {
-            screen: ScreenId::Settings,
         };
-        let payload = serde_json::to_vec(&command)
-            .unwrap_or_else(|error| panic!("failed to encode harness command: {error}"));
-        stream
-            .write_all(&payload)
-            .await
-            .unwrap_or_else(|error| panic!("failed to write harness command: {error}"));
-        stream
-            .shutdown()
-            .await
-            .unwrap_or_else(|error| panic!("failed to half-close harness command stream: {error}"));
-        let mut receipt_payload = Vec::new();
-        stream
-            .read_to_end(&mut receipt_payload)
-            .await
-            .unwrap_or_else(|error| panic!("failed to read harness command receipt: {error}"));
-        let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt_payload)
-            .unwrap_or_else(|error| panic!("failed to decode harness command receipt: {error}"));
-        assert_eq!(
-            receipt,
-            HarnessUiCommandReceipt::Accepted { operation: None }
-        );
 
-        apply_task
-            .await
-            .unwrap_or_else(|error| panic!("apply task failed: {error}"));
+        let client_task = async {
+            let mut stream = UnixStream::connect(&socket_path)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("failed to connect {}: {error}", socket_path.display())
+                });
+            let command = HarnessUiCommand::NavigateScreen {
+                screen: ScreenId::Settings,
+            };
+            let payload = serde_json::to_vec(&command)
+                .unwrap_or_else(|error| panic!("failed to encode harness command: {error}"));
+            stream
+                .write_all(&payload)
+                .await
+                .unwrap_or_else(|error| panic!("failed to write harness command: {error}"));
+            stream.shutdown().await.unwrap_or_else(|error| {
+                panic!("failed to half-close harness command stream: {error}")
+            });
+            let mut receipt_payload = Vec::new();
+            stream
+                .read_to_end(&mut receipt_payload)
+                .await
+                .unwrap_or_else(|error| panic!("failed to read harness command receipt: {error}"));
+            let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt_payload)
+                .unwrap_or_else(|error| {
+                    panic!("failed to decode harness command receipt: {error}")
+                });
+            assert_eq!(
+                receipt,
+                HarnessUiCommandReceipt::Accepted { operation: None }
+            );
+        };
+
+        let (_, ()) = tokio::join!(apply_task, client_task);
+        bridge_tasks.shutdown();
 
         clear_harness_command_sender();
-        bridge_task.abort();
         let _ = std::fs::remove_file(&socket_path);
     }
 
     /// Helper: read all `.rs` source files from the harness_state module directory
     /// and concatenate only non-test production source.
     fn read_production_source() -> String {
-        let module_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/tui/harness_state");
+        let module_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/harness_state");
         let mut production_source = String::new();
         for entry in std::fs::read_dir(&module_dir)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", module_dir.display()))
@@ -755,9 +766,8 @@ mod tests {
             if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
                 continue;
             }
-            let source = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-                panic!("failed to read {}: {error}", path.display())
-            });
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
             let file_production = source.split("#[cfg(test)]").next().unwrap_or(&source);
             production_source.push_str(file_production);
             production_source.push('\n');

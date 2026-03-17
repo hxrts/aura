@@ -120,6 +120,7 @@ mod tests {
     use super::*;
     use crate::config::{InstanceConfig, InstanceMode, RunSection};
 
+    #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let suffix = COUNTER.fetch_add(1, Ordering::Relaxed);

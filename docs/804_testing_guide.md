@@ -13,6 +13,15 @@ Aura tests follow four principles:
 3. Deterministic: Tests produce reproducible results
 4. Comprehensive: Tests validate both happy paths and error conditions
 
+For parity-critical ownership work, completeness also means:
+
+- compile-fail coverage where ownership/capability boundaries are enforced in
+  types
+- invariant tests for owner drop, stale-handle rejection, and terminality
+- timeout/backoff tests for typed timeout failure, remaining-budget
+  propagation, and bounded retries
+- the relevant ownership `just ci-*` policy checks
+
 ### Harness Policy
 
 Aura's runtime harness is the primary end-to-end validation lane.
@@ -145,6 +154,25 @@ For parity-critical waits and assertions:
 - waits may also bind to typed operation handles or strictly newer authoritative projections when the shared contract defines them
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
 - harness mode may change instrumentation and render stability, but it must not change business-flow semantics
+
+### Ownership Test Expectations
+
+When a change introduces or modifies a parity-critical ownership boundary, the
+test plan should include the applicable items below.
+
+- compile-fail tests for private constructors, capability misuse, or stale
+  move-owned handles when the boundary is type-enforced
+- invariant tests proving owner drop reaches explicit failure or cancellation
+- invariant tests proving terminal lifecycle does not regress on the same
+  logical instance
+- invariant tests proving observed layers do not author semantic lifecycle
+- timeout/backoff tests proving local wall-clock policy only changes budget and
+  diagnostics, not semantic success/failure rules
+- the relevant ownership/time `just ci-*` policy checks in addition to crate
+  tests
+
+Use physical time for local deadline and backoff policy. Do not use wall-clock
+timeouts as the primary proof of distributed completion or ordering.
 
 For failure analysis:
 

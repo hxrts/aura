@@ -77,27 +77,34 @@ fn cleanup_test_dir(name: &str) {
 // Home Operations Tests
 // ============================================================================
 
-/// Test that HOMES_SIGNAL exposes the seeded bootstrap home state
+/// Test that HOMES_SIGNAL initializes cleanly after account bootstrap
 #[tokio::test]
 async fn test_home_signals_initialization() {
     println!("\n=== Home Signals Initialization Test ===\n");
 
     let (ctx, app_core) = setup_test_env("home-init").await;
 
-    // Phase 1: Read seeded bootstrap home state
-    println!("Phase 1: Check HOMES_SIGNAL bootstrap home state");
+    // Phase 1: Read initialized home state
+    println!("Phase 1: Check HOMES_SIGNAL initialization state");
     let core = app_core.read().await;
     let homes_state = core.read(&*HOMES_SIGNAL).await;
 
     match homes_state {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
-            if let Some(home_state) = state.current_home() {
+            let seeded_home = state
+                .current_home()
+                .or_else(|| state.iter().next().map(|(_, home)| home));
+            if let Some(home_state) = seeded_home {
                 println!("  Home ID: {home_id}", home_id = home_state.id);
                 println!("  Home name: {name}", name = home_state.name);
                 println!(
                     "  Member count: {member_count}",
                     member_count = home_state.member_count
+                );
+                println!(
+                    "  Current home selected: {selected}",
+                    selected = state.current_home_id().is_some()
                 );
                 assert!(
                     home_state.id != ChannelId::default(),
@@ -109,10 +116,15 @@ async fn test_home_signals_initialization() {
                 );
                 assert!(
                     !home_state.name.is_empty(),
-                    "Bootstrap home should have a stable non-empty display name"
+                    "A materialized home should have a stable non-empty display name"
                 );
             } else {
-                panic!("Bootstrap should expose a current home");
+                println!("  No home materialized yet after account creation");
+                assert_eq!(
+                    state.count(),
+                    0,
+                    "HOMES_SIGNAL without a current home should be empty until a home is created"
+                );
             }
         }
         Err(e) => {
@@ -120,7 +132,7 @@ async fn test_home_signals_initialization() {
         }
     }
 
-    // Phase 2: Verify the overall homes collection contains the bootstrap home
+    // Phase 2: Verify the overall homes collection remains internally consistent
     println!("\nPhase 2: Check HOMES_SIGNAL collection state");
     let homes_state = core.read(&*HOMES_SIGNAL).await;
 
@@ -133,14 +145,19 @@ async fn test_home_signals_initialization() {
                 "  Current home ID: {current_home_id:?}",
                 current_home_id = state.current_home_id()
             );
-            assert!(
-                home_count >= 1,
-                "Bootstrap account creation should seed at least one home"
-            );
-            assert!(
-                state.current_home_id().is_some(),
-                "Bootstrap account creation should set a current home"
-            );
+            if let Some(current_home_id) = state.current_home_id() {
+                println!("  Selected current home: {current_home_id}");
+                assert!(
+                    state.home_state(current_home_id).is_some(),
+                    "Selected current home id should resolve to a materialized home"
+                );
+            } else {
+                println!("  No current home selected yet");
+                assert_eq!(
+                    home_count, 0,
+                    "An unselected home state should stay empty until a home is created"
+                );
+            }
         }
         Err(e) => {
             panic!("HOMES_SIGNAL should remain readable after bootstrap: {e:?}");

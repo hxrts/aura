@@ -5,8 +5,8 @@
 
 use crate::model::{
     AccessOverrideLevel, ActiveModal, AddDeviceWizardStep, CapabilityTier,
-    CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMode,
-    SettingsSection, ThresholdWizardStep, UiModel, ScreenId,
+    CreateChannelDetailsField, CreateChannelWizardStep, ModalState, NeighborhoodMode, ScreenId,
+    SettingsSection, ThresholdWizardStep, UiModel,
 };
 use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 

@@ -343,7 +343,7 @@ fn test_epoch_rotation_with_insufficient_participants() {
     assert!(result
         .unwrap_err()
         .to_string()
-        .contains("Insufficient participants"));
+        .contains("insufficient participants"));
 }
 
 #[test]

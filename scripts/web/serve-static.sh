@@ -6,6 +6,16 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
 build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
+dioxus_config="$web_root/Dioxus.toml"
+config_backup=""
+
+restore_dioxus_config() {
+    if [[ -n "$config_backup" && -f "$config_backup" ]]; then
+        cp "$config_backup" "$dioxus_config"
+        rm -f "$config_backup"
+        config_backup=""
+    fi
+}
 
 cd "$web_root"
 if [ ! -d node_modules ]; then
@@ -24,6 +34,15 @@ for profile in debug release; do
     rm -f "$target_css"
     ln -s "$source_css" "$target_css"
 done
+
+if [[ -f "$dioxus_config" ]]; then
+    config_backup="$(mktemp)"
+    cp "$dioxus_config" "$config_backup"
+    perl -0pi -e 's/^hot_reload = true$/hot_reload = false/m' "$dioxus_config"
+    perl -0pi -e 's/^reload_html = true$/reload_html = false/m' "$dioxus_config"
+    trap restore_dioxus_config EXIT
+fi
+
 case "$build_profile" in
     release)
         NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
@@ -42,6 +61,9 @@ case "$build_profile" in
         exit 1
         ;;
 esac
+
+restore_dioxus_config
+trap - EXIT
 
 if [[ ! -f "$public_dir/index.html" ]]; then
     echo "[serve-web-static] expected build output at $public_dir/index.html" >&2
