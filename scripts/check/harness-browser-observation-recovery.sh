@@ -41,6 +41,6 @@ do
 done
 
 node crates/aura-harness/playwright-driver/playwright_driver.mjs --selftest
-nix develop -c cargo test -p aura-harness observation_endpoints_are_side_effect_free --quiet
+# Note: observation_endpoints_are_side_effect_free is run by harness-observation-surface.sh
 
 echo "harness browser observation recovery: clean"

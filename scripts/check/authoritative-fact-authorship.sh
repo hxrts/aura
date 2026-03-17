@@ -6,6 +6,7 @@ cd "$repo_root"
 
 allowlist_file="scripts/check/authoritative-fact-authorship.allowlist"
 approved_owner_pattern='^crates/aura-app/src/workflows/.*\.rs:'
+approved_bridge_pattern='^crates/aura-terminal/src/tui/semantic_lifecycle\.rs:'
 
 fail() {
   echo "authoritative-fact-authorship: $*" >&2
@@ -15,8 +16,9 @@ fail() {
 [[ -f "$allowlist_file" ]] || fail "missing allowlist: $allowlist_file"
 
 # Authoritative lifecycle/readiness publication must stay in the shared
-# aura-app workflow/coordinator surface. Other layers may observe or submit,
-# but may not become parallel authors of semantic truth.
+# aura-app workflow/coordinator surface or the dedicated terminal semantic
+# lifecycle bridge. Other layers may observe or submit, but may not become
+# parallel authors of semantic truth.
 
 violations=()
 legacy_exemptions=0
@@ -25,6 +27,9 @@ while IFS= read -r match; do
   [[ -z "$match" ]] && continue
 
   if [[ "$match" =~ $approved_owner_pattern ]]; then
+    continue
+  fi
+  if [[ "$match" =~ $approved_bridge_pattern ]]; then
     continue
   fi
 
@@ -49,6 +54,7 @@ done < <(
       -e 'publish_authoritative_operation_failure(_with_instance)?\(' \
       -e 'publish_authoritative_operation_cancellation\(' \
       -e 'replace_authoritative_semantic_facts_of_kind\(' \
+      -e 'set_operation_state\(OperationId::' \
       crates -g '*.rs'
   } | rg -v ':\s*//!|:\s*//|:\s*/\*'
 )

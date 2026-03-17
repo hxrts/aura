@@ -177,10 +177,10 @@ harness-scenario-inventory-check:
     bash scripts/check/harness-scenario-inventory.sh
 
 harness-shared-scenario-contract-check:
-    bash scripts/check/harness-shared-scenario-contract.sh
+    bash scripts/check/harness-governance.sh shared-scenario-contract
 
 harness-scenario-legality-check:
-    bash scripts/check/harness-scenario-legality.sh
+    bash scripts/check/harness-governance.sh scenario-legality
 
 harness-ui-state-evented-check:
     bash scripts/check/harness-ui-state-evented.sh
@@ -231,7 +231,7 @@ ci-harness-command-plane-boundary:
     bash scripts/check/harness-command-plane-boundary.sh
 
 ci-harness-scenario-shape-contract:
-    bash scripts/check/harness-scenario-shape-contract.sh
+    bash scripts/check/harness-governance.sh scenario-shape-contract
 
 ci-harness-runtime-events-authoritative:
     bash scripts/check/harness-runtime-events-authoritative.sh
@@ -405,7 +405,7 @@ ci-harness-matrix-inventory:
 
 # Harness shared intent-contract policy
 ci-harness-shared-intent-contract:
-    bash scripts/check/harness-shared-scenario-contract.sh
+    bash scripts/check/harness-governance.sh shared-scenario-contract
     cargo test -p aura-app shared_intent_contract_accepts_intents --quiet
     cargo test -p aura-app shared_intent_contract_rejects_ui_actions --quiet
 
@@ -612,9 +612,8 @@ ci-user-flow-policy:
     just ci-harness-ownership-policy
 
 ci-harness-ownership-policy:
-    bash scripts/check/harness-ownership-category-contract.sh
+    bash scripts/check/ownership-category-declarations.sh
     bash scripts/check/harness-actor-vs-move-ownership.sh
-    bash scripts/check/harness-semantic-lifecycle-ownership.sh
     bash scripts/check/harness-readiness-ownership.sh
     bash scripts/check/harness-typed-semantic-errors.sh
     bash scripts/check/harness-move-ownership-boundary.sh
@@ -650,9 +649,6 @@ ci-timeout-policy:
 ci-timeout-time-domains:
     bash scripts/check/timeout-time-domain-usage.sh
 
-ci-timeout-backoff:
-    bash scripts/check/timeout-backoff-discipline.sh
-
 # Choreography wiring lint
 ci-choreo:
     scripts/check/choreo-wiring.sh
@@ -678,9 +674,6 @@ ci-async-service-actor-ownership:
 ci-runtime-instrumentation-schema:
     bash scripts/check/runtime-instrumentation-schema.sh
 
-ci-harness-semantic-lifecycle-ownership:
-    bash scripts/check/harness-semantic-lifecycle-ownership.sh
-
 ci-harness-readiness-ownership:
     bash scripts/check/harness-readiness-ownership.sh
 
@@ -695,9 +688,6 @@ ci-harness-authoritative-fact-boundary:
 
 ci-harness-actor-vs-move-ownership:
     bash scripts/check/harness-actor-vs-move-ownership.sh
-
-ci-harness-ownership-category-contract:
-    bash scripts/check/harness-ownership-category-contract.sh
 
 # Quint typecheck
 ci-quint-typecheck:

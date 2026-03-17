@@ -9,16 +9,16 @@ fail() {
   exit 1
 }
 
-bash scripts/check/harness-core-scenario-mechanics.sh
+bash scripts/check/harness-governance.sh core-scenario-mechanics
 bash scripts/check/harness-governance-wrappers.sh
 bash scripts/check/harness-ui-state-evented.sh
 bash scripts/check/ui-parity-contract.sh
 # Inventory and converted shared-scenario contract
 bash scripts/check/harness-scenario-inventory.sh
-bash scripts/check/harness-shared-scenario-contract.sh
-bash scripts/check/harness-scenario-legality.sh
+bash scripts/check/harness-governance.sh shared-scenario-contract
+bash scripts/check/harness-governance.sh scenario-legality
 bash scripts/check/harness-scenario-config-boundary.sh
-bash scripts/check/harness-scenario-shape-contract.sh
+bash scripts/check/harness-governance.sh scenario-shape-contract
 bash scripts/check/harness-shared-flow-metadata.sh
 bash scripts/check/harness-command-plane-boundary.sh
 bash scripts/check/harness-trace-determinism.sh

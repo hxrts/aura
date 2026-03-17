@@ -1,6 +1,0 @@
-# Temporary baseline for frontend-local semantic lifecycle authorship that must
-# be migrated into authoritative coordinators.
-# Owner: architecture
-# Reason: shared semantic lifecycle migration is in progress; temporary
-# frontend-local lifecycle authorship is still being removed.
-# Doc: work/ownership.md

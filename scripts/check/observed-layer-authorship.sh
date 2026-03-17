@@ -9,12 +9,14 @@ fail() {
   exit 1
 }
 
-# Keep this thin: compose the stricter ownership checks that already police
-# lifecycle/readiness/publication boundaries, then assert the UI projection
-# layer is not introducing direct authoritative publication on its own.
+# Composition script that delegates to:
+#   1. authoritative-fact-authorship.sh — lifecycle/readiness publication boundaries
+#      (also covers semantic lifecycle ownership since the merge)
+#   2. harness-readiness-ownership.sh — readiness-specific refresh API enforcement
+# Then asserts the UI projection layer does not introduce direct authoritative
+# publication on its own.
 
 bash scripts/check/authoritative-fact-authorship.sh
-bash scripts/check/harness-semantic-lifecycle-ownership.sh
 bash scripts/check/harness-readiness-ownership.sh
 
 ui_violations="$(

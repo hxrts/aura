@@ -60,7 +60,10 @@ rg -q 'actor services solve long-lived runtime supervision and lifecycle' "$agen
 rg -q 'move semantics solve session and endpoint ownership transfer' "$agent_arch" \
   || fail "aura-agent must document move semantics for ownership transfer"
 
-bash scripts/check/harness-semantic-lifecycle-ownership.sh
+# Composition: delegates to sub-checks after the doc validation above.
+#   1. harness-readiness-ownership.sh — readiness-specific refresh API enforcement
+#   2. harness-move-ownership-boundary.sh — frontend handle/receipt fabrication boundaries
+# Note: semantic lifecycle ownership is now covered by authoritative-fact-authorship.sh.
 bash scripts/check/harness-readiness-ownership.sh
 bash scripts/check/harness-move-ownership-boundary.sh
 

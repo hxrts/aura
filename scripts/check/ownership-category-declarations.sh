@@ -11,9 +11,11 @@ fail() {
 
 ownership_doc="docs/122_ownership_model.md"
 project_structure_doc="docs/999_project_structure.md"
+testing_guide="docs/804_testing_guide.md"
 
 [[ -f "$ownership_doc" ]] || fail "missing ownership model doc: $ownership_doc"
 [[ -f "$project_structure_doc" ]] || fail "missing project structure doc: $project_structure_doc"
+[[ -f "$testing_guide" ]] || fail "missing testing guide: $testing_guide"
 
 required_docs=(
   "$ownership_doc"
@@ -30,6 +32,27 @@ done
 for category in '`Pure`' '`MoveOwned`' '`ActorOwned`' '`Observed`'; do
   rg -Fq "$category" "$ownership_doc" \
     || fail "ownership model doc missing category declaration: $category"
+done
+
+# Testing guide shared semantic ownership inventory
+rg -q '### Shared Semantic Ownership Inventory' "$testing_guide" \
+  || fail "testing guide must define the shared semantic ownership inventory"
+
+required_inventory_rows=(
+  'Semantic command / handle contract'
+  'Semantic operation lifecycle'
+  'Channel / invitation / delivery readiness'
+  'Runtime-facing async service state'
+  'TUI command ingress'
+  'TUI shell / callbacks / subscriptions'
+  'Browser harness bridge'
+  'Harness executor / wait model'
+  'Ownership transfer / stale-owner invalidation'
+)
+
+for row in "${required_inventory_rows[@]}"; do
+  rg -Fq "$row" "$testing_guide" \
+    || fail "testing guide ownership inventory missing row: $row"
 done
 
 mapfile -t crate_dirs < <(find crates -mindepth 1 -maxdepth 1 -type d | sort)
@@ -68,6 +91,15 @@ for crate_dir in "${crate_dirs[@]}"; do
       ;;
   esac
 done
+
+# Agent-specific structural concurrency checks
+agent_arch="crates/aura-agent/ARCHITECTURE.md"
+if [[ -f "$agent_arch" ]]; then
+  rg -q 'Structured Concurrency Model' "$agent_arch" \
+    || violations+=("$agent_arch: must define the structured concurrency model")
+  rg -q 'Session Ownership' "$agent_arch" \
+    || violations+=("$agent_arch: must define session ownership")
+fi
 
 if (( ${#missing_arch[@]} > 0 )); then
   printf '%s\n' "${missing_arch[@]}" >&2
