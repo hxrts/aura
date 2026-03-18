@@ -310,13 +310,17 @@ impl StatusResult {
         }
     }
 
-    /// Check if this is in a terminal state
+    /// Check if this is in a terminal state.
+    ///
+    /// `Unknown` is NOT terminal — the status system was unable to determine
+    /// the fact's lifecycle state.  Callers should not treat unknown status
+    /// as finalized; they should either retry or escalate.
     pub fn is_terminal(&self) -> bool {
         match self {
             Self::Optimistic(s) => s.is_finalized(),
             Self::Deferred(s) => s.state.is_terminal(),
             Self::Ceremony(s) => s.is_terminal(),
-            Self::Unknown => true,
+            Self::Unknown => false,
         }
     }
 }
