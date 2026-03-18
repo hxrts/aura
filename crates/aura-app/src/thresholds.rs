@@ -52,19 +52,21 @@ pub fn default_guardian_threshold(total_n: u8) -> u8 {
 }
 
 /// Normalize a requested guardian threshold given total guardians.
+///
+/// Enforces the invariant `2 <= k <= n` when `n >= 2`.  When `n < 2`
+/// the guardian set is too small for threshold signing so the minimum
+/// valid k (2) is returned — callers should treat this as an
+/// indication that more guardians are needed.
 pub fn normalize_guardian_threshold(requested: u8, total_n: u8) -> u8 {
-    let mut k = requested;
-    if total_n >= 2 {
-        if k < 2 {
-            k = 2;
-        }
-        if k > total_n {
-            k = total_n;
-        }
-    } else if k < 2 {
-        k = 2;
+    let min_k = 2u8;
+    let k = requested.max(min_k);
+    if total_n >= min_k {
+        k.clamp(min_k, total_n)
+    } else {
+        // n < 2: not enough guardians for threshold signing.
+        // Return the minimum valid k so downstream can detect the gap.
+        min_k
     }
-    k
 }
 
 /// Normalize a recovery threshold given total guardians.
