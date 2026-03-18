@@ -24,12 +24,26 @@ where
 }
 
 /// Read a signal or return its Default value on error.
+///
+/// This is a convenience helper for non-critical reads where a default is
+/// acceptable.  Callers on parity-critical paths should use [`read_signal`]
+/// instead so errors are visible.
+///
+/// When the `instrumented` feature is active, a debug-level message is
+/// emitted on fallback so signal-system failures are diagnosable.
 pub async fn read_signal_or_default<T>(app_core: &Arc<RwLock<AppCore>>, signal: &Signal<T>) -> T
 where
     T: Clone + Default + Send + Sync + 'static,
 {
     let core = app_core.read().await;
-    core.read(signal).await.unwrap_or_default()
+    match core.read(signal).await {
+        Ok(value) => value,
+        Err(_e) => {
+            #[cfg(feature = "instrumented")]
+            tracing::debug!(error = %_e, "read_signal_or_default: falling back to default");
+            T::default()
+        }
+    }
 }
 
 /// Emit a signal or return a standardized AuraError.
