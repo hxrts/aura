@@ -335,9 +335,14 @@ impl ContactsState {
 
     /// Set read receipt policy for a contact.
     ///
-    /// If the contact doesn't exist, this is a no-op.
-    pub fn set_read_receipt_policy(&mut self, contact_id: &AuthorityId, policy: ReadReceiptPolicy) {
-        self.update_contact(contact_id, |c| c.read_receipt_policy = policy);
+    /// Returns `true` if the contact was found and updated, `false` if the
+    /// contact does not exist (no-op).
+    pub fn set_read_receipt_policy(
+        &mut self,
+        contact_id: &AuthorityId,
+        policy: ReadReceiptPolicy,
+    ) -> bool {
+        self.update_contact(contact_id, |c| c.read_receipt_policy = policy)
     }
 
     /// Clear all contacts.
