@@ -351,9 +351,12 @@ impl AppCore {
             }
         }
 
-        // Idempotent init: if signals are already registered, don't re-register.
-        let chat_id = (*crate::signal_defs::CHAT_SIGNAL).id();
-        if self.reactive.is_registered(chat_id) {
+        // Idempotent init: check the *last* signal registered by
+        // register_app_signals so that a partial registration (e.g. chat
+        // registered but later signals failed) is detected and retried.
+        let sentinel_id =
+            (*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).id();
+        if self.reactive.is_registered(sentinel_id) {
             return Ok(());
         }
 
