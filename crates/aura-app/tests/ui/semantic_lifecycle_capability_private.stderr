@@ -1,0 +1,11 @@
+error[E0603]: function `semantic_lifecycle_publication_capability` is private
+ --> tests/ui/semantic_lifecycle_capability_private.rs:2:54
+  |
+2 |     let _ = aura_app::ui::workflows::semantic_facts::semantic_lifecycle_publication_capability();
+  |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ private function
+  |
+note: the function `semantic_lifecycle_publication_capability` is defined here
+ --> src/workflows/semantic_facts.rs
+  |
+  | pub(crate) fn semantic_lifecycle_publication_capability() -> &'static LifecyclePublicationCapability {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

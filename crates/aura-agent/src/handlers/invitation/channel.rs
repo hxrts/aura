@@ -1,5 +1,7 @@
 use super::*;
 
+const INVITATION_CHANNEL_JOIN_TIMEOUT_MS: u64 = 2_000;
+
 pub(super) struct InvitationChannelHandler<'a> {
     handler: &'a InvitationHandler,
 }
@@ -9,6 +11,152 @@ impl<'a> InvitationChannelHandler<'a> {
         Self { handler }
     }
 
+    async fn best_effort_create_channel(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        log_message: &'static str,
+    ) {
+        let started_at = match effects.physical_time().await {
+            Ok(started_at) => started_at,
+            Err(error) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    error = %error,
+                    "{log_message}"
+                );
+                return;
+            }
+        };
+        let budget = match TimeoutBudget::from_start_and_timeout(
+            &started_at,
+            Duration::from_millis(INVITATION_CHANNEL_JOIN_TIMEOUT_MS),
+        ) {
+            Ok(budget) => budget,
+            Err(error) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    error = %error,
+                    "{log_message}"
+                );
+                return;
+            }
+        };
+
+        let create_result = execute_with_timeout_budget(effects, &budget, || async {
+            effects
+                .create_channel(ChannelCreateParams {
+                    context: context_id,
+                    channel: Some(channel_id),
+                    skip_window: None,
+                    topic: None,
+                })
+                .await
+        })
+        .await;
+
+        match create_result {
+            Ok(_) => {}
+            Err(TimeoutRunError::Timeout(error)) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    error = %error,
+                    timeout_ms = INVITATION_CHANNEL_JOIN_TIMEOUT_MS,
+                    "{log_message}"
+                );
+            }
+            Err(TimeoutRunError::Operation(error)) => {
+                let lowered = error.to_string().to_ascii_lowercase();
+                if !lowered.contains("already") && !lowered.contains("exists") {
+                    tracing::warn!(
+                        context_id = %context_id,
+                        channel_id = %channel_id,
+                        error = %error,
+                        "{log_message}"
+                    );
+                }
+            }
+        }
+    }
+
+    async fn best_effort_join_channel(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        participant: AuthorityId,
+        log_message: &'static str,
+    ) {
+        let started_at = match effects.physical_time().await {
+            Ok(started_at) => started_at,
+            Err(error) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    participant = %participant,
+                    error = %error,
+                    "{log_message}"
+                );
+                return;
+            }
+        };
+        let budget = match TimeoutBudget::from_start_and_timeout(
+            &started_at,
+            Duration::from_millis(INVITATION_CHANNEL_JOIN_TIMEOUT_MS),
+        ) {
+            Ok(budget) => budget,
+            Err(error) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    participant = %participant,
+                    error = %error,
+                    "{log_message}"
+                );
+                return;
+            }
+        };
+
+        let join_result = execute_with_timeout_budget(effects, &budget, || async {
+            effects
+                .join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant,
+                })
+                .await
+        })
+        .await;
+
+        match join_result {
+            Ok(()) => {}
+            Err(TimeoutRunError::Timeout(error)) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    participant = %participant,
+                    error = %error,
+                    timeout_ms = INVITATION_CHANNEL_JOIN_TIMEOUT_MS,
+                    "{log_message}"
+                );
+            }
+            Err(TimeoutRunError::Operation(error)) => {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    participant = %participant,
+                    error = %error,
+                    "{log_message}"
+                );
+            }
+        }
+    }
+
+    #[aura_macros::best_effort_boundary]
     pub(super) async fn provision_amp_channel_for_inbound_chat_fact(
         &self,
         effects: &AuraEffectSystem,
@@ -43,26 +191,13 @@ impl<'a> InvitationChannelHandler<'a> {
             return;
         }
 
-        if let Err(error) = effects
-            .create_channel(ChannelCreateParams {
-                context: context_id,
-                channel: Some(channel_id),
-                skip_window: None,
-                topic: None,
-            })
-            .await
-        {
-            let lowered = error.to_string().to_ascii_lowercase();
-            if !lowered.contains("already") && !lowered.contains("exists") {
-                tracing::warn!(
-                    context_id = %context_id,
-                    channel_id = %channel_id,
-                    error = %error,
-                    "Failed to provision AMP channel checkpoint from inbound chat fact"
-                );
-                return;
-            }
-        }
+        self.best_effort_create_channel(
+            effects,
+            context_id,
+            channel_id,
+            "Failed to provision AMP channel checkpoint from inbound chat fact",
+        )
+        .await;
 
         let local_authority = self.handler.context.authority.authority_id();
         let mut participants = vec![local_authority];
@@ -71,22 +206,14 @@ impl<'a> InvitationChannelHandler<'a> {
         }
 
         for participant in participants {
-            if let Err(error) = effects
-                .join_channel(ChannelJoinParams {
-                    context: context_id,
-                    channel: channel_id,
-                    participant,
-                })
-                .await
-            {
-                tracing::debug!(
-                    context_id = %context_id,
-                    channel_id = %channel_id,
-                    participant = %participant,
-                    error = %error,
-                    "AMP join provisioning from inbound chat fact failed"
-                );
-            }
+            self.best_effort_join_channel(
+                effects,
+                context_id,
+                channel_id,
+                participant,
+                "AMP join provisioning from inbound chat fact failed",
+            )
+            .await;
         }
     }
 
@@ -245,6 +372,7 @@ impl<'a> InvitationChannelHandler<'a> {
         invite.context_id
     }
 
+    #[aura_macros::best_effort_boundary]
     pub(super) async fn materialize_channel_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,
@@ -252,21 +380,14 @@ impl<'a> InvitationChannelHandler<'a> {
     ) -> AgentResult<()> {
         let own_id = self.handler.context.authority.authority_id();
 
-        if let Err(error) = effects
-            .join_channel(ChannelJoinParams {
-                context: invite.context_id,
-                channel: invite.channel_id,
-                participant: own_id,
-            })
-            .await
-        {
-            tracing::debug!(
-                context_id = %invite.context_id,
-                channel_id = %invite.channel_id,
-                error = %error,
-                "Failed to join invited channel (continuing)"
-            );
-        }
+        self.best_effort_join_channel(
+            effects,
+            invite.context_id,
+            invite.channel_id,
+            own_id,
+            "Failed to join invited channel (continuing)",
+        )
+        .await;
 
         if !self
             .handler

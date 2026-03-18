@@ -3012,6 +3012,7 @@ pub async fn invite_user_to_channel(
 
 /// Invite a user to a channel while carrying an already-authoritative context,
 /// when the caller has one.
+#[aura_macros::semantic_owner]
 pub async fn invite_user_to_channel_with_context(
     app_core: &Arc<RwLock<AppCore>>,
     target_user_id: &str,

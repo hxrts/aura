@@ -403,9 +403,10 @@ fn execute_harness_followup_command(
                 OperationId::invitation_accept(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
             );
+            let handle = operation.harness_handle();
             state.router.go_to(Screen::Chat);
             (cb.chat.on_accept_pending_channel_invitation)(operation);
-            Ok(None)
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
             let Some(cb) = callbacks.as_ref() else {

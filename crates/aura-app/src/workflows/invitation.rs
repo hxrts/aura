@@ -175,7 +175,10 @@ use thiserror::Error;
 #[allow(clippy::disallowed_types)]
 type ChannelInvitationStageTracker = Arc<std::sync::Mutex<&'static str>>;
 
-const INVITATION_ACCEPT_STAGE_TIMEOUT_MS: u64 = 3_000;
+const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
+const INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
+const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
+const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
 const CONTACT_LINK_ATTEMPTS: usize = 32;
 const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
@@ -713,6 +716,107 @@ async fn fail_device_enrollment_accept<T>(
     Err(AuraError::agent(error.detail.unwrap_or_else(|| {
         "device enrollment acceptance failed".to_string()
     })))
+}
+
+async fn fail_pending_invitation_accept_if_owned<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    instance_id: Option<OperationInstanceId>,
+    error: AcceptInvitationError,
+) -> Result<T, AuraError> {
+    if instance_id.is_some() {
+        return fail_invitation_accept(
+            app_core,
+            SemanticOperationKind::AcceptPendingChannelInvitation,
+            instance_id,
+            error,
+        )
+        .await;
+    }
+
+    Err(error.into())
+}
+
+async fn list_pending_invitations_with_timeout(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) -> Result<Vec<InvitationInfo>, AcceptInvitationError> {
+    let budget = workflow_timeout_budget(
+        runtime,
+        Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
+    )
+    .await
+    .map_err(|error| AcceptInvitationError::AcceptFailed {
+        detail: error.to_string(),
+    })?;
+
+    match execute_with_runtime_timeout_budget(runtime, &budget, || async {
+        Ok::<_, AcceptInvitationError>(runtime.list_pending_invitations().await)
+    })
+    .await
+    {
+        Ok(pending) => Ok(pending),
+        Err(TimeoutRunError::Timeout(error)) => Err(AcceptInvitationError::AcceptFailed {
+            detail: error.to_string(),
+        }),
+        Err(TimeoutRunError::Operation(error)) => Err(error),
+    }
+}
+
+async fn best_effort_trigger_runtime_discovery(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) {
+    let budget = match workflow_timeout_budget(
+        runtime,
+        Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
+    )
+    .await
+    {
+        Ok(budget) => budget,
+        Err(_) => return,
+    };
+
+    let _ = execute_with_runtime_timeout_budget(runtime, &budget, || {
+        runtime.trigger_discovery()
+    })
+    .await;
+}
+
+async fn drive_invitation_accept_convergence(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) -> Result<(), AcceptInvitationError> {
+    for _ in 0..INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS {
+        let step_budget = workflow_timeout_budget(
+            runtime,
+            Duration::from_millis(INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS),
+        )
+        .await
+        .map_err(|error| AcceptInvitationError::AcceptFailed {
+            detail: error.to_string(),
+        })?;
+
+        let _ = execute_with_runtime_timeout_budget(runtime, &step_budget, || {
+            runtime.process_ceremony_messages()
+        })
+        .await;
+        let _ = execute_with_runtime_timeout_budget(runtime, &step_budget, || {
+            runtime.trigger_sync()
+        })
+        .await;
+        converge_runtime(runtime).await;
+        let _ = execute_with_runtime_timeout_budget(runtime, &step_budget, || {
+            crate::workflows::system::refresh_account(app_core)
+        })
+        .await;
+
+        if ensure_runtime_peer_connectivity(runtime, "accept_invitation")
+            .await
+            .is_ok()
+        {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 async fn ensure_channel_invitation_context_and_bootstrap(
@@ -1460,6 +1564,7 @@ pub async fn accept_invitation(
 }
 
 /// Accept an invitation and attribute the semantic operation to a specific UI instance.
+#[aura_macros::semantic_owner]
 pub async fn accept_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
@@ -1487,14 +1592,20 @@ pub async fn accept_invitation_with_instance(
     .await?;
     let runtime = require_runtime(app_core).await?;
 
-    let accept_budget = workflow_timeout_budget(
+    let accept_budget = match workflow_timeout_budget(
         &runtime,
-        Duration::from_millis(INVITATION_ACCEPT_STAGE_TIMEOUT_MS),
+        Duration::from_millis(INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS),
     )
     .await
     .map_err(|error| AcceptInvitationError::AcceptFailed {
         detail: error.to_string(),
-    })?;
+    }) {
+        Ok(budget) => budget,
+        Err(error) => {
+            return fail_invitation_accept(app_core, operation_kind, instance_id.clone(), error)
+                .await;
+        }
+    };
     let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
         runtime.accept_invitation(invitation_id.as_str())
     })
@@ -1529,18 +1640,9 @@ pub async fn accept_invitation_with_instance(
         }
     }
 
-    for _ in 0..4 {
-        let _ = runtime.trigger_discovery().await;
-        let _ = runtime.process_ceremony_messages().await;
-        let _ = runtime.trigger_sync().await;
-        converge_runtime(&runtime).await;
-        let _ = crate::workflows::system::refresh_account(app_core).await;
-        if ensure_runtime_peer_connectivity(&runtime, "accept_invitation")
-            .await
-            .is_ok()
-        {
-            break;
-        }
+    best_effort_trigger_runtime_discovery(&runtime).await;
+    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime).await {
+        return fail_invitation_accept(app_core, operation_kind, instance_id.clone(), error).await;
     }
 
     if accepted_invitation.as_ref().is_some_and(|invitation| {
@@ -1573,15 +1675,26 @@ pub async fn accept_invitation_with_instance(
         invitation.invitation_type == crate::views::invitations::InvitationType::Chat
     }) {
         if let Some(channel_id) = invitation.home_id {
-            let reconcile_budget = workflow_timeout_budget(
+            let reconcile_budget = match workflow_timeout_budget(
                 &runtime,
-                Duration::from_millis(INVITATION_ACCEPT_STAGE_TIMEOUT_MS),
+                Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
             )
             .await
             .map_err(|error| AcceptInvitationError::AcceptFailed {
                 detail: error.to_string(),
-            })?;
-            execute_with_runtime_timeout_budget(&runtime, &reconcile_budget, || {
+            }) {
+                Ok(budget) => budget,
+                Err(error) => {
+                    return fail_invitation_accept(
+                        app_core,
+                        operation_kind,
+                        instance_id.clone(),
+                        error,
+                    )
+                    .await;
+                }
+            };
+            let reconcile_result = execute_with_runtime_timeout_budget(&runtime, &reconcile_budget, || {
                 reconcile_accepted_channel_invitation(
                     app_core,
                     &runtime,
@@ -1607,7 +1720,16 @@ pub async fn accept_invitation_with_instance(
                 TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
                     detail: operation_error.to_string(),
                 },
-            })?;
+            });
+            if let Err(error) = reconcile_result {
+                return fail_invitation_accept(
+                    app_core,
+                    operation_kind,
+                    instance_id.clone(),
+                    error,
+                )
+                .await;
+            }
         }
     }
 
@@ -1633,6 +1755,7 @@ pub async fn accept_imported_invitation(
 }
 
 /// Accept an imported invitation and attribute the semantic operation to a specific UI instance.
+#[aura_macros::semantic_owner]
 pub async fn accept_imported_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &crate::runtime_bridge::InvitationInfo,
@@ -1667,14 +1790,20 @@ pub async fn accept_imported_invitation_with_instance(
 
     let runtime = require_runtime(app_core).await?;
 
-    let accept_budget = workflow_timeout_budget(
+    let accept_budget = match workflow_timeout_budget(
         &runtime,
-        Duration::from_millis(INVITATION_ACCEPT_STAGE_TIMEOUT_MS),
+        Duration::from_millis(INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS),
     )
     .await
     .map_err(|error| AcceptInvitationError::AcceptFailed {
         detail: error.to_string(),
-    })?;
+    }) {
+        Ok(budget) => budget,
+        Err(error) => {
+            return fail_invitation_accept(app_core, operation_kind, instance_id.clone(), error)
+                .await;
+        }
+    };
     let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
         runtime.accept_invitation(invitation.invitation_id.as_str())
     })
@@ -1709,18 +1838,9 @@ pub async fn accept_imported_invitation_with_instance(
         }
     }
 
-    for _ in 0..4 {
-        let _ = runtime.trigger_discovery().await;
-        let _ = runtime.process_ceremony_messages().await;
-        let _ = runtime.trigger_sync().await;
-        converge_runtime(&runtime).await;
-        let _ = crate::workflows::system::refresh_account(app_core).await;
-        if ensure_runtime_peer_connectivity(&runtime, "accept_invitation")
-            .await
-            .is_ok()
-        {
-            break;
-        }
+    best_effort_trigger_runtime_discovery(&runtime).await;
+    if let Err(error) = drive_invitation_accept_convergence(app_core, &runtime).await {
+        return fail_invitation_accept(app_core, operation_kind, instance_id.clone(), error).await;
     }
 
     match &invitation.invitation_type {
@@ -1771,15 +1891,26 @@ pub async fn accept_imported_invitation_with_instance(
                     .await;
                 }
             };
-            let reconcile_budget = workflow_timeout_budget(
+            let reconcile_budget = match workflow_timeout_budget(
                 &runtime,
-                Duration::from_millis(INVITATION_ACCEPT_STAGE_TIMEOUT_MS),
+                Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
             )
             .await
             .map_err(|error| AcceptInvitationError::AcceptFailed {
                 detail: error.to_string(),
-            })?;
-            execute_with_runtime_timeout_budget(&runtime, &reconcile_budget, || {
+            }) {
+                Ok(budget) => budget,
+                Err(error) => {
+                    return fail_invitation_accept(
+                        app_core,
+                        operation_kind,
+                        instance_id.clone(),
+                        error,
+                    )
+                    .await;
+                }
+            };
+            let reconcile_result = execute_with_runtime_timeout_budget(&runtime, &reconcile_budget, || {
                 reconcile_accepted_channel_invitation(
                     app_core,
                     &runtime,
@@ -1805,7 +1936,16 @@ pub async fn accept_imported_invitation_with_instance(
                 TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
                     detail: operation_error.to_string(),
                 },
-            })?;
+            });
+            if let Err(error) = reconcile_result {
+                return fail_invitation_accept(
+                    app_core,
+                    operation_kind,
+                    instance_id.clone(),
+                    error,
+                )
+                .await;
+            }
         }
         crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {}
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => unreachable!(),
@@ -2213,6 +2353,7 @@ pub async fn accept_pending_home_invitation(
 }
 
 /// Accept the current pending home invitation and attribute the semantic operation to a specific UI instance.
+#[aura_macros::semantic_owner]
 pub async fn accept_pending_home_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     instance_id: Option<OperationInstanceId>,
@@ -2235,9 +2376,18 @@ pub async fn accept_pending_home_invitation_with_instance(
         if let Some(invitation_id) =
             pending_home_invitation_id_from_view(&invitations, our_authority)
         {
-            if let Some(invitation) = runtime
-                .list_pending_invitations()
-                .await
+            let pending = match list_pending_invitations_with_timeout(&runtime).await {
+                Ok(pending) => pending,
+                Err(error) => {
+                    return fail_pending_invitation_accept_if_owned(
+                        app_core,
+                        instance_id,
+                        error,
+                    )
+                    .await;
+                }
+            };
+            if let Some(invitation) = pending
                 .into_iter()
                 .find(|invitation| invitation.invitation_id == invitation_id)
             {
@@ -2270,7 +2420,7 @@ pub async fn accept_pending_home_invitation_with_instance(
         Duration::from_millis(HOME_ACCEPT_BACKOFF_MS),
     )?;
     let invitation_id = execute_with_runtime_retry_budget(&runtime, &policy, |_attempt| async {
-        let pending = runtime.list_pending_invitations().await;
+        let pending = list_pending_invitations_with_timeout(&runtime).await?;
         let home_invitation = pending.iter().find(|inv| {
             matches!(inv.invitation_type, InvitationBridgeType::Channel { .. })
                 && inv.sender_id != our_authority
@@ -2293,12 +2443,20 @@ pub async fn accept_pending_home_invitation_with_instance(
     }
 
     if let Some(invitation_id) =
-        accepted_pending_home_invitation_from_history(app_core, our_authority, instance_id).await?
+        accepted_pending_home_invitation_from_history(app_core, our_authority, instance_id.clone())
+            .await?
     {
         return Ok(invitation_id);
     }
 
-    Err(super::error::WorkflowError::Precondition("No pending home invitation found").into())
+    fail_pending_invitation_accept_if_owned(
+        app_core,
+        instance_id,
+        AcceptInvitationError::AcceptFailed {
+            detail: "No pending home invitation found".to_string(),
+        },
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -2687,6 +2845,45 @@ mod tests {
             } if *operation_id == OperationId::invitation_accept()
                 && status.kind == SemanticOperationKind::AcceptPendingChannelInvitation
                 && status.phase == SemanticOperationPhase::Succeeded
+        )));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_pending_home_invitation_without_pending_invites_publishes_terminal_failure() {
+        let our_authority = AuthorityId::new_from_entropy([69u8; 32]);
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> =
+            Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+                our_authority,
+            ));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let instance_id = OperationInstanceId("pending-accept-1".to_string());
+        let result =
+            accept_pending_home_invitation_with_instance(&app_core, Some(instance_id.clone()))
+                .await;
+
+        assert!(result.is_err());
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id,
+                instance_id: Some(observed_instance_id),
+                status,
+            } if *operation_id == OperationId::invitation_accept()
+                && observed_instance_id == &instance_id
+                && status.kind == SemanticOperationKind::AcceptPendingChannelInvitation
+                && status.phase == SemanticOperationPhase::Failed
         )));
     }
 

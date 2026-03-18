@@ -254,3 +254,24 @@ pub fn aura_error_types(input: TokenStream) -> TokenStream {
 pub fn aura_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     test_macros::aura_test_impl(attr, item)
 }
+
+/// Marker attribute for parity-critical semantic owner functions.
+///
+/// The attribute is intentionally a no-op at expansion time. Repo-local
+/// ownership lints inspect it to enforce bounded-await policy inside owner
+/// functions.
+#[proc_macro_attribute]
+pub fn semantic_owner(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+/// Marker attribute for best-effort side-effect boundaries.
+///
+/// The attribute is intentionally a no-op at expansion time. Repo-local
+/// ownership lints inspect it to ensure best-effort boundaries route side
+/// effects through sanctioned helpers instead of awaiting transport/channel
+/// operations directly.
+#[proc_macro_attribute]
+pub fn best_effort_boundary(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}

@@ -627,6 +627,8 @@ ci-ownership-policy:
     just ci-capability-boundaries
     just ci-typed-errors
     just ci-operation-terminality
+    just ci-semantic-owner-awaits
+    just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
     just ci-timeout-policy
     just ci-timeout-time-domains
@@ -652,6 +654,12 @@ ci-typed-errors:
 
 ci-operation-terminality:
     bash scripts/check/operation-terminality.sh
+
+ci-semantic-owner-awaits:
+    bash scripts/check/semantic-owner-bounded-awaits.sh
+
+ci-best-effort-side-effects:
+    bash scripts/check/best-effort-side-effect-boundary.sh
 
 ci-observed-layer-boundaries:
     bash scripts/check/observed-layer-authorship.sh

@@ -86,7 +86,7 @@ const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
-const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 4_500;
+const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
 
 async fn execute_with_effect_timeout<TTime, T, E, Fut>(
@@ -3576,12 +3576,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let invitation_id =
             aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
-        let result = invitation_service
-            .accept(&invitation_id)
-            .await
-            .map_err(|e| {
+        let result = execute_with_effect_timeout(
+            &self.agent.runtime().effects(),
+            Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
+            invitation_service.accept(&invitation_id),
+        )
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
+                "invitation_service.accept timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
+            )),
+            TimeoutRunError::Operation(e) => {
                 IntentError::internal_error(format!("Failed to accept invitation: {}", e))
-            })?;
+            }
+        })?;
 
         if result.success {
             Ok(())

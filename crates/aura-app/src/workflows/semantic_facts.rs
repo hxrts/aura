@@ -41,7 +41,7 @@ static SEMANTIC_READINESS_PUBLICATION_CAPABILITY: LazyLock<ReadinessPublicationC
 
 /// Return the sanctioned lifecycle-publication capability for shared semantic
 /// operation status publication.
-pub fn semantic_lifecycle_publication_capability() -> &'static LifecyclePublicationCapability {
+pub(crate) fn semantic_lifecycle_publication_capability() -> &'static LifecyclePublicationCapability {
     &SEMANTIC_LIFECYCLE_PUBLICATION_CAPABILITY
 }
 

@@ -103,6 +103,7 @@ const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const INVITATION_CONTENT_TYPE: &str = "application/aura-invitation";
 const INVITATION_PREPARE_STAGE_TIMEOUT_MS: u64 = 4_000;
+const INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS: u64 = 2_000;
 
 async fn timeout_prepare_invitation_stage<T>(
     effects: &AuraEffectSystem,
@@ -127,6 +128,45 @@ async fn timeout_prepare_invitation_stage<T>(
             )),
             TimeoutRunError::Operation(error) => error,
         })
+}
+
+async fn timeout_best_effort_network_stage<T>(
+    effects: &AuraEffectSystem,
+    stage: &'static str,
+    future: impl Future<Output = AgentResult<T>>,
+) -> AgentResult<T> {
+    let started_at = effects.physical_time().await.map_err(|error| {
+        AgentError::runtime(format!(
+            "invitation best-effort network stage `{stage}` could not read physical time: {error}"
+        ))
+    })?;
+    let budget = TimeoutBudget::from_start_and_timeout(
+        &started_at,
+        Duration::from_millis(INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS),
+    )
+    .map_err(|error| AgentError::runtime(error.to_string()))?;
+    execute_with_timeout_budget(effects, &budget, || future)
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => AgentError::runtime(format!(
+                "invitation best-effort network stage `{stage}` timed out after {INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS}ms"
+            )),
+            TimeoutRunError::Operation(error) => error,
+        })
+}
+
+async fn best_effort_send_envelope(
+    effects: &AuraEffectSystem,
+    stage: &'static str,
+    envelope: TransportEnvelope,
+) -> AgentResult<()> {
+    timeout_best_effort_network_stage(effects, stage, async {
+        effects
+            .send_envelope(envelope)
+            .await
+            .map_err(|error| AgentError::effects(format!("{stage}: {error}")))
+    })
+    .await
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -966,7 +1006,13 @@ impl InvitationHandler {
                         receipt: None,
                     };
 
-                    if let Err(error) = effects.send_envelope(envelope).await {
+                    if let Err(error) = best_effort_send_envelope(
+                        &effects,
+                        "device enrollment acceptance envelope send failed",
+                        envelope,
+                    )
+                    .await
+                    {
                         tracing::warn!(
                             invitation_id = %invitation_id,
                             error = %error,
@@ -2380,6 +2426,7 @@ pub async fn execute_guard_outcome(
             effects,
             charge_peer,
             &mut pending_receipt,
+            false,
         )
         .await?;
     }
@@ -2472,22 +2519,41 @@ pub(crate) async fn execute_invitation_effect_commands(
 
     for command in commands {
         let is_network_side_effect = matches!(
-            command,
+            &command,
             aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
                 | aura_invitation::guards::EffectCommand::NotifyPeer { .. }
                 | aura_invitation::guards::EffectCommand::RecordReceipt { .. }
         );
 
-        match execute_effect_command(
-            command,
-            authority,
-            context_id,
-            effects,
-            charge_peer,
-            &mut pending_receipt,
-        )
-        .await
-        {
+        let result = if best_effort_network_failures && is_network_side_effect {
+            timeout_best_effort_network_stage(
+                effects,
+                "accept_network_side_effect",
+                execute_effect_command(
+                    command,
+                    authority,
+                    context_id,
+                    effects,
+                    charge_peer,
+                    &mut pending_receipt,
+                    best_effort_network_failures,
+                ),
+            )
+            .await
+        } else {
+            execute_effect_command(
+                command,
+                authority,
+                context_id,
+                effects,
+                charge_peer,
+                &mut pending_receipt,
+                best_effort_network_failures,
+            )
+            .await
+        };
+
+        match result {
             Ok(()) => {}
             Err(error) if best_effort_network_failures && is_network_side_effect => {
                 tracing::warn!(
@@ -2511,6 +2577,7 @@ async fn execute_effect_command(
     effects: &AuraEffectSystem,
     charge_peer: AuthorityId,
     pending_receipt: &mut Option<Receipt>,
+    best_effort_network_failures: bool,
 ) -> AgentResult<()> {
     match command {
         aura_invitation::guards::EffectCommand::JournalAppend { fact } => {
@@ -2531,6 +2598,7 @@ async fn execute_effect_command(
                 authority,
                 pending_receipt.clone(),
                 effects,
+                best_effort_network_failures,
             )
             .await
         }
@@ -2580,6 +2648,7 @@ async fn execute_notify_peer(
     authority: &AuthorityContext,
     receipt: Option<Receipt>,
     effects: &AuraEffectSystem,
+    best_effort_network_failures: bool,
 ) -> AgentResult<()> {
     if effects.is_test_mode() {
         return Ok(());
@@ -2686,10 +2755,14 @@ async fn execute_notify_peer(
         receipt: receipt.map(transport_receipt_from_flow),
     };
 
-    effects
-        .send_envelope(envelope)
-        .await
-        .map_err(|e| AgentError::effects(format!("Failed to notify peer with invitation: {e}")))?;
+    if best_effort_network_failures {
+        best_effort_send_envelope(effects, "notify peer with invitation failed", envelope)
+            .await?;
+    } else {
+        effects.send_envelope(envelope).await.map_err(|e| {
+            AgentError::effects(format!("Failed to notify peer with invitation: {e}"))
+        })?;
+    }
 
     Ok(())
 }
