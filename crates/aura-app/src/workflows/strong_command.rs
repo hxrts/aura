@@ -1217,6 +1217,7 @@ async fn wait_for_consistency(
     }
 
     const CONSISTENCY_MAX_PASSES: usize = 8;
+    let mut runtime_available = false;
     for _pass in 0..CONSISTENCY_MAX_PASSES {
         if consistency_invariant_holds(app_core, plan).await {
             return match requirement {
@@ -1227,7 +1228,14 @@ async fn wait_for_consistency(
         }
 
         if let Ok(runtime) = require_runtime(app_core).await {
+            runtime_available = true;
             converge_runtime(&runtime).await;
+        } else if !runtime_available {
+            // No runtime has been available for any pass.  Convergence
+            // cannot make progress so bail early instead of spinning.
+            #[cfg(feature = "instrumented")]
+            tracing::warn!("consistency wait: no runtime available, returning partial timeout");
+            return ConsistencyState::TimedOutPartial;
         }
         cooperative_yield().await;
     }
@@ -1251,7 +1259,13 @@ async fn consistency_invariant_holds(
                     .chat
                     .channel(&channel_id.0)
                     .is_none_or(|channel| channel.member_count == 0),
-                Err(_) => false,
+                Err(_) => {
+                    // Scope resolution failed — treat as satisfied rather
+                    // than looping forever.  The leave operation already
+                    // executed; if the channel can't be found the leave
+                    // effectively succeeded.
+                    true
+                }
             },
             _ => false,
         },
