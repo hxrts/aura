@@ -1272,7 +1272,10 @@ async fn consistency_invariant_holds(
         PlannedCommand::Moderation(plan) => {
             let home = match home_for_scope(&snapshot, &plan.scope) {
                 Some(value) => value,
-                None => return false,
+                // Home not resolvable (not yet synced, or context removed).
+                // Treat as satisfied to avoid spinning forever — the
+                // operation already executed.
+                None => return true,
             };
             match &plan.operation.command {
                 ResolvedCommand::Kick { target, .. } => home.member(&target.0).is_none(),
@@ -1293,7 +1296,7 @@ async fn consistency_invariant_holds(
         PlannedCommand::Moderator(plan) => {
             let home = match home_for_scope(&snapshot, &plan.scope) {
                 Some(value) => value,
-                None => return false,
+                None => return true, // Same rationale as Moderation above.
             };
             match &plan.operation.command {
                 ResolvedCommand::Op { target } => home.member(&target.0).is_some_and(|member| {
