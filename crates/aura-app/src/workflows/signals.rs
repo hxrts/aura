@@ -31,6 +31,7 @@ where
 ///
 /// When the `instrumented` feature is active, a debug-level message is
 /// emitted on fallback so signal-system failures are diagnosable.
+#[allow(clippy::manual_unwrap_or_default)] // Intentional: log on fallback when instrumented.
 pub async fn read_signal_or_default<T>(app_core: &Arc<RwLock<AppCore>>, signal: &Signal<T>) -> T
 where
     T: Clone + Default + Send + Sync + 'static,
