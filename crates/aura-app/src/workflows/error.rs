@@ -58,11 +58,12 @@ pub enum WorkflowError {
     },
 
     /// Transport delivery failed after retries.
-    #[error("Delivery to {peer} failed after {attempts} attempts: {detail}")]
+    #[error("Delivery to {peer} failed after {attempts} attempts: {source}")]
     DeliveryFailed {
         peer: String,
         attempts: usize,
-        detail: String,
+        #[source]
+        source: AuraError,
     },
 
     /// A precondition was not met.

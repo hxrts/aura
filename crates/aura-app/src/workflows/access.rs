@@ -57,7 +57,7 @@ async fn send_relational_fact_with_retry(
                     AuraError::from(super::error::WorkflowError::DeliveryFailed {
                         peer: peer.to_string(),
                         attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
-                        detail: error.to_string(),
+                        source: AuraError::agent(error.to_string()),
                     })
                 })
         }

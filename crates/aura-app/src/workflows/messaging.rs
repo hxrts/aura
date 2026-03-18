@@ -605,7 +605,7 @@ async fn send_chat_fact_with_retry(
                     }
                     continue;
                 }
-                break error.to_string();
+                break error;
             }
         }
     };
@@ -613,7 +613,7 @@ async fn send_chat_fact_with_retry(
     Err(super::error::WorkflowError::DeliveryFailed {
         peer: peer.to_string(),
         attempts: CHAT_FACT_SEND_MAX_ATTEMPTS,
-        detail: last_error,
+        source: AuraError::agent(last_error.to_string()),
     }
     .into())
 }
@@ -733,7 +733,7 @@ async fn deliver_message_fact_remotely(
             return Err(super::error::WorkflowError::DeliveryFailed {
                 peer: channel_id.to_string(),
                 attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                detail: "no recipient peers resolved after extended retries".to_string(),
+                source: AuraError::agent("no recipient peers resolved after extended retries"),
             }
             .into());
         }
@@ -741,11 +741,11 @@ async fn deliver_message_fact_remotely(
             return Err(super::error::WorkflowError::DeliveryFailed {
                 peer: channel_id.to_string(),
                 attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                detail: format!(
+                source: AuraError::agent(format!(
                     "delivery prerequisites never converged: {}",
                     last_connectivity_error
                         .unwrap_or_else(|| "no recipient fanout attempt executed".to_string())
-                ),
+                )),
             }
             .into());
         }
@@ -753,10 +753,10 @@ async fn deliver_message_fact_remotely(
             return Err(super::error::WorkflowError::DeliveryFailed {
                 peer: channel_id.to_string(),
                 attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                detail: format!(
+                source: AuraError::agent(format!(
                     "message fanout unavailable for all recipients: {}",
                     failed_fanout.join("; ")
-                ),
+                )),
             }
             .into());
         }
