@@ -1309,6 +1309,8 @@ async fn consistency_invariant_holds(
                 _ => false,
             }
         }
+        // General commands are local-only operations (settings, config) that
+        // take effect immediately without requiring convergence verification.
         PlannedCommand::General(_plan) => true,
     }
 }
