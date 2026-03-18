@@ -259,9 +259,19 @@ impl HomeState {
     }
 
     /// Add a member to the home
+    ///
+    /// The storage budget is charged best-effort.  If the budget capacity is
+    /// exceeded the member is still added (the authoritative fact is already
+    /// committed) but the budget projection will be inaccurate.
     pub fn add_member(&mut self, member: HomeMember) {
-        // Charge storage budget for new member
-        let _ = self.storage.add_member();
+        if let Err(_e) = self.storage.add_member() {
+            #[cfg(feature = "instrumented")]
+            tracing::warn!(
+                home_id = %self.id,
+                error = %_e,
+                "home budget capacity exceeded — member added but budget projection diverges"
+            );
+        }
         self.member_count += 1;
         if member.is_online {
             self.online_count += 1;
