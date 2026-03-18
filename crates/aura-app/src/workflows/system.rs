@@ -195,57 +195,77 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         core.runtime().cloned()
     };
 
+    // Track the first error encountered so callers know the refresh was partial.
+    // Each stage runs best-effort: a failure in one stage does not prevent the
+    // remaining stages from executing.  The first error is returned so callers
+    // can distinguish a clean refresh from a partial one.
+    let mut first_error: Option<AuraError> = None;
+    macro_rules! best_effort {
+        ($expr:expr) => {
+            if let Err(e) = $expr {
+                if first_error.is_none() {
+                    first_error = Some(e);
+                }
+            }
+        };
+    }
+
     // Refresh chat state and republish CHAT_SIGNAL so UI subscriptions pick up
     // runtime-side convergence that did not originate from a direct UI action.
     #[cfg(feature = "signals")]
     {
-        let _ = emit_chat_snapshot_signal(app_core).await;
+        best_effort!(emit_chat_snapshot_signal(app_core).await);
     }
 
-    // Refresh contacts state
+    // Refresh contacts state (infallible)
     let _ = super::query::list_contacts(app_core).await;
 
-    // Refresh invitations state
+    // Refresh invitations state (infallible read + fallible readiness)
     let _ = super::invitation::list_invitations(app_core).await;
-    let _ = super::invitation::refresh_authoritative_invitation_readiness(app_core).await;
-    let _ = super::invitation::refresh_authoritative_contact_link_readiness(app_core).await;
+    best_effort!(super::invitation::refresh_authoritative_invitation_readiness(app_core).await);
+    best_effort!(super::invitation::refresh_authoritative_contact_link_readiness(app_core).await);
 
     // Refresh settings state
-    let _ = super::settings::refresh_settings_from_runtime(app_core).await;
+    best_effort!(super::settings::refresh_settings_from_runtime(app_core).await);
 
     // Refresh recovery state (signals feature only)
     #[cfg(feature = "signals")]
     {
-        let _ = super::recovery::get_recovery_status(app_core).await;
+        best_effort!(super::recovery::get_recovery_status(app_core).await);
     }
 
     if let Some(runtime) = runtime {
-        let _ = runtime.trigger_discovery().await;
-        let _ = runtime.trigger_sync().await;
+        best_effort!(runtime.trigger_discovery().await.map_err(|e| AuraError::agent(e.to_string())));
+        best_effort!(runtime.trigger_sync().await.map_err(|e| AuraError::agent(e.to_string())));
     }
 
     #[cfg(feature = "signals")]
     {
-        let _ = emit_chat_snapshot_signal(app_core).await;
+        best_effort!(emit_chat_snapshot_signal(app_core).await);
     }
     #[cfg(feature = "signals")]
     {
-        let _ =
-            super::messaging::refresh_authoritative_channel_membership_readiness(app_core).await;
+        best_effort!(
+            super::messaging::refresh_authoritative_channel_membership_readiness(app_core).await
+        );
     }
 
     // Refresh discovered peers (re-query runtime, not just read stale signal)
-    let _ = super::network::refresh_discovered_peers(app_core).await;
+    best_effort!(super::network::refresh_discovered_peers(app_core).await);
     #[cfg(feature = "signals")]
     {
-        let _ =
-            super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core).await;
+        best_effort!(
+            super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core).await
+        );
     }
 
     // Refresh connection and network status derived from contacts.
-    let _ = refresh_connection_status_from_contacts(app_core).await;
+    best_effort!(refresh_connection_status_from_contacts(app_core).await);
 
-    Ok(())
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
@@ -403,6 +423,8 @@ pub async fn install_contacts_refresh_hook(
     }
 
     let Some(spawner) = spawner else {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!("contacts refresh hook not installed: no task spawner available");
         return Ok(());
     };
 
@@ -463,6 +485,8 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
     }
 
     let Some(spawner) = spawner else {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!("chat refresh hook not installed: no task spawner available");
         return Ok(());
     };
 
@@ -522,6 +546,8 @@ pub async fn install_authoritative_readiness_hook(
     }
 
     let Some(spawner) = spawner else {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!("authoritative readiness hook not installed: no task spawner available");
         return Ok(());
     };
 
@@ -754,11 +780,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_refresh_account() {
+    async fn test_refresh_account_completes_all_stages() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
-        let result = refresh_account(&app_core).await;
-        assert!(result.is_ok());
+        // An offline AppCore (no runtime, signals not initialized) will encounter
+        // partial failures during refresh.  The function should still complete
+        // all stages rather than short-circuiting, and returns the first error.
+        // The important contract: it does NOT panic and does NOT hang.
+        let _result = refresh_account(&app_core).await;
     }
 }

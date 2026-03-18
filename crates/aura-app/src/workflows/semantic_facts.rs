@@ -57,6 +57,12 @@ fn authorize_readiness_publication(
 }
 
 /// Mutate the authoritative semantic-fact set and publish the replacement atomically.
+///
+/// The update gate serializes read-modify-emit sequences.  If `emit_signal`
+/// fails the mutations are lost and the signal retains its prior value — the
+/// error is propagated so callers can react.  A single retry is attempted
+/// before giving up because the most common transient cause is signal
+/// initialization timing.
 pub async fn update_authoritative_semantic_facts<F>(
     app_core: &Arc<RwLock<AppCore>>,
     update: F,
@@ -67,13 +73,26 @@ where
     let _guard = AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE.lock().await;
     let mut facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
     update(&mut facts);
-    emit_signal(
+    let result = emit_signal(
         app_core,
         &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-        facts,
+        facts.clone(),
         AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
     )
-    .await
+    .await;
+    match result {
+        Ok(()) => Ok(()),
+        Err(_first_err) => {
+            // Single retry — re-emit the already-mutated facts.
+            emit_signal(
+                app_core,
+                &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+                facts,
+                AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
+            )
+            .await
+        }
+    }
 }
 
 /// Publish one authoritative semantic fact, replacing any prior fact with the same key.

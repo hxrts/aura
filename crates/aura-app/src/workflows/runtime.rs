@@ -266,7 +266,22 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
                 let _ = execute_with_runtime_timeout_budget(runtime, &budget, || future).await;
             }
             Err(_) => {
-                let _ = future.await;
+                // Budget creation failed (time source unavailable, etc.).  Rather than
+                // awaiting without any deadline — which can stall the convergence loop
+                // indefinitely — race the operation against a hard ceiling sleep.
+                let ceiling_ms = step_timeout_ms.max(DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS);
+                let operation = future;
+                let sleep = runtime.sleep_ms(ceiling_ms);
+                pin_mut!(operation);
+                pin_mut!(sleep);
+                match select(operation, sleep).await {
+                    Either::Left((result, _)) => {
+                        let _ = result;
+                    }
+                    Either::Right(((), _)) => {
+                        // Hard ceiling reached — drop the operation and continue.
+                    }
+                }
             }
         }
     }

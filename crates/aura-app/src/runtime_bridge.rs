@@ -980,8 +980,13 @@ pub trait RuntimeBridge: Send + Sync {
     /// Returns `true` for all capabilities. Override in implementations that
     /// integrate with Biscuit tokens or other authorization systems.
     async fn has_command_capability(&self, _capability: &str) -> bool {
-        // Default: allow all capabilities
-        // Implementations with Biscuit integration should check the token
+        // Default: allow all capabilities.
+        //
+        // WARNING: This default is permissive by design so that offline and test
+        // bridges work without Biscuit integration.  Production RuntimeBridge
+        // implementations MUST override this to evaluate Biscuit tokens or an
+        // equivalent capability check.  Relying on this default in a production
+        // deployment disables command-level authorization.
         true
     }
 

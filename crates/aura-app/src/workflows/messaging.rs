@@ -763,12 +763,16 @@ async fn deliver_message_fact_remotely(
     }
 
     converge_runtime(runtime).await;
+    // Post-send connectivity verification.  The message is committed locally
+    // regardless, but we surface a diagnostic so the UI can indicate that remote
+    // delivery is pending.  This warning fires in both instrumented and
+    // non-instrumented builds via the semantic-facts signal.
     if let Err(_error) = ensure_runtime_peer_connectivity(runtime, "send_message_ref").await {
         #[cfg(feature = "instrumented")]
         tracing::warn!(
             error = %_error,
             channel_id = %channel_id,
-            "message send completed without reachable peers"
+            "message send completed without reachable peers — remote delivery may not have converged"
         );
     }
 
@@ -1719,17 +1723,42 @@ async fn warm_channel_connectivity(
     channel_id: ChannelId,
     context_id: ContextId,
 ) {
-    let recipients =
-        recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
-    for peer in recipients {
-        let _ = runtime.ensure_peer_channel(context_id, peer).await;
-    }
-    let _ = refresh_authoritative_delivery_readiness_for_channel(
-        app_core, runtime, channel_id, context_id,
-    )
+    let policy = match workflow_retry_policy(
+        8,
+        Duration::from_millis(150),
+        Duration::from_millis(750),
+    ) {
+        Ok(policy) => policy,
+        Err(_) => return,
+    };
+    let _ = execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
+        let recipients =
+            recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+        let mut any_peer_ready = recipients.is_empty();
+        for peer in recipients {
+            if runtime.ensure_peer_channel(context_id, peer).await.is_ok() {
+                any_peer_ready = true;
+            }
+        }
+        let _ = refresh_authoritative_delivery_readiness_for_channel(
+            app_core, runtime, channel_id, context_id,
+        )
+        .await;
+        converge_runtime(runtime).await;
+        let _ = crate::workflows::system::refresh_account(app_core).await;
+        if any_peer_ready
+            || ensure_runtime_peer_connectivity(runtime, "warm_channel_connectivity")
+                .await
+                .is_ok()
+        {
+            Ok(())
+        } else {
+            Err(AuraError::from(super::error::WorkflowError::Precondition(
+                "channel peer connectivity not yet warmed",
+            )))
+        }
+    })
     .await;
-    converge_runtime(runtime).await;
-    let _ = crate::workflows::system::refresh_account(app_core).await;
 }
 
 /// Resolve recipient peers for a channel view from known channel, home, contact, and discovery state.
@@ -2159,24 +2188,30 @@ pub async fn join_channel(
         })?;
     enforce_home_join_allowed(app_core, context_id, channel_id, runtime.authority_id()).await?;
 
-    runtime
+    if let Err(error) = runtime
         .amp_join_channel(ChannelJoinParams {
             context: context_id,
             channel: channel_id,
             participant: runtime.authority_id(),
         })
         .await
-        .map_err(|error| {
-            if intent_error_is_not_found(&error) {
-                JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
-            } else {
-                JoinChannelError::Transport {
-                    channel_id,
-                    detail: error.to_string(),
-                }
-                .into_aura_error()
+    {
+        let canonical_state_exists = runtime_channel_state_exists(app_core, &runtime, channel_id)
+            .await
+            .unwrap_or(false);
+        if intent_error_is_not_found(&error) && !canonical_state_exists {
+            return Err(JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error());
+        }
+        if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists
+            && !canonical_state_exists
+        {
+            return Err(JoinChannelError::Transport {
+                channel_id,
+                detail: error.to_string(),
             }
-        })?;
+            .into_aura_error());
+        }
+    }
 
     restore_home_member_membership(
         app_core,

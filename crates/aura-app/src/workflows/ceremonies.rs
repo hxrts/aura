@@ -181,6 +181,10 @@ impl Default for CeremonyPollPolicy {
 pub enum CeremonyLifecycleState {
     Completed,
     Failed,
+    /// The ceremony failed and the best-effort rollback also failed.
+    /// The account may be in a partially-committed state that requires
+    /// manual intervention or a fresh ceremony to resolve.
+    FailedRollbackIncomplete,
     TimedOut,
 }
 
@@ -220,6 +224,16 @@ pub async fn get_key_rotation_ceremony_status(
 }
 
 /// Cancel a key rotation ceremony (best effort).
+///
+/// # Ownership contract
+///
+/// Today this accepts a bare `CeremonyId`, which means multiple callers can
+/// race cancel against poll or status queries.  The target ownership model
+/// requires a `MoveOwned` ceremony handle returned by the start function that
+/// is consumed on cancel — preventing concurrent cancel/poll races by
+/// construction.  Until that migration is complete, callers must coordinate
+/// externally to avoid issuing cancel and poll concurrently on the same
+/// ceremony.
 pub async fn cancel_key_rotation_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     ceremony_id: &CeremonyId,
@@ -259,6 +273,7 @@ where
 
         if status.has_failed {
             // Best-effort rollback for rotations (until runtime owns this fully).
+            let mut rollback_failed = false;
             if policy.rollback_on_failure {
                 if let Some(epoch) = status.pending_epoch {
                     if matches!(
@@ -268,13 +283,25 @@ where
                     ) {
                         let core = app_core.read().await;
                         if let Err(e) = core.rollback_guardian_key_rotation(epoch).await {
-                            let _ = e;
+                            #[cfg(feature = "instrumented")]
+                            tracing::error!(
+                                error = %e,
+                                ceremony_id = %ceremony_id,
+                                epoch = ?epoch,
+                                "ceremony rollback failed — account may be in partially-committed state"
+                            );
+                            let _ = &e;
+                            rollback_failed = true;
                         }
                     }
                 }
             }
             return Ok(CeremonyLifecycle {
-                state: CeremonyLifecycleState::Failed,
+                state: if rollback_failed {
+                    CeremonyLifecycleState::FailedRollbackIncomplete
+                } else {
+                    CeremonyLifecycleState::Failed
+                },
                 status,
                 attempts: attempt,
             });
@@ -283,7 +310,16 @@ where
         if status.is_complete {
             // Best-effort: refresh settings so device list / counts update after a commit.
             if policy.refresh_settings_on_complete {
-                let _ = crate::workflows::settings::refresh_settings_from_runtime(app_core).await;
+                if let Err(_e) =
+                    crate::workflows::settings::refresh_settings_from_runtime(app_core).await
+                {
+                    #[cfg(feature = "instrumented")]
+                    tracing::warn!(
+                        error = %_e,
+                        ceremony_id = %ceremony_id,
+                        "settings refresh failed after ceremony completion — UI may show stale device counts"
+                    );
+                }
             }
             return Ok(CeremonyLifecycle {
                 state: CeremonyLifecycleState::Completed,
