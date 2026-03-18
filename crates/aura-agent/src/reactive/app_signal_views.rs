@@ -1036,7 +1036,8 @@ impl ReactiveView for ChatSignalView {
                     )) => {
                         // When a channel epoch is committed, all messages with epoch_hint <= parent_epoch are finalized
                         let count = state
-                            .mark_finalized_up_to_epoch(&bump.channel, bump.parent_epoch as u32);
+                            .mark_finalized_up_to_epoch(&bump.channel, bump.parent_epoch as u32)
+                            .unwrap_or(0);
                         if count > 0 {
                             tracing::debug!(
                                 channel_id = %bump.channel,

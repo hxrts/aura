@@ -398,6 +398,11 @@ impl ChatState {
     }
 
     /// Rebind an existing channel entry to a canonical identity, preserving visible state.
+    ///
+    /// This performs a multi-step mutation (remove old channel, merge messages,
+    /// reassign message channel_ids, insert canonical channel).  The view is a
+    /// derived projection — if the intermediate state is inconsistent due to a
+    /// panic, the view can be recomputed from journal facts via a full refresh.
     pub fn rebind_channel_identity(&mut self, from: &ChannelId, mut canonical: Channel) {
         let canonical_id = canonical.id;
         if *from == canonical.id {
@@ -668,13 +673,26 @@ impl ChatState {
     /// Messages with epoch_hint <= parent_epoch are considered finalized.
     ///
     /// Updates the channel's last_finalized_epoch and marks individual messages.
-    /// Returns the number of messages that were updated.
-    pub fn mark_finalized_up_to_epoch(&mut self, channel_id: &ChannelId, epoch: u32) -> u32 {
+    /// Returns `None` if the channel does not exist, or `Some(count)` with the
+    /// number of messages that were updated (may be 0 if all were already
+    /// finalized).
+    pub fn mark_finalized_up_to_epoch(
+        &mut self,
+        channel_id: &ChannelId,
+        epoch: u32,
+    ) -> Option<u32> {
         // Update the channel's finalized epoch
-        if let Some(channel) = self.channel_mut(channel_id) {
+        let channel_exists = if let Some(channel) = self.channel_mut(channel_id) {
             if epoch > channel.last_finalized_epoch {
                 channel.last_finalized_epoch = epoch;
             }
+            true
+        } else {
+            false
+        };
+
+        if !channel_exists {
+            return None;
         }
 
         // Mark all messages with epoch_hint <= epoch as finalized
@@ -689,7 +707,7 @@ impl ChatState {
                 }
             }
         }
-        count
+        Some(count)
     }
 }
 
@@ -839,7 +857,7 @@ mod tests {
 
         // Finalize up to epoch 2 (should mark msg1 and msg2)
         let count = state.mark_finalized_up_to_epoch(&channel_id, 2);
-        assert_eq!(count, 2);
+        assert_eq!(count, Some(2));
 
         // Check message finalization states
         let messages = state.channel_messages.get(&channel_id).unwrap();
@@ -913,12 +931,13 @@ mod tests {
 
         // First finalization
         let count1 = state.mark_finalized_up_to_epoch(&channel_id, 5);
-        assert_eq!(count1, 1);
+        assert_eq!(count1, Some(1));
 
         // Second finalization of same messages should return 0
         let count2 = state.mark_finalized_up_to_epoch(&channel_id, 5);
         assert_eq!(
-            count2, 0,
+            count2,
+            Some(0),
             "Already-finalized messages should not be counted again"
         );
     }
@@ -928,9 +947,9 @@ mod tests {
         let mut state = ChatState::default();
         let unknown_channel = ChannelId::from_bytes([99u8; 32]);
 
-        // Should not panic on unknown channel
+        // Should return None for unknown channel
         let count = state.mark_finalized_up_to_epoch(&unknown_channel, 10);
-        assert_eq!(count, 0);
+        assert_eq!(count, None, "unknown channel should return None, not Some(0)");
     }
 
     #[test]
