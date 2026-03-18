@@ -290,11 +290,48 @@ pub enum CommandScope {
 }
 
 /// Planning preconditions that must hold before execution.
+///
+/// These are validated against the current snapshot at execution time via
+/// [`validate_preconditions`] to detect TOCTOU drift between plan resolution
+/// and execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanPrecondition {
     TargetExists(ResolvedAuthorityId),
     ChannelExists(ResolvedChannelId),
     ActorInScope,
+}
+
+/// Validate that all plan preconditions still hold against the current state.
+#[cfg(feature = "signals")]
+fn validate_preconditions<T>(
+    plan: &CommandPlan<T>,
+    snapshot: &crate::core::StateSnapshot,
+) -> Result<(), CommandResolverError> {
+    for precondition in &plan.preconditions {
+        match precondition {
+            PlanPrecondition::TargetExists(target) => {
+                if snapshot.contacts.contact(&target.0).is_none() {
+                    return Err(CommandResolverError::UnknownTarget {
+                        target: ResolveTarget::Authority,
+                        input: target.0.to_string(),
+                    });
+                }
+            }
+            PlanPrecondition::ChannelExists(channel) => {
+                if snapshot.chat.channel(&channel.0).is_none() {
+                    return Err(CommandResolverError::UnknownTarget {
+                        target: ResolveTarget::Channel,
+                        input: channel.0.to_string(),
+                    });
+                }
+            }
+            PlanPrecondition::ActorInScope => {
+                // Actor-in-scope is verified by the resolver; re-check is
+                // deferred until actor-scoped capability gates are in place.
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Typed command plan for execution.
@@ -1121,6 +1158,20 @@ pub async fn execute_planned(
     app_core: &Arc<RwLock<AppCore>>,
     plan: PlannedCommand,
 ) -> Result<CommandExecutionResult, AuraError> {
+    // Validate preconditions against current state to detect TOCTOU drift.
+    {
+        let snapshot = app_core.read().await.snapshot();
+        let check = match &plan {
+            PlannedCommand::Membership(p) => validate_preconditions(p, &snapshot),
+            PlannedCommand::Moderation(p) => validate_preconditions(p, &snapshot),
+            PlannedCommand::Moderator(p) => validate_preconditions(p, &snapshot),
+            PlannedCommand::General(p) => validate_preconditions(p, &snapshot),
+        };
+        if let Err(e) = check {
+            return Err(AuraError::invalid(format!("precondition failed: {e}")));
+        }
+    }
+
     let requirement = plan.consistency_requirement();
     let details = match &plan {
         PlannedCommand::Membership(plan) => execute_membership(app_core, plan).await?,
@@ -1215,6 +1266,12 @@ async fn consistency_invariant_holds(
                 ResolvedCommand::Unban { target } => !home.ban_list.contains_key(&target.0),
                 ResolvedCommand::Mute { target, .. } => home.mute_list.contains_key(&target.0),
                 ResolvedCommand::Unmute { target } => !home.mute_list.contains_key(&target.0),
+                // Invite consistency is fire-and-forget: the invitation is
+                // dispatched asynchronously and there is no local state to
+                // verify synchronously.  Returning `true` means the
+                // consistency loop treats the operation as immediately
+                // accepted rather than waiting for a state change that
+                // cannot be observed locally.
                 ResolvedCommand::Invite { .. } => true,
                 _ => false,
             }
