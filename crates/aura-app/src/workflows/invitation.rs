@@ -304,10 +304,10 @@ fn is_pending_home_or_channel_invitation(
 }
 
 #[cfg(feature = "signals")]
-fn select_pending_home_invitation<'a>(
-    invitations: &'a InvitationsState,
+fn select_pending_home_invitation(
+    invitations: &InvitationsState,
     our_authority: AuthorityId,
-) -> Option<&'a crate::views::invitations::Invitation> {
+) -> Option<&crate::views::invitations::Invitation> {
     let pending = invitations
         .all_pending()
         .iter()
