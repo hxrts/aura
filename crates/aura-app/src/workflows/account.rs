@@ -368,7 +368,7 @@ pub async fn finalize_runtime_account_bootstrap(
             Duration::from_millis(BOOTSTRAP_RETRY_MS),
             Duration::from_millis(BOOTSTRAP_RETRY_MS),
         )?;
-        let _ = execute_with_runtime_retry_budget(
+        execute_with_runtime_retry_budget(
             &require_runtime(app_core).await?,
             &retry_policy,
             |_attempt| async {
@@ -392,7 +392,7 @@ pub async fn finalize_runtime_account_bootstrap(
         .map_err(|error| match error {
             RetryRunError::Timeout(timeout_error) => AuraError::from(timeout_error),
             RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
-        });
+        })?;
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -401,7 +401,10 @@ pub async fn finalize_runtime_account_bootstrap(
             let core = app_core.read().await;
             core.runtime().cloned()
         } {
-            let _ = runtime.bootstrap_signing_keys().await;
+            runtime
+                .bootstrap_signing_keys()
+                .await
+                .map_err(|e| AuraError::agent(e.to_string()))?;
         }
     }
 
