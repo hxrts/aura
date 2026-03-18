@@ -1717,21 +1717,27 @@ async fn recipient_peers_for_channel(
     )
 }
 
+/// Best-effort channel connectivity warming.
+///
+/// Runs a bounded retry loop attempting to establish peer channels and
+/// verify connectivity.  Returns `true` if warming succeeded, `false`
+/// if retries were exhausted or policy creation failed.  Callers that
+/// need guaranteed connectivity should check the return value.
 async fn warm_channel_connectivity(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
     context_id: ContextId,
-) {
+) -> bool {
     let policy = match workflow_retry_policy(
         8,
         Duration::from_millis(150),
         Duration::from_millis(750),
     ) {
         Ok(policy) => policy,
-        Err(_) => return,
+        Err(_) => return false,
     };
-    let _ = execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
+    let result = execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         let recipients =
             recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
         let mut any_peer_ready = recipients.is_empty();
@@ -1759,6 +1765,16 @@ async fn warm_channel_connectivity(
         }
     })
     .await;
+    let warmed = result.is_ok();
+    if !warmed {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!(
+            channel_id = %channel_id,
+            context_id = %context_id,
+            "channel connectivity warming exhausted retries"
+        );
+    }
+    warmed
 }
 
 /// Resolve recipient peers for a channel view from known channel, home, contact, and discovery state.
