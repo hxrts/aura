@@ -1579,8 +1579,14 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn sleep_ms(&self, ms: u64) {
-        // Offline bridge yields without actual sleep since there's no runtime.
-        // In practice, offline mode doesn't execute retry loops.
+        // Offline bridge yields without actual sleep since there's no runtime
+        // event loop to advance.  The duration is intentionally ignored —
+        // retry/backoff loops in offline mode execute at yield-speed so they
+        // terminate quickly rather than blocking.
+        //
+        // WARNING: This means exponential backoff timing is meaningless in
+        // offline mode.  Code that depends on real elapsed time for
+        // correctness must not run against OfflineRuntimeBridge.
         let _ = ms;
         crate::workflows::runtime::cooperative_yield().await;
     }
