@@ -67,7 +67,20 @@ impl ChannelParticipants {
                 available: participants.len(),
             });
         }
-        Ok(Self { participants })
+        // Deduplicate: duplicate authorities would produce incorrect results
+        // in downstream protocol/signing operations.
+        let mut deduped = participants;
+        deduped.sort();
+        deduped.dedup();
+        if deduped.len() < MIN_CHANNEL_PARTICIPANTS {
+            return Err(ChannelError::InsufficientParticipants {
+                required: MIN_CHANNEL_PARTICIPANTS,
+                available: deduped.len(),
+            });
+        }
+        Ok(Self {
+            participants: deduped,
+        })
     }
 
     /// Create a channel between self and one other participant

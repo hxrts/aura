@@ -67,7 +67,15 @@ impl GuardianCandidates {
         if contacts.is_empty() {
             return Err(GuardianSetupError::NoContacts);
         }
-        Ok(Self { contacts })
+        // Deduplicate: duplicate guardian authorities would produce incorrect
+        // results in threshold signing operations.
+        let mut deduped = contacts;
+        deduped.sort();
+        deduped.dedup();
+        if deduped.is_empty() {
+            return Err(GuardianSetupError::NoContacts);
+        }
+        Ok(Self { contacts: deduped })
     }
 
     /// Check if there are enough contacts for a given threshold
