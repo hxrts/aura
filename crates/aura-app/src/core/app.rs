@@ -241,6 +241,10 @@ impl AppCore {
         self.account_id
     }
 
+    pub(crate) fn contacts_refresh_hook_installed(&self) -> bool {
+        self.contacts_refresh_hook_installed
+    }
+
     pub(crate) fn mark_contacts_refresh_hook_installed(&mut self) -> bool {
         if self.contacts_refresh_hook_installed {
             false
@@ -250,6 +254,10 @@ impl AppCore {
         }
     }
 
+    pub(crate) fn chat_refresh_hook_installed(&self) -> bool {
+        self.chat_refresh_hook_installed
+    }
+
     pub(crate) fn mark_chat_refresh_hook_installed(&mut self) -> bool {
         if self.chat_refresh_hook_installed {
             false
@@ -257,6 +265,11 @@ impl AppCore {
             self.chat_refresh_hook_installed = true;
             true
         }
+    }
+
+    #[cfg(feature = "signals")]
+    pub(crate) fn authoritative_readiness_hook_installed(&self) -> bool {
+        self.authoritative_readiness_hook_installed
     }
 
     #[cfg(feature = "signals")]

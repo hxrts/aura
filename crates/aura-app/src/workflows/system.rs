@@ -411,11 +411,11 @@ pub async fn install_contacts_refresh_hook(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let (reactive, spawner, should_install) = {
-        let mut core = app_core.write().await;
-        let should_install = core.mark_contacts_refresh_hook_installed();
+        let core = app_core.read().await;
+        let already_installed = core.contacts_refresh_hook_installed();
         let reactive = core.reactive().clone();
         let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
-        (reactive, spawner, should_install)
+        (reactive, spawner, !already_installed)
     };
 
     if !should_install {
@@ -427,6 +427,14 @@ pub async fn install_contacts_refresh_hook(
         tracing::warn!("contacts refresh hook not installed: no task spawner available");
         return Ok(());
     };
+
+    // Mark installed only after we confirmed a spawner exists.
+    {
+        let mut core = app_core.write().await;
+        if !core.mark_contacts_refresh_hook_installed() {
+            return Ok(()); // Another task installed it concurrently.
+        }
+    }
 
     let app_core = Arc::clone(app_core);
     let refresh_in_flight = Arc::new(AtomicBool::new(false));
@@ -473,11 +481,11 @@ pub async fn install_contacts_refresh_hook(
 /// with the real runtime without adding frontend-specific refresh logic.
 pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
     let (reactive, spawner, should_install) = {
-        let mut core = app_core.write().await;
-        let should_install = core.mark_chat_refresh_hook_installed();
+        let core = app_core.read().await;
+        let already_installed = core.chat_refresh_hook_installed();
         let reactive = core.reactive().clone();
         let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
-        (reactive, spawner, should_install)
+        (reactive, spawner, !already_installed)
     };
 
     if !should_install {
@@ -489,6 +497,13 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
         tracing::warn!("chat refresh hook not installed: no task spawner available");
         return Ok(());
     };
+
+    {
+        let mut core = app_core.write().await;
+        if !core.mark_chat_refresh_hook_installed() {
+            return Ok(());
+        }
+    }
 
     let app_core = Arc::clone(app_core);
     let refresh_in_flight = Arc::new(AtomicBool::new(false));
@@ -534,11 +549,11 @@ pub async fn install_authoritative_readiness_hook(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let (reactive, spawner, should_install) = {
-        let mut core = app_core.write().await;
-        let should_install = core.mark_authoritative_readiness_hook_installed();
+        let core = app_core.read().await;
+        let already_installed = core.authoritative_readiness_hook_installed();
         let reactive = core.reactive().clone();
         let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
-        (reactive, spawner, should_install)
+        (reactive, spawner, !already_installed)
     };
 
     if !should_install {
@@ -550,6 +565,13 @@ pub async fn install_authoritative_readiness_hook(
         tracing::warn!("authoritative readiness hook not installed: no task spawner available");
         return Ok(());
     };
+
+    {
+        let mut core = app_core.write().await;
+        if !core.mark_authoritative_readiness_hook_installed() {
+            return Ok(());
+        }
+    }
 
     let contacts_app_core = Arc::clone(app_core);
     let contacts_spawner = spawner.clone();
