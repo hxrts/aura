@@ -1034,10 +1034,17 @@ async fn try_join_via_pending_channel_invitation(
         }
     }
 
-    let _ = crate::workflows::system::refresh_account(app_core).await;
+    // Best-effort: refresh account state after invitation convergence.
+    if let Err(_e) = crate::workflows::system::refresh_account(app_core).await {
+        #[cfg(feature = "instrumented")]
+        tracing::debug!(error = %_e, "refresh_account after invitation accept failed");
+    }
 
     // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
-    let _ = join_channel(app_core, invited_channel_id).await;
+    if let Err(_e) = join_channel(app_core, invited_channel_id).await {
+        #[cfg(feature = "instrumented")]
+        tracing::debug!(error = %_e, channel_id = %invited_channel_id, "best-effort join_channel after invitation accept failed");
+    }
     if let Ok(context_id) =
         context_id_for_channel(app_core, invited_channel_id, Some(runtime.authority_id())).await
     {
@@ -2184,7 +2191,14 @@ pub async fn create_channel_with_authoritative_binding(
             publish_create_channel_phase(app_core, SemanticOperationPhase::Succeeded).await?;
         }
         Err(error) => {
-            let _ = publish_create_channel_failure(app_core, error).await;
+            if let Err(_pub_err) = publish_create_channel_failure(app_core, error).await {
+                #[cfg(feature = "instrumented")]
+                tracing::error!(
+                    operation_error = %error,
+                    publish_error = %_pub_err,
+                    "create_channel: failed to publish failure fact"
+                );
+            }
         }
     }
 
@@ -3168,7 +3182,7 @@ pub async fn invite_user_to_channel_with_context(
                 SemanticFailureCode::InternalError,
             )
             .with_detail(error.to_string());
-            let _ = publish_authoritative_operation_failure_with_instance(
+            if let Err(_pub_err) = publish_authoritative_operation_failure_with_instance(
                 app_core,
                 semantic_lifecycle_publication_capability(),
                 OperationId::invitation_create(),
@@ -3176,7 +3190,15 @@ pub async fn invite_user_to_channel_with_context(
                 SemanticOperationKind::InviteActorToChannel,
                 semantic_error,
             )
-            .await;
+            .await
+            {
+                #[cfg(feature = "instrumented")]
+                tracing::error!(
+                    operation_error = %error,
+                    publish_error = %_pub_err,
+                    "invite_authority_to_channel: failed to publish failure fact"
+                );
+            }
         }
     }
 
