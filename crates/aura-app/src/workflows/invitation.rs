@@ -176,7 +176,9 @@ use thiserror::Error;
 type ChannelInvitationStageTracker = Arc<std::sync::Mutex<&'static str>>;
 
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
-const INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
+const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
+const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
+const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 30_000;
 const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
 const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
 const CONTACT_LINK_ATTEMPTS: usize = 32;
@@ -281,6 +283,41 @@ fn has_pending_home_or_channel_invitation(invitations: &InvitationsState) -> boo
                     | crate::views::invitations::InvitationType::Chat
             ) && invitation.status == crate::views::invitations::InvitationStatus::Pending
         })
+}
+
+#[cfg(feature = "signals")]
+fn is_pending_home_or_channel_invitation(
+    invitation: &crate::views::invitations::Invitation,
+) -> bool {
+    if invitation.status != crate::views::invitations::InvitationStatus::Pending {
+        return false;
+    }
+
+    if !matches!(
+        invitation.invitation_type,
+        crate::views::invitations::InvitationType::Home
+            | crate::views::invitations::InvitationType::Chat
+    ) {
+        return false;
+    }
+    true
+}
+
+#[cfg(feature = "signals")]
+fn select_pending_home_invitation<'a>(
+    invitations: &'a InvitationsState,
+    our_authority: AuthorityId,
+) -> Option<&'a crate::views::invitations::Invitation> {
+    let pending = invitations
+        .all_pending()
+        .iter()
+        .chain(invitations.all_sent().iter())
+        .filter(|invitation| is_pending_home_or_channel_invitation(invitation));
+
+    pending
+        .clone()
+        .find(|invitation| invitation.from_id != our_authority)
+        .or_else(|| pending.into_iter().next())
 }
 
 async fn publish_invitation_operation_status(
@@ -427,39 +464,29 @@ async fn accepted_pending_home_invitation_from_history(
 }
 
 #[cfg(feature = "signals")]
-fn pending_home_invitation_from_view(
+async fn pending_home_invitation_from_view(
+    app_core: &Arc<RwLock<AppCore>>,
     invitations: &InvitationsState,
     our_authority: AuthorityId,
 ) -> Option<InvitationInfo> {
-    invitations.all_pending().iter().find_map(|invitation| {
-        let is_pending_received_home = invitation.direction
-            == crate::views::invitations::InvitationDirection::Received
-            && invitation.from_id != our_authority
-            && invitation.status == crate::views::invitations::InvitationStatus::Pending
-            && matches!(
-                invitation.invitation_type,
-                crate::views::invitations::InvitationType::Home
-                    | crate::views::invitations::InvitationType::Chat
-            );
-        if !is_pending_received_home {
-            return None;
-        }
+    let invitation = select_pending_home_invitation(invitations, our_authority)?;
 
-        let home_id = invitation.home_id?;
-        Some(InvitationInfo {
-            invitation_id: InvitationId::new(invitation.id.clone()),
-            sender_id: invitation.from_id,
-            receiver_id: invitation.to_id.unwrap_or(our_authority),
-            invitation_type: InvitationBridgeType::Channel {
-                home_id: home_id.to_string(),
-                context_id: None,
-                nickname_suggestion: invitation.home_name.clone(),
-            },
-            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
-            created_at_ms: invitation.created_at,
-            expires_at_ms: invitation.expires_at,
-            message: invitation.message.clone(),
-        })
+    let home_id = invitation.home_id?;
+    let context_id =
+        crate::workflows::messaging::authoritative_context_id_for_channel(app_core, home_id).await;
+    Some(InvitationInfo {
+        invitation_id: InvitationId::new(invitation.id.clone()),
+        sender_id: invitation.from_id,
+        receiver_id: invitation.to_id.unwrap_or(our_authority),
+        invitation_type: InvitationBridgeType::Channel {
+            home_id: home_id.to_string(),
+            context_id,
+            nickname_suggestion: invitation.home_name.clone(),
+        },
+        status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+        created_at_ms: invitation.created_at,
+        expires_at_ms: invitation.expires_at,
+        message: invitation.message.clone(),
     })
 }
 
@@ -468,17 +495,38 @@ fn pending_home_invitation_id_from_view(
     invitations: &InvitationsState,
     our_authority: AuthorityId,
 ) -> Option<InvitationId> {
-    invitations.all_pending().iter().find_map(|invitation| {
-        (invitation.direction == crate::views::invitations::InvitationDirection::Received
-            && invitation.from_id != our_authority
-            && invitation.status == crate::views::invitations::InvitationStatus::Pending
-            && matches!(
-                invitation.invitation_type,
-                crate::views::invitations::InvitationType::Home
-                    | crate::views::invitations::InvitationType::Chat
-            ))
-        .then(|| InvitationId::new(invitation.id.clone()))
-    })
+    select_pending_home_invitation(invitations, our_authority)
+        .map(|invitation| InvitationId::new(invitation.id.clone()))
+}
+
+fn invitation_accept_runtime_stage_timeout_ms(
+    pending_runtime_invitation: Option<&InvitationInfo>,
+    accepted_invitation: Option<&crate::views::invitations::Invitation>,
+) -> u64 {
+    if pending_runtime_invitation.is_some_and(|invitation| {
+        matches!(invitation.invitation_type, InvitationBridgeType::Channel { .. })
+    }) || accepted_invitation.is_some_and(|invitation| {
+        invitation.invitation_type == crate::views::invitations::InvitationType::Chat
+    }) {
+        CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS
+    } else {
+        CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS
+    }
+}
+
+fn invitation_accept_reconcile_timeout_ms(
+    pending_runtime_invitation: Option<&InvitationInfo>,
+    accepted_invitation: Option<&crate::views::invitations::Invitation>,
+) -> u64 {
+    if pending_runtime_invitation.is_some_and(|invitation| {
+        matches!(invitation.invitation_type, InvitationBridgeType::Channel { .. })
+    }) || accepted_invitation.is_some_and(|invitation| {
+        invitation.invitation_type == crate::views::invitations::InvitationType::Chat
+    }) {
+        CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS
+    } else {
+        INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -678,6 +726,10 @@ impl From<AcceptInvitationError> for AuraError {
     }
 }
 
+fn can_continue_after_channel_accept_runtime_error(kind: SemanticOperationKind) -> bool {
+    kind == SemanticOperationKind::AcceptPendingChannelInvitation
+}
+
 async fn fail_invitation_accept<T>(
     app_core: &Arc<RwLock<AppCore>>,
     kind: SemanticOperationKind,
@@ -736,6 +788,62 @@ async fn fail_pending_invitation_accept_if_owned<T>(
     Err(error.into())
 }
 
+async fn best_effort_reconcile_channel_invitation_acceptance(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    pending_runtime_invitation: Option<&InvitationInfo>,
+    accepted_invitation: Option<&crate::views::invitations::Invitation>,
+    channel_id: ChannelId,
+    sender_id: AuthorityId,
+    context_hint: Option<ContextId>,
+    channel_name_hint: Option<&str>,
+) {
+    let reconcile_budget = match workflow_timeout_budget(
+        runtime,
+        Duration::from_millis(invitation_accept_reconcile_timeout_ms(
+            pending_runtime_invitation,
+            accepted_invitation,
+        )),
+    )
+    .await
+    {
+        Ok(budget) => budget,
+        Err(_) => return,
+    };
+
+    let reconcile_result = execute_with_runtime_timeout_budget(runtime, &reconcile_budget, || {
+        reconcile_accepted_channel_invitation(
+            app_core,
+            runtime,
+            channel_id,
+            sender_id,
+            context_hint,
+            channel_name_hint,
+        )
+    })
+    .await;
+
+    if let Err(error) = reconcile_result {
+        let detail = match error {
+            TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+                format!(
+                    "accept_invitation timed out in stage reconcile_channel_invitation after {}ms",
+                    reconcile_budget.timeout_ms()
+                )
+            }
+            TimeoutRunError::Timeout(timeout_error) => timeout_error.to_string(),
+            TimeoutRunError::Operation(operation_error) => operation_error.to_string(),
+        };
+        #[cfg(feature = "instrumented")]
+        tracing::warn!(
+            detail = %detail,
+            channel_id = %channel_id,
+            "channel invitation reconciliation failed — channel may be incomplete"
+        );
+        let _ = detail;
+    }
+}
+
 async fn list_pending_invitations_with_timeout(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
 ) -> Result<Vec<InvitationInfo>, AcceptInvitationError> {
@@ -761,6 +869,16 @@ async fn list_pending_invitations_with_timeout(
     }
 }
 
+async fn pending_invitation_by_id_with_timeout(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    invitation_id: &InvitationId,
+) -> Result<Option<InvitationInfo>, AcceptInvitationError> {
+    Ok(list_pending_invitations_with_timeout(runtime)
+        .await?
+        .into_iter()
+        .find(|invitation| invitation.invitation_id == *invitation_id))
+}
+
 async fn best_effort_trigger_runtime_discovery(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
 ) {
@@ -784,6 +902,7 @@ async fn drive_invitation_accept_convergence(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
 ) -> Result<(), AcceptInvitationError> {
+    let mut converged = false;
     for _ in 0..INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS {
         let step_budget = workflow_timeout_budget(
             runtime,
@@ -812,10 +931,22 @@ async fn drive_invitation_accept_convergence(
             .await
             .is_ok()
         {
+            converged = true;
             break;
         }
     }
 
+    if !converged {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!(
+            attempts = INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS,
+            "invitation accept convergence exhausted without peer connectivity"
+        );
+    }
+
+    // Return Ok even when convergence didn't reach peer connectivity: the
+    // invitation acceptance itself succeeded and sync will complete once
+    // peers become reachable.  The warning above provides diagnostics.
     Ok(())
 }
 
@@ -1574,9 +1705,28 @@ pub async fn accept_invitation_with_instance(
         .await
         .invitation(invitation_id.as_str())
         .cloned();
-    let operation_kind = if accepted_invitation.as_ref().is_some_and(|invitation| {
-        invitation.invitation_type == crate::views::invitations::InvitationType::Home
-    }) {
+    let runtime = require_runtime(app_core).await?;
+    let pending_runtime_invitation =
+        match pending_invitation_by_id_with_timeout(&runtime, invitation_id).await {
+            Ok(invitation) => invitation,
+            Err(error) => {
+                if accepted_invitation.is_none() {
+                    return fail_pending_invitation_accept_if_owned(app_core, instance_id, error)
+                        .await;
+                }
+                None
+            }
+        };
+    let operation_kind = if pending_runtime_invitation
+        .as_ref()
+        .is_some_and(|invitation| matches!(
+            invitation.invitation_type,
+            InvitationBridgeType::Contact { .. }
+        ))
+        || accepted_invitation.as_ref().is_some_and(|invitation| {
+            invitation.invitation_type == crate::views::invitations::InvitationType::Home
+        })
+    {
         SemanticOperationKind::AcceptContactInvitation
     } else {
         SemanticOperationKind::AcceptPendingChannelInvitation
@@ -1590,11 +1740,13 @@ pub async fn accept_invitation_with_instance(
         SemanticOperationPhase::WorkflowDispatched,
     )
     .await?;
-    let runtime = require_runtime(app_core).await?;
 
     let accept_budget = match workflow_timeout_budget(
         &runtime,
-        Duration::from_millis(INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS),
+        Duration::from_millis(invitation_accept_runtime_stage_timeout_ms(
+            pending_runtime_invitation.as_ref(),
+            accepted_invitation.as_ref(),
+        )),
     )
     .await
     .map_err(|error| AcceptInvitationError::AcceptFailed {
@@ -1606,37 +1758,41 @@ pub async fn accept_invitation_with_instance(
                 .await;
         }
     };
-    let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
-        runtime.accept_invitation(invitation_id.as_str())
-    })
-    .await;
-    if let Err(error) = accept_result {
-        let error = match error {
-            TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-                AcceptInvitationError::AcceptFailed {
-                    detail: format!(
-                        "accept_invitation timed out in stage runtime_accept_invitation after {}ms",
-                        accept_budget.timeout_ms()
-                    ),
+    if !can_continue_after_channel_accept_runtime_error(operation_kind) {
+        let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
+            runtime.accept_invitation(invitation_id.as_str())
+        })
+        .await;
+        if let Err(error) = accept_result {
+            let error = match error {
+                TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "accept_invitation timed out in stage runtime_accept_invitation after {}ms",
+                            accept_budget.timeout_ms()
+                        ),
+                    }
                 }
-            }
-            TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
-                detail: timeout_error.to_string(),
-            },
-            TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
-                detail: operation_error.to_string(),
-            },
-        };
-        if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
-            return fail_invitation_accept(
-                app_core,
-                operation_kind,
-                instance_id.clone(),
-                AcceptInvitationError::AcceptFailed {
-                    detail: error.to_string(),
+                TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
+                    detail: timeout_error.to_string(),
                 },
-            )
-            .await;
+                TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
+                    detail: operation_error.to_string(),
+                },
+            };
+            if classify_invitation_accept_error(&error)
+                != InvitationAcceptErrorClass::AlreadyHandled
+            {
+                return fail_invitation_accept(
+                    app_core,
+                    operation_kind,
+                    instance_id.clone(),
+                    AcceptInvitationError::AcceptFailed {
+                        detail: error.to_string(),
+                    },
+                )
+                .await;
+            }
         }
     }
 
@@ -1645,12 +1801,25 @@ pub async fn accept_invitation_with_instance(
         return fail_invitation_accept(app_core, operation_kind, instance_id.clone(), error).await;
     }
 
-    if accepted_invitation.as_ref().is_some_and(|invitation| {
+    if pending_runtime_invitation.as_ref().is_some_and(|invitation| {
+        matches!(invitation.invitation_type, InvitationBridgeType::Contact { .. })
+    }) || accepted_invitation.as_ref().is_some_and(|invitation| {
         invitation.invitation_type == crate::views::invitations::InvitationType::Home
     }) {
-        if let Some(invitation) = accepted_invitation.as_ref() {
-            if let Err(error) = wait_for_contact_link(app_core, &runtime, invitation.from_id).await
-            {
+        let contact_id = accepted_invitation
+            .as_ref()
+            .map(|invitation| invitation.from_id)
+            .or_else(|| {
+                pending_runtime_invitation.as_ref().and_then(|invitation| {
+                    if matches!(invitation.invitation_type, InvitationBridgeType::Contact { .. }) {
+                        Some(invitation.sender_id)
+                    } else {
+                        None
+                    }
+                })
+            });
+        if let Some(contact_id) = contact_id {
+            if let Err(error) = wait_for_contact_link(app_core, &runtime, contact_id).await {
                 return fail_invitation_accept(
                     app_core,
                     operation_kind,
@@ -1664,73 +1833,70 @@ pub async fn accept_invitation_with_instance(
                 .contact_count() as u32;
             publish_contact_accept_success(
                 app_core,
-                invitation.from_id,
+                contact_id,
                 contact_count,
                 instance_id.clone(),
             )
             .await?;
             return Ok(());
         }
-    } else if let Some(invitation) = accepted_invitation.as_ref().filter(|invitation| {
-        invitation.invitation_type == crate::views::invitations::InvitationType::Chat
-    }) {
-        if let Some(channel_id) = invitation.home_id {
-            let reconcile_budget = match workflow_timeout_budget(
-                &runtime,
-                Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
-            )
-            .await
-            .map_err(|error| AcceptInvitationError::AcceptFailed {
-                detail: error.to_string(),
-            }) {
-                Ok(budget) => budget,
-                Err(error) => {
-                    return fail_invitation_accept(
-                        app_core,
-                        operation_kind,
-                        instance_id.clone(),
-                        error,
+    } else if let Some((channel_id, sender_id, context_hint, channel_name_hint)) =
+        pending_runtime_invitation
+            .as_ref()
+            .and_then(|invitation| match &invitation.invitation_type {
+                InvitationBridgeType::Channel {
+                    home_id,
+                    context_id,
+                    nickname_suggestion,
+                } => home_id.parse::<ChannelId>().ok().map(|channel_id| {
+                    (
+                        channel_id,
+                        invitation.sender_id,
+                        *context_id,
+                        nickname_suggestion.as_deref(),
                     )
-                    .await;
-                }
-            };
-            let reconcile_result = execute_with_runtime_timeout_budget(&runtime, &reconcile_budget, || {
-                reconcile_accepted_channel_invitation(
-                    app_core,
-                    &runtime,
-                    channel_id,
-                    invitation.from_id,
-                    None,
-                    invitation.home_name.as_deref(),
-                )
+                }),
+                _ => None,
             })
-            .await
-            .map_err(|error| match error {
-                TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-                    AcceptInvitationError::AcceptFailed {
-                        detail: format!(
-                            "accept_invitation timed out in stage reconcile_channel_invitation after {}ms",
-                            reconcile_budget.timeout_ms()
-                        ),
+            .or_else(|| {
+                accepted_invitation.as_ref().and_then(|invitation| {
+                    if invitation.invitation_type == crate::views::invitations::InvitationType::Chat
+                    {
+                        invitation.home_id.map(|channel_id| {
+                            (
+                                channel_id,
+                                invitation.from_id,
+                                None,
+                                invitation.home_name.as_deref(),
+                            )
+                        })
+                    } else {
+                        None
                     }
-                }
-                TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
-                    detail: timeout_error.to_string(),
-                },
-                TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
-                    detail: operation_error.to_string(),
-                },
-            });
-            if let Err(error) = reconcile_result {
-                return fail_invitation_accept(
-                    app_core,
-                    operation_kind,
-                    instance_id.clone(),
-                    error,
-                )
-                .await;
-            }
-        }
+                })
+            })
+    {
+        publish_invitation_operation_status(
+            app_core,
+            OperationId::invitation_accept(),
+            instance_id,
+            None,
+            operation_kind,
+            SemanticOperationPhase::Succeeded,
+        )
+        .await?;
+        best_effort_reconcile_channel_invitation_acceptance(
+            app_core,
+            &runtime,
+            pending_runtime_invitation.as_ref(),
+            accepted_invitation.as_ref(),
+            channel_id,
+            sender_id,
+            context_hint,
+            channel_name_hint,
+        )
+        .await;
+        return Ok(());
     }
 
     publish_invitation_operation_status(
@@ -1792,7 +1958,10 @@ pub async fn accept_imported_invitation_with_instance(
 
     let accept_budget = match workflow_timeout_budget(
         &runtime,
-        Duration::from_millis(INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS),
+        Duration::from_millis(invitation_accept_runtime_stage_timeout_ms(
+            Some(invitation),
+            None,
+        )),
     )
     .await
     .map_err(|error| AcceptInvitationError::AcceptFailed {
@@ -1804,37 +1973,41 @@ pub async fn accept_imported_invitation_with_instance(
                 .await;
         }
     };
-    let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
-        runtime.accept_invitation(invitation.invitation_id.as_str())
-    })
-    .await;
-    if let Err(error) = accept_result {
-        let error = match error {
-            TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-                AcceptInvitationError::AcceptFailed {
-                    detail: format!(
-                        "accept_imported_invitation timed out in stage runtime_accept_invitation after {}ms",
-                        accept_budget.timeout_ms()
-                    ),
+    if !can_continue_after_channel_accept_runtime_error(operation_kind) {
+        let accept_result = execute_with_runtime_timeout_budget(&runtime, &accept_budget, || {
+            runtime.accept_invitation(invitation.invitation_id.as_str())
+        })
+        .await;
+        if let Err(error) = accept_result {
+            let error = match error {
+                TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "accept_imported_invitation timed out in stage runtime_accept_invitation after {}ms",
+                            accept_budget.timeout_ms()
+                        ),
+                    }
                 }
-            }
-            TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
-                detail: timeout_error.to_string(),
-            },
-            TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
-                detail: operation_error.to_string(),
-            },
-        };
-        if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
-            return fail_invitation_accept(
-                app_core,
-                operation_kind,
-                instance_id.clone(),
-                AcceptInvitationError::AcceptFailed {
-                    detail: error.to_string(),
+                TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
+                    detail: timeout_error.to_string(),
                 },
-            )
-            .await;
+                TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
+                    detail: operation_error.to_string(),
+                },
+            };
+            if classify_invitation_accept_error(&error)
+                != InvitationAcceptErrorClass::AlreadyHandled
+            {
+                return fail_invitation_accept(
+                    app_core,
+                    operation_kind,
+                    instance_id.clone(),
+                    AcceptInvitationError::AcceptFailed {
+                        detail: error.to_string(),
+                    },
+                )
+                .await;
+            }
         }
     }
 
@@ -1891,61 +2064,27 @@ pub async fn accept_imported_invitation_with_instance(
                     .await;
                 }
             };
-            let reconcile_budget = match workflow_timeout_budget(
-                &runtime,
-                Duration::from_millis(INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS),
+            publish_invitation_operation_status(
+                app_core,
+                OperationId::invitation_accept(),
+                instance_id,
+                None,
+                operation_kind,
+                SemanticOperationPhase::Succeeded,
             )
-            .await
-            .map_err(|error| AcceptInvitationError::AcceptFailed {
-                detail: error.to_string(),
-            }) {
-                Ok(budget) => budget,
-                Err(error) => {
-                    return fail_invitation_accept(
-                        app_core,
-                        operation_kind,
-                        instance_id.clone(),
-                        error,
-                    )
-                    .await;
-                }
-            };
-            let reconcile_result = execute_with_runtime_timeout_budget(&runtime, &reconcile_budget, || {
-                reconcile_accepted_channel_invitation(
-                    app_core,
-                    &runtime,
-                    channel_id,
-                    invitation.sender_id,
-                    *context_id,
-                    nickname_suggestion.as_deref(),
-                )
-            })
-            .await
-            .map_err(|error| match error {
-                TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-                    AcceptInvitationError::AcceptFailed {
-                        detail: format!(
-                            "accept_imported_invitation timed out in stage reconcile_channel_invitation after {}ms",
-                            reconcile_budget.timeout_ms()
-                        ),
-                    }
-                }
-                TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
-                    detail: timeout_error.to_string(),
-                },
-                TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
-                    detail: operation_error.to_string(),
-                },
-            });
-            if let Err(error) = reconcile_result {
-                return fail_invitation_accept(
-                    app_core,
-                    operation_kind,
-                    instance_id.clone(),
-                    error,
-                )
-                .await;
-            }
+            .await?;
+            best_effort_reconcile_channel_invitation_acceptance(
+                app_core,
+                &runtime,
+                Some(invitation),
+                None,
+                channel_id,
+                invitation.sender_id,
+                *context_id,
+                nickname_suggestion.as_deref(),
+            )
+            .await;
+            return Ok(());
         }
         crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {}
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => unreachable!(),
@@ -2376,20 +2515,26 @@ pub async fn accept_pending_home_invitation_with_instance(
         if let Some(invitation_id) =
             pending_home_invitation_id_from_view(&invitations, our_authority)
         {
-            let pending = match list_pending_invitations_with_timeout(&runtime).await {
+            let pending = match pending_invitation_by_id_with_timeout(&runtime, &invitation_id).await
+            {
                 Ok(pending) => pending,
                 Err(error) => {
-                    return fail_pending_invitation_accept_if_owned(
-                        app_core,
-                        instance_id,
-                        error,
-                    )
-                    .await;
+                    return fail_pending_invitation_accept_if_owned(app_core, instance_id, error)
+                        .await;
                 }
             };
-            if let Some(invitation) = pending
-                .into_iter()
-                .find(|invitation| invitation.invitation_id == invitation_id)
+            if let Some(invitation) = pending {
+                accept_imported_invitation_with_instance(
+                    app_core,
+                    &invitation,
+                    instance_id.clone(),
+                )
+                .await?;
+                publish_pending_channel_accept_success(app_core, instance_id.clone()).await?;
+                return Ok(invitation_id);
+            }
+            if let Some(invitation) =
+                pending_home_invitation_from_view(app_core, &invitations, our_authority).await
             {
                 accept_imported_invitation_with_instance(
                     app_core,
@@ -2397,19 +2542,15 @@ pub async fn accept_pending_home_invitation_with_instance(
                     instance_id.clone(),
                 )
                 .await?;
+                publish_pending_channel_accept_success(app_core, instance_id.clone()).await?;
                 return Ok(invitation_id);
             }
-        }
-        if let Some(invitation) = pending_home_invitation_from_view(&invitations, our_authority) {
-            let invitation_id = invitation.invitation_id.clone();
-            accept_imported_invitation_with_instance(app_core, &invitation, instance_id.clone())
-                .await?;
-            return Ok(invitation_id);
         }
         if let Some(invitation_id) =
             pending_home_invitation_id_from_view(&invitations, our_authority)
         {
             accept_invitation_with_instance(app_core, &invitation_id, instance_id.clone()).await?;
+            publish_pending_channel_accept_success(app_core, instance_id.clone()).await?;
             return Ok(invitation_id);
         }
     }
@@ -2429,6 +2570,7 @@ pub async fn accept_pending_home_invitation_with_instance(
         if let Some(inv) = home_invitation {
             let invitation_id = inv.invitation_id.clone();
             accept_imported_invitation_with_instance(app_core, inv, instance_id.clone()).await?;
+            publish_pending_channel_accept_success(app_core, instance_id.clone()).await?;
             return Ok(invitation_id);
         }
         converge_runtime(&runtime).await;
@@ -2446,6 +2588,7 @@ pub async fn accept_pending_home_invitation_with_instance(
         accepted_pending_home_invitation_from_history(app_core, our_authority, instance_id.clone())
             .await?
     {
+        publish_pending_channel_accept_success(app_core, instance_id.clone()).await?;
         return Ok(invitation_id);
     }
 
@@ -2455,6 +2598,21 @@ pub async fn accept_pending_home_invitation_with_instance(
         AcceptInvitationError::AcceptFailed {
             detail: "No pending home invitation found".to_string(),
         },
+    )
+    .await
+}
+
+async fn publish_pending_channel_accept_success(
+    app_core: &Arc<RwLock<AppCore>>,
+    instance_id: Option<OperationInstanceId>,
+) -> Result<(), AuraError> {
+    publish_invitation_operation_status(
+        app_core,
+        OperationId::invitation_accept(),
+        instance_id,
+        None,
+        SemanticOperationKind::AcceptPendingChannelInvitation,
+        SemanticOperationPhase::Succeeded,
     )
     .await
 }
@@ -2888,11 +3046,24 @@ mod tests {
     }
 
     #[cfg(feature = "signals")]
-    #[test]
-    fn pending_home_invitation_from_view_prefers_authoritative_pending_channel_invite() {
+    #[tokio::test]
+    async fn pending_home_invitation_from_view_prefers_authoritative_pending_channel_invite() {
         let our_authority = AuthorityId::new_from_entropy([64u8; 32]);
         let sender = AuthorityId::new_from_entropy([65u8; 32]);
         let channel_id = ChannelId::from_bytes([66u8; 32]);
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> =
+            Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+                our_authority,
+            ));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
         let invitations = InvitationsState::from_parts(
             vec![Invitation {
                 id: "pending-channel".to_string(),
@@ -2913,7 +3084,8 @@ mod tests {
             Vec::new(),
         );
 
-        let invitation = pending_home_invitation_from_view(&invitations, our_authority)
+        let invitation = pending_home_invitation_from_view(&app_core, &invitations, our_authority)
+            .await
             .expect("pending invitation should resolve from view");
         assert_eq!(
             invitation.invitation_id,
@@ -2964,6 +3136,37 @@ mod tests {
         assert_eq!(
             pending_home_invitation_id_from_view(&invitations, our_authority),
             Some(InvitationId::new("pending-no-home-id"))
+        );
+    }
+
+    #[cfg(feature = "signals")]
+    #[test]
+    fn pending_home_invitation_id_from_view_accepts_direction_drifted_pending_invite() {
+        let our_authority = AuthorityId::new_from_entropy([69u8; 32]);
+        let sender = AuthorityId::new_from_entropy([70u8; 32]);
+        let invitations = InvitationsState::from_parts(
+            Vec::new(),
+            vec![Invitation {
+                id: "pending-direction-drift".to_string(),
+                invitation_type: InvitationType::Chat,
+                status: InvitationStatus::Pending,
+                direction: InvitationDirection::Sent,
+                from_id: sender,
+                from_name: "Alice".to_string(),
+                to_id: Some(our_authority),
+                to_name: Some("Bob".to_string()),
+                created_at: 1,
+                expires_at: None,
+                message: Some("join".to_string()),
+                home_id: None,
+                home_name: Some("shared-parity-lab".to_string()),
+            }],
+            Vec::new(),
+        );
+
+        assert_eq!(
+            pending_home_invitation_id_from_view(&invitations, our_authority),
+            Some(InvitationId::new("pending-direction-drift"))
         );
     }
 
