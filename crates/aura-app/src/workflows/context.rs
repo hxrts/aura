@@ -103,10 +103,23 @@ async fn local_first_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
     if harness_determinism::harness_mode_enabled() {
         return harness_determinism::parity_timestamp_ms(app_core, "context-local-first", &[])
             .await
-            .unwrap_or(0);
+            .unwrap_or(1);
     }
 
-    current_time_ms(app_core).await.unwrap_or(0)
+    match current_time_ms(app_core).await {
+        Ok(ts) => ts,
+        Err(_e) => {
+            #[cfg(feature = "instrumented")]
+            tracing::warn!(
+                error = %_e,
+                "time source unavailable — using fallback timestamp 1"
+            );
+            // Use 1 instead of 0 so the timestamp is distinguishable from
+            // "not set" (which uses 0 by convention) while still being
+            // obviously wrong if it shows up in debugging.
+            1
+        }
+    }
 }
 
 /// Set active context for navigation and command targeting
