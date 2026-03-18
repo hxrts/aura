@@ -133,7 +133,14 @@ impl ObserverRegistry {
         self.observers.retain(|(obs_id, _)| *obs_id != id);
     }
 
-    /// Notify all observers of chat state change
+    /// Notify all observers of chat state change.
+    ///
+    /// # Panic safety
+    ///
+    /// Observer callbacks are invoked sequentially.  If one observer panics,
+    /// remaining observers in the list will not be notified.  Observers must
+    /// not panic; a panicking observer is a bug in the observer, not in the
+    /// notification system.
     pub fn notify_chat(&self, state: &ChatState) {
         for (_, observer) in &self.observers {
             observer.on_chat_changed(state.clone());
