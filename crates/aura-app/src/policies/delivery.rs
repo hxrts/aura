@@ -112,10 +112,17 @@ impl DeliveryPolicy for DropWhenFinalized {
 pub struct DropWhenFullyAcked;
 
 impl DropWhenFullyAcked {
-    /// Check if all expected peers have acknowledged
+    /// Check if all expected peers have acknowledged.
+    ///
+    /// Returns `false` when `expected` is empty — an empty peer list means the
+    /// policy couldn't determine who should ack, so the fact should NOT be
+    /// treated as fully acknowledged (vacuous truth is a silent failure here).
     fn is_fully_acked(ack: Option<&Acknowledgment>, expected: &[AuthorityId]) -> bool {
+        if expected.is_empty() {
+            return false;
+        }
         let Some(ack) = ack else {
-            return expected.is_empty();
+            return false;
         };
         expected.iter().all(|p| ack.contains(p))
     }
@@ -332,8 +339,9 @@ mod tests {
         let c = test_consistency(Agreement::Provisional, Some(test_ack(&[1, 2])));
         assert!(policy.should_drop_tracking(&c, &expected));
 
-        // Empty expected means always acked
-        assert!(policy.should_drop_tracking(&c, &[]));
+        // Empty expected means the policy couldn't determine peers — do NOT
+        // drop tracking (vacuous truth was a silent failure).
+        assert!(!policy.should_drop_tracking(&c, &[]));
     }
 
     #[test]

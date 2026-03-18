@@ -389,7 +389,9 @@ mod tests {
 
         let result = StatusResult::Unknown;
         assert!(!result.is_finalized());
-        assert!(result.is_terminal());
+        // Unknown is NOT terminal — the status system could not determine
+        // the state, so callers should retry rather than assume finalized.
+        assert!(!result.is_terminal());
     }
 
     #[test]
