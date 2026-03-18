@@ -404,12 +404,19 @@ pub trait RuntimeBridge: Send + Sync {
     /// # Arguments
     /// * `facts` - The facts to commit
     /// * `options` - Options controlling fact behavior (e.g., ack tracking)
+    /// # Important
+    ///
+    /// The default implementation **silently drops the `options` parameter**
+    /// and delegates to [`commit_relational_facts`].  Production
+    /// implementations MUST override this method if callers rely on
+    /// `FactOptions` (e.g., ack tracking for delivery receipts).  Relying
+    /// on the default when options carry semantic meaning will silently
+    /// disable that behavior.
     async fn commit_relational_facts_with_options(
         &self,
         facts: &[RelationalFact],
         options: FactOptions,
     ) -> Result<(), IntentError> {
-        // Default implementation ignores options (for backward compatibility)
         let _ = options;
         self.commit_relational_facts(facts).await
     }
