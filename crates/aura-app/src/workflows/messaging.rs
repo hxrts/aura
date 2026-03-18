@@ -2279,7 +2279,13 @@ pub async fn join_channel_by_name(
     .await?;
     let runtime = require_runtime(app_core).await?;
     converge_runtime(&runtime).await;
-    ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await?;
+    if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await {
+        messaging_warn!(
+            "Channel {} joined before connectivity fully warmed: {}",
+            channel_id,
+            _error
+        );
+    }
     Ok(())
 }
 
@@ -2717,11 +2723,20 @@ pub async fn send_message_ref(
                                 message_id = %background_message_id,
                                 "background remote message delivery failed"
                             );
-                            let _ = mark_message_delivery_failed(
+                            if let Err(_mark_err) = mark_message_delivery_failed(
                                 &background_app_core,
                                 &background_message_id,
                             )
-                            .await;
+                            .await
+                            {
+                                #[cfg(feature = "instrumented")]
+                                tracing::error!(
+                                    delivery_error = %_error,
+                                    mark_error = %_mark_err,
+                                    message_id = %background_message_id,
+                                    "double failure: delivery failed and mark-failed also failed — message stuck in Sending state"
+                                );
+                            }
                         }
                     });
                 } else {
