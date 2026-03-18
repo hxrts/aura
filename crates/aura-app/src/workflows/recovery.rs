@@ -111,8 +111,22 @@ pub async fn start_recovery(
         Vec::new(), // guardian_bindings
     );
 
-    // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL
-    set_recovery_state(app_core, state).await?;
+    // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL.
+    //
+    // If this fails the ceremony is already initiated at the runtime but local
+    // state never reflects it.  Attempt best-effort cancellation so the runtime
+    // doesn't have a dangling ceremony.
+    if let Err(state_error) = set_recovery_state(app_core, state).await {
+        #[cfg(feature = "instrumented")]
+        tracing::error!(
+            error = %state_error,
+            ceremony_id = %ceremony_id,
+            "recovery state write failed after ceremony init — attempting cancellation"
+        );
+        let core = app_core.read().await;
+        let _ = core.cancel_key_rotation_ceremony(&ceremony_id).await;
+        return Err(state_error);
+    }
 
     Ok(ceremony_id)
 }
@@ -161,6 +175,19 @@ pub async fn start_recovery_from_state(
 ///
 /// Returns `true` when the contact became a guardian, `false` when guardian
 /// status was revoked.
+///
+/// # Multi-step atomicity
+///
+/// This function performs up to three sequential mutations:
+/// 1. Create guardian invitation on the runtime (when adding)
+/// 2. Update recovery state
+/// 3. Update contacts state
+///
+/// If step 2 fails after step 1, the runtime invitation is leaked.  If
+/// step 3 fails after steps 1+2, contacts state is inconsistent with
+/// recovery state.  Full transactional rollback is not yet implemented;
+/// callers should treat errors from this function as requiring a manual
+/// consistency check (e.g. `refresh_account`).
 pub async fn toggle_guardian_contact(
     app_core: &Arc<RwLock<AppCore>>,
     contact_id: &str,
