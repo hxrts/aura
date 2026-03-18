@@ -22,6 +22,13 @@ pub enum InvitationError {
         /// Maximum guardians allowed (n from threshold)
         max: u8,
     },
+    /// Threshold k is below the FROST minimum
+    ThresholdTooLow {
+        /// Configured k
+        k: u8,
+        /// Required minimum
+        min: u8,
+    },
 }
 
 impl fmt::Display for InvitationError {
@@ -37,6 +44,12 @@ impl fmt::Display for InvitationError {
                 write!(
                     f,
                     "Configure guardian threshold before sending guardian invitations"
+                )
+            }
+            InvitationError::ThresholdTooLow { k, min } => {
+                write!(
+                    f,
+                    "Threshold k={k} is below the minimum ({min}) required for threshold signing"
                 )
             }
             InvitationError::GuardianSetFull { current, max } => {
@@ -124,6 +137,7 @@ impl InvitationConfig {
     ///
     /// Returns an error if:
     /// - No threshold is configured
+    /// - The threshold k is below the FROST minimum (2)
     /// - The guardian set is already at capacity (n)
     pub fn guardian(
         from: AuthorityId,
@@ -131,6 +145,14 @@ impl InvitationConfig {
         current_guardians: u8,
     ) -> Result<Self, InvitationError> {
         let threshold = threshold.ok_or(InvitationError::NoThresholdForGuardian)?;
+
+        // FROST requires k >= 2 for threshold signing.
+        if threshold.k() < 2 {
+            return Err(InvitationError::ThresholdTooLow {
+                k: threshold.k(),
+                min: 2,
+            });
+        }
 
         if current_guardians >= threshold.n() {
             return Err(InvitationError::GuardianSetFull {
