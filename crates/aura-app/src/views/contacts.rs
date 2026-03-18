@@ -311,10 +311,13 @@ impl ContactsState {
 
     /// Set nickname for a contact.
     ///
-    /// If the contact doesn't exist, creates a new contact entry.
-    pub fn set_nickname(&mut self, target: AuthorityId, nickname: String) {
+    /// If the contact doesn't exist, creates a new contact entry with default
+    /// fields.  Returns `true` if an existing contact was updated, `false` if
+    /// a new contact was implicitly created.
+    pub fn set_nickname(&mut self, target: AuthorityId, nickname: String) -> bool {
         if let Some(contact) = self.contacts.get_mut(&target) {
             contact.nickname = nickname;
+            true
         } else {
             // Create new contact with the nickname
             self.contacts.insert(
@@ -330,6 +333,7 @@ impl ContactsState {
                     read_receipt_policy: ReadReceiptPolicy::default(),
                 },
             );
+            false
         }
     }
 
