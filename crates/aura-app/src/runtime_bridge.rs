@@ -292,6 +292,17 @@ pub struct SettingsBridgeState {
     pub contact_count: usize,
 }
 
+impl SettingsBridgeState {
+    /// Returns `true` if this state was populated from a real runtime.
+    ///
+    /// The `Default` implementation produces k=0, n=0 which is
+    /// cryptographically invalid.  UI code should check this before
+    /// displaying threshold information.
+    pub fn has_valid_threshold(&self) -> bool {
+        self.threshold_k >= 2 && self.threshold_n >= self.threshold_k
+    }
+}
+
 /// Bridge-level device summary.
 ///
 /// This is used to populate UI settings screens without requiring the UI layer
