@@ -277,6 +277,10 @@ impl RuntimeBridge for MockRuntimeBridge {
         self.reactive_handler.clone()
     }
 
+    async fn is_peer_online(&self, _peer: AuthorityId) -> bool {
+        false
+    }
+
     // =========================================================================
     // Typed Fact Commit (Override default)
     // =========================================================================

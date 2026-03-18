@@ -630,10 +630,10 @@ pub trait RuntimeBridge: Send + Sync {
     /// peer count). Implementations may use transport channel health, rendezvous
     /// reachability, or other heuristics.
     ///
-    /// Default implementation returns `false`.
-    async fn is_peer_online(&self, _peer: AuthorityId) -> bool {
-        false
-    }
+    /// All implementations must provide this method — there is no default so
+    /// that forgetting to implement it is a compile-time error rather than a
+    /// silent "all peers offline" bug.
+    async fn is_peer_online(&self, peer: AuthorityId) -> bool;
 
     // =========================================================================
     // Peer Discovery
@@ -1576,6 +1576,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
                 Ok(now.as_millis() as u64)
             }
         }
+    }
+
+    async fn is_peer_online(&self, _peer: AuthorityId) -> bool {
+        false
     }
 
     async fn sleep_ms(&self, ms: u64) {
