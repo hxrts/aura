@@ -486,4 +486,85 @@ mod tests {
         );
         assert!(outcome.effects.is_empty()); // No effects on denial
     }
+
+    /// Effects accumulate in guard order: ChargeBudget (FlowGuard) before
+    /// AppendJournal (JournalCoupler) before RecordLeakage (LeakageGuard).
+    /// If ordering is wrong, budget could be charged after a journal entry
+    /// that references an uncharged operation.
+    #[test]
+    fn test_guard_chain_effect_ordering() {
+        let chain = GuardChain::standard();
+        let mut snapshot = test_snapshot();
+        let context = test_context();
+        let peer = test_peer();
+
+        let mut budgets = HashMap::new();
+        budgets.insert((context, peer), FlowCost::new(1000));
+        snapshot.budgets = FlowBudgetView::new(budgets);
+
+        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100))
+            .with_context_id(context)
+            .with_peer(peer)
+            .with_metadata_leakage(16);
+
+        let outcome = chain.evaluate(&snapshot, &request);
+        assert!(outcome.is_authorized());
+
+        // Find indices of each effect type
+        let charge_idx = outcome
+            .effects
+            .iter()
+            .position(|e| matches!(e, EffectCommand::ChargeBudget { .. }));
+        let journal_idx = outcome
+            .effects
+            .iter()
+            .position(|e| matches!(e, EffectCommand::AppendJournal { .. }));
+        let leakage_idx = outcome
+            .effects
+            .iter()
+            .position(|e| matches!(e, EffectCommand::RecordLeakage { .. }));
+
+        // All must exist and be in the correct order
+        let charge_idx = charge_idx.expect("ChargeBudget missing");
+        let journal_idx = journal_idx.expect("AppendJournal missing");
+        let leakage_idx = leakage_idx.expect("RecordLeakage missing");
+
+        assert!(
+            charge_idx < journal_idx,
+            "ChargeBudget must precede AppendJournal"
+        );
+        assert!(
+            journal_idx < leakage_idx,
+            "AppendJournal must precede RecordLeakage"
+        );
+    }
+
+    /// CapGuard denial stops the chain before FlowGuard or any downstream
+    /// guard runs. No budget charge, no journal entry, no leakage record.
+    #[test]
+    fn test_guard_chain_capguard_denial_stops_chain() {
+        let chain = GuardChain::standard();
+        let mut snapshot = test_snapshot();
+        let context = test_context();
+        let peer = test_peer();
+
+        // Budget is sufficient — denial must come from CapGuard, not FlowGuard
+        let mut budgets = HashMap::new();
+        budgets.insert((context, peer), FlowCost::new(1000));
+        snapshot.budgets = FlowBudgetView::new(budgets);
+
+        // Remove authorization metadata so CapGuard denies
+        snapshot.metadata = MetadataView::new(HashMap::new());
+
+        let request = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100))
+            .with_context_id(context)
+            .with_peer(peer);
+
+        let outcome = chain.evaluate(&snapshot, &request);
+        assert!(!outcome.is_authorized());
+        assert!(
+            outcome.effects.is_empty(),
+            "CapGuard denial must produce zero effects"
+        );
+    }
 }

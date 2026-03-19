@@ -97,15 +97,15 @@ cargo test -p aura-guards
 
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
-| Guard chain ordering violated | `src/guards/pure.rs` (inline) | Covered |
+| Guard chain effect ordering wrong | `src/guards/pure.rs` `test_guard_chain_effect_ordering` | Covered |
+| CapGuard denial leaks downstream effects | `src/guards/pure.rs` `test_guard_chain_capguard_denial_stops_chain` | Covered |
+| FlowGuard denial leaks downstream effects | `src/guards/pure.rs` `test_guard_chain_early_denial` | Covered |
 | Transport without guard evaluation | `tests/chain/guard_chain_transport.rs` | Covered |
 | CapGuard accepts missing capability | `src/guards/capability_guard.rs` (inline) | Covered |
 | FlowGuard accepts exhausted budget | `src/guards/pure.rs` (inline) | Covered |
-| JournalCoupler fails to couple fact | `src/guards/pure.rs` (inline) | Covered |
-| LeakageTracker fails to record | `src/guards/pure.rs` (inline) | Covered |
+| Charge-before-send property | `tests/chain/guard_chain_properties.rs` (proptest) | Covered |
 | Choreography guard integration | `tests/chain/choreography_guards.rs` | Covered |
 | GuardPlan drifts from choreography | `tests/chain/guard_plan_golden.rs` | Covered |
-| Charge-before-send property | `tests/chain/guard_chain_properties.rs` | Covered |
 | Policy defaults incorrect | `src/guards/policy.rs` (inline) | Covered |
 
 ## Boundaries
