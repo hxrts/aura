@@ -272,6 +272,12 @@ The runtime must also distinguish owner identity from owner capability:
 
 Both checks matter for effect routing, especially across delegation boundaries.
 
+Parity-critical ownership boundaries should declare that split explicitly
+through `aura-macros` rather than comments or naming convention alone:
+- `#[semantic_owner(..., category = "move_owned")]` for move-owned workflow owners
+- `#[actor_owned(..., category = "actor_owned")]` for long-lived async domains
+- `#[capability_boundary(category = "capability_gated", ...)]` for mint/publication helpers
+
 See `crates/aura-agent/ARCHITECTURE.md` for the complete ownership model.
 
 ## Layer Placement

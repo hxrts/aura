@@ -94,7 +94,7 @@ impl OperationTracker {
         existing: OperationState,
         next: OperationState,
     ) -> bool {
-        matches!(existing, OperationState::Succeeded | OperationState::Failed) && existing != next
+        !existing.can_transition_to(next)
     }
 
     fn set_state(&mut self, operation_id: OperationId, state: OperationState) {

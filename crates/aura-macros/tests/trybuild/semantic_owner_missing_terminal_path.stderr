@@ -1,0 +1,16 @@
+error: semantic_owner requires sanctioned terminal path `publish_done` to appear in the function body
+  --> tests/trybuild/semantic_owner_missing_terminal_path.rs:10:3
+   |
+10 |   ) {
+   |  ___^
+11 | |     let _ = 1usize;
+12 | | }
+   | |_^
+
+warning: unused imports: `OperationContext` and `TraceContext`
+ --> tests/trybuild/semantic_owner_missing_terminal_path.rs:1:17
+  |
+1 | use aura_core::{OperationContext, TraceContext};
+  |                 ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

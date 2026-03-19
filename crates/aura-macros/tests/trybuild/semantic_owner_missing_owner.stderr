@@ -1,0 +1,18 @@
+error: semantic_owner requires `owner = "..."`
+ --> tests/trybuild/semantic_owner_missing_owner.rs:5:1
+  |
+5 | / #[aura_macros::semantic_owner(
+6 | |     terminal = "publish_done",
+7 | |     category = "move_owned"
+8 | | )]
+  | |__^
+  |
+  = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused imports: `OperationContext` and `TraceContext`
+ --> tests/trybuild/semantic_owner_missing_owner.rs:1:17
+  |
+1 | use aura_core::{OperationContext, TraceContext};
+  |                 ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

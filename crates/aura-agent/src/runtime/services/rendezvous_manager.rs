@@ -321,6 +321,14 @@ fn default_udp_effects() -> Arc<dyn UdpEffects> {
 /// - Broadcast presence on the local network periodically
 /// - Listen for other Aura nodes on the LAN
 /// - Cache discovered peer descriptors for connection
+#[aura_macros::actor_owned(
+    owner = "rendezvous_manager",
+    domain = "rendezvous",
+    gate = "rendezvous_command_ingress",
+    command = RendezvousCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 #[derive(Clone)]
 pub struct RendezvousManager {
     /// Configuration

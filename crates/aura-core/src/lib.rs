@@ -157,7 +157,7 @@ pub use conformance::{
 pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use ownership::{
     actor_owned, capability_gated, move_owned,
-    BestEffortBoundaryProtocol,
+    ActorDeclaration, BestEffortBoundaryProtocol, BoundaryDeclarationCategory,
     issue_operation_context, issue_operation_handle, issue_owner_token,
     ownership_capability_token_request_for, ActorIngressMutationCapability,
     AuthorizedActorIngressMutation, AuthorizedProgressPublication,
@@ -169,7 +169,8 @@ pub use ownership::{
     OwnershipErrorDomain, OwnershipResult, OwnershipTransfer, OwnershipTransferCapability,
     PostTerminalBestEffort, PublicationSequence, ReadinessPublicationCapability,
     SemanticOwnerAwaitPolicy, SemanticOwnerBestEffortPolicy, SemanticOwnerHandoffPolicy,
-    SemanticOwnerProtocol, TerminalOutcome, TerminalPublisher, Terminality, TraceContext,
+    SemanticOwnerProtocol, SupervisionRegistration, TerminalOutcome, TerminalPublisher,
+    Terminality, TraceContext,
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,

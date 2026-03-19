@@ -268,6 +268,13 @@ Rules:
 - canonical ownership/runtime primitives for parity-critical code come from
   `aura-core::ownership` through the explicit `actor_owned`, `move_owned`, and
   `capability_gated` surfaces
+- parity-critical boundaries must use the `aura-macros` declaration layer:
+  `#[semantic_owner(..., category = "move_owned")]`,
+  `#[actor_owned(..., category = "actor_owned")]`,
+  `#[capability_boundary(category = "capability_gated", ...)]`, and
+  `#[ownership_lifecycle(...)]` where a small state machine is appropriate
+- ownership shell scripts are secondary escape-hatch fences; primary
+  enforcement belongs in types, macros, and compile-fail coverage
 
 ### Time System
 

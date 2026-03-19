@@ -317,7 +317,7 @@ pub struct ConnectionPool {
     connections: HashMap<DeviceId, Vec<ConnectionMetadata>>,
 
     /// Total connection count
-    total_connections: usize,
+    total_connections: u32,
 
     /// Pool statistics
     stats: PoolStatistics,
@@ -365,7 +365,7 @@ impl ConnectionPool {
         }
 
         // Check limits before creating new connection
-        let max_total_connections = self.config.max_total_connections as usize;
+        let max_total_connections = self.config.max_total_connections;
         if self.total_connections >= max_total_connections {
             self.stats.connection_limit_hits += 1;
             return Err(sync_resource_exhausted(
@@ -492,7 +492,9 @@ impl ConnectionPool {
 
             let removed = before - connections.len();
             evicted += removed;
-            self.total_connections = self.total_connections.saturating_sub(removed);
+            self.total_connections = self
+                .total_connections
+                .saturating_sub(u32::try_from(removed).unwrap_or(u32::MAX));
         }
 
         // Step 2: Close expired connections via aura-transport (no borrowing conflicts)
@@ -536,7 +538,7 @@ impl ConnectionPool {
     }
 
     /// Get current total connection count
-    pub fn total_connections(&self) -> usize {
+    pub fn total_connections(&self) -> u32 {
         self.total_connections
     }
 

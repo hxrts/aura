@@ -1,0 +1,8 @@
+error[E0599]: no function or associated item named `actor_declaration` found for struct `DemoActor` in the current scope
+ --> tests/trybuild/actor_owned_bypass_without_macro.rs:7:24
+  |
+4 | struct DemoActor;
+  | ---------------- function or associated item `actor_declaration` not found for this struct
+...
+7 |     let _ = DemoActor::actor_declaration();
+  |                        ^^^^^^^^^^^^^^^^^ function or associated item not found in `DemoActor`

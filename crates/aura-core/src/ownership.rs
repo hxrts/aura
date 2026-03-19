@@ -20,6 +20,16 @@ pub enum OwnershipCategory {
     Observed,
 }
 
+/// Declaration-time ownership boundary categories for proc-macro-enforced
+/// parity-critical surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundaryDeclarationCategory {
+    MoveOwned,
+    ActorOwned,
+    CapabilityGated,
+}
+
 /// Required frontend/app handoff policy for parity-critical semantic owners.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -525,6 +535,94 @@ impl<Domain, Message> BoundedActorIngress<Domain, Message> {
     }
 }
 
+/// Canonical declaration artifact for long-lived actor-owned domains.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActorDeclaration<Domain, Message> {
+    category: BoundaryDeclarationCategory,
+    owner_name: &'static str,
+    domain_name: &'static str,
+    ingress_gate: &'static str,
+    ingress: BoundedActorIngress<Domain, Message>,
+}
+
+impl<Domain, Message> ActorDeclaration<Domain, Message> {
+    pub fn new(
+        owner_name: &'static str,
+        domain_name: &'static str,
+        ingress_gate: &'static str,
+        capacity: u32,
+    ) -> Self {
+        Self {
+            category: BoundaryDeclarationCategory::ActorOwned,
+            owner_name,
+            domain_name,
+            ingress_gate,
+            ingress: BoundedActorIngress::new(owner_name, capacity),
+        }
+    }
+
+    pub fn category(&self) -> BoundaryDeclarationCategory {
+        self.category
+    }
+
+    pub fn owner_name(&self) -> &'static str {
+        self.owner_name
+    }
+
+    pub fn domain_name(&self) -> &'static str {
+        self.domain_name
+    }
+
+    pub fn ingress_gate(&self) -> &'static str {
+        self.ingress_gate
+    }
+
+    pub fn ingress(&self) -> &BoundedActorIngress<Domain, Message> {
+        &self.ingress
+    }
+
+    pub fn into_ingress(self) -> BoundedActorIngress<Domain, Message> {
+        self.ingress
+    }
+
+    pub fn register_supervision<HandleId>(
+        self,
+        handle_id: HandleId,
+        shutdown: OwnedShutdownToken,
+    ) -> SupervisionRegistration<Domain, Message, HandleId> {
+        SupervisionRegistration {
+            declaration: self,
+            handle: OwnedTaskHandle::new(handle_id, shutdown),
+        }
+    }
+}
+
+/// Typed link between an actor declaration and its supervised task handle.
+#[derive(Debug, Clone)]
+pub struct SupervisionRegistration<Domain, Message, HandleId> {
+    declaration: ActorDeclaration<Domain, Message>,
+    handle: OwnedTaskHandle<HandleId>,
+}
+
+impl<Domain, Message, HandleId> SupervisionRegistration<Domain, Message, HandleId> {
+    pub fn declaration(&self) -> &ActorDeclaration<Domain, Message> {
+        &self.declaration
+    }
+
+    pub fn handle(&self) -> &OwnedTaskHandle<HandleId> {
+        &self.handle
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        ActorDeclaration<Domain, Message>,
+        OwnedTaskHandle<HandleId>,
+    ) {
+        (self.declaration, self.handle)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PublicationMetadata<OperationId, InstanceId, Trace = TraceContext> {
     operation_id: OperationId,
@@ -953,7 +1051,10 @@ impl<OperationId, InstanceId, Trace, Phase> OwnerPublication
 
 /// Explicit actor-owned ownership surface.
 pub mod actor_owned {
-    pub use super::{BoundedActorIngress, OwnedShutdownToken, OwnedTaskHandle, OwnedTaskSpawner};
+    pub use super::{
+        ActorDeclaration, BoundedActorIngress, OwnedShutdownToken, OwnedTaskHandle,
+        OwnedTaskSpawner, SupervisionRegistration,
+    };
 }
 
 /// Explicit move-owned ownership surface.

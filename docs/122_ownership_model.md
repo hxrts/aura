@@ -207,6 +207,20 @@ This forbids the bug shape where:
 The handoff boundary must therefore be *before* awaited workflow execution, not
 after it.
 
+Macro declaration rule:
+
+- `#[aura_macros::semantic_owner(owner = "...", terminal = "...", category = "move_owned")]`
+  is the sanctioned declaration surface for move-owned semantic workflow
+  boundaries
+- `#[aura_macros::capability_boundary(category = "capability_gated", capability = "...")]`
+  is the sanctioned declaration surface for capability-bearing mint/publication
+  helpers
+- `#[aura_macros::actor_owned(owner = "...", domain = "...", gate = "...", command = Type, capacity = N, category = "actor_owned")]`
+  is the sanctioned declaration surface for long-lived actor-owned async domains
+- `#[aura_macros::ownership_lifecycle(initial = "...", ordered = "...", terminals = "...")]`
+  is the sanctioned declaration surface for small parity-critical lifecycle
+  enums
+
 ## Owner Body Rules
 
 Once a function is designated as a semantic owner, its body is constrained more
@@ -371,7 +385,7 @@ This inventory covers every Rust crate under `crates/`. It is the workspace-leve
 | `aura-store` | `Pure` | none | batch descriptors, keyspace transfer records | storage write admission | timeout-policy allowlist around store waits |
 | `aura-transport` | `Pure`, `MoveOwned` | none | connection descriptors, receipt ownership records | receipt issuance, transport send boundaries | none currently tracked in the repo-wide ownership rollout |
 | `aura-mpst` | `Pure`, `MoveOwned` | none | session endpoints, protocol continuations | endpoint progression | older ownership wrappers still in use |
-| `aura-macros` | `Pure` | none | none | none | none |
+| `aura-macros` | `Pure` | none | macro-declared ownership metadata | compile-time ownership, capability, and lifecycle declaration surfaces | keep shell linting secondary to proc-macro enforcement |
 | `aura-maintenance` | `Pure` | none | maintenance command descriptors, rollout records | maintenance-plan issuance | timeout-policy rollout incomplete |
 
 ### Layer 3
@@ -476,6 +490,11 @@ Each crate migration must refine its own `ARCHITECTURE.md` so that parity-critic
 The ownership model is enforced in layers.
 
 Types and private constructors provide the first line of defense. Capability-gated mutation and publication APIs form the second layer. Canonical owner wrappers and macros provide the third layer. AST-backed checks, compile-fail tests, invariant tests, and then thin `scripts/check/*.sh` / `just ci-*` wrappers complete CI enforcement.
+
+Primary enforcement belongs in typed ownership primitives and proc-macro
+declarations. Shell checks such as semantic-owner bounded-await and
+operation-terminality wrappers are secondary fences for narrow escape hatches,
+not the source of truth for semantic correctness.
 
 Scripts alone are not sufficient. The API must make the wrong pattern hard or impossible first.
 

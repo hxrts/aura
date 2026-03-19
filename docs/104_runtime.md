@@ -35,6 +35,10 @@ Two runtime rules follow from that split:
 2. Runtime-facing lifecycle and readiness publication should be
    capability-gated and should terminate explicitly with typed success, failure,
    or cancellation.
+3. Long-lived mutable async domains should be declared through
+   `#[aura_macros::actor_owned(...)]`, and small parity-critical runtime
+   lifecycle enums should prefer `#[aura_macros::ownership_lifecycle(...)]`
+   over hand-written transition helpers.
 
 ## Structured Concurrency
 

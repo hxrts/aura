@@ -1,0 +1,15 @@
+error: semantic_owner requires `category = "move_owned"`
+ --> tests/trybuild/semantic_owner_missing_category.rs:5:1
+  |
+5 | #[aura_macros::semantic_owner(owner = "demo-owner", terminal = "publish_done")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused imports: `OperationContext` and `TraceContext`
+ --> tests/trybuild/semantic_owner_missing_category.rs:1:17
+  |
+1 | use aura_core::{OperationContext, TraceContext};
+  |                 ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

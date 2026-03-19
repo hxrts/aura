@@ -24,6 +24,7 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
+    issue_semantic_operation_context,
     publish_authoritative_operation_failure, publish_authoritative_operation_phase,
     replace_authoritative_semantic_facts_of_kind, semantic_lifecycle_publication_capability,
     semantic_readiness_publication_capability, update_authoritative_semantic_facts,
@@ -57,8 +58,8 @@ use aura_core::{
         ChannelSendParams,
     },
     types::{AuthorityId, ChannelId, ContextId},
-    AuraError, InvitationId, OwnedTaskSpawner, RetryRunError, TimeoutBudget, TimeoutBudgetError,
-    TimeoutRunError,
+    AuraError, InvitationId, OperationContext, OwnedTaskSpawner, RetryRunError, TimeoutBudget,
+    TimeoutBudgetError, TimeoutRunError, TraceContext,
 };
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
@@ -2386,7 +2387,6 @@ pub async fn join_channel_by_name(
     join_channel_by_name_with_instance(app_core, channel_name, None).await
 }
 
-#[aura_macros::semantic_owner]
 /// Join an existing channel by name and attribute the semantic operation to a
 /// specific UI instance when one exists.
 pub async fn join_channel_by_name_with_instance(
@@ -2397,13 +2397,30 @@ pub async fn join_channel_by_name_with_instance(
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::join_channel(),
-        instance_id,
+        instance_id.clone(),
         SemanticOperationKind::JoinChannel,
     );
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
+    let mut operation_context =
+        issue_semantic_operation_context(OperationId::join_channel(), instance_id);
+    join_channel_by_name_owned(app_core, channel_name, &owner, operation_context.as_mut()).await
+}
 
+#[aura_macros::semantic_owner(
+    owner = "join_channel_by_name_with_instance",
+    terminal = "publish_failure",
+    category = "move_owned"
+)]
+async fn join_channel_by_name_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<(), AuraError> {
     let channel_name = channel_name.trim();
     if channel_name.is_empty() {
         let error = AuraError::invalid("Channel name cannot be empty");
@@ -3392,7 +3409,6 @@ pub async fn invite_user_to_channel(
 
 /// Invite a user to a channel while carrying an already-authoritative context,
 /// when the caller has one.
-#[aura_macros::semantic_owner]
 pub async fn invite_user_to_channel_with_context(
     app_core: &Arc<RwLock<AppCore>>,
     target_user_id: &str,
@@ -3402,13 +3418,6 @@ pub async fn invite_user_to_channel_with_context(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    let runtime = require_runtime(app_core).await?;
-    let deadline = workflow_timeout_budget(
-        &runtime,
-        Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS),
-    )
-    .await?;
-    let stage_tracker = Some(new_invite_stage_tracker("publish_workflow_dispatched"));
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
@@ -3418,6 +3427,49 @@ pub async fn invite_user_to_channel_with_context(
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
+    let mut operation_context = issue_semantic_operation_context(
+        OperationId::invitation_create(),
+        operation_instance_id.clone(),
+    );
+    invite_user_to_channel_with_context_owned(
+        app_core,
+        target_user_id,
+        channel_name_or_id,
+        context_id,
+        operation_instance_id,
+        message,
+        ttl_ms,
+        &owner,
+        operation_context.as_mut(),
+    )
+    .await
+}
+
+#[aura_macros::semantic_owner(
+    owner = "invite_user_to_channel_with_context",
+    terminal = "publish_failure",
+    category = "move_owned"
+)]
+async fn invite_user_to_channel_with_context_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    target_user_id: &str,
+    channel_name_or_id: &str,
+    context_id: Option<ContextId>,
+    operation_instance_id: Option<OperationInstanceId>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<InvitationId, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let deadline = workflow_timeout_budget(
+        &runtime,
+        Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS),
+    )
+    .await?;
+    let stage_tracker = Some(new_invite_stage_tracker("publish_workflow_dispatched"));
 
     let result = execute_with_runtime_timeout_budget(&runtime, &deadline, || async {
         // Resolve via contacts first so command targets can use IDs or contact names.

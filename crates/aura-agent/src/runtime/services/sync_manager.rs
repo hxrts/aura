@@ -214,6 +214,14 @@ impl SyncManagerState {
 ///
 /// Integrates `aura_sync::SyncService` into the agent runtime lifecycle.
 /// Handles startup, shutdown, and coordination with other agent services.
+#[aura_macros::actor_owned(
+    owner = "sync_service_manager",
+    domain = "sync",
+    gate = "sync_command_ingress",
+    command = SyncCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 #[derive(Clone)]
 pub struct SyncServiceManager {
     /// Configuration

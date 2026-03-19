@@ -4,8 +4,9 @@ use async_lock::{Mutex, RwLock};
 use aura_core::{
     issue_operation_context, AuraError, AuthorizedProgressPublication,
     AuthorizedReadinessPublication, AuthorizedTerminalPublication, LifecyclePublicationCapability,
-    OperationContextCapability, OperationProgress, OperationTimeoutBudget, OwnedShutdownToken,
-    OwnerEpoch, PublicationSequence, ReadinessPublicationCapability, TerminalOutcome, TraceContext,
+    OperationContext, OperationContextCapability, OperationProgress, OperationTimeoutBudget,
+    OwnedShutdownToken, OwnerEpoch, PublicationSequence, ReadinessPublicationCapability,
+    TerminalOutcome, TraceContext,
 };
 
 use crate::signal_defs::{
@@ -17,6 +18,9 @@ use crate::ui_contract::{
 };
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;
+
+pub(crate) type SemanticOperationContext =
+    OperationContext<OperationId, OperationInstanceId, TraceContext>;
 
 struct AuthoritativeSemanticFactsUpdateGate {
     gate: Mutex<()>,
@@ -45,15 +49,27 @@ static SEMANTIC_READINESS_PUBLICATION_CAPABILITY: LazyLock<ReadinessPublicationC
 
 /// Return the sanctioned lifecycle-publication capability for shared semantic
 /// operation status publication.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_lifecycle"
+)]
 pub(crate) fn semantic_lifecycle_publication_capability() -> &'static LifecyclePublicationCapability {
     &SEMANTIC_LIFECYCLE_PUBLICATION_CAPABILITY
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_readiness"
+)]
 pub(crate) fn semantic_readiness_publication_capability() -> &'static ReadinessPublicationCapability
 {
     &SEMANTIC_READINESS_PUBLICATION_CAPABILITY
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_readiness"
+)]
 fn authorize_readiness_publication(
     fact: AuthoritativeSemanticFact,
 ) -> AuthorizedReadinessPublication<AuthoritativeSemanticFact> {
@@ -161,6 +177,28 @@ impl SemanticWorkflowOwner {
         )
         .await
     }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_operation_context"
+)]
+pub(crate) fn issue_semantic_operation_context(
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+) -> Option<SemanticOperationContext> {
+    instance_id.map(|instance_id| {
+        issue_operation_context(
+            &SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
+            operation_id,
+            instance_id,
+            OwnerEpoch::new(0),
+            PublicationSequence::new(0),
+            OperationTimeoutBudget::deferred_local_policy(),
+            OwnedShutdownToken::detached(),
+            TraceContext::detached(),
+        )
+    })
 }
 
 impl ExactOperationLifecyclePublication {

@@ -630,6 +630,11 @@ pub enum UiReadiness {
     Ready,
 }
 
+#[aura_macros::ownership_lifecycle(
+    initial = "Idle",
+    ordered = "Idle,Submitting",
+    terminals = "Succeeded,Failed"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationState {
@@ -714,6 +719,11 @@ pub enum SemanticOperationKind {
     SendChatMessage,
 }
 
+#[aura_macros::ownership_lifecycle(
+    initial = "Submitted",
+    ordered = "Submitted,WorkflowDispatched,AuthoritativeContextReady,ContactLinkReady,MembershipReady,RecipientResolutionReady,PeerChannelReady,DeliveryReady",
+    terminals = "Succeeded,Failed,Cancelled"
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticOperationPhase {
@@ -728,13 +738,6 @@ pub enum SemanticOperationPhase {
     Succeeded,
     Failed,
     Cancelled,
-}
-
-impl SemanticOperationPhase {
-    #[must_use]
-    pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -3441,6 +3444,25 @@ mod tests {
         assert_eq!(status.error, None);
         assert!(status.phase.is_terminal());
         assert_eq!(status.phase, SemanticOperationPhase::Cancelled);
+    }
+
+    #[test]
+    fn semantic_operation_phase_generated_lifecycle_rejects_terminal_regression() {
+        assert!(SemanticOperationPhase::Submitted.can_transition_to(
+            SemanticOperationPhase::WorkflowDispatched
+        ));
+        assert!(SemanticOperationPhase::DeliveryReady
+            .can_transition_to(SemanticOperationPhase::Succeeded));
+        assert!(!SemanticOperationPhase::Succeeded.can_transition_to(
+            SemanticOperationPhase::Failed
+        ));
+    }
+
+    #[test]
+    fn operation_state_generated_lifecycle_requires_new_instance_after_terminal() {
+        assert!(OperationState::Idle.can_transition_to(OperationState::Submitting));
+        assert!(OperationState::Submitting.can_transition_to(OperationState::Succeeded));
+        assert!(!OperationState::Succeeded.can_transition_to(OperationState::Submitting));
     }
 
     #[test]

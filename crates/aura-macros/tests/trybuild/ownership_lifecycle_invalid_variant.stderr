@@ -1,0 +1,11 @@
+error: ownership_lifecycle variant `Ready` is missing from the enum
+  --> tests/trybuild/ownership_lifecycle_invalid_variant.rs:6:1
+   |
+ 6 | / #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ 7 | | enum DemoLifecycle {
+ 8 | |     Submitted,
+ 9 | |     Dispatched,
+...  |
+12 | |     Cancelled,
+13 | | }
+   | |_^

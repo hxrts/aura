@@ -213,7 +213,7 @@ pub struct PeerMetadata {
     pub has_sync_capability: bool,
 
     /// Current number of active sync sessions
-    pub active_sessions: usize,
+    pub active_sessions: u32,
 }
 
 impl PeerMetadata {
@@ -276,7 +276,7 @@ impl PeerMetadata {
     }
 
     /// Check if peer is available for new sync sessions
-    pub fn is_available(&self, max_concurrent: usize) -> bool {
+    pub fn is_available(&self, max_concurrent: u32) -> bool {
         matches!(self.status, PeerStatus::Connected) && self.active_sessions < max_concurrent
     }
 
@@ -618,7 +618,7 @@ impl PeerManager {
     ///
     /// Returns up to `count` peers sorted by score (highest first)
     pub fn select_sync_peers(&self, count: usize) -> Vec<DeviceId> {
-        let max_concurrent_sessions = self.config.max_concurrent_sessions as usize;
+        let max_concurrent_sessions = self.config.max_concurrent_sessions;
         let mut scored_peers: Vec<_> = self
             .peers
             .values()
@@ -640,7 +640,7 @@ impl PeerManager {
 
     /// Check if a peer is available for sync
     pub fn is_peer_available(&self, device_id: &DeviceId) -> bool {
-        let max_concurrent_sessions = self.config.max_concurrent_sessions as usize;
+        let max_concurrent_sessions = self.config.max_concurrent_sessions;
         self.peers
             .get(device_id)
             .map(|p| p.metadata.is_available(max_concurrent_sessions))
@@ -681,7 +681,7 @@ impl PeerManager {
 
     /// Get statistics about tracked peers
     pub fn statistics(&self) -> PeerManagerStatistics {
-        let max_concurrent_sessions = self.config.max_concurrent_sessions as usize;
+        let max_concurrent_sessions = self.config.max_concurrent_sessions;
         let connected = self
             .peers
             .values()
@@ -700,7 +700,7 @@ impl PeerManager {
             .filter(|p| p.metadata.has_sync_capability)
             .count();
 
-        let active_sessions: usize = self
+        let active_sessions: u32 = self
             .peers
             .values()
             .map(|p| p.metadata.active_sessions)
@@ -711,7 +711,7 @@ impl PeerManager {
             connected_peers: connected as u32,
             available_peers: available as u32,
             peers_with_sync_capability: with_capability as u32,
-            total_active_sessions: active_sessions as u32,
+            total_active_sessions: active_sessions,
         }
     }
 

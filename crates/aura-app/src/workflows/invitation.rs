@@ -153,6 +153,7 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
+    issue_semantic_operation_context,
     publish_authoritative_operation_failure, publish_authoritative_operation_failure_with_instance,
     publish_authoritative_operation_phase, publish_authoritative_operation_phase_with_instance,
     replace_authoritative_semantic_facts_of_kind, semantic_lifecycle_publication_capability,
@@ -168,7 +169,8 @@ use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::{
-    AuraError, OwnedTaskSpawner, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError,
+    AuraError, OperationContext, OwnedTaskSpawner, RetryRunError, TimeoutBudget,
+    TimeoutBudgetError, TimeoutRunError, TraceContext,
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -1884,11 +1886,18 @@ pub async fn accept_invitation(
     accept_invitation_with_instance(app_core, invitation_id, None).await
 }
 
-#[aura_macros::semantic_owner]
+#[aura_macros::semantic_owner(
+    owner = "invitation_accept_id_owned",
+    terminal = "publish_invitation_owner_status",
+    category = "move_owned"
+)]
 async fn accept_invitation_id_owned(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
     owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<(), AuraError> {
     let accepted_invitation = list_invitations(app_core)
         .await
@@ -2040,7 +2049,6 @@ async fn accept_invitation_id_owned(
 }
 
 /// Accept an invitation and attribute the semantic operation to a specific UI instance.
-#[aura_macros::semantic_owner]
 pub async fn accept_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &InvitationId,
@@ -2078,12 +2086,14 @@ pub async fn accept_invitation_with_instance(
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_accept(),
-        instance_id,
+        instance_id.clone(),
         operation_kind,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    accept_invitation_id_owned(app_core, invitation_id, &owner).await
+    let mut operation_context =
+        issue_semantic_operation_context(OperationId::invitation_accept(), instance_id);
+    accept_invitation_id_owned(app_core, invitation_id, &owner, operation_context.as_mut()).await
 }
 
 /// Accept an imported invitation using the invitation metadata returned by the runtime bridge.
@@ -2094,11 +2104,18 @@ pub async fn accept_imported_invitation(
     accept_imported_invitation_with_instance(app_core, invitation, None).await
 }
 
-#[aura_macros::semantic_owner]
+#[aura_macros::semantic_owner(
+    owner = "accept_imported_invitation_owned",
+    terminal = "publish_invitation_owner_status",
+    category = "move_owned"
+)]
 async fn accept_imported_invitation_owned(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &crate::runtime_bridge::InvitationInfo,
     owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<(), AuraError> {
     if matches!(
         invitation.invitation_type,
@@ -2226,7 +2243,6 @@ async fn accept_imported_invitation_owned(
 }
 
 /// Accept an imported invitation and attribute the semantic operation to a specific UI instance.
-#[aura_macros::semantic_owner]
 pub async fn accept_imported_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &crate::runtime_bridge::InvitationInfo,
@@ -2236,12 +2252,15 @@ pub async fn accept_imported_invitation_with_instance(
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_accept(),
-        instance_id,
+        instance_id.clone(),
         operation_kind,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    accept_imported_invitation_owned(app_core, invitation, &owner).await
+    let mut operation_context =
+        issue_semantic_operation_context(OperationId::invitation_accept(), instance_id);
+    accept_imported_invitation_owned(app_core, invitation, &owner, operation_context.as_mut())
+        .await
 }
 
 /// Accept a device-enrollment invitation and wait for the local device view to converge.
@@ -2636,20 +2655,19 @@ pub async fn accept_pending_home_invitation(
     accept_pending_home_invitation_with_instance(app_core, None).await
 }
 
-/// Accept the current pending home invitation and attribute the semantic operation to a specific UI instance.
-#[aura_macros::semantic_owner]
-pub async fn accept_pending_home_invitation_with_instance(
+#[aura_macros::semantic_owner(
+    owner = "accept_pending_home_invitation_id_owned",
+    terminal = "publish_invitation_owner_status",
+    category = "move_owned"
+)]
+async fn accept_pending_home_invitation_id_owned(
     app_core: &Arc<RwLock<AppCore>>,
+    owner: &SemanticWorkflowOwner,
     instance_id: Option<OperationInstanceId>,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<InvitationId, AuraError> {
-    let owner = SemanticWorkflowOwner::new(
-        app_core,
-        OperationId::invitation_accept(),
-        instance_id.clone(),
-        SemanticOperationKind::AcceptPendingChannelInvitation,
-    );
-    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
-        .await?;
     let runtime = require_runtime(app_core).await?;
     let our_authority = runtime.authority_id();
     const HOME_ACCEPT_ATTEMPTS: usize = 200;
@@ -2672,24 +2690,24 @@ pub async fn accept_pending_home_invitation_with_instance(
             {
                 Ok(pending) => pending,
                 Err(error) => {
-                    return fail_pending_invitation_accept_if_owned(Some(&owner), error).await;
+                    return fail_pending_invitation_accept_if_owned(Some(owner), error).await;
                 }
             };
             if let Some(invitation) = pending {
-                accept_imported_invitation_owned(app_core, &invitation, &owner).await?;
+                accept_imported_invitation_owned(app_core, &invitation, owner, None).await?;
                 return Ok(invitation_id);
             }
             if let Some(invitation) =
                 pending_home_invitation_from_view(app_core, &invitations, our_authority).await
             {
-                accept_imported_invitation_owned(app_core, &invitation, &owner).await?;
+                accept_imported_invitation_owned(app_core, &invitation, owner, None).await?;
                 return Ok(invitation_id);
             }
         }
         if let Some(invitation_id) =
             pending_home_invitation_id_from_view(&invitations, our_authority)
         {
-            accept_invitation_id_owned(app_core, &invitation_id, &owner).await?;
+            accept_invitation_id_owned(app_core, &invitation_id, owner, None).await?;
             return Ok(invitation_id);
         }
     }
@@ -2708,7 +2726,7 @@ pub async fn accept_pending_home_invitation_with_instance(
 
         if let Some(inv) = home_invitation {
             let invitation_id = inv.invitation_id.clone();
-            accept_imported_invitation_owned(app_core, inv, &owner).await?;
+            accept_imported_invitation_owned(app_core, inv, owner, None).await?;
             return Ok(invitation_id);
         }
         #[cfg(feature = "signals")]
@@ -2724,7 +2742,7 @@ pub async fn accept_pending_home_invitation_with_instance(
             if let Some(invitation_id) =
                 pending_home_invitation_id_from_view(&invitations, our_authority)
             {
-                accept_invitation_id_owned(app_core, &invitation_id, &owner).await?;
+                accept_invitation_id_owned(app_core, &invitation_id, owner, None).await?;
                 return Ok(invitation_id);
             }
 
@@ -2753,13 +2771,37 @@ pub async fn accept_pending_home_invitation_with_instance(
         accepted_pending_home_invitation_from_history(app_core, our_authority, instance_id.clone())
             .await?
     {
-        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::Succeeded).await?;
+        publish_invitation_owner_status(owner, None, SemanticOperationPhase::Succeeded).await?;
         return Ok(invitation_id);
     }
 
-    fail_pending_invitation_accept_if_owned(Some(&owner), AcceptInvitationError::AcceptFailed {
+    fail_pending_invitation_accept_if_owned(Some(owner), AcceptInvitationError::AcceptFailed {
             detail: "No pending home invitation found".to_string(),
         })
+    .await
+}
+
+/// Accept the current pending home invitation and attribute the semantic operation to a specific UI instance.
+pub async fn accept_pending_home_invitation_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationId, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_accept(),
+        instance_id.clone(),
+        SemanticOperationKind::AcceptPendingChannelInvitation,
+    );
+    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    let mut operation_context =
+        issue_semantic_operation_context(OperationId::invitation_accept(), instance_id.clone());
+    accept_pending_home_invitation_id_owned(
+        app_core,
+        &owner,
+        instance_id,
+        operation_context.as_mut(),
+    )
     .await
 }
 

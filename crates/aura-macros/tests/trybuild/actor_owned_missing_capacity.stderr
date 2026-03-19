@@ -1,0 +1,13 @@
+error: actor_owned requires `capacity = N`
+  --> tests/trybuild/actor_owned_missing_capacity.rs:4:1
+   |
+ 4 | / #[aura_macros::actor_owned(
+ 5 | |     owner = "demo-actor",
+ 6 | |     domain = "demo-domain",
+ 7 | |     gate = "demo-ingress",
+ 8 | |     command = DemoCommand,
+ 9 | |     category = "actor_owned"
+10 | | )]
+   | |__^
+   |
+   = note: this error originates in the attribute macro `aura_macros::actor_owned` (in Nightly builds, run with -Z macro-backtrace for more info)
