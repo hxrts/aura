@@ -37,7 +37,16 @@ cfg_if! {
         use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
         use error::{log_web_error, WebUiError, WebUiOperation};
+        use futures::{
+            channel::{mpsc, oneshot},
+            StreamExt,
+        };
+        use js_sys::Promise;
+        use std::cell::Cell;
+        use std::rc::Rc;
         use std::sync::Arc;
+        use wasm_bindgen::JsValue;
+        use wasm_bindgen_futures::future_to_promise;
         use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
@@ -459,7 +468,7 @@ cfg_if! {
             }));
 
             harness_bridge::set_controller(controller.clone());
-            if let Err(error) = harness_bridge::install_window_harness_api(controller) {
+            if let Err(error) = harness_bridge::install_window_harness_api() {
                 log_web_error(
                     "error",
                     &WebUiError::operation(
@@ -564,24 +573,14 @@ cfg_if! {
             })
         }
 
-        fn reload_page() -> Result<(), WebUiError> {
-            let window = web_sys::window().ok_or_else(|| {
-                WebUiError::config(
+        async fn request_runtime_rebootstrap() -> Result<(), WebUiError> {
+            harness_bridge::request_rebootstrap().await.map_err(|error| {
+                WebUiError::operation(
                     WebUiOperation::ReloadPage,
-                    "WEB_WINDOW_UNAVAILABLE",
-                    "window is not available",
+                    "WEB_REBOOTSTRAP_REQUEST_FAILED",
+                    format!("failed to request in-process rebootstrap: {:?}", error),
                 )
-            })?;
-            window
-                .location()
-                .reload()
-                .map_err(|error| {
-                    WebUiError::operation(
-                        WebUiOperation::ReloadPage,
-                        "WEB_RELOAD_FAILED",
-                        format!("failed to reload page: {:?}", error),
-                    )
-                })
+            })
         }
 
         #[derive(Clone, PartialEq)]
@@ -775,9 +774,11 @@ cfg_if! {
                         if let Err(error) = clear_storage_key(&legacy_device_key) {
                             log_web_error("warn", &error);
                         }
-                        if let Err(error) = reload_page() {
-                            log_web_error("error", &error);
-                        }
+                        spawn(async move {
+                            if let Err(error) = request_runtime_rebootstrap().await {
+                                log_web_error("error", &error);
+                            }
+                        });
                     })),
                 ));
                 install_harness_instrumentation(controller.clone());
@@ -800,7 +801,10 @@ cfg_if! {
                     }
                     match runtime_workflows::require_runtime(controller.app_core()).await {
                         Ok(runtime) => {
-                            let runtime_devices = runtime.list_devices().await;
+                            let runtime_devices = runtime
+                                .try_list_devices()
+                                .await
+                                .unwrap_or_default();
                             match settings_workflows::get_settings(controller.app_core()).await {
                                 Ok(settings) => web_sys::console::log_1(
                                     &format!(
@@ -923,7 +927,17 @@ cfg_if! {
 
         #[component]
         fn App() -> Element {
-            let bootstrap = use_resource(|| async move { bootstrap_controller().await });
+            let bootstrap_started = use_hook(|| Rc::new(Cell::new(false)));
+            let bootstrap_epoch = use_signal(|| 0_u64);
+            let committed_bootstrap = use_signal(|| Option::<BootstrapState>::None);
+            let bootstrap_error = use_signal(|| Option::<WebUiError>::None);
+            let rebootstrap_requests = use_hook(|| {
+                let (tx, rx) = mpsc::unbounded::<oneshot::Sender<Result<(), WebUiError>>>();
+                (
+                    tx,
+                    Rc::new(std::cell::RefCell::new(Some(rx))),
+                )
+            });
 
             use_effect(|| {
                 if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -931,15 +945,120 @@ cfg_if! {
                 }
             });
 
-            if let Some(Ok(state)) = &*bootstrap.read_unchecked() {
+            use_effect(move || {
+                if !bootstrap_started.get() {
+                    bootstrap_started.set(true);
+                    let mut rebootstrap_rx = rebootstrap_requests
+                        .1
+                        .borrow_mut()
+                        .take()
+                        .expect("rebootstrap receiver should initialize once");
+                    let mut bootstrap_epoch = bootstrap_epoch;
+                    let mut committed_bootstrap = committed_bootstrap;
+                    let mut bootstrap_error = bootstrap_error;
+                    spawn(async move {
+                        while let Some(completion_tx) = rebootstrap_rx.next().await {
+                            let epoch = bootstrap_epoch() + 1;
+                            web_sys::console::log_1(
+                                &format!("[web-bootstrap] trigger start epoch={epoch}").into(),
+                            );
+                            bootstrap_epoch.set(epoch);
+
+                            web_sys::console::log_1(
+                                &format!("[web-bootstrap] runner start epoch={epoch}").into(),
+                            );
+                            let result = bootstrap_controller().await;
+                            if bootstrap_epoch() != epoch {
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-bootstrap] runner superseded epoch={epoch};current={}",
+                                        bootstrap_epoch()
+                                    )
+                                    .into(),
+                                );
+                                let _ = completion_tx.send(Ok(()));
+                                continue;
+                            }
+                            match result {
+                                Ok(state) => {
+                                    web_sys::console::log_1(
+                                        &format!("[web-bootstrap] runner ok epoch={epoch}").into(),
+                                    );
+                                    bootstrap_error.set(None);
+                                    committed_bootstrap.set(Some(state));
+                                    let _ = completion_tx.send(Ok(()));
+                                }
+                                Err(error) => {
+                                    web_sys::console::error_1(
+                                        &format!(
+                                            "[web-bootstrap] runner error epoch={epoch} error={}",
+                                            error.user_message()
+                                        )
+                                        .into(),
+                                    );
+                                    if committed_bootstrap().is_none() {
+                                        bootstrap_error.set(Some(error.clone()));
+                                    } else {
+                                        log_web_error("error", &error);
+                                    }
+                                    let _ = completion_tx.send(Err(error));
+                                }
+                            }
+                        }
+                    });
+
+                    let (completion_tx, _completion_rx) =
+                        oneshot::channel::<Result<(), WebUiError>>();
+                    let _ = rebootstrap_requests.0.unbounded_send(completion_tx);
+                }
+
+                let trigger: Arc<dyn Fn() -> js_sys::Promise> = Arc::new({
+                    let rebootstrap_tx = rebootstrap_requests.0.clone();
+                    move || {
+                        let (completion_tx, completion_rx) =
+                            oneshot::channel::<Result<(), WebUiError>>();
+                        if rebootstrap_tx.unbounded_send(completion_tx).is_err() {
+                            return Promise::reject(&JsValue::from_str(
+                                "rebootstrap request channel is unavailable",
+                            ));
+                        }
+
+                        future_to_promise(async move {
+                            match completion_rx.await {
+                                Ok(Ok(())) => {
+                                    web_sys::console::log_1(&"[web-bootstrap] trigger done".into());
+                                    Ok(JsValue::UNDEFINED)
+                                }
+                                Ok(Err(error)) => {
+                                    web_sys::console::error_1(
+                                        &format!(
+                                            "[web-bootstrap] trigger failed error={}",
+                                            error.user_message()
+                                        )
+                                        .into(),
+                                    );
+                                    Err(JsValue::from_str(&error.user_message()))
+                                }
+                                Err(_) => Err(JsValue::from_str(
+                                    "bootstrap completion channel dropped unexpectedly",
+                                )),
+                            }
+                        })
+                    }
+                });
+
+                harness_bridge::set_rebootstrap_trigger(trigger);
+            });
+
+            if let Some(state) = committed_bootstrap() {
                 return rsx! {
                     BootstrappedApp {
-                        state: state.clone(),
+                        state,
                     }
                 };
             }
 
-            if let Some(Err(error)) = &*bootstrap.read_unchecked() {
+            if let Some(error) = bootstrap_error() {
                 return rsx! {
                     main {
                         class: "min-h-screen bg-background text-foreground grid place-items-center px-6",
@@ -1072,7 +1191,7 @@ cfg_if! {
                     spawn(async move {
                         let app_core = controller.app_core().clone();
                         let result = async {
-                            let mut requires_reload = false;
+                            let mut requires_rebootstrap = false;
                             let invitation = invitation_workflows::import_invitation_details(
                                 &app_core, &code,
                             )
@@ -1122,7 +1241,7 @@ cfg_if! {
                             {
                                 web_sys::console::log_1(
                                     &format!(
-                                        "[web-import-device] staging_reload current_authority={};subject_authority={};selected_runtime_identity={:?};invited_device={}",
+                                        "[web-import-device] staging_rebootstrap current_authority={};subject_authority={};selected_runtime_identity={:?};invited_device={}",
                                         current_authority,
                                         subject_authority,
                                         selected_runtime_identity,
@@ -1156,18 +1275,18 @@ cfg_if! {
                                 }
                                 web_sys::console::log_1(
                                     &format!(
-                                        "[web-import-device] staged_reload subject_authority={};device_id={}",
+                                        "[web-import-device] staged_rebootstrap subject_authority={};device_id={}",
                                         subject_authority, device_id
                                     )
                                     .into(),
                                 );
-                                requires_reload = true;
-                                reload_page().map_err(|error| {
+                                requires_rebootstrap = true;
+                                request_runtime_rebootstrap().await.map_err(|error| {
                                     error.with_operation(
                                         WebUiOperation::ImportDeviceEnrollmentCode,
                                     )
                                 })?;
-                                return Ok(requires_reload);
+                                return Ok(requires_rebootstrap);
                             }
 
                             if let Err(error) =
@@ -1219,7 +1338,10 @@ cfg_if! {
                                     error.to_string(),
                                 )
                             })?;
-                            let runtime_devices_after_accept = runtime.list_devices().await;
+                            let runtime_devices_after_accept = runtime
+                                .try_list_devices()
+                                .await
+                                .unwrap_or_default();
                             web_sys::console::log_1(
                                 &format!(
                                     "[web-import-device] accepted runtime_devices={:?}",
@@ -1268,18 +1390,18 @@ cfg_if! {
                                     error.to_string(),
                                 )
                             })?;
-                            Ok(requires_reload)
+                            Ok(requires_rebootstrap)
                         }
                         .await;
 
                         match result {
-                            Ok(requires_reload) => {
-                                if !requires_reload {
+                            Ok(requires_rebootstrap) => {
+                                if !requires_rebootstrap {
                                     controller.info_toast("Device enrollment complete");
                                     bootstrap_account_ready.set(true);
                                     controller.set_account_setup_state(true, "", None);
                                 } else {
-                                    controller.info_toast("Reloading to finish import");
+                                    controller.info_toast("Switching runtime to finish import");
                                 }
                                 importing_code.set(false);
                             }
@@ -1362,7 +1484,7 @@ cfg_if! {
                             })
                         } else {
                             match stage_initial_web_account_bootstrap(&nickname).await {
-                                Ok(()) => reload_page(),
+                                Ok(()) => request_runtime_rebootstrap().await,
                                 Err(error) => Err(error),
                             }
                         };
@@ -1376,7 +1498,7 @@ cfg_if! {
                                     bootstrap_account_ready.set(true);
                                     controller.set_account_setup_state(true, "", None);
                                 } else {
-                                    controller.info_toast("Reloading to finish account creation");
+                                    controller.info_toast("Finishing account bootstrap");
                                 }
                                 creating_account.set(false);
                             }

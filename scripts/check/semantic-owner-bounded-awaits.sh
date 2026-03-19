@@ -6,4 +6,5 @@ cd "$repo_root"
 
 nix develop --command cargo run -q -p aura-macros --bin ownership_lints -- \
   semantic-owner-bounded-awaits \
-  crates/aura-app/src/workflows
+  crates/aura-app/src/workflows \
+  crates/aura-terminal/src/tui/callbacks

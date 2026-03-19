@@ -18,9 +18,13 @@ pub(crate) type NoArgOwnedCallback = Arc<dyn Fn(SubmittedOperationOwner) + Send 
 
 /// Callback that takes a single string ID.
 pub type IdCallback = Arc<dyn Fn(String) + Send + Sync>;
+pub(crate) type IdOwnedCallback =
+    Arc<dyn Fn(String, Option<SubmittedOperationOwner>) + Send + Sync>;
 
 /// Callback that takes two string arguments.
 pub type TwoStringCallback = Arc<dyn Fn(String, String) + Send + Sync>;
+pub(crate) type TwoStringOwnedCallback =
+    Arc<dyn Fn(String, String, Option<SubmittedOperationOwner>) + Send + Sync>;
 pub(crate) type TwoStringContextOwnedCallback =
     Arc<dyn Fn(String, String, Option<String>, Option<SubmittedOperationOwner>) + Send + Sync>;
 
@@ -58,9 +62,9 @@ pub(crate) type CreateInvitationCallbackType = Arc<
 // --- Chat Screen ---
 /// Send callback takes channel_id and content - channel is obtained from TUI's selected_channel
 /// to avoid race conditions with async channel selection updates.
-pub type SendCallback = TwoStringCallback;
+pub(crate) type SendCallback = TwoStringOwnedCallback;
 pub type ChannelSelectCallback = IdCallback;
-pub type JoinChannelCallback = IdCallback;
+pub(crate) type JoinChannelCallback = IdOwnedCallback;
 pub(crate) type CreateChannelCallback = StringOptStringVecU8Callback;
 pub type RetryMessageCallback = ThreeStringCallback;
 pub type SetTopicCallback = TwoStringCallback;

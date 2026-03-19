@@ -728,7 +728,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn barrier_validator_requires_declared_convergence_before_next_intent() {
+    fn barrier_validator_allows_accept_pending_channel_without_membership_wait() {
         let definition = ScenarioDefinition {
             id: "barriers".to_string(),
             goal: "test barriers".to_string(),
@@ -743,21 +743,16 @@ mod tests {
                     id: "next-intent".to_string(),
                     actor: Some(ActorId("alice".to_string())),
                     timeout_ms: Some(1000),
-                    action: SemanticAction::Intent(IntentAction::JoinChannel {
-                        channel_name: "shared".to_string(),
-                    }),
+                    action: SemanticAction::Intent(IntentAction::OpenScreen(ScreenId::Chat)),
                 },
             ],
         };
 
-        let error = validate_declared_barriers(&definition)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("ChannelMembershipReady"));
+        assert!(validate_declared_barriers(&definition).is_ok());
     }
 
     #[test]
-    fn barrier_validator_accepts_matching_runtime_event_wait() {
+    fn barrier_validator_accepts_extra_runtime_wait_after_accept_pending_channel() {
         let definition = ScenarioDefinition {
             id: "barriers-ok".to_string(),
             goal: "test barriers".to_string(),

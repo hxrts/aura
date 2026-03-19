@@ -77,6 +77,19 @@ The correct split is:
   coordinators
 - DOM helpers stay conformance-only and downstream of semantic ownership
 
+The sanctioned browser/frontend boundary is strict:
+
+- browser code must not allocate local semantic owners for parity-critical
+  operations
+- browser code must not keep browser-local `Submitting` state after a required
+  handoff to shared workflow ownership
+- browser bridge code may only forward exact operation handles and
+  authoritative lifecycle records downstream from shared workflow/runtime
+  ownership
+- if a future web flow needs local semantic ownership, it must first extend the
+  shared ownership model and the frontend handoff boundary checks rather than
+  introducing a browser-local exception
+
 ### Ownership Inventory
 
 | Path | Category | Authoritative owner | May mutate | Observe only |
@@ -101,6 +114,7 @@ The correct split is:
 - browser harness contract tests
 - Playwright semantic bridge tests
 - `just ci-observed-layer-boundaries`
+- `just ci-frontend-handoff-boundary`
 - `just ci-actor-lifecycle`
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState

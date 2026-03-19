@@ -198,9 +198,14 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
         .expect("accept device enrollment invitation should succeed");
 
     // Wait for the initiator to observe completion.
+    let handle =
+        aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
+            aura_core::CeremonyId::new(start.ceremony_id.clone()),
+            aura_app::ui::prelude::CeremonyKind::DeviceEnrollment,
+        );
     let status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        aura_core::CeremonyId::new(start.ceremony_id.clone()),
+        &handle,
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,

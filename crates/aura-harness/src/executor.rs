@@ -110,6 +110,7 @@ struct ScenarioContext {
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
     current_channel_name: BTreeMap<String, String>,
     current_channel_id: BTreeMap<String, String>,
+    channel_name_by_id: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
@@ -1432,6 +1433,9 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
+            context
+                .channel_name_by_id
+                .insert(channel_id.clone(), channel_name.clone());
             context.current_channel_id.insert(instance_id.clone(), channel_id);
             record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
@@ -1596,7 +1600,11 @@ fn execute_semantic_intent(
             record_submission_handle(
                 context,
                 &instance_id,
-                require_semantic_unit_submission(&metadata_step, "join_channel", response)?,
+                Some(require_semantic_unit_submission_with_exact_handle(
+                    &metadata_step,
+                    "join_channel",
+                    response,
+                )?),
             );
             context
                 .current_channel_name
@@ -1604,13 +1612,15 @@ fn execute_semantic_intent(
             if let Some(channel_id) =
                 capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?
             {
+                context
+                    .channel_name_by_id
+                    .insert(channel_id.clone(), channel_name.clone());
                 context.current_channel_id.insert(instance_id.clone(), channel_id);
             }
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let channel_name = context
                 .current_channel_name
                 .get(&instance_id)
@@ -1642,53 +1652,29 @@ fn execute_semantic_intent(
                 &instance_id,
                 invite_intent,
             )?;
-            let operation_handle = require_semantic_unit_submission(
+            let operation_handle = require_semantic_unit_submission_with_exact_handle(
                 &metadata_step,
                 "invite_actor_to_channel",
                 response,
             )?;
-            record_submission_handle(context, &instance_id, operation_handle.clone());
-            if let Some(handle) = operation_handle {
-                if convergence_stage(
+            record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
+            convergence_stage(
+                &metadata_step,
+                "invite_actor_to_channel_operation",
+                wait_for_operation_handle_state(
                     &metadata_step,
-                    "invite_actor_to_channel_operation",
-                    wait_for_operation_handle_state(
-                        &metadata_step,
-                        tool_api,
-                        &instance_id,
-                        timeout_ms,
-                        &handle,
-                        OperationState::Succeeded,
-                    ),
-                )
-                .is_err()
-                {
-                    let remaining_ms = deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_millis()
-                        .max(1) as u64;
-                    let mut invitation_ready_step = semantic_wait_step(&metadata_step);
-                    invitation_ready_step.runtime_event_kind =
-                        Some(RuntimeEventKind::InvitationCodeReady);
-                    convergence_stage(
-                        &metadata_step,
-                        "invitation_code_ready",
-                        wait_for_semantic_state(
-                            &invitation_ready_step,
-                            tool_api,
-                            context,
-                            &instance_id,
-                            remaining_ms,
-                        ),
-                    )?;
-                }
-            }
+                    tool_api,
+                    &instance_id,
+                    timeout_ms,
+                    &operation_handle,
+                    OperationState::Succeeded,
+                ),
+            )?;
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
         IntentAction::AcceptPendingChannelInvitation => {
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let contract = intent.contract();
             let response = submit_shared_intent(
                 &metadata_step,
@@ -1697,68 +1683,24 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            let operation_handle = require_semantic_unit_submission(
+            let operation_handle = require_semantic_unit_submission_with_exact_handle(
                 &metadata_step,
                 "accept_pending_channel_invitation",
                 response,
             )?;
-            record_submission_handle(context, &instance_id, operation_handle.clone());
-            if let Some(handle) = operation_handle {
-                if convergence_stage(
+            record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
+            convergence_stage(
+                &metadata_step,
+                "accept_pending_channel_invitation_operation",
+                wait_for_operation_handle_state(
                     &metadata_step,
-                    "accept_pending_channel_invitation_operation",
-                    wait_for_operation_handle_state(
-                        &metadata_step,
-                        tool_api,
-                        &instance_id,
-                        timeout_ms,
-                        &handle,
-                        OperationState::Succeeded,
-                    ),
-                )
-                .is_err()
-                {
-                    let remaining_ms = deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_millis()
-                        .max(1) as u64;
-                    let mut invitation_accepted_step = semantic_wait_step(&metadata_step);
-                    invitation_accepted_step.runtime_event_kind =
-                        Some(RuntimeEventKind::InvitationAccepted);
-                    if convergence_stage(
-                        &metadata_step,
-                        "invitation_accepted",
-                        wait_for_semantic_state(
-                            &invitation_accepted_step,
-                            tool_api,
-                            context,
-                            &instance_id,
-                            remaining_ms,
-                        ),
-                    )
-                    .is_err()
-                    {
-                        let remaining_ms = deadline
-                            .saturating_duration_since(Instant::now())
-                            .as_millis()
-                            .max(1) as u64;
-                        let mut channel_membership_ready_step = semantic_wait_step(&metadata_step);
-                        channel_membership_ready_step.runtime_event_kind =
-                            Some(RuntimeEventKind::ChannelMembershipReady);
-                        convergence_stage(
-                            &metadata_step,
-                            "channel_membership_ready",
-                            wait_for_semantic_state(
-                                &channel_membership_ready_step,
-                                tool_api,
-                                context,
-                                &instance_id,
-                                remaining_ms,
-                            ),
-                        )?;
-                    }
-                }
-            }
+                    tool_api,
+                    &instance_id,
+                    timeout_ms,
+                    &operation_handle,
+                    OperationState::Succeeded,
+                ),
+            )?;
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
@@ -1773,7 +1715,11 @@ fn execute_semantic_intent(
             record_submission_handle(
                 context,
                 &instance_id,
-                require_semantic_unit_submission(&metadata_step, "send_chat_message", response)?,
+                Some(require_semantic_unit_submission_with_exact_handle(
+                    &metadata_step,
+                    "send_chat_message",
+                    response,
+                )?),
             );
             Ok(())
         }
@@ -1814,13 +1760,7 @@ fn enforce_action_preconditions(
             failures.join(", ")
         );
     }
-    bail!(
-        "step {} precondition violation for {:?} on instance {}: {}",
-        step.id,
-        intent.kind(),
-        instance_id,
-        failures.join(", ")
-    );
+    Ok(())
 }
 
 fn action_precondition_wait_step(
@@ -1888,9 +1828,19 @@ fn resolve_intent_templates(
         IntentAction::AcceptPendingChannelInvitation => {
             IntentAction::AcceptPendingChannelInvitation
         }
-        IntentAction::JoinChannel { channel_name } => IntentAction::JoinChannel {
-            channel_name: resolve_template(channel_name, context)?,
-        },
+        IntentAction::JoinChannel { channel_name } => {
+            let resolved_channel = resolve_template(channel_name, context)?;
+            let channel_name = if resolved_channel.starts_with("channel:") {
+                context
+                    .channel_name_by_id
+                    .get(&resolved_channel)
+                    .cloned()
+                    .unwrap_or(resolved_channel)
+            } else {
+                resolved_channel
+            };
+            IntentAction::JoinChannel { channel_name }
+        }
         IntentAction::InviteActorToChannel {
             authority_id,
             channel_id,
@@ -3138,7 +3088,38 @@ fn semantic_wait_matches_for_instance(
     let mut non_operation_step = step.clone();
     non_operation_step.operation_id = None;
     non_operation_step.operation_state = None;
-    if !semantic_wait_matches(&non_operation_step, snapshot) {
+    if non_operation_step.contains.is_none() && non_operation_step.value.is_none() {
+        if let Some(kind) = non_operation_step.runtime_event_kind {
+            if matches!(
+                kind,
+                RuntimeEventKind::ChannelMembershipReady
+                    | RuntimeEventKind::RecipientPeersResolved
+                    | RuntimeEventKind::MessageDeliveryReady
+            ) {
+                let mut channel_needles = Vec::new();
+                if let Some(channel_name) = context.current_channel_name.get(instance_id) {
+                    channel_needles.push(channel_name.clone());
+                }
+                if let Some(channel_id) = context.current_channel_id.get(instance_id) {
+                    channel_needles.push(channel_id.clone());
+                }
+                channel_needles.dedup();
+
+                if !channel_needles.is_empty() {
+                    let matched = channel_needles.into_iter().any(|needle| {
+                        let mut candidate_step = non_operation_step.clone();
+                        candidate_step.contains = Some(needle);
+                        semantic_wait_matches(&candidate_step, snapshot)
+                    });
+                    if !matched {
+                        return false;
+                    }
+                } else if !semantic_wait_matches(&non_operation_step, snapshot) {
+                    return false;
+                }
+            }
+        }
+    } else if !semantic_wait_matches(&non_operation_step, snapshot) {
         return false;
     }
 
@@ -3290,6 +3271,21 @@ fn require_semantic_unit_submission(
             operation
         ),
     }
+}
+
+fn require_semantic_unit_submission_with_exact_handle(
+    step: &CompatibilityStep,
+    operation: &str,
+    response: SemanticCommandResponse,
+) -> Result<UiOperationHandle> {
+    let handle = require_semantic_unit_submission(step, operation, response)?;
+    handle.ok_or_else(|| {
+        anyhow!(
+            "step {} issue stage failed for {}: missing canonical ui operation handle with exact instance tracking",
+            step.id,
+            operation
+        )
+    })
 }
 
 fn require_channel_binding_submission(
@@ -3887,10 +3883,12 @@ mod tests {
     use aura_app::ui::scenarios::ScenarioAction;
     use aura_app::ui::contract::{
         ConfirmationState, FieldId, ListId, ListItemSnapshot, ListSnapshot, OperationId,
-        OperationInstanceId, OperationSnapshot, OperationState, ScreenId, SelectionSnapshot,
-        UiReadiness, UiSnapshot,
+        OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
+        RuntimeEventSnapshot, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
     };
-    use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot, QuiescenceState};
+    use aura_app::ui_contract::{
+        next_projection_revision, ChannelFactKey, QuiescenceSnapshot, QuiescenceState,
+    };
 
     #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {
@@ -4224,6 +4222,21 @@ mod tests {
         assert_eq!(wait_step.readiness, Some(UiReadiness::Ready));
         assert_eq!(wait_step.quiescence, Some(QuiescenceState::Settled));
         assert_eq!(wait_step.instance.as_deref(), Some("bob"));
+    }
+
+    #[test]
+    fn action_precondition_wait_success_returns_without_bailing() {
+        let source = include_str!("executor.rs");
+        let anchor = "if let Err(wait_error) =\n        wait_for_semantic_state(&wait_step, tool_api, context, &instance_id, timeout_ms)\n    {";
+        let start = source
+            .find(anchor)
+            .unwrap_or_else(|| panic!("missing precondition wait block"));
+        let tail = &source[start..];
+        let expected_tail = "    Ok(())\n}";
+        assert!(
+            tail.contains(expected_tail),
+            "precondition wait block must return Ok(()) after successful waits"
+        );
     }
 
     #[test]
@@ -5299,6 +5312,74 @@ mod tests {
     }
 
     #[test]
+    fn join_channel_templates_resolve_channel_ids_back_to_shared_names() {
+        let mut context = ScenarioContext::default();
+        context.vars.insert(
+            "shared_channel_id".to_string(),
+            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                .to_string(),
+        );
+        context.channel_name_by_id.insert(
+            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                .to_string(),
+            "shared-parity-lab".to_string(),
+        );
+
+        let resolved = resolve_intent_templates(
+            &IntentAction::JoinChannel {
+                channel_name: "${shared_channel_id}".to_string(),
+            },
+            &context,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+
+        assert!(matches!(
+            resolved,
+            IntentAction::JoinChannel { channel_name }
+                if channel_name == "shared-parity-lab"
+        ));
+    }
+
+    #[test]
+    fn exact_handle_required_for_parity_critical_submission() {
+        let step = crate::config::CompatibilityStep {
+            id: "join-channel".to_string(),
+            ..Default::default()
+        };
+        let response = SemanticCommandResponse::accepted_without_value();
+
+        let error = require_semantic_unit_submission_with_exact_handle(
+            &step,
+            "join_channel",
+            response,
+        )
+        .err()
+        .unwrap_or_else(|| panic!("missing handle must fail"));
+
+        assert!(
+            error
+                .to_string()
+                .contains("missing canonical ui operation handle with exact instance tracking"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn parity_critical_executor_paths_do_not_fallback_to_runtime_event_waits() {
+        let source = include_str!("executor.rs");
+        let invite_fallback_label = format!("{}{}", "pending_home_", "invitation_ready");
+        let accept_fallback_label = format!("{}{}", "invitation_", "accepted");
+        assert!(
+            !source.contains(&invite_fallback_label),
+            "invite_actor_to_channel must not hide missing terminal publication behind readiness fallback"
+        );
+        assert!(
+            !source.contains(&accept_fallback_label),
+            "accept_pending_channel_invitation must not hide missing terminal publication behind readiness fallback"
+        );
+    }
+
+    #[test]
     fn semantic_wait_runtime_events_require_authoritative_runtime_facts() {
         let step = crate::config::CompatibilityStep {
             id: "wait-contact-link".to_string(),
@@ -5320,6 +5401,50 @@ mod tests {
             !semantic_wait_matches(&step, &snapshot),
             "runtime event waits must not fall back to list/UI state"
         );
+    }
+
+    #[test]
+    fn semantic_wait_channel_runtime_events_accept_authoritative_name_or_id() {
+        let step = crate::config::CompatibilityStep {
+            id: "wait-channel-membership".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            runtime_event_kind: Some(RuntimeEventKind::ChannelMembershipReady),
+            ..Default::default()
+        };
+        let mut context = ScenarioContext::default();
+        context
+            .current_channel_name
+            .insert("bob".to_string(), "shared-parity-lab".to_string());
+        context.current_channel_id.insert(
+            "bob".to_string(),
+            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                .to_string(),
+        );
+
+        let mut snapshot = UiSnapshot::loading(ScreenId::Chat);
+        snapshot.runtime_events.push(RuntimeEventSnapshot {
+            id: RuntimeEventId(
+                "channel_membership_ready:channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                    .to_string(),
+            ),
+            fact: RuntimeFact::ChannelMembershipReady {
+                channel: ChannelFactKey {
+                    id: Some(
+                        "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                            .to_string(),
+                    ),
+                    name: Some(
+                        "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                            .to_string(),
+                    ),
+                },
+                member_count: Some(2),
+            },
+        });
+
+        assert!(semantic_wait_matches_for_instance(
+            &step, &snapshot, &context, "bob"
+        ));
     }
 
     #[test]

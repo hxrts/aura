@@ -25,6 +25,50 @@ use aura_core::{AttemptBudget, AuraError};
 use std::future::Future;
 use std::time::Duration;
 
+/// Move-owned ceremony handle.
+///
+/// This is the canonical owner token for parity-critical key rotation and
+/// membership-change ceremonies. Cancellation consumes the handle so callers
+/// cannot issue multiple cancels on the same owned ceremony instance.
+#[derive(Debug)]
+pub struct CeremonyHandle {
+    ceremony_id: CeremonyId,
+    kind: crate::runtime_bridge::CeremonyKind,
+}
+
+impl CeremonyHandle {
+    fn new(ceremony_id: CeremonyId, kind: crate::runtime_bridge::CeremonyKind) -> Self {
+        Self { ceremony_id, kind }
+    }
+
+    /// Legacy reconstruction for UI flows that still persist only a ceremony ID.
+    ///
+    /// New call sites should keep the original handle returned by the start
+    /// workflow.
+    pub fn legacy_from_id(
+        ceremony_id: CeremonyId,
+        kind: crate::runtime_bridge::CeremonyKind,
+    ) -> Self {
+        Self { ceremony_id, kind }
+    }
+
+    pub fn ceremony_id(&self) -> &CeremonyId {
+        &self.ceremony_id
+    }
+
+    pub fn kind(&self) -> crate::runtime_bridge::CeremonyKind {
+        self.kind
+    }
+
+    /// Legacy escape hatch for UI paths that still persist only an ID.
+    ///
+    /// New call sites should keep the original handle returned by the start
+    /// workflow rather than reconstructing one later.
+    pub fn into_ceremony_id(self) -> CeremonyId {
+        self.ceremony_id
+    }
+}
+
 async fn fail_start_device_enrollment<T>(
     app_core: &Arc<RwLock<AppCore>>,
     detail: impl Into<String>,
@@ -53,10 +97,13 @@ pub async fn start_guardian_ceremony(
     threshold_k: FrostThreshold,
     total_n: u16,
     guardian_ids: Vec<AuthorityId>,
-) -> Result<CeremonyId, AuraError> {
+) -> Result<CeremonyHandle, AuraError> {
     let core = app_core.read().await;
     core.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
+        .map(|ceremony_id| {
+            CeremonyHandle::new(ceremony_id, crate::runtime_bridge::CeremonyKind::GuardianRotation)
+        })
         .map_err(|e| ceremony_op("start guardian ceremony", e).into())
 }
 
@@ -66,10 +113,13 @@ pub async fn start_device_threshold_ceremony(
     threshold_k: FrostThreshold,
     total_n: u16,
     device_ids: Vec<String>,
-) -> Result<CeremonyId, AuraError> {
+) -> Result<CeremonyHandle, AuraError> {
     let core = app_core.read().await;
     core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
         .await
+        .map(|ceremony_id| {
+            CeremonyHandle::new(ceremony_id, crate::runtime_bridge::CeremonyKind::DeviceRotation)
+        })
         .map_err(|e| ceremony_op("start device threshold ceremony", e).into())
 }
 
@@ -130,7 +180,7 @@ pub async fn start_device_enrollment_ceremony(
 pub async fn start_device_removal_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     device_id: String,
-) -> Result<CeremonyId, AuraError> {
+) -> Result<CeremonyHandle, AuraError> {
     let runtime = {
         let core = app_core.read().await;
         core.runtime()
@@ -140,6 +190,9 @@ pub async fn start_device_removal_ceremony(
     runtime
         .initiate_device_removal_ceremony(device_id)
         .await
+        .map(|ceremony_id| {
+            CeremonyHandle::new(ceremony_id, crate::runtime_bridge::CeremonyKind::DeviceRemoval)
+        })
         .map_err(|e| ceremony_op("start device removal", e).into())
 }
 
@@ -215,6 +268,16 @@ impl CeremonyStatusLike for KeyRotationCeremonyStatus {
 /// Get status of a key rotation ceremony (generic form).
 pub async fn get_key_rotation_ceremony_status(
     app_core: &Arc<RwLock<AppCore>>,
+    handle: &CeremonyHandle,
+) -> Result<KeyRotationCeremonyStatus, AuraError> {
+    let core = app_core.read().await;
+    core.get_key_rotation_ceremony_status(handle.ceremony_id())
+        .await
+        .map_err(|e| ceremony_op("get ceremony status", e).into())
+}
+
+pub async fn get_key_rotation_ceremony_status_by_id(
+    app_core: &Arc<RwLock<AppCore>>,
     ceremony_id: &CeremonyId,
 ) -> Result<KeyRotationCeremonyStatus, AuraError> {
     let core = app_core.read().await;
@@ -236,6 +299,16 @@ pub async fn get_key_rotation_ceremony_status(
 /// ceremony.
 pub async fn cancel_key_rotation_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
+    handle: CeremonyHandle,
+) -> Result<(), AuraError> {
+    let core = app_core.read().await;
+    core.cancel_key_rotation_ceremony(handle.ceremony_id())
+        .await
+        .map_err(|e| ceremony_op("cancel ceremony", e).into())
+}
+
+pub async fn cancel_key_rotation_ceremony_by_id(
+    app_core: &Arc<RwLock<AppCore>>,
     ceremony_id: &CeremonyId,
 ) -> Result<(), AuraError> {
     let core = app_core.read().await;
@@ -250,7 +323,7 @@ pub async fn cancel_key_rotation_ceremony(
 /// Callers provide an `on_update` hook to receive intermediate statuses.
 pub async fn monitor_key_rotation_ceremony_with_policy<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: CeremonyId,
+    handle: &CeremonyHandle,
     policy: CeremonyPollPolicy,
     mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
     mut sleep_fn: SleepFn,
@@ -268,7 +341,7 @@ where
             .saturating_add(1);
         sleep_fn(policy.interval).await;
 
-        let status = get_key_rotation_ceremony_status(app_core, &ceremony_id).await?;
+        let status = get_key_rotation_ceremony_status(app_core, handle).await?;
         on_update(&status);
 
         if status.has_failed {
@@ -286,7 +359,7 @@ where
                             #[cfg(feature = "instrumented")]
                             tracing::error!(
                                 error = %e,
-                                ceremony_id = %ceremony_id,
+                                ceremony_id = %handle.ceremony_id(),
                                 epoch = ?epoch,
                                 "ceremony rollback failed — account may be in partially-committed state"
                             );
@@ -316,7 +389,7 @@ where
                     #[cfg(feature = "instrumented")]
                     tracing::warn!(
                         error = %_e,
-                        ceremony_id = %ceremony_id,
+                        ceremony_id = %handle.ceremony_id(),
                         "settings refresh failed after ceremony completion — UI may show stale device counts"
                     );
                 }
@@ -330,7 +403,7 @@ where
     }
 
     // Timed out; return the latest status we can fetch.
-    let status = get_key_rotation_ceremony_status(app_core, &ceremony_id).await?;
+    let status = get_key_rotation_ceremony_status(app_core, handle).await?;
     Ok(CeremonyLifecycle {
         state: CeremonyLifecycleState::TimedOut,
         status,
@@ -344,7 +417,7 @@ where
 /// Callers provide an `on_update` hook to receive intermediate statuses.
 pub async fn monitor_key_rotation_ceremony<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
-    ceremony_id: CeremonyId,
+    handle: &CeremonyHandle,
     poll_interval: Duration,
     mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
     mut sleep_fn: SleepFn,
@@ -356,7 +429,7 @@ where
     let policy = CeremonyPollPolicy::with_interval(poll_interval);
     let lifecycle = monitor_key_rotation_ceremony_with_policy(
         app_core,
-        ceremony_id,
+        handle,
         policy,
         &mut on_update,
         &mut sleep_fn,

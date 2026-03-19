@@ -215,10 +215,16 @@ impl ReactiveEffects for ReactiveHandler {
         self.graph.emit(signal.id(), value).await
     }
 
-    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
     where
         T: Clone + Send + Sync + 'static,
     {
+        if !self.is_registered(signal.id()) {
+            return Err(ReactiveError::SignalNotFound {
+                id: signal.id().to_string(),
+            });
+        }
+
         // We need to create a synchronous subscription here since the trait
         // method isn't async. We'll wrap the async operation in a blocking call.
         // In practice, signals should be pre-registered before subscribing.
@@ -231,8 +237,8 @@ impl ReactiveEffects for ReactiveHandler {
         let signal_id = signal.id().clone();
 
         self.tasks.spawn_cancellable(async move {
-            if let Ok(mut receiver) = graph.subscribe(&signal_id).await {
-                loop {
+            match graph.subscribe(&signal_id).await {
+                Ok(mut receiver) => loop {
                     match receiver.recv().await {
                         Ok(any_value) => {
                             if let Some(value) = any_value.0.downcast_ref::<T>() {
@@ -243,13 +249,27 @@ impl ReactiveEffects for ReactiveHandler {
                             }
                         }
                         Err(broadcast::error::RecvError::Closed) => break,
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(
+                                signal_id = %signal_id,
+                                skipped,
+                                "reactive subscription lagged; updates were dropped"
+                            );
+                            continue;
+                        }
                     }
+                },
+                Err(error) => {
+                    tracing::warn!(
+                        signal_id = %signal_id,
+                        error = %error,
+                        "reactive subscription forwarding task exited before attaching"
+                    );
                 }
             }
         });
 
-        SignalStream::new(rx, signal.id().clone())
+        Ok(SignalStream::new(rx, signal.id().clone()))
     }
 
     async fn register<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
@@ -460,6 +480,15 @@ mod tests {
         let signal: Signal<u32> = Signal::new("never_registered");
 
         let result = handler.emit(&signal, 42).await;
+        assert!(matches!(result, Err(ReactiveError::SignalNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_unregistered_signal_fails_fast() {
+        let handler = ReactiveHandler::new();
+        let signal: Signal<u32> = Signal::new("never_registered");
+
+        let result = handler.subscribe(&signal);
         assert!(matches!(result, Err(ReactiveError::SignalNotFound { .. })));
     }
 

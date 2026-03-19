@@ -136,7 +136,7 @@ pub struct ChatScreenProps {
 
     // === Callbacks (still needed for effect dispatch) ===
     /// Callback when sending a message (channel_id, content)
-    pub on_send: Option<SendCallback>,
+    pub(crate) on_send: Option<SendCallback>,
     /// Callback when creating a new channel (name, topic)
     pub(crate) on_create_channel: Option<CreateChannelCallback>,
     /// Callback when retrying a failed message (message_id, channel, content)

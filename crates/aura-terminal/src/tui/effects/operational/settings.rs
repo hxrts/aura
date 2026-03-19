@@ -48,8 +48,8 @@ pub async fn handle_settings(
 
         EffectCommand::RemoveDevice { device_id } => {
             match start_device_removal_ceremony(app_core, device_id.clone()).await {
-                Ok(ceremony_id) => Some(Ok(OpResponse::DeviceRemovalStarted {
-                    ceremony_id: ceremony_id.to_string(),
+                Ok(ceremony_handle) => Some(Ok(OpResponse::DeviceRemovalStarted {
+                    ceremony_id: ceremony_handle.ceremony_id().to_string(),
                 })),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }

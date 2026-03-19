@@ -121,13 +121,6 @@ pub(super) async fn resolve_channel_id_from_state_or_input(
         }
     }
 
-    let chat = chat_snapshot(app_core).await;
-    if let Some(existing) =
-        resolve_matching_chat_channel(&chat, raw, &raw_lower, normalized_name, &normalized_lower)
-    {
-        return Ok(existing);
-    }
-
     let mut homes = {
         let core = app_core.read().await;
         core.views().get_homes()
@@ -155,6 +148,13 @@ pub(super) async fn resolve_channel_id_from_state_or_input(
         .map(|(home_id, _, _)| home_id)
     {
         return Ok(home_id);
+    }
+
+    let chat = chat_snapshot(app_core).await;
+    if let Some(existing) =
+        resolve_matching_chat_channel(&chat, raw, &raw_lower, normalized_name, &normalized_lower)
+    {
+        return Ok(existing);
     }
 
     Ok(selector.to_channel_id())

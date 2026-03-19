@@ -62,6 +62,23 @@ one authoritative coordinator must own:
 Frontend crates may not invent parallel lifecycle ownership for those
 operations.
 
+For parity-critical semantic operations, `aura-app` also owns the stronger
+semantic-owner protocol:
+
+- if Layer 7 creates a local submission record, Layer 7 must hand ownership off
+  before the first awaited workflow step owned by `aura-app`
+- only the canonical workflow owner may publish non-local lifecycle after
+  handoff
+- terminal publication must happen before any best-effort repair, warming, or
+  reconciliation that is allowed to fail
+- best-effort failure must never keep the primary operation in `Submitting`
+- semantic owners may only use approved bounded-await and retry helpers inside
+  owner bodies
+
+If a workflow cannot satisfy those rules directly, it should move long-lived
+convergence into a dedicated `ActorOwned` coordinator instead of hiding it in
+an unbounded helper await.
+
 ### Ownership Inventory
 
 | Path | Category | Authoritative owner | May mutate | Observe only |
@@ -83,6 +100,11 @@ Changes to `aura-app` ownership boundaries should ship with:
   not lose entries under concurrent publication
 - timeout/backoff invariant tests for local-budget propagation and typed
   timeout failure where the workflow owns timeout policy
+- semantic-owner invariant tests proving:
+  - best-effort failure cannot block terminal publication
+  - frontend-local submission cannot mask authoritative terminal state after
+    handoff
+  - stale authoritative instances cannot overwrite newer local submissions
 
 ### Capability-Gated Points
 

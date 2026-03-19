@@ -1090,16 +1090,12 @@ impl IntentAction {
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                         BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
-                    before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
-                        RuntimeEventKind::ChannelMembershipReady,
-                    )],
+                    before_next_intent: vec![BarrierDeclaration::OperationState {
+                        operation_id: OperationId::invitation_accept(),
+                        state: OperationState::Succeeded,
+                    }],
                 },
-                post_operation_convergence: Some(PostOperationConvergenceContract {
-                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
-                        RuntimeEventKind::ChannelMembershipReady,
-                    )],
-                    violation_code: "channel_membership_convergence_required".to_string(),
-                }),
+                post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Screen(ScreenId::Chat),
                 selection_semantics: SelectionSemantics::PreservesCurrent,
                 transitions: vec![AuthoritativeTransitionKind::Operation(
@@ -2218,15 +2214,14 @@ mod tests {
         );
 
         let accept_pending_contract = IntentAction::AcceptPendingChannelInvitation.contract();
-        let accept_pending_convergence = accept_pending_contract
-            .post_operation_convergence
-            .expect("accept_pending_channel_invitation must declare convergence");
         assert_eq!(
-            accept_pending_convergence.required_before_next_intent,
-            vec![BarrierDeclaration::RuntimeEvent(
-                RuntimeEventKind::ChannelMembershipReady,
-            )]
+            accept_pending_contract.barriers.before_next_intent,
+            vec![BarrierDeclaration::OperationState {
+                operation_id: OperationId::invitation_accept(),
+                state: OperationState::Succeeded,
+            }]
         );
+        assert!(accept_pending_contract.post_operation_convergence.is_none());
 
         let send_message_contract = IntentAction::SendChatMessage {
             message: "hello".to_string(),

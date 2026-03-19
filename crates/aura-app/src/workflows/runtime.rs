@@ -16,13 +16,18 @@ use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::{
-    time::PhysicalTime, AuraError, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
-    TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile, TimeoutRunError,
+    time::PhysicalTime, AuraError, ExponentialBackoffPolicy, PostTerminalBestEffort,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
+    TimeoutExecutionProfile, TimeoutRunError,
 };
 
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;
 const DEFAULT_HARNESS_CONVERGENCE_BACKOFF_MS: u64 = 150;
 const DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 1_000;
+
+/// Canonical best-effort collector for workflow follow-up that must not own
+/// primary terminal lifecycle.
+pub type WorkflowBestEffort = PostTerminalBestEffort<AuraError>;
 
 #[cfg(test)]
 static HARNESS_MODE_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
@@ -146,6 +151,12 @@ pub fn workflow_retry_policy(
         )?,
     );
     workflow_timeout_profile().apply_retry_policy(&base)
+}
+
+/// Create the canonical post-terminal best-effort collector for workflow code.
+#[must_use]
+pub fn workflow_best_effort() -> WorkflowBestEffort {
+    WorkflowBestEffort::post_terminal_only()
 }
 
 /// Execute a workflow operation under a runtime-backed retry budget.
@@ -311,11 +322,23 @@ pub async fn ensure_runtime_peer_connectivity(
     runtime: &Arc<dyn RuntimeBridge>,
     flow: &str,
 ) -> Result<(), AuraError> {
-    let sync_status = runtime.get_sync_status().await;
+    let sync_status = runtime
+        .try_get_sync_status()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("get sync status", e)))?;
     let connected_peers = sync_status.connected_peers;
-    let sync_peers = runtime.get_sync_peers().await;
-    let discovered_peers = runtime.get_discovered_peers().await;
-    let lan_peers = runtime.get_lan_peers().await;
+    let sync_peers = runtime
+        .try_get_sync_peers()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("get sync peers", e)))?;
+    let discovered_peers = runtime
+        .try_get_discovered_peers()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("get discovered peers", e)))?;
+    let lan_peers = runtime
+        .try_get_lan_peers()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("get lan peers", e)))?;
 
     if connected_peers == 0 {
         return Err(super::error::WorkflowError::ConnectivityRequired {

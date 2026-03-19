@@ -131,6 +131,8 @@ export interface DriverSession {
   lastObservationResetReason?: string;
   observationEpoch?: number;
   clipboardCache?: string;
+  pendingSemanticPayload?: string | null;
+  semanticResultCache?: Record<string, unknown>;
   lastMutationReason?: string | null;
   tracePath?: string | null;
   lastUiStateSource?: string;

@@ -111,6 +111,7 @@ async fn demo_amp_channel_echoes_peer_message() {
     let mut chat_stream = {
         let core = app_core.read().await;
         core.subscribe(&*CHAT_SIGNAL)
+            .expect("chat signal should be registered")
     };
 
     // Using typed ChannelId ensures we send to the EXACT channel we created

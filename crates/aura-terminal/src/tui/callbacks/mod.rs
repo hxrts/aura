@@ -10,7 +10,7 @@
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use crate::tui::callbacks::{CallbackRegistry, SendCallback, IdCallback};
+//! use crate::tui::callbacks::{CallbackRegistry, IdCallback};
 //!
 //! // Create all callbacks at once
 //! let registry = CallbackRegistry::new(ctx, tx, app_core);
@@ -23,13 +23,13 @@ mod factories;
 mod types;
 
 // Re-export types
-pub(crate) use types::CreateChannelCallback;
+pub(crate) use types::{CreateChannelCallback, SendCallback};
 pub use types::{
     AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateHomeCallback,
     CreateNeighborhoodCallback, ExportInvitationCallback, GoHomeCallback, GuardianSelectCallback,
-    IdCallback, ImportDeviceEnrollmentCallback, InvitationCallback, JoinChannelCallback,
+    IdCallback, ImportDeviceEnrollmentCallback, InvitationCallback,
     NeighborhoodHomeCallback, NoArgCallback, RecoveryCallback, RemoveDeviceCallback,
-    RetryMessageCallback, SendCallback, SetModeratorCallback, SetTopicCallback, StartChatCallback,
+    RetryMessageCallback, SetModeratorCallback, SetTopicCallback, StartChatCallback,
     StringOptStringCallback, ThreeStringCallback, ThresholdCallback, TwoStringCallback,
     UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };

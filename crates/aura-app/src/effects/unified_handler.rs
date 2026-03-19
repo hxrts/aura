@@ -275,7 +275,10 @@ impl UnifiedHandler {
     }
 
     /// Subscribe to signal changes.
-    pub fn subscribe_signal<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    pub fn subscribe_signal<T>(
+        &self,
+        signal: &Signal<T>,
+    ) -> Result<SignalStream<T>, ReactiveError>
     where
         T: Clone + Send + Sync + 'static,
     {
@@ -406,7 +409,7 @@ impl ReactiveEffects for UnifiedHandler {
         self.reactive.emit(signal, value).await
     }
 
-    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
     where
         T: Clone + Send + Sync + 'static,
     {

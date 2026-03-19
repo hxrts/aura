@@ -287,7 +287,7 @@ pub trait SharedSemanticBackend {
         authority_id: &str,
         channel_id: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit(
+        expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::InviteActorToChannel {
                     authority_id: authority_id.to_string(),
@@ -299,7 +299,7 @@ pub trait SharedSemanticBackend {
     }
 
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit(
+        expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::AcceptPendingChannelInvitation,
             ))?,
@@ -308,7 +308,7 @@ pub trait SharedSemanticBackend {
     }
 
     fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit(
+        expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(IntentAction::JoinChannel {
                 channel_name: channel_name.to_string(),
             }))?,
@@ -317,7 +317,7 @@ pub trait SharedSemanticBackend {
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit(
+        expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::SendChatMessage {
                     message: message.to_string(),
@@ -345,6 +345,19 @@ fn expect_semantic_command_unit(
             "{operation} produced an unexpected channel binding payload"
         )),
     }
+}
+
+fn expect_semantic_command_unit_with_required_handle(
+    response: SemanticCommandResponse,
+    operation: &str,
+) -> Result<SubmittedAction<()>> {
+    let submitted = expect_semantic_command_unit(response, operation)?;
+    if submitted.handle.ui_operation.is_none() {
+        return Err(anyhow!(
+            "{operation} must expose a canonical ui operation handle with exact instance tracking"
+        ));
+    }
+    Ok(submitted)
 }
 
 fn expect_semantic_command_channel_binding(
@@ -827,6 +840,24 @@ mod tests {
                 .to_string()
                 .contains("unexpected contact invitation code payload"),
             "expected payload-shape rejection, got {error:#}"
+        );
+    }
+
+    #[test]
+    fn parity_critical_shared_submit_helpers_require_ui_operation_handles() {
+        let mut backend = RecordingSemanticBackend::new()
+            .with_response(Ok(SemanticCommandResponse::accepted_without_value()));
+
+        let error = backend
+            .submit_join_channel("shared-parity-lab")
+            .err()
+            .unwrap_or_else(|| panic!("missing ui handle must fail"));
+
+        assert!(
+            error
+                .to_string()
+                .contains("canonical ui operation handle with exact instance tracking"),
+            "unexpected error: {error:#}"
         );
     }
 

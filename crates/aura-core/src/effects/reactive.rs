@@ -252,6 +252,12 @@ impl<T: Clone> SignalStream<T> {
     /// Receive the next value, waiting if necessary.
     ///
     /// Returns an error if the channel is closed.
+    ///
+    /// Signal subscriptions are eventually consistent rather than lossless:
+    /// if a subscriber lags behind the broadcast buffer under sustained load,
+    /// intermediate values may be dropped and the next received value will be a
+    /// newer snapshot. Handlers are expected to log lag events so the loss is
+    /// diagnosable.
     pub async fn recv(&mut self) -> Result<T, ReactiveError> {
         loop {
             match self.receiver.recv().await {
@@ -270,8 +276,12 @@ impl<T: Clone> SignalStream<T> {
                         id: self.signal_id.to_string(),
                     });
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // Missed some values, continue receiving
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(
+                        signal_id = %self.signal_id,
+                        skipped,
+                        "signal stream lagged; continuing with a newer snapshot"
+                    );
                     continue;
                 }
             }
@@ -335,7 +345,13 @@ pub trait ReactiveEffects: Send + Sync {
     ///
     /// Returns a stream that yields values when the signal changes.
     /// The stream can be filtered to only receive specific updates.
-    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    ///
+    /// # Errors
+    ///
+    /// Returns `ReactiveError::SignalNotFound` if the signal has not been
+    /// registered yet. Callers must handle this rather than assuming an empty
+    /// stream means "no updates".
+    fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
     where
         T: Clone + Send + Sync + 'static;
 
@@ -483,7 +499,7 @@ impl<T: ReactiveEffects + ?Sized> ReactiveEffects for Arc<T> {
         (**self).emit(signal, value).await
     }
 
-    fn subscribe<V>(&self, signal: &Signal<V>) -> SignalStream<V>
+    fn subscribe<V>(&self, signal: &Signal<V>) -> Result<SignalStream<V>, ReactiveError>
     where
         V: Clone + Send + Sync + 'static,
     {

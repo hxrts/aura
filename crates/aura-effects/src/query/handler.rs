@@ -879,7 +879,10 @@ impl QueryEffects for QueryHandler {
         let signal: Signal<Q::Result> = Signal::new(signal_name.as_str());
 
         // Get the signal stream
-        let stream = self.reactive.subscribe(&signal);
+        let stream = self
+            .reactive
+            .subscribe(&signal)
+            .expect("query subscription requires a registered reactive signal");
 
         // Create subscription with query dependencies tracked
         QuerySubscription::new(stream, query.query_id())

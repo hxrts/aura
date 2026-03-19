@@ -23,14 +23,16 @@ use crate::tui::components::copy_to_clipboard;
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::{EffectCommand, OpResponse};
-use crate::tui::semantic_lifecycle::{SemanticOperationTransferScope, SubmittedOperationOwner};
+use crate::tui::semantic_lifecycle::{
+    authoritative_operation_status_update, SemanticOperationTransferScope, SubmittedOperationOwner,
+};
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui_contract::{
     ChannelFactKey, InvitationFactKind, OperationState, RuntimeEventKind, RuntimeFact,
-    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationStatus,
 };
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::AuthorityId;
@@ -102,6 +104,8 @@ async fn run_invitation_import_flow(
     code: String,
     operation: SubmittedOperationOwner,
 ) {
+    let transfer = operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
+
     let app_core = ctx.app_core_raw().clone();
     let invitation = import_invitation_details(&app_core, &code).await.ok();
     match ctx
@@ -109,15 +113,28 @@ async fn run_invitation_import_flow(
         .await
     {
         Ok(_) => {
-            let _ =
-                operation.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
             for update in invitation_import_success_updates(&code, invitation.as_ref()) {
                 send_ui_update_required(&tx, update).await;
             }
         }
         Err(error) => {
             tracing::error!(error = %error, "ImportInvitation dispatch failed");
-            operation.fail(error.to_string()).await;
+            send_ui_update_required(
+                &tx,
+                authoritative_operation_status_update(
+                    transfer.operation_id().clone(),
+                    Some(transfer.instance_id().clone()),
+                    SemanticOperationStatus::failed(
+                        transfer.kind(),
+                        SemanticOperationError::new(
+                            SemanticFailureDomain::Command,
+                            SemanticFailureCode::InternalError,
+                        )
+                        .with_detail(error.to_string()),
+                    ),
+                ),
+            )
+            .await;
             send_ui_update_required(
                 &tx,
                 UiUpdate::ToastAdded(ToastMessage::error(

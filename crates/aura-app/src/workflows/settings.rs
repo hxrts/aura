@@ -29,8 +29,14 @@ async fn refresh_settings_signal_from_runtime(
             .map(|r| r.authority_id().to_string())
             .unwrap_or_default();
         match core.settings_snapshot().await {
-            Some(snapshot) => (snapshot.0, snapshot.1, snapshot.2, authority_id),
-            None => return Ok(()),
+            Ok(Some(snapshot)) => (snapshot.0, snapshot.1, snapshot.2, authority_id),
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                return Err(AuraError::from(super::error::runtime_call(
+                    "refresh settings snapshot",
+                    error,
+                )));
+            }
         }
     };
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;

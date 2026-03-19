@@ -586,11 +586,13 @@ pub trait RuntimeBridge: Send + Sync {
     // Sync Operations
     // =========================================================================
 
-    /// Get current sync status
-    async fn get_sync_status(&self) -> SyncStatus;
+    /// Get current sync status, distinguishing runtime unavailability from a real
+    /// zero-value status.
+    async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError>;
 
-    /// Get list of known sync peers
-    async fn get_sync_peers(&self) -> Vec<DeviceId>;
+    /// Get list of known sync peers, distinguishing runtime unavailability from
+    /// a real empty peer set.
+    async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError>;
 
     /// Trigger sync with peers (if sync service is available)
     async fn trigger_sync(&self) -> Result<(), IntentError>;
@@ -639,11 +641,13 @@ pub trait RuntimeBridge: Send + Sync {
     // Peer Discovery
     // =========================================================================
 
-    /// Get list of discovered peers from rendezvous
-    async fn get_discovered_peers(&self) -> Vec<AuthorityId>;
+    /// Get list of discovered peers, distinguishing runtime unavailability from
+    /// a real empty discovery set.
+    async fn try_get_discovered_peers(&self) -> Result<Vec<AuthorityId>, IntentError>;
 
-    /// Get rendezvous status
-    async fn get_rendezvous_status(&self) -> RendezvousStatus;
+    /// Get rendezvous status, distinguishing runtime unavailability from a real
+    /// zero-value status.
+    async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError>;
 
     /// Trigger an on-demand discovery refresh
     ///
@@ -655,12 +659,9 @@ pub trait RuntimeBridge: Send + Sync {
     // LAN Discovery
     // =========================================================================
 
-    /// Get list of peers discovered via LAN (mDNS/UDP broadcast)
-    ///
-    /// Returns peers that have been discovered on the local network.
-    /// These are typically more immediately reachable than peers from
-    /// internet rendezvous.
-    async fn get_lan_peers(&self) -> Vec<LanPeerInfo>;
+    /// Get list of peers discovered via LAN, distinguishing runtime
+    /// unavailability from a real empty LAN set.
+    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError>;
 
     /// Send an invitation to a LAN peer
     ///
@@ -910,26 +911,26 @@ pub trait RuntimeBridge: Send + Sync {
     /// Cancel a sent invitation
     async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
 
-    /// List pending invitations (sent and received)
-    async fn list_pending_invitations(&self) -> Vec<InvitationInfo>;
+    /// List pending invitations, distinguishing runtime unavailability from a
+    /// real empty pending set.
+    async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError>;
 
     /// Import an invitation from a shareable code
     ///
     /// Parses the code and returns invitation info without accepting it.
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError>;
 
-    /// Get IDs of peers we have sent pending invitations to
-    ///
-    /// Returns a set of authority IDs for peers that have pending invitations
-    /// from us. Used to mark discovered peers as "invited" in the UI.
-    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId>;
+    /// Get IDs of peers with pending invitations, distinguishing runtime
+    /// unavailability from a real empty invited set.
+    async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError>;
 
     // =========================================================================
     // Settings Operations
     // =========================================================================
 
-    /// Get current settings state
-    async fn get_settings(&self) -> SettingsBridgeState;
+    /// Get current settings state, distinguishing runtime unavailability from a
+    /// real stored settings snapshot.
+    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError>;
 
     /// Returns true when an account configuration has been persisted for this runtime.
     async fn has_account_config(&self) -> Result<bool, IntentError>;
@@ -940,11 +941,13 @@ pub trait RuntimeBridge: Send + Sync {
     /// nickname suggestion for first-run onboarding.
     async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError>;
 
-    /// List devices for the current account (best effort).
-    async fn list_devices(&self) -> Vec<BridgeDeviceInfo>;
+    /// List devices for the current account, distinguishing runtime
+    /// unavailability from a real empty device list.
+    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError>;
 
-    /// List authorities available to this runtime/device (best effort).
-    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo>;
+    /// List authorities available to this runtime/device, distinguishing
+    /// runtime unavailability from a real empty authority list.
+    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError>;
 
     /// Update nickname suggestion (what the user wants to be called)
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError>;
@@ -1026,13 +1029,13 @@ pub trait RuntimeBridge: Send + Sync {
     /// use virtual time.
     async fn sleep_ms(&self, ms: u64);
 
-    /// Get overall runtime status
-    async fn get_status(&self) -> RuntimeStatus {
-        RuntimeStatus {
-            sync: self.get_sync_status().await,
-            rendezvous: self.get_rendezvous_status().await,
+    /// Get overall runtime status.
+    async fn get_status(&self) -> Result<RuntimeStatus, IntentError> {
+        Ok(RuntimeStatus {
+            sync: self.try_get_sync_status().await?,
+            rendezvous: self.try_get_rendezvous_status().await?,
             is_authenticated: self.is_authenticated().await,
-        }
+        })
     }
 }
 
@@ -1249,12 +1252,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn get_sync_status(&self) -> SyncStatus {
-        SyncStatus::default()
+    async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
+        Err(IntentError::no_agent("Sync status not available in offline mode"))
     }
 
-    async fn get_sync_peers(&self) -> Vec<DeviceId> {
-        Vec::new()
+    async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError> {
+        Err(IntentError::no_agent("Sync peers not available in offline mode"))
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
@@ -1283,12 +1286,16 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn get_discovered_peers(&self) -> Vec<AuthorityId> {
-        Vec::new()
+    async fn try_get_discovered_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
+        Err(IntentError::no_agent(
+            "Discovered peers not available in offline mode",
+        ))
     }
 
-    async fn get_rendezvous_status(&self) -> RendezvousStatus {
-        RendezvousStatus::default()
+    async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError> {
+        Err(IntentError::no_agent(
+            "Rendezvous status not available in offline mode",
+        ))
     }
 
     async fn trigger_discovery(&self) -> Result<(), IntentError> {
@@ -1297,8 +1304,8 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
-        Vec::new()
+    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
+        Err(IntentError::no_agent("LAN peers not available in offline mode"))
     }
 
     async fn send_lan_invitation(
@@ -1501,8 +1508,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn list_pending_invitations(&self) -> Vec<InvitationInfo> {
-        Vec::new()
+    async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
+        Err(IntentError::no_agent(
+            "Pending invitations not available in offline mode",
+        ))
     }
 
     async fn import_invitation(&self, _code: &str) -> Result<InvitationInfo, IntentError> {
@@ -1511,12 +1520,14 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId> {
-        Vec::new()
+    async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {
+        Err(IntentError::no_agent(
+            "Invited peer ids not available in offline mode",
+        ))
     }
 
-    async fn get_settings(&self) -> SettingsBridgeState {
-        SettingsBridgeState::default()
+    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
+        Err(IntentError::no_agent("Settings not available in offline mode"))
     }
 
     async fn has_account_config(&self) -> Result<bool, IntentError> {
@@ -1529,12 +1540,14 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
-        Vec::new()
+    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
+        Err(IntentError::no_agent("Devices not available in offline mode"))
     }
 
-    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo> {
-        Vec::new()
+    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
+        Err(IntentError::no_agent(
+            "Authorities not available in offline mode",
+        ))
     }
 
     async fn set_nickname_suggestion(&self, _name: &str) -> Result<(), IntentError> {
@@ -1608,8 +1621,13 @@ mod tests {
         assert_eq!(bridge.authority_id(), authority);
         assert!(!bridge.is_authenticated().await);
         assert!(!bridge.has_signing_capability().await);
-        assert!(bridge.get_sync_peers().await.is_empty());
-        assert!(bridge.get_discovered_peers().await.is_empty());
+        assert!(bridge.try_get_sync_peers().await.is_err());
+        assert!(bridge.try_get_discovered_peers().await.is_err());
+        assert!(bridge.try_get_lan_peers().await.is_err());
+        assert!(bridge.try_list_pending_invitations().await.is_err());
+        assert!(bridge.try_get_settings().await.is_err());
+        assert!(bridge.try_list_devices().await.is_err());
+        assert!(bridge.try_list_authorities().await.is_err());
     }
 
     #[tokio::test]

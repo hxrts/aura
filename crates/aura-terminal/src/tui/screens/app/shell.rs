@@ -36,7 +36,7 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
-    cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
+    monitor_key_rotation_ceremony, start_device_threshold_ceremony,
     start_guardian_ceremony,
 };
 use aura_app::ui::workflows::network as network_workflows;
@@ -102,6 +102,68 @@ fn shell_retry_policy() -> RetryBudgetPolicy {
     profile
         .apply_retry_policy(&base)
         .expect("shell retry policy must scale")
+}
+
+async fn authoritative_settings_devices_for_command(
+    app_ctx: &AppCoreContext,
+    shared_devices: &SharedDevices,
+) -> Vec<Device> {
+    let from_signal = {
+        let core = app_ctx.app_core.raw().read().await;
+        core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
+    };
+
+    if let Some(settings_state) = from_signal {
+        let devices = settings_state
+            .devices
+            .iter()
+            .map(|device| Device {
+                id: device.id.to_string(),
+                name: device.name.clone(),
+                is_current: device.is_current,
+                last_seen: device.last_seen,
+            })
+            .collect::<Vec<_>>();
+        *shared_devices.write() = devices.clone();
+        return devices;
+    }
+
+    shared_devices.read().clone()
+}
+
+async fn authoritative_settings_authorities_for_command(
+    app_ctx: &AppCoreContext,
+) -> (Vec<crate::tui::types::AuthorityInfo>, usize) {
+    let from_signal = {
+        let core = app_ctx.app_core.raw().read().await;
+        core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
+    };
+
+    if let Some(settings_state) = from_signal {
+        let current_index = settings_state
+            .authorities
+            .iter()
+            .position(|authority| authority.is_current)
+            .unwrap_or(0);
+        let authorities = settings_state
+            .authorities
+            .iter()
+            .map(|authority| {
+                let info = crate::tui::types::AuthorityInfo::new(
+                    authority.id.to_string(),
+                    authority.nickname_suggestion.clone(),
+                );
+                if authority.is_current {
+                    info.current()
+                } else {
+                    info
+                }
+            })
+            .collect::<Vec<_>>();
+        return (authorities, current_index);
+    }
+
+    (Vec::new(), 0)
 }
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -385,9 +447,20 @@ fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Chat callbacks are unavailable".to_string());
             };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = SubmittedOperationOwner::submit_local_only(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::join_channel(),
+                SemanticOperationKind::JoinChannel,
+            );
+            let handle = operation.harness_handle();
             state.router.go_to(Screen::Chat);
-            (cb.chat.on_join_channel)(channel_name);
-            Ok(None)
+            (cb.chat.on_join_channel)(channel_name, Some(operation));
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::AcceptPendingHomeInvitation) => {
             let Some(cb) = callbacks.as_ref() else {
@@ -405,12 +478,28 @@ fn execute_harness_followup_command(
             );
             let handle = operation.harness_handle();
             state.router.go_to(Screen::Chat);
+            state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.chat.on_accept_pending_channel_invitation)(operation);
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }) => {
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Chat callbacks are unavailable".to_string());
+            };
+            let trimmed = content.trim_start();
+            let operation = if trimmed.starts_with('/') {
+                None
+            } else {
+                let Some(update_tx) = update_tx.clone() else {
+                    return Err("UI update sender is unavailable".to_string());
+                };
+                Some(SubmittedOperationOwner::submit_local_only(
+                    app_ctx.app_core.raw().clone(),
+                    app_ctx.tasks(),
+                    update_tx,
+                    OperationId::send_message(),
+                    SemanticOperationKind::SendChatMessage,
+                ))
             };
             let channels = shared_channels.read().clone();
             let committed_channel_id = selected_channel.read().clone().filter(|channel_id| {
@@ -427,16 +516,17 @@ fn execute_harness_followup_command(
                 .or_else(|| resolve_committed_selected_channel_id(state, &channels))
                 .or(visible_message_channel_id)
             {
-                (cb.chat.on_send)(channel_id, content);
+                let handle = operation.as_ref().map(SubmittedOperationOwner::harness_handle);
+                (cb.chat.on_send)(channel_id, content, operation);
+                Ok(handle)
             } else {
-                return Err(format!(
+                Err(format!(
                     "No committed channel selected (channels={} selected_index={} visible_messages={})",
                     channels.len(),
                     state.chat.selected_channel,
                     shared_messages.read().len()
-                ));
+                ))
             }
-            Ok(None)
         }
         TuiCommand::Dispatch(DispatchCommand::InviteSelectedContactToChannel) => {
             let Some(cb) = callbacks.as_ref() else {
@@ -895,6 +985,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let mut stream = {
                         let core = app_core.raw().read().await;
                         core.subscribe(&*ERROR_SIGNAL)
+                            .map_err(|e| format!("error signal subscription failed: {e}"))?
                     };
 
                     while let Ok(err_opt) = stream.recv().await {
@@ -1088,12 +1179,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let app_snapshot_for_command = app_ctx_for_commands.snapshot();
                     let harness_contacts_for_command = shared_contacts_for_commands.read().clone();
                     let harness_channels_for_command = shared_channels_for_commands.read().clone();
-                    let harness_devices_for_command = shared_devices_for_commands.read().clone();
+                    let harness_devices_for_command =
+                        authoritative_settings_devices_for_command(
+                            &app_ctx_for_commands,
+                            &shared_devices_for_commands,
+                        )
+                        .await;
+                    let (authorities_for_command, current_authority_index_for_command) =
+                        authoritative_settings_authorities_for_command(&app_ctx_for_commands).await;
                     let harness_messages_for_command = shared_messages_for_commands.read().clone();
 
                     let apply_result = tui.with_mut(|state| {
                         let callbacks_for_commands = shared_callbacks_for_commands.read().clone();
                         let mut operation_handle = None;
+                        if !authorities_for_command.is_empty() {
+                            state.authorities = authorities_for_command.clone();
+                            state.current_authority_index = current_authority_index_for_command
+                                .min(state.authorities.len().saturating_sub(1));
+                        }
                         let followup = apply_harness_command(
                             state,
                             submission.command.clone(),
@@ -2440,7 +2543,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::JoinChannel { channel_name } => {
                                         new_state.router.go_to(Screen::Chat);
-                                        (cb.chat.on_join_channel)(channel_name);
+                                        (cb.chat.on_join_channel)(channel_name, None);
                                     }
                                     DispatchCommand::AcceptPendingHomeInvitation => {
                                         let Some(update_tx) = update_tx_for_events.clone() else {
@@ -2461,6 +2564,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.chat.on_accept_pending_channel_invitation)(operation);
                                     }
                                     DispatchCommand::SendChatMessage { content } => {
+                                        let trimmed = content.trim_start();
+                                        let operation = if trimmed.starts_with('/') {
+                                            None
+                                        } else {
+                                            let Some(update_tx) = update_tx_for_events.clone() else {
+                                                new_state.toast_error(
+                                                    "UI update sender is unavailable",
+                                                );
+                                                continue;
+                                            };
+                                            Some(SubmittedOperationOwner::submit_local_only(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::send_message(),
+                                                SemanticOperationKind::SendChatMessage,
+                                            ))
+                                        };
                                         let channels = shared_channels_for_dispatch.read().clone();
                                         let committed_channel_id = tui_selected_for_events
                                             .read()
@@ -2488,7 +2609,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 &channels,
                                             )
                                         }).or(visible_message_channel_id) {
-                                            (cb.chat.on_send)(channel_id, content);
+                                            (cb.chat.on_send)(channel_id, content, operation);
                                         } else {
                                             new_state.toast_error(format!(
                                                 "No committed channel selected (channels={} selected_index={} visible_messages={})",
@@ -3231,10 +3352,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tasks_handle.spawn(async move {
                                             let app = app_core.raw();
                                             match start_guardian_ceremony(app, threshold, n, ids).await {
-                                                Ok(ceremony_id) => {
+                                                Ok(ceremony_handle) => {
                                                     let k = threshold.value();
                                                     tracing::info!(
-                                                        ceremony_id = ?ceremony_id,
+                                                        ceremony_id = %ceremony_handle.ceremony_id(),
                                                         threshold = k,
                                                         guardians = n,
                                                         "Guardian ceremony initiated, waiting for guardian responses"
@@ -3251,7 +3372,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         // Prime the modal with an initial status update so `ceremony_id` is
                                                         // available immediately for UI cancel.
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                            ceremony_id: ceremony_id.to_string(),
+                                                            ceremony_id: ceremony_handle.ceremony_id().to_string(),
                                                             kind: aura_app::ui::types::CeremonyKind::GuardianRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
@@ -3277,7 +3398,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
-                                                            ceremony_id.clone(),
+                                                            &ceremony_handle,
                                                             tokio::time::Duration::from_millis(500),
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
@@ -3372,11 +3493,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             )
                                             .await
                                             {
-                                                Ok(ceremony_id) => {
+                                                Ok(ceremony_handle) => {
                                                     let k = threshold.value();
                                                     tracing::info!(
                                                         "Multifactor ceremony initiated: {} ({}-of-{})",
-                                                        ceremony_id,
+                                                        ceremony_handle.ceremony_id(),
                                                         k,
                                                         n
                                                     );
@@ -3392,7 +3513,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                     if let Some(tx) = update_tx.clone() {
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                            ceremony_id: ceremony_id.to_string(),
+                                                            ceremony_id: ceremony_handle.ceremony_id().to_string(),
                                                             kind: aura_app::ui::types::CeremonyKind::DeviceRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
@@ -3417,7 +3538,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
-                                                            ceremony_id.clone(),
+                                                            &ceremony_handle,
                                                             tokio::time::Duration::from_millis(500),
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
@@ -3475,7 +3596,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let app = app_core.raw();
 
                                             let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
-                                            if let Err(e) = cancel_key_rotation_ceremony(app, &ceremony_id_typed).await {
+                                            if let Err(e) = aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony_by_id(app, &ceremony_id_typed).await {
                                                 tracing::error!("Failed to cancel guardian ceremony: {}", e);
                                                 send_optional_ui_update_required(
                                                     &update_tx,
@@ -3507,7 +3628,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let app = app_core.raw();
 
                                             let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
-                                            if let Err(e) = cancel_key_rotation_ceremony(app, &ceremony_id_typed).await {
+                                            if let Err(e) = aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony_by_id(app, &ceremony_id_typed).await {
                                                 tracing::error!("Failed to cancel ceremony: {}", e);
                                                 send_optional_ui_update_required(
                                                     &update_tx,

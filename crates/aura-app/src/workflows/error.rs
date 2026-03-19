@@ -66,6 +66,24 @@ pub enum WorkflowError {
         source: AuraError,
     },
 
+    /// Delivery prerequisites never converged within the retry budget.
+    #[error(
+        "Delivery prerequisites never converged for {peer} after {attempts} attempts: {detail}"
+    )]
+    DeliveryPrerequisitesNeverConverged {
+        peer: String,
+        attempts: usize,
+        detail: String,
+    },
+
+    /// Fanout could not reach any recipient within the retry budget.
+    #[error("Message fanout unavailable for {peer} after {attempts} attempts: {recipients:?}")]
+    DeliveryFanoutUnavailable {
+        peer: String,
+        attempts: usize,
+        recipients: Vec<String>,
+    },
+
     /// A precondition was not met.
     #[error("{0}")]
     Precondition(&'static str),

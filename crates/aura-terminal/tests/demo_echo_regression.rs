@@ -214,6 +214,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     let mut chat_stream = {
         let core = app_core.read().await;
         core.subscribe(&*CHAT_SIGNAL)
+            .expect("chat signal should be registered")
     };
 
     eprintln!("[Test] Sending message to channel {}...", channel_id);
@@ -354,6 +355,7 @@ async fn demo_echo_with_empty_channel_members() {
     let mut chat_stream = {
         let core = app_core.read().await;
         core.subscribe(&*CHAT_SIGNAL)
+            .expect("chat signal should be registered")
     };
 
     // Using typed ChannelId ensures we send to the EXACT channel we created
@@ -498,6 +500,7 @@ async fn demo_echo_persists_after_scheduler_update() {
     let mut chat_stream = {
         let core = app_core.read().await;
         core.subscribe(&*CHAT_SIGNAL)
+            .expect("chat signal should be registered")
     };
 
     // Using typed ChannelId ensures we send to the EXACT channel we created
@@ -613,6 +616,7 @@ async fn demo_echo_with_direct_member_ids_control() {
     let mut chat_stream = {
         let core = app_core.read().await;
         core.subscribe(&*CHAT_SIGNAL)
+            .expect("chat signal should be registered")
     };
 
     // Using typed ChannelId ensures we send to the EXACT channel we created

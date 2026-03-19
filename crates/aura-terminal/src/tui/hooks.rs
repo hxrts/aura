@@ -280,7 +280,9 @@ pub async fn subscribe_signal_with_retry<T, F>(
             }
         }
 
-        let mut stream = reactive.subscribe(signal);
+        let mut stream = reactive
+            .subscribe(signal)
+            .map_err(|error| format_reactive_error(&error))?;
         loop {
             match stream.recv().await {
                 Ok(value) => {

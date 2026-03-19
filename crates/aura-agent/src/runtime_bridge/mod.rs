@@ -1337,7 +1337,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Sync Operations
     // =========================================================================
 
-    async fn get_sync_status(&self) -> SyncStatus {
+    async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
         // "Connected peers" is a UI-facing availability signal. It should reflect
         // currently reachable peers (e.g., contacts/devices online), not merely the
         // configured peer list.
@@ -1372,14 +1372,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 )
             };
 
-        SyncStatus {
+        Ok(SyncStatus {
             is_running,
             connected_peers: (transport_stats.active_channels as usize)
                 .max(active_sessions as usize),
             last_sync_ms,
             pending_facts: 0, // Would need to track this in SyncServiceManager
             active_sessions: active_sessions as usize,
-        }
+        })
     }
 
     async fn is_peer_online(&self, peer: AuthorityId) -> bool {
@@ -1420,12 +1420,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         false
     }
-    async fn get_sync_peers(&self) -> Vec<DeviceId> {
-        if let Some(sync) = self.agent.runtime().sync() {
+    async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError> {
+        Ok(if let Some(sync) = self.agent.runtime().sync() {
             sync.peers().await
         } else {
             Vec::new()
-        }
+        })
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
@@ -1704,12 +1704,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Peer Discovery
     // =========================================================================
 
-    async fn get_discovered_peers(&self) -> Vec<AuthorityId> {
-        rendezvous::get_discovered_peers(self).await
+    async fn try_get_discovered_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
+        Ok(rendezvous::get_discovered_peers(self).await)
     }
 
-    async fn get_rendezvous_status(&self) -> RendezvousStatus {
-        rendezvous::get_rendezvous_status(self).await
+    async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError> {
+        Ok(rendezvous::get_rendezvous_status(self).await)
     }
 
     async fn trigger_discovery(&self) -> Result<(), IntentError> {
@@ -1720,8 +1720,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // LAN Discovery
     // =========================================================================
 
-    async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
-        rendezvous::get_lan_peers(self).await
+    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
+        Ok(rendezvous::get_lan_peers(self).await)
     }
 
     async fn send_lan_invitation(
@@ -3648,8 +3648,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
-    async fn list_pending_invitations(&self) -> Vec<InvitationInfo> {
-        if let Ok(invitation_service) = self.agent.invitations() {
+    async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
+        Ok(if let Ok(invitation_service) = self.agent.invitations() {
             invitation_service
                 .list_pending()
                 .await
@@ -3658,7 +3658,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .collect()
         } else {
             Vec::new()
-        }
+        })
     }
 
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
@@ -3677,9 +3677,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(convert_invitation_to_bridge_info(&invitation))
     }
 
-    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId> {
+    async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {
         // Get pending invitations where we are the sender
-        if let Ok(invitation_service) = self.agent.invitations() {
+        Ok(if let Ok(invitation_service) = self.agent.invitations() {
             let our_authority = self.agent.authority_id();
             invitation_service
                 .list_pending()
@@ -3690,15 +3690,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .collect()
         } else {
             Vec::new()
-        }
+        })
     }
 
     // =========================================================================
     // Settings Operations
     // =========================================================================
 
-    async fn get_settings(&self) -> SettingsBridgeState {
-        let device_count = self.list_devices().await.len();
+    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
+        let device_count = self.try_list_devices().await?.len();
 
         // Get threshold config if available
         let (threshold_k, threshold_n) = if let Some(config) = self.get_threshold_config().await {
@@ -3738,17 +3738,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         };
 
-        SettingsBridgeState {
+        Ok(SettingsBridgeState {
             nickname_suggestion,
             mfa_policy,
             threshold_k,
             threshold_n,
             device_count,
             contact_count,
-        }
+        })
     }
 
-    async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
+    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
         use aura_app::views::naming::EffectiveName;
         use aura_core::tree::metadata::DeviceLeafMetadata;
 
@@ -3769,10 +3769,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     is_current: true,
                     last_seen: None,
                 };
-                return vec![BridgeDeviceInfo {
+                return Ok(vec![BridgeDeviceInfo {
                     name: device.effective_name(),
                     ..device
-                }];
+                }]);
             }
         };
 
@@ -3830,10 +3830,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             );
         }
 
-        devices
+        Ok(devices)
     }
 
-    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo> {
+    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
         let current_id = self.agent.authority_id();
         let current_nickname = match self.try_load_account_config().await {
             Ok(Some((_key, config))) => config
@@ -3858,7 +3858,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Ok(keys) => keys,
             Err(error) => {
                 tracing::warn!("Failed to list stored authorities: {}", error);
-                return authorities;
+                return Ok(authorities);
             }
         };
 
@@ -3898,7 +3898,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .cmp(&left.is_current)
                 .then_with(|| left.id.to_string().cmp(&right.id.to_string()))
         });
-        authorities
+        Ok(authorities)
     }
 
     async fn has_account_config(&self) -> Result<bool, IntentError> {

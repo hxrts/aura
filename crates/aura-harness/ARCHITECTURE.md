@@ -89,6 +89,16 @@ The correct split is:
 - the harness consumes typed move-owned handles/tokens but does not create or
   advance them outside approved command-plane surfaces
 
+For parity-critical operations, the harness should assume and enforce the
+stronger semantic-owner protocol defined by `docs/122_ownership_model.md`:
+
+- frontend-local submission ownership must either settle locally or hand off
+  before awaited app/runtime workflow execution
+- terminal publication must occur before best-effort follow-up that may fail
+- best-effort failure must not block the operation from leaving `Submitting`
+- waits should target canonical owner lifecycle/readiness, not heuristic
+  fallback symptoms of missing terminal publication
+
 ### Ownership Inventory
 
 | Path | Category | Authoritative owner | May mutate | Observe only |
@@ -115,6 +125,8 @@ The correct split is:
 - `just ci-actor-lifecycle`
 - `just ci-move-semantics`
 - `just ci-timeout-policy`
+- `just ci-semantic-owner-awaits`
+- `just ci-best-effort-side-effects`
 
 ### Detailed Specifications
 

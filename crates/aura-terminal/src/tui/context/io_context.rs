@@ -1070,7 +1070,11 @@ impl IoContext {
             .and_then(|core| core.runtime().cloned());
 
         if let Some(runtime) = runtime {
-            return runtime.get_sync_status().await.last_sync_ms;
+            return runtime
+                .try_get_sync_status()
+                .await
+                .ok()
+                .and_then(|status| status.last_sync_ms);
         }
         None
     }
@@ -1082,9 +1086,10 @@ impl IoContext {
         };
 
         if let Some(runtime) = runtime {
-            let status = runtime.get_sync_status().await;
-            if status.connected_peers > 0 {
-                return status.connected_peers;
+            if let Ok(status) = runtime.try_get_sync_status().await {
+                if status.connected_peers > 0 {
+                    return status.connected_peers;
+                }
             }
         }
 
@@ -1123,7 +1128,9 @@ impl IoContext {
             return vec![];
         };
 
-        let lan_peers = runtime.get_lan_peers().await;
+        let Ok(lan_peers) = runtime.try_get_lan_peers().await else {
+            return vec![];
+        };
         lan_peers
             .iter()
             .map(|peer| (peer.authority_id.to_string(), peer.address.clone()))

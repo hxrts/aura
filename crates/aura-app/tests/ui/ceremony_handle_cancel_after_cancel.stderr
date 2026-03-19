@@ -1,0 +1,9 @@
+error[E0382]: use of moved value: `handle`
+  --> tests/ui/ceremony_handle_cancel_after_cancel.rs:12:53
+   |
+10 | async fn consume_twice(app_core: Arc<RwLock<AppCore>>, handle: CeremonyHandle) {
+   |                                                        ------ move occurs because `handle` has type `CeremonyHandle`, which does not implement the `Copy` trait
+11 |     let _ = cancel_key_rotation_ceremony(&app_core, handle).await;
+   |                                                     ------ value moved here
+12 |     let _ = cancel_key_rotation_ceremony(&app_core, handle).await;
+   |                                                     ^^^^^^ value used here after move

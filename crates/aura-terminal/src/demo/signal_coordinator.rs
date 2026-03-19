@@ -118,13 +118,25 @@ impl DemoSignalCoordinator {
         // Subscribe to chat signal to detect new messages from Bob
         let mut chat_stream = {
             let core = self.app_core.read().await;
-            core.subscribe(&*CHAT_SIGNAL)
+            match core.subscribe(&*CHAT_SIGNAL) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    tracing::warn!(error = %error, "demo signal coordinator failed to subscribe to chat");
+                    return;
+                }
+            }
         };
 
         // Subscribe to recovery signal to detect recovery initiation
         let mut recovery_stream = {
             let core = self.app_core.read().await;
-            core.subscribe(&*RECOVERY_SIGNAL)
+            match core.subscribe(&*RECOVERY_SIGNAL) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    tracing::warn!(error = %error, "demo signal coordinator failed to subscribe to recovery");
+                    return;
+                }
+            }
         };
 
         loop {

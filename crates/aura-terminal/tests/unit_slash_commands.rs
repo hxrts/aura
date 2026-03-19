@@ -66,8 +66,7 @@ async fn slash_who_emits_participants_toast() {
     let callbacks = ChatCallbacks::new(ctx.clone(), tx, ctx.app_core_raw().clone());
     ensure_chat_channel(&ctx).await;
 
-    let on_send = callbacks.on_send.clone();
-    on_send("general".to_string(), "/who".to_string());
+    callbacks.send("general".to_string(), "/who".to_string());
 
     let toast = next_toast(&mut rx).await;
     assert_eq!(toast.id, "command");
@@ -87,8 +86,7 @@ async fn slash_whois_emits_whois_toast() {
     let callbacks = ChatCallbacks::new(ctx.clone(), tx, ctx.app_core_raw().clone());
     ensure_chat_channel(&ctx).await;
 
-    let on_send = callbacks.on_send.clone();
-    on_send("general".to_string(), "/whois test-user".to_string());
+    callbacks.send("general".to_string(), "/whois test-user".to_string());
 
     let toast = next_toast(&mut rx).await;
     assert_eq!(toast.id, "command");

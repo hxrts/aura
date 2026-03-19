@@ -3,6 +3,7 @@ use crate::{
     AuraError, ProtocolErrorCode,
 };
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::marker::PhantomData;
 
 /// Repo-wide ownership taxonomy for parity-critical surfaces.
@@ -13,6 +14,138 @@ pub enum OwnershipCategory {
     MoveOwned,
     ActorOwned,
     Observed,
+}
+
+/// Required frontend/app handoff policy for parity-critical semantic owners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticOwnerHandoffPolicy {
+    /// The frontend/local owner must settle the operation locally.
+    FrontendSettlesLocally,
+    /// The frontend/local owner must relinquish ownership before the first
+    /// awaited app/runtime workflow step.
+    HandoffBeforeFirstAwait,
+}
+
+/// Allowed await policy for parity-critical semantic-owner bodies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticOwnerAwaitPolicy {
+    /// Only approved bounded-await helpers are allowed inside the owner body.
+    BoundedOnly,
+}
+
+/// Required relationship between terminal publication and best-effort follow-up work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticOwnerBestEffortPolicy {
+    /// Terminal publication must happen before best-effort follow-up that is
+    /// allowed to fail.
+    TerminalBeforeBestEffort,
+}
+
+/// Canonical protocol for parity-critical semantic owners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SemanticOwnerProtocol {
+    handoff_policy: SemanticOwnerHandoffPolicy,
+    await_policy: SemanticOwnerAwaitPolicy,
+    best_effort_policy: SemanticOwnerBestEffortPolicy,
+}
+
+impl SemanticOwnerProtocol {
+    /// Canonical Aura semantic-owner protocol.
+    pub const CANONICAL: Self = Self {
+        handoff_policy: SemanticOwnerHandoffPolicy::HandoffBeforeFirstAwait,
+        await_policy: SemanticOwnerAwaitPolicy::BoundedOnly,
+        best_effort_policy: SemanticOwnerBestEffortPolicy::TerminalBeforeBestEffort,
+    };
+
+    pub const fn handoff_policy(self) -> SemanticOwnerHandoffPolicy {
+        self.handoff_policy
+    }
+
+    pub const fn await_policy(self) -> SemanticOwnerAwaitPolicy {
+        self.await_policy
+    }
+
+    pub const fn best_effort_policy(self) -> SemanticOwnerBestEffortPolicy {
+        self.best_effort_policy
+    }
+}
+
+/// Canonical protocol for best-effort boundaries that are not allowed to own
+/// primary terminal lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BestEffortBoundaryProtocol {
+    terminal_relation: SemanticOwnerBestEffortPolicy,
+}
+
+impl BestEffortBoundaryProtocol {
+    /// Canonical Aura best-effort protocol.
+    pub const POST_TERMINAL_ONLY: Self = Self {
+        terminal_relation: SemanticOwnerBestEffortPolicy::TerminalBeforeBestEffort,
+    };
+
+    pub const fn terminal_relation(self) -> SemanticOwnerBestEffortPolicy {
+        self.terminal_relation
+    }
+}
+
+/// Canonical collector for post-terminal best-effort work.
+///
+/// This helper is intentionally incapable of publishing primary terminal
+/// lifecycle. It only records best-effort failures after the owner has already
+/// published terminal success/failure through the canonical lifecycle path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostTerminalBestEffort<E> {
+    protocol: BestEffortBoundaryProtocol,
+    first_error: Option<E>,
+}
+
+impl<E> PostTerminalBestEffort<E> {
+    #[must_use]
+    pub const fn post_terminal_only() -> Self {
+        Self {
+            protocol: BestEffortBoundaryProtocol::POST_TERMINAL_ONLY,
+            first_error: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn protocol(&self) -> BestEffortBoundaryProtocol {
+        self.protocol
+    }
+
+    pub fn record<T>(&mut self, result: Result<T, E>) -> Option<T> {
+        match result {
+            Ok(value) => Some(value),
+            Err(error) => {
+                if self.first_error.is_none() {
+                    self.first_error = Some(error);
+                }
+                None
+            }
+        }
+    }
+
+    pub async fn capture<T, Fut>(&mut self, future: Fut) -> Option<T>
+    where
+        Fut: Future<Output = Result<T, E>>,
+    {
+        self.record(future.await)
+    }
+
+    #[must_use]
+    pub fn first_error(&self) -> Option<&E> {
+        self.first_error.as_ref()
+    }
+
+    pub fn finish(self) -> Result<(), E> {
+        match self.first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
 }
 
 /// High-level typed error domain for ownership and lifecycle failures.
@@ -697,5 +830,59 @@ mod tests {
 
         assert_eq!(mutation.capability().as_str(), "actor:ingress");
         assert_eq!(mutation.mutation(), &"join_channel");
+    }
+
+    #[test]
+    fn canonical_semantic_owner_protocol_requires_handoff_and_bounded_waits() {
+        let protocol = super::SemanticOwnerProtocol::CANONICAL;
+        assert_eq!(
+            protocol.handoff_policy(),
+            super::SemanticOwnerHandoffPolicy::HandoffBeforeFirstAwait
+        );
+        assert_eq!(
+            protocol.await_policy(),
+            super::SemanticOwnerAwaitPolicy::BoundedOnly
+        );
+        assert_eq!(
+            protocol.best_effort_policy(),
+            super::SemanticOwnerBestEffortPolicy::TerminalBeforeBestEffort
+        );
+    }
+
+    #[test]
+    fn canonical_best_effort_boundary_protocol_is_post_terminal_only() {
+        assert_eq!(
+            super::BestEffortBoundaryProtocol::POST_TERMINAL_ONLY.terminal_relation(),
+            super::SemanticOwnerBestEffortPolicy::TerminalBeforeBestEffort
+        );
+    }
+
+    #[tokio::test]
+    async fn post_terminal_best_effort_preserves_first_error_and_cannot_own_terminality() {
+        let mut best_effort =
+            super::PostTerminalBestEffort::<super::OwnershipError>::post_terminal_only();
+
+        assert_eq!(
+            best_effort.protocol().terminal_relation(),
+            super::SemanticOwnerBestEffortPolicy::TerminalBeforeBestEffort
+        );
+
+        let first = best_effort
+            .capture(async { Err::<(), _>(super::OwnershipError::timeout("first")) })
+            .await;
+        let second = best_effort
+            .capture(async { Err::<(), _>(super::OwnershipError::timeout("second")) })
+            .await;
+
+        assert!(first.is_none());
+        assert!(second.is_none());
+        assert_eq!(
+            best_effort.first_error(),
+            Some(&super::OwnershipError::timeout("first"))
+        );
+        assert_eq!(
+            best_effort.finish(),
+            Err(super::OwnershipError::timeout("first"))
+        );
     }
 }

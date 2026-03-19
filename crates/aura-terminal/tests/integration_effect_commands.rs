@@ -333,6 +333,7 @@ async fn test_subscriber_receives_updates() {
             let mut stream = {
                 let core = app_core.read().await;
                 core.subscribe(&*CONTACTS_SIGNAL)
+                    .expect("contacts signal should be registered")
             };
 
             // Wait for one update

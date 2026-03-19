@@ -21,7 +21,7 @@ mod settings;
 pub use crate::tui::callbacks::{
     AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, ExportInvitationCallback,
     GoHomeCallback, GuardianSelectCallback, InvitationCallback, RecoveryCallback,
-    RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetTopicCallback, StartChatCallback,
+    RemoveDeviceCallback, RetryMessageCallback, SetTopicCallback, StartChatCallback,
     UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 

@@ -167,7 +167,7 @@ impl SettingsCallbacks {
                     // Prime status quickly (best-effort) so the modal has counters immediately.
                     let ceremony_id_typed = CeremonyId::new(start.ceremony_id.clone());
                     if let Ok(status) =
-                        aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                        aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status_by_id(
                             ctx.app_core_raw(),
                             &ceremony_id_typed,
                         )
@@ -197,9 +197,14 @@ impl SettingsCallbacks {
                     let tx_monitor = tx.clone();
                     let ceremony_id = CeremonyId::new(start.ceremony_id.clone());
                     spawn_ctx(ctx.clone(), async move {
+                        let handle =
+                            aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
+                                ceremony_id,
+                                aura_app::ui::prelude::CeremonyKind::DeviceEnrollment,
+                            );
                         let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                             &app,
-                            ceremony_id,
+                            &handle,
                             Duration::from_millis(500),
                             |status| {
                                 let _ = send_ui_update_lossy(
@@ -272,9 +277,13 @@ impl SettingsCallbacks {
                 let app = ctx.app_core_raw().clone();
                 let tx_monitor = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
+                    let handle = aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
+                        CeremonyId::new(ceremony_id),
+                        aura_app::ui::prelude::CeremonyKind::DeviceRemoval,
+                    );
                     match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
-                        CeremonyId::new(ceremony_id),
+                        &handle,
                         Duration::from_millis(250),
                         |_| {},
                         physical_sleep,

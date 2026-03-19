@@ -510,18 +510,18 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Sync Operations
     // =========================================================================
 
-    async fn get_sync_status(&self) -> SyncStatus {
-        SyncStatus {
+    async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
+        Ok(SyncStatus {
             is_running: true,
             connected_peers: 0,
             last_sync_ms: Some(self.now_ms()),
             pending_facts: 0,
             active_sessions: 0,
-        }
+        })
     }
 
-    async fn get_sync_peers(&self) -> Vec<DeviceId> {
-        vec![]
+    async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError> {
+        Ok(vec![])
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
@@ -540,23 +540,23 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Discovery Operations
     // =========================================================================
 
-    async fn get_discovered_peers(&self) -> Vec<AuthorityId> {
-        vec![]
+    async fn try_get_discovered_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
+        Ok(vec![])
     }
 
-    async fn get_rendezvous_status(&self) -> RendezvousStatus {
-        RendezvousStatus {
+    async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError> {
+        Ok(RendezvousStatus {
             is_running: true,
             cached_peers: 0,
-        }
+        })
     }
 
     async fn trigger_discovery(&self) -> Result<(), IntentError> {
         Ok(())
     }
 
-    async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
-        vec![]
+    async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
+        Ok(vec![])
     }
 
     async fn send_lan_invitation(
@@ -723,8 +723,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
-    async fn get_invited_peer_ids(&self) -> Vec<AuthorityId> {
-        Vec::new()
+    async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {
+        Ok(Vec::new())
     }
 
     async fn respond_to_guardian_ceremony(
@@ -1001,13 +1001,13 @@ impl RuntimeBridge for MockRuntimeBridge {
         }
     }
 
-    async fn list_pending_invitations(&self) -> Vec<InvitationInfo> {
+    async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
         let invitations = self.invitations.read().await;
-        invitations
+        Ok(invitations
             .values()
             .filter(|inv| inv.status == InvitationBridgeStatus::Pending)
             .cloned()
-            .collect()
+            .collect())
     }
 
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
@@ -1125,19 +1125,19 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Settings
     // =========================================================================
 
-    async fn get_settings(&self) -> SettingsBridgeState {
+    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
         let nickname_suggestion = self.nickname_suggestion.read().await.clone();
         let mfa_policy = self.mfa_policy.read().await.clone();
         let devices = self.devices.read().await;
 
-        SettingsBridgeState {
+        Ok(SettingsBridgeState {
             nickname_suggestion,
             mfa_policy,
             threshold_k: 2,
             threshold_n: 3,
             device_count: devices.len(),
             contact_count: 0,
-        }
+        })
     }
 
     async fn has_account_config(&self) -> Result<bool, IntentError> {
@@ -1149,16 +1149,16 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
-    async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
-        self.devices.read().await.clone()
+    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
+        Ok(self.devices.read().await.clone())
     }
 
-    async fn list_authorities(&self) -> Vec<BridgeAuthorityInfo> {
-        vec![BridgeAuthorityInfo {
+    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
+        Ok(vec![BridgeAuthorityInfo {
             id: self.authority_id,
             nickname_suggestion: Some(self.nickname_suggestion.read().await.clone()),
             is_current: true,
-        }]
+        }])
     }
 
     async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {

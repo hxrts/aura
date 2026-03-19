@@ -193,9 +193,13 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         .await
         .expect("accept device enrollment invitation should succeed");
 
+    let handle_b = aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
+        aura_core::CeremonyId::new(start_b.ceremony_id.clone()),
+        aura_app::ui::prelude::CeremonyKind::DeviceEnrollment,
+    );
     let status_b = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        aura_core::CeremonyId::new(start_b.ceremony_id.clone()),
+        &handle_b,
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,
@@ -271,9 +275,13 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         })
     };
 
+    let handle_c = aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
+        aura_core::CeremonyId::new(start_c.ceremony_id.clone()),
+        aura_app::ui::prelude::CeremonyKind::DeviceEnrollment,
+    );
     let status_c = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        aura_core::CeremonyId::new(start_c.ceremony_id.clone()),
+        &handle_c,
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,

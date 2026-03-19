@@ -751,32 +751,41 @@ impl AppCore {
     /// Returns `true` if the runtime has an active sync service.
     pub async fn is_sync_running(&self) -> bool {
         if let Some(runtime) = &self.runtime {
-            return runtime.get_sync_status().await.is_running;
+            return runtime
+                .try_get_sync_status()
+                .await
+                .map(|status| status.is_running)
+                .unwrap_or(false);
         }
         false
     }
 
     /// Get current sync status from the runtime (if available)
-    pub async fn sync_status(&self) -> Option<RuntimeSyncStatus> {
+    pub async fn sync_status(&self) -> Result<Option<RuntimeSyncStatus>, IntentError> {
         if let Some(runtime) = &self.runtime {
-            return Some(runtime.get_sync_status().await);
+            return runtime.try_get_sync_status().await.map(Some);
         }
-        None
+        Ok(None)
     }
 
     /// Get settings + device list from the runtime (if available).
     pub async fn settings_snapshot(
         &self,
-    ) -> Option<(
+    ) -> Result<
+        Option<(
         SettingsBridgeState,
         Vec<BridgeDeviceInfo>,
         Vec<BridgeAuthorityInfo>,
-    )> {
-        let runtime = self.runtime.as_ref()?;
-        let settings = runtime.get_settings().await;
-        let devices = runtime.list_devices().await;
-        let authorities = runtime.list_authorities().await;
-        Some((settings, devices, authorities))
+    )>,
+        IntentError,
+    > {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Ok(None);
+        };
+        let settings = runtime.try_get_settings().await?;
+        let devices = runtime.try_list_devices().await?;
+        let authorities = runtime.try_list_authorities().await?;
+        Ok(Some((settings, devices, authorities)))
     }
 
     /// Get the list of known sync peers
@@ -788,7 +797,7 @@ impl AppCore {
             .as_ref()
             .ok_or_else(|| IntentError::no_agent("sync_peers requires a runtime"))?;
 
-        Ok(runtime.get_sync_peers().await)
+        runtime.try_get_sync_peers().await
     }
 
     /// Discover peers via rendezvous
@@ -800,27 +809,28 @@ impl AppCore {
             .as_ref()
             .ok_or_else(|| IntentError::no_agent("discover_peers requires a runtime"))?;
 
-        Ok(runtime.get_discovered_peers().await)
+        runtime.try_get_discovered_peers().await
     }
 
     /// Get LAN-discovered peers
     ///
     /// Returns a list of peers discovered via LAN (mDNS/UDP broadcast) with their
-    /// network addresses. Returns empty list if no runtime is available.
-    pub async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
+    /// network addresses.
+    pub async fn get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
         if let Some(runtime) = &self.runtime {
-            runtime.get_lan_peers().await
+            return runtime.try_get_lan_peers().await;
         } else {
-            vec![]
+            Err(IntentError::no_agent("get_lan_peers requires a runtime"))
         }
     }
 
     /// Check if the runtime is online (has active sync or rendezvous services)
     pub async fn is_online(&self) -> bool {
         if let Some(runtime) = &self.runtime {
-            let status = runtime.get_status().await;
-            // Check if either sync or rendezvous is running
-            return status.sync.is_running || status.rendezvous.is_running;
+            let sync = runtime.try_get_sync_status().await.ok();
+            let rendezvous = runtime.try_get_rendezvous_status().await.ok();
+            return sync.as_ref().is_some_and(|status| status.is_running)
+                || rendezvous.as_ref().is_some_and(|status| status.is_running);
         }
         false
     }
@@ -1178,7 +1188,7 @@ impl ReactiveEffects for AppCore {
         self.reactive.emit(signal, value).await
     }
 
-    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
     where
         T: Clone + Send + Sync + 'static,
     {

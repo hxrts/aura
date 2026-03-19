@@ -15,13 +15,17 @@ use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui_contract::RuntimeFact;
 use aura_core::{types::identifiers::ChannelId, AuthorityId};
 use aura_ui::UiController;
-use js_sys::{Array, Function, Object, Reflect, JSON};
-use serde_wasm_bindgen::{from_value, to_value};
+use futures::channel::oneshot;
+use js_sys::{Array, Function, Object, Promise, Reflect, JSON};
+use serde_json::from_str;
+use serde_wasm_bindgen::to_value;
+use std::cell::RefCell as StdRefCell;
+use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::{future_to_promise, spawn_local};
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 
 struct PendingUiPublish {
     value: JsValue,
@@ -37,6 +41,7 @@ thread_local! {
     static PENDING_UI_PUBLISH: RefCell<Option<PendingUiPublish>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
     static UI_PUBLISH_RAF_PENDING: Cell<bool> = const { Cell::new(false) };
+    static REBOOTSTRAP_TRIGGER: RefCell<Option<Arc<dyn Fn() -> js_sys::Promise>>> = const { RefCell::new(None) };
 }
 
 const WEB_STORAGE_PREFIX: &str = "aura_";
@@ -108,6 +113,22 @@ fn submit_create_account_in_background(controller: Arc<UiController>, nickname: 
             }
         }
     });
+}
+
+pub fn set_rebootstrap_trigger(trigger: Arc<dyn Fn() -> js_sys::Promise>) {
+    REBOOTSTRAP_TRIGGER.with(|slot| {
+        *slot.borrow_mut() = Some(trigger);
+    });
+}
+
+pub async fn request_rebootstrap() -> Result<(), JsValue> {
+    web_sys::console::log_1(&"[web-harness] request_rebootstrap start".into());
+    let trigger = REBOOTSTRAP_TRIGGER.with(|slot| slot.borrow().clone());
+    let trigger = trigger.ok_or_else(|| JsValue::from_str("rebootstrap trigger is unavailable"))?;
+    let promise = trigger();
+    let _ = JsFuture::from(promise).await?;
+    web_sys::console::log_1(&"[web-harness] request_rebootstrap done".into());
+    Ok(())
 }
 
 fn browser_screen(screen: ScreenId) -> Option<ScreenId> {
@@ -193,6 +214,31 @@ fn selected_authority_id(controller: &UiController) -> Option<String> {
         })
 }
 
+async fn schedule_browser_ui_mutation(
+    action: impl FnOnce() + 'static,
+) -> Result<(), JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("window unavailable"))?;
+    let (tx, rx) = oneshot::channel::<()>();
+    let action = Rc::new(StdRefCell::new(Some(Box::new(action) as Box<dyn FnOnce()>)));
+    let callback_action = action.clone();
+    let callback = Closure::once(move || {
+        if let Some(action) = callback_action.borrow_mut().take() {
+            action();
+        }
+        let _ = tx.send(());
+    });
+    window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(
+            callback.as_ref().unchecked_ref(),
+            0,
+        )
+        .map_err(|error| JsValue::from_str(&format!("failed to schedule UI mutation: {error:?}")))?;
+    callback.forget();
+    rx.await
+        .map_err(|_| JsValue::from_str("scheduled UI mutation dropped before execution"))?;
+    Ok(())
+}
+
 async fn submit_semantic_command(
     controller: Arc<UiController>,
     request: SemanticCommandRequest,
@@ -201,28 +247,53 @@ async fn submit_semantic_command(
         IntentAction::OpenScreen(screen) => {
             let target =
                 browser_screen(screen).ok_or_else(|| JsValue::from_str("unsupported screen"))?;
-            controller.set_screen(target);
+            let controller = controller.clone();
+            schedule_browser_ui_mutation(move || controller.set_screen(target)).await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::CreateAccount { account_name } => {
+            update_semantic_debug("create_account_begin", Some(&account_name));
             controller.set_account_setup_state(false, account_name.clone(), None);
-            let has_runtime = {
-                let core = controller.app_core().read().await;
-                core.runtime().is_some()
-            };
+            let has_runtime = controller
+                .app_core()
+                .try_read()
+                .map(|core| core.runtime().is_some())
+                .unwrap_or(false);
             if has_runtime {
-                submit_create_account_in_background(controller, account_name);
+                update_semantic_debug("create_account_runtime_path", Some(&account_name));
+                submit_create_account_in_background(controller, account_name.clone());
             } else {
+                update_semantic_debug("create_account_stage_start", Some(&account_name));
                 web_sys::console::log_1(
                     &format!("[web-harness] create_account stage nickname={account_name}").into(),
                 );
                 super::stage_initial_web_account_bootstrap(&account_name)
                     .await
                     .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                update_semantic_debug("create_account_staged", Some(&account_name));
                 web_sys::console::log_1(
                     &format!("[web-harness] create_account staged nickname={account_name}").into(),
                 );
+                update_semantic_debug("create_account_rebootstrap_start", Some(&account_name));
+                let account_name_for_rebootstrap = account_name.clone();
+                spawn_local(async move {
+                    match request_rebootstrap().await {
+                        Ok(()) => update_semantic_debug(
+                            "create_account_rebootstrap_done",
+                            Some(&account_name_for_rebootstrap),
+                        ),
+                        Err(error) => update_semantic_debug(
+                            "create_account_rebootstrap_error",
+                            Some(&format!(
+                                "{}: {error:?}",
+                                account_name_for_rebootstrap
+                            )),
+                        ),
+                    }
+                });
+                update_semantic_debug("create_account_rebootstrap_enqueued", Some(&account_name));
             }
+            update_semantic_debug("create_account_return", Some(&account_name));
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::CreateHome { home_name } => {
@@ -251,8 +322,13 @@ async fn submit_semantic_command(
             ))
         }
         IntentAction::StartDeviceEnrollment { device_name, .. } => {
-            controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
+            let controller_for_screen = controller.clone();
+            schedule_browser_ui_mutation(move || {
+                controller_for_screen.set_screen(ScreenId::Settings);
+                controller_for_screen
+                    .set_settings_section(browser_settings_section(SettingsSection::Devices));
+            })
+            .await?;
             let start = ceremony_workflows::start_device_enrollment_ceremony(
                 &controller.app_core(),
                 device_name.clone(),
@@ -279,13 +355,22 @@ async fn submit_semantic_command(
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
-            controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(browser_settings_section(section));
+            let controller = controller.clone();
+            schedule_browser_ui_mutation(move || {
+                controller.set_screen(ScreenId::Settings);
+                controller.set_settings_section(browser_settings_section(section));
+            })
+            .await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::RemoveSelectedDevice => {
-            controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
+            let controller_for_screen = controller.clone();
+            schedule_browser_ui_mutation(move || {
+                controller_for_screen.set_screen(ScreenId::Settings);
+                controller_for_screen
+                    .set_settings_section(browser_settings_section(SettingsSection::Devices));
+            })
+            .await?;
             let device_id = selected_device_id(&controller)?;
             ceremony_workflows::start_device_removal_ceremony(&controller.app_core(), device_id)
                 .await
@@ -293,8 +378,13 @@ async fn submit_semantic_command(
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::SwitchAuthority { authority_id } => {
-            controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(aura_ui::model::SettingsSection::Authority);
+            let controller_for_screen = controller.clone();
+            schedule_browser_ui_mutation(move || {
+                controller_for_screen.set_screen(ScreenId::Settings);
+                controller_for_screen
+                    .set_settings_section(aura_ui::model::SettingsSection::Authority);
+            })
+            .await?;
             if selected_authority_id(&controller).as_deref() == Some(authority_id.as_str()) {
                 return Ok(SemanticCommandResponse::accepted_without_value());
             }
@@ -559,6 +649,12 @@ pub fn set_controller(controller: Arc<UiController>) {
     });
 }
 
+fn current_controller() -> Result<Arc<UiController>, JsValue> {
+    CONTROLLER
+        .with(|slot| slot.borrow().clone())
+        .ok_or_else(|| JsValue::from_str("Runtime bridge not available"))
+}
+
 pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(window) = web_sys::window() else {
         return;
@@ -634,14 +730,39 @@ fn serialized_published_ui_snapshot(
     published
 }
 
-pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), JsValue> {
+fn update_semantic_debug(event: &str, detail: Option<&str>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let debug = Reflect::get(window.as_ref(), &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"))
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined())
+        .unwrap_or_else(|| {
+            let object = Object::new();
+            let _ = Reflect::set(
+                window.as_ref(),
+                &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+                object.as_ref(),
+            );
+            object.into()
+        });
+    let _ = Reflect::set(&debug, &JsValue::from_str("last_event"), &JsValue::from_str(event));
+    let _ = Reflect::set(
+        &debug,
+        &JsValue::from_str("last_detail"),
+        &detail.map(JsValue::from_str).unwrap_or(JsValue::NULL),
+    );
+}
+
+pub fn install_window_harness_api() -> Result<(), JsValue> {
     let harness = Object::new();
     let observe = Object::new();
 
-    let send_keys_controller = controller.clone();
     let send_keys = Closure::wrap(Box::new(move |keys: JsValue| -> JsValue {
         if let Some(text) = keys.as_string() {
-            send_keys_controller.send_keys(&text);
+            if let Ok(controller) = current_controller() {
+                controller.send_keys(&text);
+            }
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
@@ -652,14 +773,15 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     send_keys.forget();
 
-    let send_key_controller = controller.clone();
     let send_key = Closure::wrap(Box::new(move |key: JsValue, repeat: JsValue| -> JsValue {
         let key_name = key.as_string().unwrap_or_default();
         let repeat = repeat
             .as_f64()
             .map(|value| value.max(1.0) as u16)
             .unwrap_or(1);
-        send_key_controller.send_key_named(&key_name, repeat);
+        if let Ok(controller) = current_controller() {
+            controller.send_key_named(&key_name, repeat);
+        }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue, JsValue) -> JsValue>);
     Reflect::set(
@@ -669,7 +791,6 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     send_key.forget();
 
-    let navigate_controller = controller.clone();
     let navigate_screen = Closure::wrap(Box::new(move |screen: JsValue| -> JsValue {
         let Some(screen_name) = screen.as_string() else {
             return JsValue::FALSE;
@@ -683,7 +804,9 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
             "settings" => ScreenId::Settings,
             _ => return JsValue::FALSE,
         };
-        navigate_controller.set_screen(target);
+        if let Ok(controller) = current_controller() {
+            controller.set_screen(target);
+        }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
     Reflect::set(
@@ -693,9 +816,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     navigate_screen.forget();
 
-    let snapshot_controller = controller.clone();
     let snapshot = Closure::wrap(Box::new(move || -> JsValue {
-        let rendered = snapshot_controller.snapshot();
+        let Ok(controller) = current_controller() else {
+            return JsValue::NULL;
+        };
+        let rendered = controller.snapshot();
         let payload = Object::new();
         let _ = Reflect::set(
             &payload,
@@ -731,12 +856,14 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     snapshot.forget();
 
-    let ui_state_controller = controller.clone();
     let ui_state = Closure::wrap(Box::new(move || -> JsValue {
-        let Some(window) = web_sys::window() else {
-            return serialize_ui_snapshot(&ui_state_controller.ui_snapshot());
+        let Ok(controller) = current_controller() else {
+            return JsValue::NULL;
         };
-        serialized_published_ui_snapshot(&window, &ui_state_controller)
+        let Some(window) = web_sys::window() else {
+            return serialize_ui_snapshot(&controller.ui_snapshot());
+        };
+        serialized_published_ui_snapshot(&window, &controller)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         &observe,
@@ -745,7 +872,6 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     ui_state.forget();
 
-    let read_clipboard_controller = controller.clone();
     let read_clipboard = Closure::wrap(Box::new(move || -> JsValue {
         if let Some(window) = web_sys::window() {
             if let Ok(value) = Reflect::get(
@@ -759,7 +885,10 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
                 }
             }
         }
-        JsValue::from_str(&read_clipboard_controller.read_clipboard())
+        match current_controller() {
+            Ok(controller) => JsValue::from_str(&controller.read_clipboard()),
+            Err(_) => JsValue::from_str(""),
+        }
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         &observe,
@@ -768,32 +897,103 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     read_clipboard.forget();
 
-    let submit_semantic_command_controller = controller.clone();
-    let submit_semantic_command_fn =
-        Closure::wrap(Box::new(move |request: JsValue| -> js_sys::Promise {
-            let controller = submit_semantic_command_controller.clone();
-            future_to_promise(async move {
-                let request = from_value::<SemanticCommandRequest>(request).map_err(|error| {
-                    JsValue::from_str(&format!("invalid semantic command request: {error}"))
-                })?;
-                let response = submit_semantic_command(controller, request).await?;
-                to_value(&response).map_err(|error| {
-                    JsValue::from_str(&format!(
-                        "failed to encode semantic command response: {error}"
-                    ))
-                })
+    let submit_semantic_command_raw =
+        Closure::wrap(Box::new(move |request_json: String| -> js_sys::Promise {
+            Promise::new(&mut |resolve, reject| {
+                let resolve = resolve.clone();
+                let reject = reject.clone();
+                let request_json = request_json.clone();
+                spawn_local(async move {
+                    update_semantic_debug("raw_entry", None);
+                    web_sys::console::log_1(
+                        &"[web-harness] submit_semantic_command entry".into(),
+                    );
+                    let outcome: Result<JsValue, JsValue> = async {
+                        let controller = current_controller()?;
+                        let request = from_str::<SemanticCommandRequest>(&request_json).map_err(
+                            |error| {
+                                JsValue::from_str(&format!(
+                                    "invalid semantic command request: {error}"
+                                ))
+                            },
+                        )?;
+                        update_semantic_debug(
+                            "raw_parsed",
+                            Some(&format!("{:?}", request.intent)),
+                        );
+                        web_sys::console::log_1(
+                            &format!(
+                                "[web-harness] submit_semantic_command intent={:?}",
+                                request.intent
+                            )
+                            .into(),
+                        );
+                        let _ = JsFuture::from(Promise::resolve(&JsValue::UNDEFINED)).await;
+                        let response = submit_semantic_command(controller, request).await?;
+                        to_value(&response).map_err(|error| {
+                            JsValue::from_str(&format!(
+                                "failed to encode semantic command response: {error}"
+                            ))
+                        })
+                    }
+                    .await;
+
+                    match outcome {
+                        Ok(value) => {
+                            update_semantic_debug("raw_resolved", None);
+                            let _ = resolve.call1(&JsValue::UNDEFINED, &value);
+                        }
+                        Err(error) => {
+                            update_semantic_debug("raw_rejected", error.as_string().as_deref());
+                            let _ = reject.call1(&JsValue::UNDEFINED, &error);
+                        }
+                    }
+                });
             })
-        }) as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
+        }) as Box<dyn FnMut(String) -> js_sys::Promise>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("__submit_semantic_command_raw"),
+        submit_semantic_command_raw.as_ref().unchecked_ref(),
+    )?;
+    let submit_semantic_command_fn = Function::new_with_args(
+        "request",
+        r#"
+window.__AURA_SEMANTIC_DEBUG__ = window.__AURA_SEMANTIC_DEBUG__ || {};
+window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_entry";
+console.log("[web-harness-js] submit_semantic_command wrapper entry");
+const raw = window.__AURA_HARNESS__?.__submit_semantic_command_raw;
+if (typeof raw !== "function") {
+  window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_missing_raw";
+  return Promise.reject(
+    new Error("window.__AURA_HARNESS__.__submit_semantic_command_raw is unavailable"),
+  );
+}
+try {
+  const result = raw(JSON.stringify(request));
+  window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_raw_return";
+  console.log("[web-harness-js] submit_semantic_command wrapper raw returned");
+  return Promise.resolve(result);
+} catch (error) {
+  window.__AURA_SEMANTIC_DEBUG__.last_event = "wrapper_threw";
+  window.__AURA_SEMANTIC_DEBUG__.last_detail = error?.message ?? String(error);
+  console.error("[web-harness-js] submit_semantic_command wrapper threw", error);
+  return Promise.reject(error);
+}
+"#,
+    );
     Reflect::set(
         &harness,
         &JsValue::from_str("submit_semantic_command"),
-        submit_semantic_command_fn.as_ref().unchecked_ref(),
+        submit_semantic_command_fn.as_ref(),
     )?;
-    submit_semantic_command_fn.forget();
+    submit_semantic_command_raw.forget();
 
-    let authority_id_controller = controller.clone();
     let get_authority_id = Closure::wrap(Box::new(move || -> JsValue {
-        JsValue::from_str(&authority_id_controller.authority_id())
+        match current_controller() {
+            Ok(controller) => JsValue::from_str(&controller.authority_id()),
+            Err(error) => error,
+        }
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         &observe,
@@ -802,15 +1002,16 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     get_authority_id.forget();
 
-    let tail_log_controller = controller.clone();
     let tail_log = Closure::wrap(Box::new(move |lines: JsValue| -> JsValue {
         let lines = lines
             .as_f64()
             .map(|value| value.max(1.0) as usize)
             .unwrap_or(20);
         let array = Array::new();
-        for line in tail_log_controller.tail_log(lines) {
-            array.push(&JsValue::from_str(&line));
+        if let Ok(controller) = current_controller() {
+            for line in controller.tail_log(lines) {
+                array.push(&JsValue::from_str(&line));
+            }
         }
         array.into()
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
@@ -821,9 +1022,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     tail_log.forget();
 
-    let root_structure_controller = controller.clone();
     let root_structure = Closure::wrap(Box::new(move || -> JsValue {
-        let snapshot = root_structure_controller.ui_snapshot();
+        let Ok(controller) = current_controller() else {
+            return JsValue::NULL;
+        };
+        let snapshot = controller.ui_snapshot();
         let Some(window) = web_sys::window() else {
             return JsValue::NULL;
         };
@@ -933,10 +1136,11 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
     )?;
     root_structure.forget();
 
-    let inject_controller = controller.clone();
     let inject_message = Closure::wrap(Box::new(move |message: JsValue| -> JsValue {
         if let Some(text) = message.as_string() {
-            inject_controller.inject_message(&text);
+            if let Ok(controller) = current_controller() {
+                controller.inject_message(&text);
+            }
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
@@ -958,12 +1162,14 @@ pub fn install_window_harness_api(controller: Arc<UiController>) -> Result<(), J
         &JsValue::from_str("__AURA_HARNESS_OBSERVE__"),
         &observe,
     )?;
-    let read_only_ui_state_controller = controller;
     let read_only_ui_state = Closure::wrap(Box::new(move || -> JsValue {
-        let Some(window) = web_sys::window() else {
-            return serialize_ui_snapshot(&read_only_ui_state_controller.ui_snapshot());
+        let Ok(controller) = current_controller() else {
+            return JsValue::NULL;
         };
-        serialized_published_ui_snapshot(&window, &read_only_ui_state_controller)
+        let Some(window) = web_sys::window() else {
+            return serialize_ui_snapshot(&controller.ui_snapshot());
+        };
+        serialized_published_ui_snapshot(&window, &controller)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         window.as_ref(),

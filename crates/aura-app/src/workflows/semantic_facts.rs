@@ -2,7 +2,8 @@ use std::sync::{Arc, LazyLock};
 
 use async_lock::{Mutex, RwLock};
 use aura_core::{
-    AuraError, AuthorizedReadinessPublication, LifecyclePublicationCapability,
+    AuraError, AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
+    LifecyclePublicationCapability, OperationLifecycle,
     ReadinessPublicationCapability,
 };
 
@@ -54,6 +55,203 @@ fn authorize_readiness_publication(
     fact: AuthoritativeSemanticFact,
 ) -> AuthorizedReadinessPublication<AuthoritativeSemanticFact> {
     AuthorizedReadinessPublication::authorize(semantic_readiness_publication_capability(), fact)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExactOperationLifecyclePublication {
+    operation_id: OperationId,
+    instance_id: OperationInstanceId,
+    kind: SemanticOperationKind,
+    publication: AuthorizedLifecyclePublication<SemanticOperationPhase, (), SemanticOperationError>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SemanticWorkflowOwner {
+    app_core: Arc<RwLock<AppCore>>,
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    kind: SemanticOperationKind,
+}
+
+impl SemanticWorkflowOwner {
+    pub(crate) fn new(
+        app_core: &Arc<RwLock<AppCore>>,
+        operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        Self {
+            app_core: app_core.clone(),
+            operation_id,
+            instance_id,
+            kind,
+        }
+    }
+
+    pub(crate) fn app_core(&self) -> &Arc<RwLock<AppCore>> {
+        &self.app_core
+    }
+
+    pub(crate) fn kind(&self) -> SemanticOperationKind {
+        self.kind
+    }
+
+    pub(crate) fn phase_fact(
+        &self,
+        phase: SemanticOperationPhase,
+    ) -> AuthoritativeSemanticFact {
+        operation_phase_fact(
+            self.operation_id.clone(),
+            self.instance_id.clone(),
+            self.kind,
+            phase,
+        )
+    }
+
+    pub(crate) async fn publish_phase(
+        &self,
+        phase: SemanticOperationPhase,
+    ) -> Result<(), AuraError> {
+        publish_authoritative_operation_phase_with_instance(
+            &self.app_core,
+            semantic_lifecycle_publication_capability(),
+            self.operation_id.clone(),
+            self.instance_id.clone(),
+            self.kind,
+            phase,
+        )
+        .await
+    }
+
+    pub(crate) async fn publish_failure(
+        &self,
+        error: SemanticOperationError,
+    ) -> Result<(), AuraError> {
+        publish_authoritative_operation_failure_with_instance(
+            &self.app_core,
+            semantic_lifecycle_publication_capability(),
+            self.operation_id.clone(),
+            self.instance_id.clone(),
+            self.kind,
+            error,
+        )
+        .await
+    }
+}
+
+impl ExactOperationLifecyclePublication {
+    pub(crate) fn phase(
+        capability: &LifecyclePublicationCapability,
+        operation_id: OperationId,
+        instance_id: OperationInstanceId,
+        kind: SemanticOperationKind,
+        phase: SemanticOperationPhase,
+    ) -> Self {
+        assert_ne!(
+            phase,
+            SemanticOperationPhase::Failed,
+            "failed terminal publication requires explicit failure payload"
+        );
+        let lifecycle = match phase {
+            SemanticOperationPhase::Submitted => OperationLifecycle::submitted(),
+            SemanticOperationPhase::Cancelled => OperationLifecycle::cancelled(),
+            SemanticOperationPhase::Succeeded => OperationLifecycle::succeeded(()),
+            phase => OperationLifecycle::progress(phase),
+        };
+        Self {
+            operation_id,
+            instance_id,
+            kind,
+            publication: AuthorizedLifecyclePublication::authorize(capability, lifecycle),
+        }
+    }
+
+    pub(crate) fn failure(
+        capability: &LifecyclePublicationCapability,
+        operation_id: OperationId,
+        instance_id: OperationInstanceId,
+        kind: SemanticOperationKind,
+        error: SemanticOperationError,
+    ) -> Self {
+        Self {
+            operation_id,
+            instance_id,
+            kind,
+            publication: AuthorizedLifecyclePublication::authorize(
+                capability,
+                OperationLifecycle::failed(error),
+            ),
+        }
+    }
+
+    pub(crate) fn into_fact(self) -> AuthoritativeSemanticFact {
+        let (_capability, lifecycle) = self.publication.into_parts();
+        let status = match lifecycle {
+            OperationLifecycle::Submitted => {
+                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Submitted)
+            }
+            OperationLifecycle::Progress { phase } => SemanticOperationStatus::new(self.kind, phase),
+            OperationLifecycle::Succeeded { .. } => {
+                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded)
+            }
+            OperationLifecycle::Failed { error } => SemanticOperationStatus::failed(self.kind, error),
+            OperationLifecycle::Cancelled => {
+                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Cancelled)
+            }
+        };
+
+        AuthoritativeSemanticFact::OperationStatus {
+            operation_id: self.operation_id,
+            instance_id: Some(self.instance_id),
+            status,
+        }
+    }
+}
+
+pub(crate) fn operation_phase_fact(
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    kind: SemanticOperationKind,
+    phase: SemanticOperationPhase,
+) -> AuthoritativeSemanticFact {
+    match instance_id {
+        Some(instance_id) => ExactOperationLifecyclePublication::phase(
+            semantic_lifecycle_publication_capability(),
+            operation_id,
+            instance_id,
+            kind,
+            phase,
+        )
+        .into_fact(),
+        None => AuthoritativeSemanticFact::OperationStatus {
+            operation_id,
+            instance_id: None,
+            status: SemanticOperationStatus::new(kind, phase),
+        },
+    }
+}
+
+pub(crate) fn operation_failure_fact(
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    kind: SemanticOperationKind,
+    error: SemanticOperationError,
+) -> AuthoritativeSemanticFact {
+    match instance_id {
+        Some(instance_id) => ExactOperationLifecyclePublication::failure(
+            semantic_lifecycle_publication_capability(),
+            operation_id,
+            instance_id,
+            kind,
+            error,
+        )
+        .into_fact(),
+        None => AuthoritativeSemanticFact::OperationStatus {
+            operation_id,
+            instance_id: None,
+            status: SemanticOperationStatus::failed(kind, error),
+        },
+    }
 }
 
 /// Mutate the authoritative semantic-fact set and publish the replacement atomically.
@@ -108,6 +306,18 @@ pub(crate) async fn publish_authoritative_semantic_fact(
     .await
 }
 
+pub(crate) async fn publish_exact_operation_lifecycle(
+    app_core: &Arc<RwLock<AppCore>>,
+    publication: ExactOperationLifecyclePublication,
+) -> Result<(), AuraError> {
+    let fact = publication.into_fact();
+    update_authoritative_semantic_facts(app_core, |facts| {
+        facts.retain(|existing| existing.key() != fact.key());
+        facts.push(fact);
+    })
+    .await
+}
+
 /// Replace the full set of authoritative semantic facts for one fact kind.
 pub(crate) async fn replace_authoritative_semantic_facts_of_kind(
     app_core: &Arc<RwLock<AppCore>>,
@@ -146,21 +356,36 @@ pub(crate) async fn publish_authoritative_operation_phase(
 /// Publish the current phase for a semantic operation with an explicit instance.
 pub(crate) async fn publish_authoritative_operation_phase_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
-    _capability: &LifecyclePublicationCapability,
+    capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
     phase: SemanticOperationPhase,
 ) -> Result<(), AuraError> {
-    publish_authoritative_semantic_fact(
-        app_core,
-        authorize_readiness_publication(AuthoritativeSemanticFact::OperationStatus {
-            operation_id,
-            instance_id,
-            status: SemanticOperationStatus::new(kind, phase),
-        }),
-    )
-    .await
+    if let Some(instance_id) = instance_id {
+        publish_exact_operation_lifecycle(
+            app_core,
+            ExactOperationLifecyclePublication::phase(
+                capability,
+                operation_id,
+                instance_id,
+                kind,
+                phase,
+            ),
+        )
+        .await
+    } else {
+        publish_authoritative_semantic_fact(
+            app_core,
+            authorize_readiness_publication(operation_phase_fact(
+                operation_id,
+                None,
+                kind,
+                phase,
+            )),
+        )
+        .await
+    }
 }
 
 /// Publish a terminal failure for a semantic operation.
@@ -185,27 +410,43 @@ pub(crate) async fn publish_authoritative_operation_failure(
 /// Publish a terminal failure for a semantic operation with an explicit instance.
 pub(crate) async fn publish_authoritative_operation_failure_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
-    _capability: &LifecyclePublicationCapability,
+    capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
     error: SemanticOperationError,
 ) -> Result<(), AuraError> {
-    publish_authoritative_semantic_fact(
-        app_core,
-        authorize_readiness_publication(AuthoritativeSemanticFact::OperationStatus {
-            operation_id,
-            instance_id,
-            status: SemanticOperationStatus::failed(kind, error),
-        }),
-    )
-    .await
+    if let Some(instance_id) = instance_id {
+        publish_exact_operation_lifecycle(
+            app_core,
+            ExactOperationLifecyclePublication::failure(
+                capability,
+                operation_id,
+                instance_id,
+                kind,
+                error,
+            ),
+        )
+        .await
+    } else {
+        publish_authoritative_semantic_fact(
+            app_core,
+            authorize_readiness_publication(operation_failure_fact(
+                operation_id,
+                None,
+                kind,
+                error,
+            )),
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
+    use crate::ui_contract::{SemanticOperationKind, SemanticOperationPhase};
     use crate::{AppConfig, AppCore};
 
     #[tokio::test]
@@ -243,5 +484,38 @@ mod tests {
             })
         );
         assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn exact_operation_lifecycle_publication_retains_instance_identity() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        publish_exact_operation_lifecycle(
+            &app_core,
+            ExactOperationLifecyclePublication::phase(
+                semantic_lifecycle_publication_capability(),
+                OperationId::invitation_accept(),
+                OperationInstanceId("tui-op-invitation_accept-3".to_string()),
+                SemanticOperationKind::AcceptPendingChannelInvitation,
+                SemanticOperationPhase::Succeeded,
+            ),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.contains(&AuthoritativeSemanticFact::OperationStatus {
+            operation_id: OperationId::invitation_accept(),
+            instance_id: Some(OperationInstanceId("tui-op-invitation_accept-3".to_string())),
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::AcceptPendingChannelInvitation,
+                SemanticOperationPhase::Succeeded,
+            ),
+        }));
     }
 }

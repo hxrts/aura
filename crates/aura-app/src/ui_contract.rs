@@ -1108,6 +1108,11 @@ impl OperationId {
     pub fn send_message() -> Self {
         Self("send_message".to_string())
     }
+
+    #[must_use]
+    pub fn join_channel() -> Self {
+        Self("join_channel".to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

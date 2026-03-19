@@ -71,6 +71,25 @@ struct OperationTracker {
 }
 
 impl OperationTracker {
+    fn instance_generation(instance_id: &OperationInstanceId) -> Option<u64> {
+        instance_id.0.rsplit('-').next()?.parse::<u64>().ok()
+    }
+
+    fn incoming_instance_is_older(
+        current: &OperationInstanceId,
+        incoming: &OperationInstanceId,
+    ) -> bool {
+        match (
+            Self::instance_generation(current),
+            Self::instance_generation(incoming),
+        ) {
+            (Some(current_generation), Some(incoming_generation)) => {
+                incoming_generation < current_generation
+            }
+            _ => false,
+        }
+    }
+
     fn terminal_transition_requires_new_instance(
         existing: OperationState,
         next: OperationState,
@@ -108,6 +127,11 @@ impl OperationTracker {
                         return;
                     }
                     entry.state = state;
+                    return;
+                }
+                Some(entry)
+                    if Self::incoming_instance_is_older(&entry.instance_id, &instance_id) =>
+                {
                     return;
                 }
                 _ => {
@@ -578,6 +602,69 @@ impl TuiState {
 mod tests {
     use super::*;
 
+    fn parity_critical_operation_ids() -> [OperationId; 4] {
+        [
+            OperationId::invitation_create(),
+            OperationId::invitation_accept(),
+            OperationId("join_channel".to_string()),
+            OperationId::send_message(),
+        ]
+    }
+
+    fn assert_local_terminal_regression_allocates_new_instance(operation_id: OperationId) {
+        let mut state = TuiState::new();
+        state.set_operation_state(operation_id.clone(), OperationState::Succeeded);
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_operation_state(operation_id, OperationState::Failed);
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots[0].state, OperationState::Failed);
+        assert_ne!(snapshots[0].instance_id, first_instance);
+    }
+
+    fn assert_authoritative_terminal_regression_allocates_new_instance(operation_id: OperationId) {
+        let mut state = TuiState::new();
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            None,
+            OperationState::Succeeded,
+        );
+        let first = state.exported_operation_snapshots();
+        let first_instance = first[0].instance_id.clone();
+
+        state.set_authoritative_operation_state(operation_id, None, OperationState::Failed);
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots[0].state, OperationState::Failed);
+        assert_ne!(snapshots[0].instance_id, first_instance);
+    }
+
+    fn assert_older_authoritative_instance_cannot_replace_newer_submission(
+        operation_id: OperationId,
+    ) {
+        let mut state = TuiState::new();
+        let stale = OperationInstanceId(format!("tui-op-{}-2", operation_id.0));
+        let current = OperationInstanceId(format!("tui-op-{}-3", operation_id.0));
+
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            Some(current.clone()),
+            OperationState::Submitting,
+        );
+        state.set_authoritative_operation_state(
+            operation_id,
+            Some(stale),
+            OperationState::Succeeded,
+        );
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].instance_id, current);
+        assert_eq!(snapshots[0].state, OperationState::Submitting);
+    }
+
     #[test]
     fn operation_tracker_reissues_instance_id_on_new_submission() {
         let mut state = TuiState::new();
@@ -707,5 +794,39 @@ mod tests {
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Succeeded);
         assert_eq!(snapshots[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn authoritative_update_for_older_instance_does_not_replace_newer_submission() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_accept();
+
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            Some(OperationInstanceId("tui-op-invitation_accept-3".to_string())),
+            OperationState::Submitting,
+        );
+        state.set_authoritative_operation_state(
+            operation_id,
+            Some(OperationInstanceId("tui-op-invitation_accept-2".to_string())),
+            OperationState::Succeeded,
+        );
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].instance_id,
+            OperationInstanceId("tui-op-invitation_accept-3".to_string())
+        );
+        assert_eq!(snapshots[0].state, OperationState::Submitting);
+    }
+
+    #[test]
+    fn parity_critical_operation_tracker_invariants_hold() {
+        for operation_id in parity_critical_operation_ids() {
+            assert_local_terminal_regression_allocates_new_instance(operation_id.clone());
+            assert_authoritative_terminal_regression_allocates_new_instance(operation_id.clone());
+            assert_older_authoritative_instance_cannot_replace_newer_submission(operation_id);
+        }
     }
 }

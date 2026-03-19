@@ -1175,7 +1175,7 @@ fn submit_runtime_modal_action(
                                         let _ =
                                             time_workflows::sleep_ms(&app_core_for_status, 1_000)
                                                 .await;
-                                        match ceremony_workflows::get_key_rotation_ceremony_status(
+                                        match ceremony_workflows::get_key_rotation_ceremony_status_by_id(
                                             &app_core_for_status,
                                             &ceremony_id,
                                         )
@@ -1230,7 +1230,7 @@ fn submit_runtime_modal_action(
                     let app_core = controller.app_core().clone();
                     let rerender_for_status = rerender.clone();
                     spawn(async move {
-                        match ceremony_workflows::get_key_rotation_ceremony_status(
+                        match ceremony_workflows::get_key_rotation_ceremony_status_by_id(
                             &app_core,
                             &ceremony_id,
                         )
@@ -1828,10 +1828,10 @@ fn submit_runtime_modal_action(
                 )
                 .await
                 {
-                    Ok(ceremony_id) => {
+                    Ok(ceremony_handle) => {
                         match ceremony_workflows::get_key_rotation_ceremony_status(
                             &app_core,
-                            &ceremony_id,
+                            &ceremony_handle,
                         )
                         .await
                         {
@@ -2115,7 +2115,7 @@ fn cancel_runtime_modal_action(
     let app_core = controller.app_core().clone();
     let rerender_for_cancel = rerender.clone();
     spawn(async move {
-        match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, &ceremony_id).await {
+        match ceremony_workflows::cancel_key_rotation_ceremony_by_id(&app_core, &ceremony_id).await {
             Ok(()) => {
                 controller.complete_runtime_modal_success("Device enrollment canceled");
             }
@@ -2654,9 +2654,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut runtime_for_neighborhood = neighborhood_runtime;
         let controller_for_neighborhood = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_neighborhood.app_core().read().await;
                 core.subscribe(&*NEIGHBORHOOD_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2669,9 +2671,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut runtime_for_homes = neighborhood_runtime;
         let controller_for_homes = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_homes.app_core().read().await;
                 core.subscribe(&*HOMES_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2684,9 +2688,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut runtime_for_contacts = neighborhood_runtime;
         let controller_for_contacts = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_contacts.app_core().read().await;
                 core.subscribe(&*CONTACTS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2699,9 +2705,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut contacts_for_contacts_signal = contacts_runtime;
         let controller_for_contacts_signal = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_contacts_signal.app_core().read().await;
                 core.subscribe(&*CONTACTS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2714,9 +2722,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut contacts_for_discovered_peers = contacts_runtime;
         let controller_for_discovered_peers = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_discovered_peers.app_core().read().await;
                 core.subscribe(&*DISCOVERED_PEERS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2729,9 +2739,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut runtime_for_chat = neighborhood_runtime;
         let controller_for_chat = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_chat.app_core().read().await;
                 core.subscribe(&*CHAT_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2744,9 +2756,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut chat_for_chat_signal = chat_runtime;
         let controller_for_chat_signal = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_chat_signal.app_core().read().await;
                 core.subscribe(&*CHAT_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2759,9 +2773,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut runtime_for_network = neighborhood_runtime;
         let controller_for_network = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_network.app_core().read().await;
                 core.subscribe(&*NETWORK_STATUS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2774,9 +2790,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut runtime_for_transport = neighborhood_runtime;
         let controller_for_transport = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_transport.app_core().read().await;
                 core.subscribe(&*TRANSPORT_PEERS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2789,9 +2807,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut settings_for_settings_signal = settings_runtime;
         let controller_for_settings_signal = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_settings_signal.app_core().read().await;
                 core.subscribe(&*SETTINGS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2804,9 +2824,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut settings_for_recovery_signal = settings_runtime;
         let controller_for_recovery_signal = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_recovery_signal.app_core().read().await;
                 core.subscribe(&*RECOVERY_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2819,9 +2841,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut notifications_for_invites = notifications_runtime;
         let controller_for_invites = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_invites.app_core().read().await;
                 core.subscribe(&*INVITATIONS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2834,12 +2858,14 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut notifications_for_recovery = notifications_runtime;
         let controller_for_notifications_recovery = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_notifications_recovery
                     .app_core()
                     .read()
                     .await;
                 core.subscribe(&*RECOVERY_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2854,9 +2880,11 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let mut notifications_for_errors = notifications_runtime;
         let controller_for_errors = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_errors.app_core().read().await;
                 core.subscribe(&*ERROR_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {
@@ -2868,12 +2896,14 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let controller_for_authoritative_operations = controller_for_runtime.clone();
         spawn(async move {
-            let mut stream = {
+            let Ok(mut stream) = ({
                 let core = controller_for_authoritative_operations
                     .app_core()
                     .read()
                     .await;
                 core.subscribe(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+            }) else {
+                return;
             };
 
             while stream.recv().await.is_ok() {

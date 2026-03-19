@@ -165,7 +165,10 @@ pub async fn list_lan_peers(
     timestamp_ms: u64,
 ) -> Result<Vec<String>, AuraError> {
     let app_core_guard = app_core.read().await;
-    let lan_peers = app_core_guard.get_lan_peers().await;
+    let lan_peers = app_core_guard
+        .get_lan_peers()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("list lan peers", e)))?;
 
     let peer_list: Vec<String> = lan_peers
         .iter()
@@ -263,11 +266,19 @@ async fn emit_discovered_peers_signal(
         .discover_peers()
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("refresh discovered peers", e)))?;
-    let lan_peers = app_core_guard.get_lan_peers().await;
+    let lan_peers = app_core_guard
+        .get_lan_peers()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("refresh lan peers", e)))?;
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = if let Some(runtime) = app_core_guard.runtime() {
-        runtime.get_invited_peer_ids().await.into_iter().collect()
+        runtime
+            .try_get_invited_peer_ids()
+            .await
+            .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
+            .into_iter()
+            .collect()
     } else {
         HashSet::new()
     };

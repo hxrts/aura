@@ -5,9 +5,9 @@ use super::*;
 /// All callbacks for the chat screen
 #[derive(Clone)]
 pub struct ChatCallbacks {
-    pub on_send: SendCallback,
+    pub(crate) on_send: SendCallback,
     pub(crate) on_accept_pending_channel_invitation: NoArgOwnedCallback,
-    pub on_join_channel: JoinChannelCallback,
+    pub(crate) on_join_channel: JoinChannelCallback,
     pub on_retry_message: RetryMessageCallback,
     pub(crate) on_create_channel: CreateChannelCallback,
     pub on_set_topic: SetTopicCallback,
@@ -36,6 +36,11 @@ impl ChatCallbacks {
             on_list_participants: Self::make_list_participants(ctx, tx),
         }
     }
+
+    pub fn send(&self, channel_id: String, content: String) {
+        (self.on_send)(channel_id, content, None);
+    }
+
     fn make_accept_pending_channel_invitation(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
@@ -46,7 +51,9 @@ impl ChatCallbacks {
             let app_core = ctx.app_core_raw().clone();
             let operation_instance_id = operation.harness_handle().instance_id;
             spawn_ctx(ctx, async move {
-                let mut operation = Some(operation);
+                let _ = operation.handoff_to_app_workflow(
+                    SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+                );
                 let accept = std::panic::AssertUnwindSafe(
                     aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_instance(
                         &app_core,
@@ -55,19 +62,8 @@ impl ChatCallbacks {
                 )
                 .catch_unwind();
                 match accept.await {
-                    Ok(Ok(_)) => {
-                        if let Some(operation) = operation.take() {
-                            let _ = operation.relinquish_to_workflow(
-                                SemanticOperationTransferScope::AcceptPendingChannelInvitation,
-                            );
-                        }
-                    }
+                    Ok(Ok(_)) => {}
                     Ok(Err(error)) => {
-                        if let Some(operation) = operation.take() {
-                            let _ = operation.relinquish_to_workflow(
-                                SemanticOperationTransferScope::AcceptPendingChannelInvitation,
-                            );
-                        }
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error(
@@ -87,19 +83,8 @@ impl ChatCallbacks {
                                 "accept_pending_channel_invitation callback panicked: {message}"
                             )
                         } else {
-                            "accept_pending_channel_invitation callback panicked".to_string()
+                                "accept_pending_channel_invitation callback panicked".to_string()
                         };
-                        if let Some(operation) = operation.take() {
-                            operation
-                                .fail_with(
-                                    SemanticOperationError::new(
-                                        SemanticFailureDomain::Command,
-                                        SemanticFailureCode::InternalError,
-                                    )
-                                    .with_detail(detail.clone()),
-                                )
-                                .await;
-                        }
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),
@@ -114,7 +99,7 @@ impl ChatCallbacks {
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SendCallback {
         let strong_resolver =
             Arc::new(aura_app::ui::workflows::strong_command::CommandResolver::default());
-        Arc::new(move |channel_id: String, content: String| {
+        Arc::new(move |channel_id: String, content: String, operation| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let strong_resolver = strong_resolver.clone();
@@ -123,6 +108,14 @@ impl ChatCallbacks {
             let content_clone = content;
 
             spawn_ctx(ctx.clone(), async move {
+                let operation_instance_id = operation.map(|operation| {
+                    let operation_instance_id = operation.harness_handle().instance_id;
+                    let _ = operation.handoff_to_app_workflow(
+                        SemanticOperationTransferScope::SendChatMessage,
+                    );
+                    operation_instance_id
+                });
+
                 // Channel ID is now passed from the TUI's selected_channel to avoid
                 // race conditions with async channel selection updates
 
@@ -373,11 +366,6 @@ impl ChatCallbacks {
                 }
 
                 // Normal message path
-                let cmd = EffectCommand::SendMessage {
-                    channel: channel_id_clone.clone(),
-                    content: content_clone.clone(),
-                };
-
                 send_ui_update_reliable(
                     &tx,
                     UiUpdate::MessageSent {
@@ -387,7 +375,46 @@ impl ChatCallbacks {
                 )
                 .await;
 
-                match ctx.dispatch(cmd).await {
+                let result = match channel_id_clone.parse() {
+                    Ok(channel_id) => {
+                        if let Some(operation_instance_id) = operation_instance_id.clone() {
+                            aura_app::ui::workflows::messaging::send_message_now_with_instance(
+                                &app_core,
+                                channel_id,
+                                &content_clone,
+                                Some(operation_instance_id),
+                            )
+                            .await
+                        } else {
+                            aura_app::ui::workflows::messaging::send_message_now(
+                                &app_core,
+                                channel_id,
+                                &content_clone,
+                            )
+                            .await
+                        }
+                    }
+                    Err(_) => {
+                        if let Some(operation_instance_id) = operation_instance_id {
+                            aura_app::ui::workflows::messaging::send_message_by_name_now_with_instance(
+                                &app_core,
+                                &channel_id_clone,
+                                &content_clone,
+                                Some(operation_instance_id),
+                            )
+                            .await
+                        } else {
+                            aura_app::ui::workflows::messaging::send_message_by_name_now(
+                                &app_core,
+                                &channel_id_clone,
+                                &content_clone,
+                            )
+                            .await
+                        }
+                    }
+                };
+
+                match result {
                     Ok(_) => {
                         let channel_name = {
                             let core = app_core.read().await;
@@ -458,15 +485,25 @@ impl ChatCallbacks {
     }
 
     fn make_join_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> JoinChannelCallback {
-        Arc::new(move |channel_name: String| {
+        Arc::new(move |channel_name: String, operation: Option<SubmittedOperationOwner>| {
             let ctx = ctx.clone();
             let tx = tx.clone();
+            let app_core = ctx.app_core_raw().clone();
             spawn_ctx(ctx.clone(), async move {
-                let cmd = EffectCommand::JoinChannel {
-                    channel: channel_name.clone(),
-                };
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {}
+                let operation_instance_id = operation
+                    .as_ref()
+                    .map(|operation| operation.harness_handle().instance_id);
+                if let Some(operation) = operation {
+                    let _ = operation.handoff_to_app_workflow(SemanticOperationTransferScope::JoinChannel);
+                }
+                match aura_app::ui::workflows::messaging::join_channel_by_name_with_instance(
+                    &app_core,
+                    &channel_name,
+                    operation_instance_id,
+                )
+                .await
+                {
+                    Ok(()) => {}
                     Err(error) => {
                         send_ui_update_reliable(
                             &tx,

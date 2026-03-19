@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
-use aura_app::ui::scenarios::{IntentAction, SemanticCommandRequest, SemanticCommandResponse};
+use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -325,7 +325,6 @@ impl PlaywrightBrowserBackend {
         &mut self,
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
-        let reload_after_submit = matches!(request.intent, IntentAction::CreateAccount { .. });
         let payload = serde_json::to_value(&request)
             .context("failed to encode browser semantic command request")?;
         let response = self.with_session(|session| {
@@ -337,18 +336,6 @@ impl PlaywrightBrowserBackend {
                 }),
             )
         })?;
-        if reload_after_submit {
-            self.with_session(|session| {
-                session.rpc_call(
-                    "reload_page",
-                    json!({
-                        "instance_id": self.config.id,
-                        "reason": "create_account_bootstrap",
-                    }),
-                )?;
-                Ok(())
-            })?;
-        }
         serde_json::from_value(response)
             .context("failed to decode browser semantic command response")
     }
@@ -1316,6 +1303,19 @@ mod tests {
     }
 
     #[test]
+    fn playwright_create_account_bootstrap_is_owned_by_web_bridge() {
+        let source = include_str!("playwright_browser.rs");
+        assert!(
+            !source.contains("session.rpc_call(\n                    \"restart_page_session\","),
+            "browser backend should not restart browser sessions after semantic create-account submission"
+        );
+        assert!(
+            !source.contains("session.rpc_call(\n                    \"reload_page\","),
+            "browser backend should not regress create-account bootstrap to a driver-owned soft page reload"
+        );
+    }
+
+    #[test]
     fn playwright_semantic_bridge_failure_and_projection_contracts_are_explicit() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -1333,6 +1333,10 @@ mod tests {
         assert!(
             bridge_source.contains("invalid semantic command request"),
             "browser bridge should reject malformed semantic requests with typed context"
+        );
+        assert!(
+            bridge_source.contains("schedule_page_reload()"),
+            "browser semantic bridge should own create-account bootstrap reload scheduling locally"
         );
         assert!(
             bridge_source.contains("unsupported screen"),

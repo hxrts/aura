@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/authorized_readiness_without_capability.rs:6:55
+  |
+6 |     let _ = AuthorizedReadinessPublication::authorize(&raw, "channel_membership_ready");
+  |             ----------------------------------------- ^^^^ expected `&ReadinessPublicationCapability`, found `&CapabilityKey`
+  |             |
+  |             arguments to this function are incorrect
+  |
+  = note: expected reference `&ReadinessPublicationCapability`
+             found reference `&CapabilityKey`
+note: associated function defined here
+ --> src/ownership.rs
+  |
+  |     pub fn authorize(capability: &ReadinessPublicationCapability, payload: Payload) -> Self {
+  |            ^^^^^^^^^

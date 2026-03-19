@@ -18,6 +18,8 @@
 //! - NO handler composition (that's aura-composition)
 
 use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_quote, ImplItemFn, ItemFn};
 
 mod ceremony_facts;
 mod choreography;
@@ -257,21 +259,44 @@ pub fn aura_test(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Marker attribute for parity-critical semantic owner functions.
 ///
-/// The attribute is intentionally a no-op at expansion time. Repo-local
-/// ownership lints inspect it to enforce bounded-await policy inside owner
-/// functions.
+/// The attribute binds the function to Aura's canonical typed semantic-owner
+/// protocol in `aura_core::SemanticOwnerProtocol` and remains inspectable by
+/// repo-local ownership lints for body-policy enforcement.
 #[proc_macro_attribute]
 pub fn semantic_owner(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
+    inject_protocol_statement(
+        item,
+        parse_quote! {
+            let _: ::aura_core::SemanticOwnerProtocol =
+                ::aura_core::SemanticOwnerProtocol::CANONICAL;
+        },
+    )
 }
 
 /// Marker attribute for best-effort side-effect boundaries.
 ///
-/// The attribute is intentionally a no-op at expansion time. Repo-local
-/// ownership lints inspect it to ensure best-effort boundaries route side
-/// effects through sanctioned helpers instead of awaiting transport/channel
-/// operations directly.
+/// The attribute binds the function to Aura's canonical typed best-effort
+/// protocol in `aura_core::BestEffortBoundaryProtocol` and remains inspectable
+/// by repo-local ownership lints for side-effect-boundary enforcement.
 #[proc_macro_attribute]
 pub fn best_effort_boundary(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    inject_protocol_statement(
+        item,
+        parse_quote! {
+            let _: ::aura_core::BestEffortBoundaryProtocol =
+                ::aura_core::BestEffortBoundaryProtocol::POST_TERMINAL_ONLY;
+        },
+    )
+}
+
+fn inject_protocol_statement(item: TokenStream, statement: syn::Stmt) -> TokenStream {
+    if let Ok(mut function) = syn::parse::<ItemFn>(item.clone()) {
+        function.block.stmts.insert(0, statement);
+        return quote!(#function).into();
+    }
+    if let Ok(mut function) = syn::parse::<ImplItemFn>(item.clone()) {
+        function.block.stmts.insert(0, statement);
+        return quote!(#function).into();
+    }
     item
 }

@@ -202,6 +202,7 @@ impl WebPresetBuilder {
             config.lan_discovery.enabled = false;
 
             let effect_context = EffectContext::new(authority_id, context_id, self.execution_mode);
+            let rendezvous_config = config.rendezvous_config();
             let runtime = match self.execution_mode {
                 ExecutionMode::Testing => EffectSystemBuilder::testing()
                     .with_config(config)
@@ -213,7 +214,7 @@ impl WebPresetBuilder {
                     .with_config(config)
                     .with_authority(authority_id)
                     .with_sync()
-                    .with_rendezvous()
+                    .with_rendezvous_config(rendezvous_config)
                     .build(&effect_context)
                     .await
                     .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,

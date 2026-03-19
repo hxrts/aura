@@ -160,6 +160,162 @@ Every parity-critical operation must have typed terminal behavior. Direct bounda
 
 Every submitted operation must reach a terminal state. Terminal states may not regress. Owner drop must publish failure or cancellation explicitly.
 
+Terminality alone is not strong enough. Aura also requires *owner-internal
+liveness*: a legal owner may not contain unbounded internal work that can keep
+an operation in `Submitting` forever. If the owner can hang indefinitely while
+still technically being the "right" owner, the architecture is incomplete.
+
+## Semantic Owner Protocol
+
+Parity-critical semantic operations must follow one protocol from submission to
+terminal publication.
+
+1. A frontend or harness may create a local submission record.
+2. If app/runtime workflow ownership is required, the frontend/harness must
+   hand ownership off immediately before the first awaited workflow step.
+3. After handoff, only the canonical owner may publish non-local lifecycle.
+4. The canonical owner must publish a terminal state before any best-effort
+   repair, warm-up, or post-success reconciliation that is allowed to fail.
+5. Best-effort follow-up work must never be required for the operation to stop
+   being `Submitting`.
+
+This forbids the bug shape where:
+
+- the callback is the "temporary" owner
+- the app workflow is the "real" owner
+- both are structurally legal
+- but the callback keeps local `Submitting` state alive while the workflow has
+  already reached terminal publication or is blocked in best-effort work
+
+The handoff boundary must therefore be *before* awaited workflow execution, not
+after it.
+
+## Owner Body Rules
+
+Once a function is designated as a semantic owner, its body is constrained more
+strictly than ordinary async code.
+
+Allowed:
+
+- bounded awaits through approved timeout-budget helpers
+- retries through approved retry-policy helpers
+- publication through capability-gated lifecycle/readiness helpers
+- explicit handoff to another sanctioned owner
+
+Forbidden:
+
+- raw open-ended `.await` on runtime/effect calls
+- awaiting best-effort network or transport side effects before terminal
+  publication
+- retaining a frontend-local owner while awaiting an app-owned workflow
+- detached work that still owns terminal responsibility
+- ad hoc local retries, sleeps, or polling loops
+
+If a semantic owner needs long-lived convergence, that convergence must be
+owned by a dedicated `ActorOwned` coordinator and expressed as typed readiness
+or typed terminal lifecycle, not as an unbounded await hidden inside a helper.
+
+## Best-Effort Separation
+
+Aura distinguishes *terminally required work* from *best-effort work*.
+
+Terminally required work:
+
+- determines whether the operation is `Succeeded`, `Failed`, or `Cancelled`
+- may block terminal publication only through bounded waits owned by the
+  canonical semantic owner
+
+Best-effort work:
+
+- may improve projection quality, connectivity, warming, discovery, or local
+  convenience
+- must run only after terminal publication, or under a different owner with its
+  own explicit lifecycle
+- must not prevent the submitted operation from leaving `Submitting`
+
+This rule is stronger than "use timeouts". A bounded best-effort step is still
+architecturally wrong if it owns the primary operation's terminal state.
+
+## Correct-By-Construction Requirements
+
+For parity-critical operation families, "correct by construction" means the
+following should eventually be true everywhere:
+
+- submission uses one canonical typed owner wrapper
+- owner handoff uses one canonical consumed transfer API
+- terminal publication uses one capability-gated API family
+- bounded awaits use one approved timeout-budget helper family
+- retries use one approved retry-policy helper family
+- best-effort work uses one explicit helper family that cannot publish or delay
+  primary terminal state
+
+If a new operation family cannot yet use those canonical wrappers, that is
+technical debt that should be tracked explicitly. New parallel helper stacks
+should not be introduced.
+
+## Enforcement Ratchet
+
+Aura should treat ownership enforcement as a ratchet, not a static checklist.
+
+The desired order of strength is:
+
+1. private constructors and opaque types
+2. capability-gated APIs
+3. canonical owner wrappers/macros
+4. AST-backed lints
+5. compile-fail tests
+6. invariant and concurrency tests
+7. thin CI shell wrappers that call those stronger checks
+
+Shell scripts remain useful as workflow glue, but they are the weakest layer.
+If a policy matters for parity-critical correctness, the long-term goal is to
+encode it in types, macros, or AST-backed analysis rather than rely on grep.
+
+## Required Invariants For Parity-Critical Operations
+
+Every parity-critical operation family should have invariant tests for all of
+the following:
+
+- owner drop forces `Failed` or `Cancelled`
+- terminal state cannot regress
+- stale owner or stale handle cannot advance state
+- canonical owner publishes terminal state within a bounded budget
+- best-effort failure cannot block terminal publication
+- frontend-local submission state cannot mask authoritative terminal state after
+  handoff
+- older authoritative instances cannot overwrite newer local submissions
+
+If one of these invariants is missing for an operation family, the family is
+not yet fully migrated to the ownership model.
+
+## Frontend Handoff Rule
+
+Layer 7 frontends are primarily `Observed`, but they are allowed to own a very
+small local submission window. That window is subject to a strict rule:
+
+- if the frontend owns terminal publication, it must settle locally
+- if the app/runtime owns terminal publication, the frontend must relinquish
+  local ownership before awaiting the app/runtime workflow
+
+There is no supported middle state where the frontend keeps a local submitting
+record "just in case" while the canonical workflow runs elsewhere.
+
+## Time And Ownership
+
+Timeouts and backoffs are part of ownership, not incidental implementation
+detail.
+
+For every parity-critical async path, the architecture must identify:
+
+- who owns the deadline
+- who owns retry policy
+- whether the wait is terminally required or best-effort
+- what happens when the budget is exhausted
+
+Wall-clock time remains a local choice in Aura's time model, but timeout policy
+ownership is not a local choice. A path that can wait forever without a
+declared owner and terminal consequence is an ownership violation.
+
 ## Layer Guidance
 
 Layer 1 (`aura-core`) defines the shared ownership vocabulary: primitives, typed lifecycle helpers, and capability boundaries.
@@ -284,7 +440,7 @@ the correct model.
 
 | Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
 |-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-terminal` | `Observed`, narrow `ActorOwned` ingress | TUI ingress loop only | harness command receipts, operation-instance records | none beyond capability-bearing handoff into `aura-app` | remaining frontend lifecycle cleanup in shared invite/channel flows |
+| `aura-terminal` | `Observed`, narrow `ActorOwned` ingress | TUI ingress loop only | harness command receipts, operation-instance records | none beyond capability-bearing handoff into `aura-app` | actor-lifecycle and typed-boundary drift must be removed rather than papered over with local semantic ownership |
 | `aura-ui` | `Observed` | none | none | none | none currently tracked in the repo-wide ownership rollout |
 | `aura-web` | `Observed`, narrow `ActorOwned` bridge | browser harness bridge only | browser semantic command requests/receipts | none beyond sanctioned bridge/handoff points | browser bridge capability/typed-error audit still active |
 
@@ -302,7 +458,7 @@ Each crate migration must refine its own `ARCHITECTURE.md` so that parity-critic
 
 The ownership model is enforced in layers.
 
-Types and private constructors provide the first line of defense. Capability-gated mutation and publication APIs form the second layer. Thin policy checks in `scripts/check/*.sh` and `just ci-*` recipes provide CI enforcement. Compile-fail tests validate private/capability boundaries. Invariant and concurrency tests verify owner drop, stale-handle invalidation, and terminality.
+Types and private constructors provide the first line of defense. Capability-gated mutation and publication APIs form the second layer. Canonical owner wrappers and macros provide the third layer. AST-backed checks, compile-fail tests, invariant tests, and then thin `scripts/check/*.sh` / `just ci-*` wrappers complete CI enforcement.
 
 Scripts alone are not sufficient. The API must make the wrong pattern hard or impossible first.
 
@@ -315,6 +471,9 @@ When adding or modifying a parity-critical path, ask these questions:
 - How is authority transferred?
 - What capability authorizes mutation or publication?
 - What is the typed terminal success/failure contract?
+- Where does local submission ownership end and canonical workflow ownership begin?
+- Which awaits are terminally required, and which are best-effort only?
+- What bounded budget owns each required wait and retry?
 - What legacy bypasses should be deleted rather than preserved?
 
 If these answers are unclear, the design is not complete enough.

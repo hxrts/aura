@@ -9,7 +9,7 @@ note: the function `publish_authoritative_operation_phase_with_instance` is defi
   |
   | / pub(crate) async fn publish_authoritative_operation_phase_with_instance(
   | |     app_core: &Arc<RwLock<AppCore>>,
-  | |     _capability: &LifecyclePublicationCapability,
+  | |     capability: &LifecyclePublicationCapability,
   | |     operation_id: OperationId,
 ... |
   | |     phase: SemanticOperationPhase,

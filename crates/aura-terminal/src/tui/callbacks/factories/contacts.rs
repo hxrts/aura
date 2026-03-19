@@ -97,7 +97,7 @@ impl ContactsCallbacks {
                 let app_core = ctx.app_core_raw().clone();
                 spawn_ctx(ctx, async move {
                     if let Some(operation) = operation {
-                        let _ = operation.relinquish_to_workflow(
+                        let _ = operation.handoff_to_app_workflow(
                             SemanticOperationTransferScope::InviteActorToChannel,
                         );
                     }

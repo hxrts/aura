@@ -19,6 +19,7 @@ use crate::signal_defs::{
 };
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::snapshot_policy::contacts_snapshot;
+use crate::workflows::runtime::workflow_best_effort;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -195,26 +196,16 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         core.runtime().cloned()
     };
 
-    // Track the first error encountered so callers know the refresh was partial.
-    // Each stage runs best-effort: a failure in one stage does not prevent the
-    // remaining stages from executing.  The first error is returned so callers
-    // can distinguish a clean refresh from a partial one.
-    let mut first_error: Option<AuraError> = None;
-    macro_rules! best_effort {
-        ($expr:expr) => {
-            if let Err(e) = $expr {
-                if first_error.is_none() {
-                    first_error = Some(e);
-                }
-            }
-        };
-    }
+    // Each stage runs post-terminal best-effort: failure in one stage does not
+    // prevent the remaining stages from executing. The first error is retained
+    // so callers can distinguish a clean refresh from a partial one.
+    let mut best_effort = workflow_best_effort();
 
     // Refresh chat state and republish CHAT_SIGNAL so UI subscriptions pick up
     // runtime-side convergence that did not originate from a direct UI action.
     #[cfg(feature = "signals")]
     {
-        best_effort!(emit_chat_snapshot_signal(app_core).await);
+        let _ = best_effort.capture(emit_chat_snapshot_signal(app_core)).await;
     }
 
     // Refresh contacts state (infallible)
@@ -222,50 +213,81 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
 
     // Refresh invitations state (infallible read + fallible readiness)
     let _ = super::invitation::list_invitations(app_core).await;
-    best_effort!(super::invitation::refresh_authoritative_invitation_readiness(app_core).await);
-    best_effort!(super::invitation::refresh_authoritative_contact_link_readiness(app_core).await);
+    let _ = best_effort
+        .capture(super::invitation::refresh_authoritative_invitation_readiness(
+            app_core,
+        ))
+        .await;
+    let _ = best_effort
+        .capture(super::invitation::refresh_authoritative_contact_link_readiness(
+            app_core,
+        ))
+        .await;
 
     // Refresh settings state
-    best_effort!(super::settings::refresh_settings_from_runtime(app_core).await);
+    let _ = best_effort
+        .capture(super::settings::refresh_settings_from_runtime(app_core))
+        .await;
 
     // Refresh recovery state (signals feature only)
     #[cfg(feature = "signals")]
     {
-        best_effort!(super::recovery::get_recovery_status(app_core).await);
+        let _ = best_effort
+            .capture(super::recovery::get_recovery_status(app_core))
+            .await;
     }
 
     if let Some(runtime) = runtime {
-        best_effort!(runtime.trigger_discovery().await.map_err(|e| AuraError::agent(e.to_string())));
-        best_effort!(runtime.trigger_sync().await.map_err(|e| AuraError::agent(e.to_string())));
+        let _ = best_effort
+            .capture(async {
+                runtime
+                    .trigger_discovery()
+                    .await
+                    .map_err(|e| AuraError::agent(e.to_string()))
+            })
+            .await;
+        let _ = best_effort
+            .capture(async {
+                runtime
+                    .trigger_sync()
+                    .await
+                    .map_err(|e| AuraError::agent(e.to_string()))
+            })
+            .await;
     }
 
     #[cfg(feature = "signals")]
     {
-        best_effort!(emit_chat_snapshot_signal(app_core).await);
+        let _ = best_effort.capture(emit_chat_snapshot_signal(app_core)).await;
     }
     #[cfg(feature = "signals")]
     {
-        best_effort!(
-            super::messaging::refresh_authoritative_channel_membership_readiness(app_core).await
-        );
+        let _ = best_effort
+            .capture(super::messaging::refresh_authoritative_channel_membership_readiness(
+                app_core,
+            ))
+            .await;
     }
 
     // Refresh discovered peers (re-query runtime, not just read stale signal)
-    best_effort!(super::network::refresh_discovered_peers(app_core).await);
+    let _ = best_effort
+        .capture(super::network::refresh_discovered_peers(app_core))
+        .await;
     #[cfg(feature = "signals")]
     {
-        best_effort!(
-            super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core).await
-        );
+        let _ = best_effort
+            .capture(
+                super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core),
+            )
+            .await;
     }
 
     // Refresh connection and network status derived from contacts.
-    best_effort!(refresh_connection_status_from_contacts(app_core).await);
+    let _ = best_effort
+        .capture(refresh_connection_status_from_contacts(app_core))
+        .await;
 
-    match first_error {
-        Some(e) => Err(e),
-        None => Ok(()),
-    }
+    best_effort.finish()
 }
 
 async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
@@ -334,7 +356,10 @@ pub async fn refresh_connection_status_from_contacts(
         // Get sync status and compute unified network status
         let sync_status = {
             let core = app_core.read().await;
-            core.sync_status().await.unwrap_or_default()
+            core.sync_status()
+                .await
+                .map_err(|e| AuraError::from(super::error::runtime_call("get sync status", e)))?
+                .unwrap_or_default()
         };
         if online_contacts == 0 && !contacts_state.is_empty() && sync_status.connected_peers > 0 {
             let fallback_online =
@@ -442,7 +467,9 @@ pub async fn install_contacts_refresh_hook(
     let refresh_spawner = spawner.clone();
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let mut stream = reactive.subscribe(&*CONTACTS_SIGNAL);
+        let Ok(mut stream) = reactive.subscribe(&*CONTACTS_SIGNAL) else {
+            return;
+        };
         loop {
             let Ok(_) = stream.recv().await else {
                 break;
@@ -511,7 +538,9 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
     let refresh_spawner = spawner.clone();
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let mut stream = reactive.subscribe(&*SYNC_STATUS_SIGNAL);
+        let Ok(mut stream) = reactive.subscribe(&*SYNC_STATUS_SIGNAL) else {
+            return;
+        };
         loop {
             let Ok(_) = stream.recv().await else {
                 break;
@@ -580,7 +609,9 @@ pub async fn install_authoritative_readiness_hook(
     let contacts_pending = Arc::new(AtomicBool::new(false));
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let mut stream = contacts_reactive.subscribe(&*CONTACTS_SIGNAL);
+        let Ok(mut stream) = contacts_reactive.subscribe(&*CONTACTS_SIGNAL) else {
+            return;
+        };
         loop {
             let Ok(_) = stream.recv().await else {
                 break;
@@ -618,7 +649,9 @@ pub async fn install_authoritative_readiness_hook(
     let chat_pending = Arc::new(AtomicBool::new(false));
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let mut stream = reactive.subscribe(&*CHAT_SIGNAL);
+        let Ok(mut stream) = reactive.subscribe(&*CHAT_SIGNAL) else {
+            return;
+        };
         loop {
             let Ok(_) = stream.recv().await else {
                 break;

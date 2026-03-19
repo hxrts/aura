@@ -10,6 +10,7 @@ use aura_app::ui_contract::{
     SemanticFailureDomain, SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
     SemanticOperationStatus,
 };
+use aura_core::SemanticOwnerProtocol;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -24,6 +25,8 @@ pub(crate) enum SemanticOperationTransferScope {
     InvitationImport,
     InviteActorToChannel,
     AcceptPendingChannelInvitation,
+    JoinChannel,
+    SendChatMessage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +39,9 @@ pub(crate) struct SemanticOperationTransfer {
     prior_owner: SemanticOperationOwner,
     new_owner: SemanticOperationOwner,
     operation_id: OperationId,
+    instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
+    protocol: SemanticOwnerProtocol,
     scope: SemanticOperationTransferScope,
     result: SemanticOperationTransferResult,
 }
@@ -152,7 +157,7 @@ impl SubmittedOperationOwner {
         .await;
     }
 
-    pub(crate) fn relinquish_to_workflow(
+    pub(crate) fn handoff_to_app_workflow(
         mut self,
         scope: SemanticOperationTransferScope,
     ) -> SemanticOperationTransfer {
@@ -161,7 +166,9 @@ impl SubmittedOperationOwner {
             prior_owner: self.owner,
             new_owner: SemanticOperationOwner::AppWorkflow,
             operation_id: self.operation_id.clone(),
+            instance_id: self.instance_id.clone(),
             kind: self.kind,
+            protocol: SemanticOwnerProtocol::CANONICAL,
             scope,
             result: SemanticOperationTransferResult::Relinquished,
         }
@@ -172,6 +179,20 @@ impl SubmittedOperationOwner {
             operation_id: self.operation_id.clone(),
             instance_id: self.instance_id.clone(),
         }
+    }
+}
+
+impl SemanticOperationTransfer {
+    pub(crate) fn operation_id(&self) -> &OperationId {
+        &self.operation_id
+    }
+
+    pub(crate) fn instance_id(&self) -> &OperationInstanceId {
+        &self.instance_id
+    }
+
+    pub(crate) fn kind(&self) -> SemanticOperationKind {
+        self.kind
     }
 }
 
@@ -208,6 +229,167 @@ mod tests {
     use super::*;
     use aura_app::{AppConfig, AppCore};
     use tokio::sync::mpsc;
+
+    #[derive(Clone, Copy)]
+    struct OperationInvariantCase {
+        operation_id: fn() -> OperationId,
+        kind: SemanticOperationKind,
+    }
+
+    fn parity_critical_cases() -> [OperationInvariantCase; 4] {
+        [
+            OperationInvariantCase {
+                operation_id: OperationId::invitation_create,
+                kind: SemanticOperationKind::InviteActorToChannel,
+            },
+            OperationInvariantCase {
+                operation_id: OperationId::invitation_accept,
+                kind: SemanticOperationKind::AcceptPendingChannelInvitation,
+            },
+            OperationInvariantCase {
+                operation_id: || OperationId("join_channel".to_string()),
+                kind: SemanticOperationKind::JoinChannel,
+            },
+            OperationInvariantCase {
+                operation_id: OperationId::send_message,
+                kind: SemanticOperationKind::SendChatMessage,
+            },
+        ]
+    }
+
+    async fn new_owner(
+        case: OperationInvariantCase,
+    ) -> (
+        Arc<RwLock<AppCore>>,
+        Arc<UiTaskRegistry>,
+        mpsc::Receiver<UiUpdate>,
+        SubmittedOperationOwner,
+    ) {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let tasks = Arc::new(UiTaskRegistry::new());
+        let (tx, rx) = mpsc::channel(8);
+        let owner = SubmittedOperationOwner::submit_local_only(
+            app_core.clone(),
+            tasks.clone(),
+            tx,
+            (case.operation_id)(),
+            case.kind,
+        );
+        (app_core, tasks, rx, owner)
+    }
+
+    async fn assert_drop_terminates(case: OperationInvariantCase) {
+        let (_app_core, tasks, mut rx, owner) = new_owner(case).await;
+        drop(owner);
+
+        let _submitted = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing submission update"));
+        let terminal = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing dropped-owner failure"));
+
+        match terminal {
+            UiUpdate::AuthoritativeOperationStatus { status, .. } => {
+                assert_eq!(status.phase, SemanticOperationPhase::Failed);
+                assert_eq!(status.kind, case.kind);
+            }
+            other => panic!("unexpected terminal update: {other:?}"),
+        }
+
+        tasks.shutdown();
+    }
+
+    async fn assert_success_is_single_terminal(case: OperationInvariantCase) {
+        let (_app_core, tasks, mut rx, owner) = new_owner(case).await;
+        owner.succeed().await;
+
+        let _submitted = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing submission update"));
+        let terminal = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing success update"));
+
+        match terminal {
+            UiUpdate::AuthoritativeOperationStatus { status, .. } => {
+                assert_eq!(status.phase, SemanticOperationPhase::Succeeded);
+                assert_eq!(status.kind, case.kind);
+            }
+            other => panic!("unexpected terminal update: {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "settled owner must not publish duplicate terminal state"
+        );
+
+        tasks.shutdown();
+    }
+
+    async fn assert_handoff_preserves_exact_terminal_instance(case: OperationInvariantCase) {
+        let (_app_core, tasks, mut rx, owner) = new_owner(case).await;
+        let transfer =
+            owner.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
+
+        let submitted = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing submission update"));
+        match submitted {
+            UiUpdate::AuthoritativeOperationStatus {
+                operation_id,
+                instance_id,
+                status,
+            } => {
+                assert_eq!(operation_id, (case.operation_id)());
+                assert_eq!(instance_id, Some(transfer.instance_id().clone()));
+                assert_eq!(status.phase, SemanticOperationPhase::WorkflowDispatched);
+            }
+            other => panic!("unexpected submission update: {other:?}"),
+        }
+
+        let failed = authoritative_operation_status_update(
+            transfer.operation_id().clone(),
+            Some(transfer.instance_id().clone()),
+            SemanticOperationStatus::failed(
+                transfer.kind(),
+                SemanticOperationError::new(
+                    SemanticFailureDomain::Command,
+                    SemanticFailureCode::InternalError,
+                )
+                .with_detail("handoff-dispatch failed"),
+            ),
+        );
+
+        match failed {
+            UiUpdate::AuthoritativeOperationStatus {
+                operation_id,
+                instance_id,
+                status,
+            } => {
+                assert_eq!(operation_id, (case.operation_id)());
+                assert_eq!(instance_id, Some(transfer.instance_id().clone()));
+                assert_eq!(status.phase, SemanticOperationPhase::Failed);
+                assert_eq!(status.kind, case.kind);
+            }
+            other => panic!("unexpected terminal update: {other:?}"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "handoff must prevent stale local owner updates from masking terminal state"
+        );
+
+        tasks.shutdown();
+    }
 
     #[tokio::test]
     async fn dropped_owner_publishes_failed_terminal_status() {
@@ -265,6 +447,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn parity_critical_owner_invariants_hold() {
+        for case in parity_critical_cases() {
+            assert_drop_terminates(case).await;
+            assert_success_is_single_terminal(case).await;
+            assert_handoff_preserves_exact_terminal_instance(case).await;
+        }
+    }
+
+    #[tokio::test]
     async fn relinquish_to_workflow_returns_typed_transfer_record_without_failure() {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
@@ -284,7 +475,7 @@ mod tests {
         );
 
         let transfer =
-            owner.relinquish_to_workflow(SemanticOperationTransferScope::InvitationImport);
+            owner.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
         assert_eq!(
             transfer.prior_owner,

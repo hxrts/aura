@@ -67,6 +67,33 @@ The correct split is:
   coordinators
 - the shell observes and renders lifecycle but does not decide it
 
+The frontend handoff rule is strict:
+
+- if a callback or shell-local owner settles the operation, it must publish a
+  local terminal state itself
+- if `aura-app` or runtime workflow ownership is required, the frontend must
+  relinquish local ownership before awaiting that workflow
+- there is no supported mixed state where the frontend keeps a local
+  `Submitting` record alive while an app-owned workflow is running
+
+The sanctioned frontend ownership boundary is also structural:
+
+- local semantic-owner allocation is allowed only at the shell/update-loop
+  submission boundary
+- handoff into `aura-app` ownership is allowed only in callback factory
+  boundaries
+- authoritative operation-state mutation is allowed only in the shell/state
+  reducer path that consumes authoritative updates
+- TUI tests may exercise these helpers in
+  [src/tui/semantic_lifecycle.rs](/Users/hxrts/projects/aura/crates/aura-terminal/src/tui/semantic_lifecycle.rs),
+  but production code must not introduce new allocation/handoff sites outside
+  the sanctioned boundary modules
+
+The frontend also may not place best-effort work on the primary semantic-owner
+path. Any best-effort local adaptation must happen after authoritative terminal
+publication or under a different explicitly-owned local task that does not own
+parity-critical lifecycle truth.
+
 ### Ownership Inventory
 
 | Path | Category | Authoritative owner | May mutate | Observe only |
@@ -88,6 +115,8 @@ Changes to parity-critical TUI ownership boundaries should ship with:
   match the wrong lifecycle record
 - boundary tests showing relinquished callback ownership does not continue to
   author semantic truth after handoff
+- invariant tests showing local `Submitting` state cannot mask authoritative
+  terminal publication after required handoff
 
 ### Capability-Gated Points
 
@@ -105,6 +134,7 @@ Changes to parity-critical TUI ownership boundaries should ship with:
 - `cargo test -p aura-terminal harness_command_invite_actor_to_channel_emits_dispatch_followup -- --nocapture`
 - `cargo test -p aura-terminal authoritative_submitting_after_terminal_allocates_new_instance -- --nocapture`
 - `just ci-observed-layer-boundaries`
+- `just ci-frontend-handoff-boundary`
 - `just ci-actor-lifecycle`
 
 ### Detailed Specifications

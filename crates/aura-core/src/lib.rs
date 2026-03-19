@@ -156,12 +156,14 @@ pub use conformance::{
 };
 pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use ownership::{
+    BestEffortBoundaryProtocol,
     issue_operation_handle, issue_owner_token, ownership_capability_token_request_for,
     ActorIngressMutationCapability, AuthorizedActorIngressMutation, AuthorizedLifecyclePublication,
     AuthorizedReadinessPublication, LifecyclePublicationCapability, OpaqueOperationHandle,
     OperationLifecycle, OwnerToken, OwnershipCapability, OwnershipCategory, OwnershipError,
     OwnershipErrorDomain, OwnershipResult, OwnershipTransfer, OwnershipTransferCapability,
-    ReadinessPublicationCapability, Terminality,
+    PostTerminalBestEffort, ReadinessPublicationCapability, SemanticOwnerAwaitPolicy,
+    SemanticOwnerBestEffortPolicy, SemanticOwnerHandoffPolicy, SemanticOwnerProtocol, Terminality,
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,

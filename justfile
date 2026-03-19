@@ -630,6 +630,7 @@ ci-ownership-policy:
     just ci-semantic-owner-awaits
     just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
+    just ci-frontend-handoff-boundary
     just ci-timeout-policy
     just ci-timeout-time-domains
     just ci-harness-ownership-policy
@@ -663,6 +664,9 @@ ci-best-effort-side-effects:
 
 ci-observed-layer-boundaries:
     bash scripts/check/observed-layer-authorship.sh
+
+ci-frontend-handoff-boundary:
+    bash scripts/check/frontend-semantic-handoff-boundary.sh
 
 ci-timeout-policy:
     bash scripts/check/timeout-policy-boundary.sh

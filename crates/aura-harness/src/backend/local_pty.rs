@@ -819,6 +819,15 @@ impl InstanceBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
+        let guard = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(snapshot) = guard.latest.clone() {
+            return Ok(snapshot);
+        }
+        drop(guard);
         self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
         let guard = session
             .ui_snapshot_feed
@@ -1689,39 +1698,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
     fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
         let snapshot = self.ui_snapshot()?;
         let previous_operation = observe_operation(&snapshot, &OperationId::invitation_accept());
-        let joined_channel_id =
-            snapshot
-                .runtime_events
-                .iter()
-                .find_map(|event| match &event.fact {
-                    RuntimeFact::ChannelMembershipReady {
-                        channel,
-                        member_count: Some(member_count),
-                        ..
-                    } if *member_count > 1 => channel.id.clone(),
-                    _ => None,
-                });
-        let already_joined = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .map(|list| list.items.len() > 1)
-            .unwrap_or(false)
-            || joined_channel_id.is_some();
-        if already_joined {
-            if let Some(channel_id) = joined_channel_id {
-                let selected_channel_id = snapshot
-                    .selections
-                    .iter()
-                    .find(|selection| selection.list == ListId::Channels)
-                    .map(|selection| selection.item_id.clone());
-                if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
-                    select_home_and_channel(self, &channel_id)?;
-                }
-            }
-            return Ok(SubmittedAction::without_handle(()));
-        }
-        let receipt_handle = self.send_harness_command(&HarnessUiCommand::AcceptPendingChannelInvitation)?;
+        let receipt_handle =
+            self.send_harness_command(&HarnessUiCommand::AcceptPendingChannelInvitation)?;
         let handle = match receipt_handle {
             Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
             None => wait_for_operation_submission(
@@ -1765,14 +1743,22 @@ impl SharedSemanticBackend for LocalPtyBackend {
             if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
                 select_home_and_channel(self, &channel_id)?;
             }
-            return Ok(SubmittedAction::without_handle(()));
         }
 
-        self.send_harness_command(&HarnessUiCommand::JoinChannel {
+        let previous_operation = observe_operation(&prejoin_snapshot, &OperationId::join_channel());
+        let receipt_handle = self.send_harness_command(&HarnessUiCommand::JoinChannel {
             channel_name: channel_name.to_string(),
-        })
-        .context("submit_join_channel: join_command")?;
-        Ok(SubmittedAction::without_handle(()))
+        })?;
+        let handle = match receipt_handle {
+            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            None => wait_for_operation_submission(
+                self,
+                OperationId::join_channel(),
+                previous_operation,
+                Duration::from_secs(5),
+            )?,
+        };
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
@@ -1837,32 +1823,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             blocking_sleep(Duration::from_millis(80));
         }
-
-        self.send_harness_command(&HarnessUiCommand::SendChatMessage {
-            content: message.to_string(),
-        })?;
-        let retry_deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            match snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) {
-                Some(OperationState::Failed) => {
-                    anyhow::bail!("submit_send_chat_message: runtime send failed");
-                }
-                Some(OperationState::Succeeded) if message_visible(&snapshot, message) => {
-                    return Ok(SubmittedAction::with_ui_operation((), handle));
-                }
-                Some(OperationState::Submitting) | Some(OperationState::Succeeded) => {
-                    return Ok(SubmittedAction::with_ui_operation((), handle));
-                }
-                _ => {}
-            }
-            if Instant::now() >= retry_deadline {
-                anyhow::bail!(
-                    "submit_send_chat_message: send_message never reached a live submitted state"
-                );
-            }
-            blocking_sleep(Duration::from_millis(80));
-        }
+        anyhow::bail!("submit_send_chat_message: send_message never reached a live submitted state")
     }
 }
 
@@ -2093,6 +2054,41 @@ mod tests {
         assert!(source.contains(
             "self.send_harness_command(&HarnessUiCommand::OpenSettingsSection { section })?;"
         ));
+    }
+
+    #[test]
+    fn local_backend_parity_critical_submissions_require_handles_and_single_issue_path() {
+        let source = include_str!("local_pty.rs");
+        let accept_start = source
+            .find("fn submit_accept_pending_channel_invitation")
+            .unwrap_or_else(|| panic!("missing submit_accept_pending_channel_invitation"));
+        let join_start = source
+            .find("fn submit_join_channel")
+            .unwrap_or_else(|| panic!("missing submit_join_channel"));
+        let send_start = source
+            .find("fn submit_send_chat_message")
+            .unwrap_or_else(|| panic!("missing submit_send_chat_message"));
+        let next_fn_after_send = source[send_start..]
+            .find("}\n}\n\n#[cfg(test)]")
+            .map(|offset| send_start + offset)
+            .unwrap_or(source.len());
+        let accept_branch = &source[accept_start..join_start];
+        let join_branch = &source[join_start..send_start];
+        let send_branch = &source[send_start..next_fn_after_send];
+
+        assert!(
+            !accept_branch.contains("SubmittedAction::without_handle"),
+            "accept_pending_channel_invitation must not short-circuit around canonical owner handles"
+        );
+        assert!(
+            !join_branch.contains("SubmittedAction::without_handle"),
+            "join_channel must not short-circuit around canonical owner handles"
+        );
+        assert_eq!(
+            send_branch.matches("HarnessUiCommand::SendChatMessage").count(),
+            1,
+            "send_chat_message must not retry by issuing the semantic command twice"
+        );
     }
 
     #[test]
