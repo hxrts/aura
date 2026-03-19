@@ -97,6 +97,78 @@ Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines context privacy boundaries.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantContextIsolation`.
 
+## Testing
+
+### Strategy
+
+aura-core is a foundation crate — if its invariants break, every crate above it
+is unsound. Testing priorities follow the blast radius of a failure:
+
+1. **Algebraic laws** (`tests/laws/`). If a semilattice law is violated, all
+   CRDTs diverge. Property tests with proptest verify associativity,
+   commutativity, idempotence, and monotonicity across implementations.
+2. **Ownership boundaries** (`tests/boundaries/`). If a boundary can be
+   bypassed, the ownership model is advisory. Compile-fail tests with trybuild
+   verify private constructors, consumed publishers, sealed traits, and
+   capability gates.
+3. **Serialization contracts** (`tests/contracts/`). If serialization breaks,
+   peers cannot communicate. Roundtrip tests for every type that crosses the
+   wire or persists to storage.
+4. **Identifier determinism** (`tests/contracts/`). If derivation changes,
+   existing data is unreadable. Pinned test vectors for known input/output
+   mappings.
+5. **Inline unit tests** (`src/**/mod tests`). Module-local behavior:
+   constructors, validation, edge cases. A change to the module should break
+   these and only these.
+
+### Test placement rule
+
+If the test would still be meaningful after a complete rewrite of the module
+internals, it belongs in `tests/`. If it tests a specific function's return
+value for a specific input, it belongs inline.
+
+### Coverage matrix
+
+| Area | Test location | Method | Status |
+|------|--------------|--------|--------|
+| **Algebraic laws** | | | |
+| JoinSemilattice — u64, Vec, BTreeMap | `tests/laws/semilattice_join.rs` | example-based | covered |
+| MeetSemilattice — u64, BTreeSet | `tests/laws/semilattice_meet.rs` | proptest | covered |
+| FlowBudget CRDT — join, merge, convergence | `tests/laws/flow_budget_crdt.rs` | proptest + example | covered |
+| Policy meet-semilattice | `tests/laws/tree_policy_meet.rs` | proptest + example | covered |
+| Time ordering | `tests/laws/time_ordering.rs` | proptest | minimal (2 properties) |
+| JoinSemilattice — Fact, FactValue | — | — | **missing** |
+| MeetSemilattice — Cap | — | — | **missing** |
+| **Ownership boundaries** | | | |
+| TerminalPublisher not clonable | `tests/boundaries/` | compile-fail | covered |
+| TerminalPublisher no double publish | `tests/boundaries/` | compile-fail | covered |
+| OperationContext private constructor | `tests/boundaries/` | compile-fail | covered |
+| OwnerToken stale after handoff | `tests/boundaries/` | compile-fail | covered |
+| Sealed owner traits | `tests/boundaries/` | compile-fail | covered |
+| Capability-gated publication (3 variants) | `tests/boundaries/` | compile-fail | covered |
+| **Serialization contracts** | | | |
+| WireEnvelope, FactEnvelope | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| FlowCost, FlowNonce, ReceiptSig | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| OwnershipCategory | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| TimeStamp variants | — | — | **missing** |
+| **Identifier determinism** | | | |
+| AuthorityId, DeviceId, SessionId | `tests/contracts/identifier_uniqueness.rs` | example + determinism | covered |
+| DKD derivation | `tests/contracts/dkd_determinism.rs` | determinism | covered |
+| Content addressing (Hash32, ContentId) | `tests/contracts/content_addressing.rs` | roundtrip | covered |
+| Pinned test vectors | — | — | **missing** |
+| **Scaling** | | | |
+| Consistency metadata at 10k scale | `tests/contracts/consistency_scaling.rs` | `#[ignore]` bench | covered |
+
+### Running tests
+
+```
+cargo test -p aura-core                    # all tests
+cargo test -p aura-core --test laws        # algebraic laws only
+cargo test -p aura-core --test contracts   # API contracts only
+cargo test -p aura-core --test compile_fail # ownership boundaries only
+cargo test -p aura-core --lib              # inline unit tests only
+```
+
 ## Boundaries
 - No handler implementations (those live in aura-effects).
 - No protocol logic (that lives in aura-protocol).
