@@ -1,11 +1,13 @@
 error: semantic_owner requires a parameter typed as OperationContext or containing OperationContext
- --> tests/boundaries/semantic_owner_missing_context.rs:3:1
-  |
-3 | / #[aura_macros::semantic_owner(
-4 | |     owner = "demo-owner",
-5 | |     terminal = "publish_done",
-6 | |     category = "move_owned"
-7 | | )]
-  | |__^
-  |
-  = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)
+  --> tests/boundaries/semantic_owner_missing_context.rs:5:1
+   |
+ 5 | / #[aura_macros::semantic_owner(
+ 6 | |     owner = "demo-owner",
+ 7 | |     terminal = "publish_done",
+ 8 | |     postcondition = "demo_done",
+...  |
+12 | |     category = "move_owned"
+13 | | )]
+   | |__^
+   |
+   = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -643,6 +643,7 @@ ci-ownership-policy:
     just ci-semantic-owner-detached-continuation
     just ci-semantic-owner-no-spawn
     just ci-semantic-owner-proof-success
+    just ci-workflow-proof-bearing-success
     just ci-parity-critical-ignored-results
     just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
@@ -680,6 +681,9 @@ ci-semantic-owner-no-spawn:
 
 ci-semantic-owner-proof-success:
     bash scripts/check/semantic-owner-proof-success.sh
+
+ci-workflow-proof-bearing-success:
+    bash scripts/check/workflow-proof-bearing-success.sh
 
 ci-parity-critical-ignored-results:
     bash scripts/check/parity-critical-ignored-results.sh

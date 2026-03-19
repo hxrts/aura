@@ -1,20 +1,19 @@
 use aura_core::{OperationContext, TraceContext};
 
-struct DemoProof;
+fn publish_done() {}
 
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
     terminal = "publish_done",
     postcondition = "demo_done",
-    proof = DemoProof,
     depends_on = "",
     child_ops = "",
     category = "move_owned"
 )]
-async fn missing_terminal_path(
+async fn missing_proof(
     _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
 ) {
-    let _ = 1usize;
+    publish_done();
 }
 
 fn main() {}

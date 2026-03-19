@@ -254,6 +254,48 @@ impl<'a> InvitationChannelHandler<'a> {
         }
     }
 
+    async fn require_channel_checkpoint(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        channel_id: ChannelId,
+    ) -> AgentResult<()> {
+        let started_at = effects
+            .physical_time()
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &started_at,
+            Duration::from_millis(INVITATION_CHANNEL_JOIN_TIMEOUT_MS),
+        )
+        .map_err(|error| AgentError::effects(error.to_string()))?;
+
+        let create_result = execute_with_timeout_budget(effects, &budget, || async {
+            effects
+                .create_channel(ChannelCreateParams {
+                    context: context_id,
+                    channel: Some(channel_id),
+                    skip_window: None,
+                    topic: None,
+                })
+                .await
+        })
+        .await;
+
+        match create_result {
+            Ok(_) => Ok(()),
+            Err(TimeoutRunError::Timeout(error)) => Err(AgentError::effects(error.to_string())),
+            Err(TimeoutRunError::Operation(error)) => {
+                let lowered = error.to_string().to_ascii_lowercase();
+                if lowered.contains("already") || lowered.contains("exists") {
+                    Ok(())
+                } else {
+                    Err(AgentError::effects(error.to_string()))
+                }
+            }
+        }
+    }
+
     #[aura_macros::best_effort_boundary]
     pub(super) async fn provision_amp_channel_for_inbound_chat_fact(
         &self,
@@ -477,6 +519,8 @@ impl<'a> InvitationChannelHandler<'a> {
     ) -> AgentResult<()> {
         let own_id = self.handler.context.authority.authority_id();
 
+        self.require_channel_checkpoint(effects, invite.context_id, invite.channel_id)
+            .await?;
         self.require_channel_join(effects, invite.context_id, invite.channel_id, own_id)
             .await?;
 

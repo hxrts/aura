@@ -1,10 +1,16 @@
 error: semantic_owner requires `category = "move_owned"`
- --> tests/boundaries/semantic_owner_missing_category.rs:5:1
-  |
-5 | #[aura_macros::semantic_owner(owner = "demo-owner", terminal = "publish_done")]
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  |
-  = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)
+  --> tests/boundaries/semantic_owner_missing_category.rs:7:1
+   |
+ 7 | / #[aura_macros::semantic_owner(
+ 8 | |     owner = "demo-owner",
+ 9 | |     terminal = "publish_done",
+10 | |     postcondition = "demo_done",
+...  |
+13 | |     child_ops = ""
+14 | | )]
+   | |__^
+   |
+   = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 warning: unused imports: `OperationContext` and `TraceContext`
  --> tests/boundaries/semantic_owner_missing_category.rs:1:17

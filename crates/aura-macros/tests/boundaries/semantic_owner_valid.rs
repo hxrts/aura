@@ -1,10 +1,25 @@
-use aura_core::{OperationContext, OperationTimeoutBudget, OwnedShutdownToken, TraceContext};
+use aura_core::{
+    OperationContext, OperationTimeoutBudget, OwnedShutdownToken, SemanticOwnerPostcondition,
+    SemanticSuccessProof, TraceContext,
+};
+
+struct DemoProof;
+
+impl SemanticSuccessProof for DemoProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("demo_done")
+    }
+}
 
 fn publish_done() {}
 
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
     terminal = "publish_done",
+    postcondition = "demo_done",
+    proof = DemoProof,
+    depends_on = "",
+    child_ops = "",
     category = "move_owned"
 )]
 async fn valid_owner(

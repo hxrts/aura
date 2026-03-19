@@ -1,6 +1,8 @@
 //! Chat domain callbacks.
 
 use super::*;
+use crate::tui::semantic_lifecycle::reconcile_handed_off_terminal_status;
+use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the chat screen
 #[derive(Clone)]
@@ -51,19 +53,44 @@ impl ChatCallbacks {
             let app_core = ctx.app_core_raw().clone();
             let operation_instance_id = operation.harness_handle().instance_id().clone();
             spawn_ctx(ctx, async move {
+                let handoff_instance_id = operation_instance_id.clone();
                 let _ = operation.handoff_to_app_workflow(
                     SemanticOperationTransferScope::AcceptPendingChannelInvitation,
                 );
                 let accept = std::panic::AssertUnwindSafe(
                     aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_instance(
                         &app_core,
-                        Some(operation_instance_id),
+                        Some(handoff_instance_id),
                     ),
                 )
                 .catch_unwind();
                 match accept.await {
-                    Ok(Ok(_)) => {}
+                    Ok(Ok(_)) => {
+                        if let Err(error) = reconcile_handed_off_terminal_status(
+                            &app_core,
+                            &tx,
+                            OperationId::invitation_accept(),
+                            operation_instance_id,
+                            SemanticOperationKind::AcceptPendingChannelInvitation,
+                        )
+                        .await
+                        {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error("invitation", error)),
+                            )
+                            .await;
+                        }
+                    }
                     Ok(Err(error)) => {
+                        let _ = reconcile_handed_off_terminal_status(
+                            &app_core,
+                            &tx,
+                            OperationId::invitation_accept(),
+                            operation_instance_id.clone(),
+                            SemanticOperationKind::AcceptPendingChannelInvitation,
+                        )
+                        .await;
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error(
@@ -85,6 +112,14 @@ impl ChatCallbacks {
                         } else {
                             "accept_pending_channel_invitation callback panicked".to_string()
                         };
+                        let _ = reconcile_handed_off_terminal_status(
+                            &app_core,
+                            &tx,
+                            OperationId::invitation_accept(),
+                            operation_instance_id,
+                            SemanticOperationKind::AcceptPendingChannelInvitation,
+                        )
+                        .await;
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::error("invitation", detail)),
@@ -493,6 +528,7 @@ impl ChatCallbacks {
                     let operation_instance_id = operation
                         .as_ref()
                         .map(|operation| operation.harness_handle().instance_id().clone());
+                    let workflow_instance_id = operation_instance_id.clone();
                     if let Some(operation) = operation {
                         let _ = operation
                             .handoff_to_app_workflow(SemanticOperationTransferScope::JoinChannel);
@@ -500,12 +536,42 @@ impl ChatCallbacks {
                     match aura_app::ui::workflows::messaging::join_channel_by_name_with_instance(
                         &app_core,
                         &channel_name,
-                        operation_instance_id,
+                        workflow_instance_id,
                     )
                     .await
                     {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            if let Some(operation_instance_id) = operation_instance_id {
+                                if let Err(error) = reconcile_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::join_channel(),
+                                    operation_instance_id,
+                                    SemanticOperationKind::JoinChannel,
+                                )
+                                .await
+                                {
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "chat", error,
+                                        )),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
                         Err(error) => {
+                            if let Some(operation_instance_id) = operation_instance_id {
+                                let _ = reconcile_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::join_channel(),
+                                    operation_instance_id,
+                                    SemanticOperationKind::JoinChannel,
+                                )
+                                .await;
+                            }
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::ToastAdded(ToastMessage::error(

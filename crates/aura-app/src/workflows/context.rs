@@ -14,7 +14,7 @@ use crate::{
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
-    workflows::semantic_facts::SemanticWorkflowOwner,
+    workflows::semantic_facts::{prove_home_created, SemanticWorkflowOwner},
     workflows::signals::read_signal,
     AppCore,
 };
@@ -526,9 +526,7 @@ pub async fn create_home(
         Err(error) => return fail_create_home(&owner, error.to_string()).await,
     };
 
-    owner
-        .publish_phase(SemanticOperationPhase::Succeeded)
-        .await?;
+    owner.publish_success_with(prove_home_created(app_core, home_id).await?).await?;
     Ok(home_id)
 }
 

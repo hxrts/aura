@@ -25,6 +25,7 @@ use crate::workflows::runtime_error_classification::{
 };
 use crate::workflows::semantic_facts::{
     issue_channel_invitation_created_proof, prove_channel_membership_ready,
+    prove_message_committed,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
@@ -2230,9 +2231,11 @@ pub async fn create_channel_with_authoritative_binding(
     .await;
 
     match &result {
-        Ok(_) => {
+        Ok(created) => {
             owner
-                .publish_phase(SemanticOperationPhase::Succeeded)
+                .publish_success_with(
+                    prove_channel_membership_ready(app_core, created.channel_id).await?,
+                )
                 .await?
         }
         Err(error) => {
@@ -3088,7 +3091,7 @@ async fn send_message_ref_owned(
     .await?;
 
     owner
-        .publish_phase(SemanticOperationPhase::Succeeded)
+        .publish_success_with(prove_message_committed(app_core, channel_id, &message_id).await?)
         .await?;
 
     Ok(message_id)

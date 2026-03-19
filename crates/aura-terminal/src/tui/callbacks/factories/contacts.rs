@@ -1,6 +1,8 @@
 //! Contacts domain callbacks.
 
 use super::*;
+use crate::tui::semantic_lifecycle::reconcile_handed_off_terminal_status;
+use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the contacts screen
 #[derive(Clone)]
@@ -94,6 +96,7 @@ impl ContactsCallbacks {
                 let operation_instance_id = operation
                     .as_ref()
                     .map(|operation| operation.harness_handle().instance_id().clone());
+                let workflow_instance_id = operation_instance_id.clone();
                 let app_core = ctx.app_core_raw().clone();
                 spawn_ctx(ctx, async move {
                     if let Some(operation) = operation {
@@ -110,15 +113,45 @@ impl ContactsCallbacks {
                             context_id
                                 .as_deref()
                                 .and_then(|context_id| context_id.parse().ok()),
-                            operation_instance_id,
+                            workflow_instance_id,
                             None,
                             None,
                         ),
                     )
                     .catch_unwind();
                     match dispatch.await {
-                        Ok(Ok(_)) => {}
+                        Ok(Ok(_)) => {
+                            if let Some(operation_instance_id) = operation_instance_id {
+                                if let Err(error) = reconcile_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::invitation_create(),
+                                    operation_instance_id,
+                                    SemanticOperationKind::InviteActorToChannel,
+                                )
+                                .await
+                                {
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "invitation", error,
+                                        )),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
                         Ok(Err(error)) => {
+                            if let Some(operation_instance_id) = operation_instance_id {
+                                let _ = reconcile_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::invitation_create(),
+                                    operation_instance_id,
+                                    SemanticOperationKind::InviteActorToChannel,
+                                )
+                                .await;
+                            }
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::ToastAdded(ToastMessage::error(
@@ -136,6 +169,16 @@ impl ContactsCallbacks {
                             } else {
                                 "invite_to_channel callback panicked".to_string()
                             };
+                            if let Some(operation_instance_id) = operation_instance_id {
+                                let _ = reconcile_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::invitation_create(),
+                                    operation_instance_id,
+                                    SemanticOperationKind::InviteActorToChannel,
+                                )
+                                .await;
+                            }
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::ToastAdded(ToastMessage::error(

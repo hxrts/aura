@@ -529,7 +529,12 @@ impl Parse for SemanticOwnerAttr {
                     "semantic_owner requires `postcondition = \"...\"`",
                 )
             })?,
-            proof,
+            proof: Some(proof.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "semantic_owner requires `proof = TypePath`",
+                )
+            })?),
             depends_on: depends_on.ok_or_else(|| {
                 Error::new(
                     proc_macro2::Span::call_site(),

@@ -14,7 +14,9 @@ use crate::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind, SemanticOperationPhase,
 };
-use crate::workflows::semantic_facts::SemanticWorkflowOwner;
+use crate::workflows::semantic_facts::{
+    issue_device_enrollment_started_proof, SemanticWorkflowOwner,
+};
 use crate::AppCore;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
@@ -179,7 +181,9 @@ pub async fn start_device_enrollment_ceremony(
         }
     };
     owner
-        .publish_phase(SemanticOperationPhase::Succeeded)
+        .publish_success_with(issue_device_enrollment_started_proof(
+            start.ceremony_id.clone(),
+        ))
         .await?;
     let handle = CeremonyHandle::new(
         start.ceremony_id.clone(),

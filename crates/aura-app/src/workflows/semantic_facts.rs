@@ -104,6 +104,18 @@ impl SemanticSuccessProof for ChannelMembershipReadyProof {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct HomeCreatedProof {
+    home_id: ChannelId,
+}
+
+impl SemanticSuccessProof for HomeCreatedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("home_created")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workflows) struct ChannelInvitationCreatedProof {
     invitation_id: aura_core::InvitationId,
 }
@@ -116,6 +128,18 @@ impl SemanticSuccessProof for ChannelInvitationCreatedProof {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct InvitationCreatedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for InvitationCreatedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("invitation_created")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workflows) struct InvitationAcceptedOrMaterializedProof {
     invitation_id: aura_core::InvitationId,
 }
@@ -123,6 +147,54 @@ pub(in crate::workflows) struct InvitationAcceptedOrMaterializedProof {
 impl SemanticSuccessProof for InvitationAcceptedOrMaterializedProof {
     fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
         SemanticOwnerPostcondition::new("invitation_accepted_or_materialized")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct PendingInvitationConsumedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for PendingInvitationConsumedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("pending_invitation_consumed")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct DeviceEnrollmentStartedProof {
+    ceremony_id: aura_core::CeremonyId,
+}
+
+impl SemanticSuccessProof for DeviceEnrollmentStartedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("device_enrollment_started")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct DeviceEnrollmentImportedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for DeviceEnrollmentImportedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("device_enrollment_imported")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct MessageCommittedProof {
+    message_id: String,
+}
+
+impl SemanticSuccessProof for MessageCommittedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("message_committed")
     }
 }
 
@@ -412,6 +484,37 @@ pub(in crate::workflows) fn issue_semantic_operation_context(
     capability = "semantic_postcondition_proof"
 )]
 #[allow(dead_code)]
+pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> HomeCreatedProof {
+    let _ = semantic_postcondition_proof_capability();
+    HomeCreatedProof { home_id }
+}
+
+#[allow(dead_code)]
+pub(in crate::workflows) async fn prove_home_created(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: ChannelId,
+) -> Result<HomeCreatedProof, AuraError> {
+    let homes = crate::workflows::signals::read_signal_or_default(
+        app_core,
+        &*crate::signal_defs::HOMES_SIGNAL,
+    )
+    .await;
+    if homes.has_home(&home_id) {
+        Ok(issue_home_created_proof(home_id))
+    } else {
+        Err(AuraError::from(
+            crate::workflows::error::WorkflowError::Precondition(
+                "home_created proof requires the home to exist in authoritative homes state",
+            ),
+        ))
+    }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
 pub(in crate::workflows) fn issue_channel_membership_ready_proof(
     channel_id: ChannelId,
 ) -> ChannelMembershipReadyProof {
@@ -448,6 +551,18 @@ pub(in crate::workflows) async fn prove_channel_membership_ready(
     capability = "semantic_postcondition_proof"
 )]
 #[allow(dead_code)]
+pub(in crate::workflows) fn issue_invitation_created_proof(
+    invitation_id: aura_core::InvitationId,
+) -> InvitationCreatedProof {
+    let _ = semantic_postcondition_proof_capability();
+    InvitationCreatedProof { invitation_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
 pub(in crate::workflows) fn issue_channel_invitation_created_proof(
     invitation_id: aura_core::InvitationId,
 ) -> ChannelInvitationCreatedProof {
@@ -464,6 +579,71 @@ pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
 ) -> InvitationAcceptedOrMaterializedProof {
     let _ = semantic_postcondition_proof_capability();
     InvitationAcceptedOrMaterializedProof { invitation_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+pub(in crate::workflows) fn issue_pending_invitation_consumed_proof(
+    invitation_id: aura_core::InvitationId,
+) -> PendingInvitationConsumedProof {
+    let _ = semantic_postcondition_proof_capability();
+    PendingInvitationConsumedProof { invitation_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+pub(in crate::workflows) fn issue_device_enrollment_started_proof(
+    ceremony_id: aura_core::CeremonyId,
+) -> DeviceEnrollmentStartedProof {
+    let _ = semantic_postcondition_proof_capability();
+    DeviceEnrollmentStartedProof { ceremony_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+pub(in crate::workflows) fn issue_message_committed_proof(message_id: impl Into<String>) -> MessageCommittedProof {
+    let _ = semantic_postcondition_proof_capability();
+    MessageCommittedProof {
+        message_id: message_id.into(),
+    }
+}
+
+pub(in crate::workflows) async fn prove_message_committed(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    message_id: &str,
+) -> Result<MessageCommittedProof, AuraError> {
+    let chat = crate::workflows::snapshot_policy::chat_snapshot(app_core).await;
+    if chat
+        .messages_for_channel(&channel_id)
+        .iter()
+        .any(|message| message.id == message_id)
+    {
+        Ok(issue_message_committed_proof(message_id))
+    } else {
+        Err(AuraError::from(
+            crate::workflows::error::WorkflowError::Precondition(
+                "message_committed proof requires the message to exist in chat state",
+            ),
+        ))
+    }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+pub(in crate::workflows) fn issue_device_enrollment_imported_proof(
+    invitation_id: aura_core::InvitationId,
+) -> DeviceEnrollmentImportedProof {
+    let _ = semantic_postcondition_proof_capability();
+    DeviceEnrollmentImportedProof { invitation_id }
 }
 
 impl ExactOperationLifecyclePublication {

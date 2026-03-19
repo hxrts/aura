@@ -20,6 +20,7 @@ enum LintMode {
     SemanticOwnerDetachedContinuation,
     SemanticOwnerNoSpawn,
     SemanticOwnerProofSuccess,
+    WorkflowProofBearingSuccess,
     ParityCriticalIgnoredResults,
     ActorOwnedTaskSpawn,
     AsyncSessionOwnership,
@@ -39,6 +40,7 @@ impl LintMode {
             "semantic-owner-detached-continuation" => Ok(Self::SemanticOwnerDetachedContinuation),
             "semantic-owner-no-spawn" => Ok(Self::SemanticOwnerNoSpawn),
             "semantic-owner-proof-success" => Ok(Self::SemanticOwnerProofSuccess),
+            "workflow-proof-bearing-success" => Ok(Self::WorkflowProofBearingSuccess),
             "parity-critical-ignored-results" => Ok(Self::ParityCriticalIgnoredResults),
             "actor-owned-task-spawn" => Ok(Self::ActorOwnedTaskSpawn),
             "async-session-ownership" => Ok(Self::AsyncSessionOwnership),
@@ -59,6 +61,7 @@ impl LintMode {
             Self::SemanticOwnerDetachedContinuation => "semantic-owner-detached-continuation",
             Self::SemanticOwnerNoSpawn => "semantic-owner-no-spawn",
             Self::SemanticOwnerProofSuccess => "semantic-owner-proof-success",
+            Self::WorkflowProofBearingSuccess => "workflow-proof-bearing-success",
             Self::ParityCriticalIgnoredResults => "parity-critical-ignored-results",
             Self::ActorOwnedTaskSpawn => "actor-owned-task-spawn",
             Self::AsyncSessionOwnership => "async-session-ownership",
@@ -127,6 +130,10 @@ fn run() -> Result<(), String> {
             }
             LintMode::SemanticOwnerProofSuccess => {
                 "proof-bound semantic owners still publish plain success or omit typed proof-bearing success"
+                    .to_string()
+            }
+            LintMode::WorkflowProofBearingSuccess => {
+                "workflow code still publishes plain success directly instead of consuming typed postcondition proofs"
                     .to_string()
             }
             LintMode::ParityCriticalIgnoredResults => {
@@ -219,6 +226,7 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         | LintMode::SemanticOwnerDetachedContinuation
         | LintMode::SemanticOwnerNoSpawn
         | LintMode::SemanticOwnerProofSuccess
+        | LintMode::WorkflowProofBearingSuccess
         | LintMode::ParityCriticalIgnoredResults => {}
     }
 
@@ -293,6 +301,12 @@ fn scan_function(
         LintMode::SemanticOwnerDetachedContinuation => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerNoSpawn => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerProofSuccess => semantic_owner_declares_proof(attrs),
+        LintMode::WorkflowProofBearingSuccess => {
+            file.to_string_lossy().contains("crates/aura-app/src/workflows/")
+                && !file
+                    .file_name()
+                    .is_some_and(|name| name == "semantic_facts.rs")
+        }
         LintMode::ParityCriticalIgnoredResults => {
             has_marker_attr(attrs, "semantic_owner")
                 || has_marker_attr(attrs, "best_effort_boundary")
@@ -484,6 +498,18 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                 );
             }
         }
+        if self.mode == LintMode::WorkflowProofBearingSuccess
+            && method_name == "publish_phase"
+            && tokens.contains("SemanticOperationPhase :: Succeeded")
+        {
+            self.push_violation(
+                node.span(),
+                format!(
+                    "workflow `{}` publishes plain success directly instead of proof-bearing success: {}",
+                    self.function_name, tokens
+                ),
+            );
+        }
         if self.mode == LintMode::BestEffortSideEffectBoundary {
             if is_primary_lifecycle_publication_name(
                 &method_name,
@@ -549,6 +575,18 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                         ),
                     );
                 }
+            }
+            if self.mode == LintMode::WorkflowProofBearingSuccess
+                && call_name.starts_with("publish_")
+                && tokens.contains("SemanticOperationPhase :: Succeeded")
+            {
+                self.push_violation(
+                    node.span(),
+                    format!(
+                        "workflow `{}` publishes plain success directly instead of proof-bearing success: {}",
+                        self.function_name, tokens
+                    ),
+                );
             }
         }
 
@@ -636,7 +674,9 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     }
                 }
             }
-            LintMode::SemanticOwnerProofSuccess | LintMode::ParityCriticalIgnoredResults => {}
+            LintMode::SemanticOwnerProofSuccess
+            | LintMode::WorkflowProofBearingSuccess
+            | LintMode::ParityCriticalIgnoredResults => {}
             LintMode::ActorOwnedTaskSpawn
             | LintMode::SemanticOwnerDetachedContinuation
             | LintMode::AsyncSessionOwnership

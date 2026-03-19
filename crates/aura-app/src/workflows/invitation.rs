@@ -153,9 +153,10 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
-    issue_invitation_accepted_or_materialized_proof, replace_authoritative_semantic_facts_of_kind,
-    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
-    SemanticWorkflowOwner,
+    issue_device_enrollment_imported_proof, issue_invitation_accepted_or_materialized_proof,
+    issue_invitation_created_proof, issue_pending_invitation_consumed_proof,
+    replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
+    update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
 use crate::workflows::settings;
 #[cfg(feature = "signals")]
@@ -302,7 +303,7 @@ async fn invitation_accept_timeout_budget(
 }
 
 fn device_enrollment_accept_retry_policy() -> Result<RetryBudgetPolicy, AuraError> {
-    workflow_retry_policy(16, Duration::from_millis(250), Duration::from_millis(250))
+    workflow_retry_policy(80, Duration::from_millis(250), Duration::from_millis(500))
         .map_err(AuraError::from)
 }
 
@@ -498,15 +499,6 @@ async fn accepted_pending_home_invitation_from_history(
                 && inv.status == crate::views::invitations::InvitationStatus::Accepted
                 && invitation_is_channel_style(inv)
         }) {
-            publish_invitation_operation_status(
-                _app_core,
-                OperationId::invitation_accept(),
-                _instance_id.clone(),
-                None,
-                SemanticOperationKind::AcceptPendingChannelInvitation,
-                SemanticOperationPhase::Succeeded,
-            )
-            .await?;
             return Ok(Some(InvitationId::new(accepted.id.clone())));
         }
     }
@@ -1336,8 +1328,22 @@ async fn reconcile_accepted_channel_invitation(
     )
     .await?
     {
-        update_accept_reconcile_stage(stage_tracker, "reconcile_channel_invitation:join_channel");
-        crate::workflows::messaging::join_channel(app_core, local_channel_id).await?;
+        update_accept_reconcile_stage(
+            stage_tracker,
+            "reconcile_channel_invitation:amp_join_channel",
+        );
+        if let Err(error) = runtime
+            .amp_join_channel(aura_core::effects::amp::ChannelJoinParams {
+                context: authoritative_context,
+                channel: local_channel_id,
+                participant: runtime.authority_id(),
+            })
+            .await
+        {
+            if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
+                return Err(super::error::runtime_call("accept channel invitation join", error).into());
+            }
+        }
     }
     update_accept_reconcile_stage(
         stage_tracker,
@@ -1407,7 +1413,11 @@ pub async fn create_contact_invitation(
         .create_contact_invitation(receiver, nickname, message, ttl_ms)
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
-    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::Succeeded).await?;
+    owner
+        .publish_success_with(issue_invitation_created_proof(
+            invitation.invitation_id.clone(),
+        ))
+        .await?;
     Ok(InvitationHandle::new(invitation))
 }
 
@@ -1439,7 +1449,11 @@ pub async fn create_guardian_invitation(
         .map_err(|e| {
             AuraError::from(super::error::runtime_call("create guardian invitation", e))
         })?;
-    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::Succeeded).await?;
+    owner
+        .publish_success_with(issue_invitation_created_proof(
+            invitation.invitation_id.clone(),
+        ))
+        .await?;
     Ok(InvitationHandle::new(invitation))
 }
 
@@ -1656,7 +1670,11 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
             return fail_channel_invitation(owner, deadline, error).await;
         }
     };
-    publish_invitation_owner_status(owner, deadline, SemanticOperationPhase::Succeeded).await?;
+    owner
+        .publish_success_with(issue_invitation_created_proof(
+            invitation.invitation_id.clone(),
+        ))
+        .await?;
     Ok(invitation)
 }
 
@@ -1744,14 +1762,13 @@ pub async fn export_invitation(
         .export_invitation(invitation_id.as_str())
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?;
-    publish_invitation_operation_status(
+    SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
         None,
-        None,
         SemanticOperationKind::CreateContactInvitation,
-        SemanticOperationPhase::Succeeded,
     )
+    .publish_success_with(issue_invitation_created_proof(invitation_id.clone()))
     .await?;
     Ok(code)
 }
@@ -2209,15 +2226,15 @@ pub async fn accept_device_enrollment_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: &InvitationInfo,
 ) -> Result<(), AuraError> {
-    publish_invitation_operation_status(
+    let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::device_enrollment(),
         None,
-        None,
         SemanticOperationKind::ImportDeviceEnrollmentCode,
-        SemanticOperationPhase::WorkflowDispatched,
-    )
-    .await?;
+    );
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
     let InvitationBridgeType::DeviceEnrollment { .. } = &invitation.invitation_type else {
         return fail_device_enrollment_accept(
             app_core,
@@ -2286,15 +2303,11 @@ pub async fn accept_device_enrollment_invitation(
                 );
             }
 
-            publish_invitation_operation_status(
-                app_core,
-                OperationId::device_enrollment(),
-                None,
-                None,
-                SemanticOperationKind::ImportDeviceEnrollmentCode,
-                SemanticOperationPhase::Succeeded,
-            )
-            .await?;
+            owner
+                .publish_success_with(issue_device_enrollment_imported_proof(
+                    invitation.invitation_id.clone(),
+                ))
+                .await?;
             return Ok(());
         }
         Err(AuraError::from(super::error::WorkflowError::Precondition(
@@ -2302,26 +2315,25 @@ pub async fn accept_device_enrollment_invitation(
         )))
     })
     .await;
-    if enrollment_result.is_ok() {
-        return Ok(());
+    match enrollment_result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            #[cfg(feature = "instrumented")]
+            tracing::warn!(
+                invitation_id = %invitation.invitation_id,
+                expected_min_devices,
+                error = %error,
+                "device enrollment acceptance failed before local device list convergence"
+            );
+            fail_device_enrollment_accept(
+                app_core,
+                format!(
+                    "device enrollment acceptance did not converge to {expected_min_devices} local devices: {error}"
+                ),
+            )
+            .await
+        }
     }
-
-    #[cfg(feature = "instrumented")]
-    tracing::warn!(
-        invitation_id = %invitation.invitation_id,
-        expected_min_devices,
-        "device enrollment acceptance completed before local device list convergence"
-    );
-    publish_invitation_operation_status(
-        app_core,
-        OperationId::device_enrollment(),
-        None,
-        None,
-        SemanticOperationKind::ImportDeviceEnrollmentCode,
-        SemanticOperationPhase::Succeeded,
-    )
-    .await?;
-    Ok(())
 }
 
 /// Accept an invitation by string ID (legacy/convenience API).
@@ -2601,8 +2613,9 @@ pub async fn accept_pending_home_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "accept_pending_home_invitation_id_owned",
-    terminal = "publish_invitation_owner_status",
+    terminal = "publish_success_with",
     postcondition = "pending_invitation_consumed",
+    proof = crate::workflows::semantic_facts::PendingInvitationConsumedProof,
     depends_on = "pending_home_invitation_ready",
     child_ops = "",
     category = "move_owned"
@@ -2718,7 +2731,11 @@ async fn accept_pending_home_invitation_id_owned(
         accepted_pending_home_invitation_from_history(app_core, our_authority, instance_id.clone())
             .await?
     {
-        publish_invitation_owner_status(owner, None, SemanticOperationPhase::Succeeded).await?;
+        owner
+            .publish_success_with(issue_pending_invitation_consumed_proof(
+                invitation_id.clone(),
+            ))
+            .await?;
         return Ok(invitation_id);
     }
 
@@ -3342,13 +3359,16 @@ mod tests {
         .await
         .unwrap();
 
-        crate::workflows::semantic_facts::publish_authoritative_operation_phase_with_instance(
+        crate::workflows::semantic_facts::SemanticWorkflowOwner::new(
             &app_core,
-            crate::workflows::semantic_facts::semantic_lifecycle_publication_capability(),
             OperationId::invitation_accept(),
             Some(instance_id.clone()),
             SemanticOperationKind::AcceptPendingChannelInvitation,
-            SemanticOperationPhase::Succeeded,
+        )
+        .publish_success_with(
+            crate::workflows::semantic_facts::issue_invitation_accepted_or_materialized_proof(
+                InvitationId::new("accepted-from-test-history"),
+            ),
         )
         .await
         .unwrap();
