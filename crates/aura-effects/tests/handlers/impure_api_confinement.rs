@@ -1,3 +1,10 @@
+//! Impure API confinement enforcement.
+//!
+//! Walks the crate tree and verifies that direct OS calls (`SystemTime::now`,
+//! `thread_rng`, `chrono`, `rand`) appear only inside the designated handler
+//! crates. If a non-allowlisted crate reaches for an impure API, the effect
+//! system boundary has been breached.
+
 #![allow(missing_docs)]
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,6 +39,9 @@ fn test_no_impure_api_usage_outside_handlers() {
         "crates/aura-consensus",
         "crates/aura-agent",
         "crates/aura-core/src/crypto",
+        // arch_lints.rs references impure API patterns as string literals in
+        // its lint rules — it does not call them.
+        "crates/aura-macros/src/bin/arch_lints.rs",
     ];
 
     let patterns = [

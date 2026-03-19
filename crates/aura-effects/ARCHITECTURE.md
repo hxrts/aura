@@ -95,6 +95,36 @@ Verification hooks:
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines handler placement.
 - [Effect System and Runtime](../../docs/103_effect_system.md) defines stateless handler rules.
+## Testing
+
+### Strategy
+
+Handler isolation and purity are the primary testing concerns. Each handler
+must be stateless between calls and confined to infrastructure-only concerns.
+Integration tests live in `tests/handlers/`; build-configuration guards live
+at `tests/` top level.
+
+### Running tests
+
+```
+cargo test -p aura-effects
+cargo test -p aura-effects -- --nocapture   # with handler output
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Handler retains state between calls | `src/transport/real.rs` (inline) | Covered |
+| EncryptedStorage roundtrip lossy | `tests/handlers/encrypted_storage_roundtrip.rs` | Covered |
+| Guard interpreter misinterprets plan | `tests/handlers/guard_interpreter.rs` | Covered |
+| Impure API used outside effect impl | `tests/handlers/impure_api_confinement.rs` | Covered |
+| Feature guards misconfigured | `tests/feature_guards.rs` | Covered |
+| Reactive signal graph propagation incorrect | `src/reactive/handler.rs` (inline) | Covered |
+| Leakage budget accumulation wrong | `src/leakage.rs` (inline) | Covered |
+| Context metadata merging incorrect | `src/context.rs` (inline) | Covered |
+| Datalog value formatting/parsing wrong | `src/query/datalog.rs` (inline) | Covered |
+
 ## Boundaries
 - Stateful caches belong in Layer 6 services.
 - Multi-party coordination belongs in aura-protocol.
