@@ -87,9 +87,10 @@ cargo test -p aura-amp
 
 | What breaks if wrong | Invariant | Status |
 |---------------------|-----------|--------|
-| AMP epoch not monotonic | InvariantAmpEpochMonotonic | Covered (inline) |
-| AMP message serialization breaks | — | Covered (`tests/wire/amp_wire.rs`) |
+| AMP epoch not monotonic | InvariantAmpEpochMonotonic | aura-journal reduction (cross-crate) |
+| AMP message serialization breaks | — | Covered (`tests/wire/amp_wire.rs`, 11 tests) |
 | Serialization non-deterministic | — | Covered (proptest in `tests/wire/`) |
+| Different epochs produce same bytes | — | Covered (`test_different_headers_produce_different_bytes`) |
 | Nonce derivation non-deterministic | — | Covered (`src/core.rs` inline) |
 | Ratchet state conversion lossy | — | Covered (`src/core.rs` inline) |
 
