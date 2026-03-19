@@ -1,3 +1,5 @@
+//! Phase 4 reliability tests.
+
 #![allow(missing_docs)]
 
 use std::fs;

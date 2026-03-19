@@ -207,6 +207,39 @@ Failure mode:
 Verification hooks:
 - Playwright driver self-test
 - browser backend contract tests
+## Testing
+
+### Strategy
+
+Deterministic replay, semantic flow execution, and tool API correctness
+are the primary concerns. Tests are organized into `tests/phases/` for
+the phased harness evolution (phase 1 through 5), `tests/holepunch/`
+for NAT traversal tiers, and top-level contract tests.
+
+### Running tests
+
+```
+cargo test -p aura-harness
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Tool API maps wrong operation | DeterministicReplayInputs | `tests/phases/phase1_tool_api.rs` | Covered |
+| State machine invalid transition | SharedFlowExecutionIsSemantic | `tests/phases/phase3_state_machine.rs` | Covered |
+| Reliability under failure | — | `tests/phases/phase4_reliability.rs` | Covered |
+| API negotiation wrong | — | `tests/phases/phase5_api_negotiation.rs` | Covered |
+| Routing replay diverges | DeterministicReplayInputs | `tests/phases/phase2_routing_replay.rs` | Covered |
+| Phase 1 regression re-introduced | — | `tests/phases/phase1_regression.rs` | Covered |
+| Phase 2 regression re-introduced | — | `tests/phases/phase2_regression.rs` | Covered |
+| Phase 5 regression re-introduced | — | `tests/phases/phase5_regression.rs` | Covered |
+| Holepunch E2E patchbay broken | — | `tests/holepunch/holepunch_e2e_runtime_patchbay.rs` | Covered |
+| Holepunch tier 2 broken | — | `tests/holepunch/holepunch_tier2_patchbay.rs` | Covered |
+| Holepunch stress fails | — | `tests/holepunch/holepunch_tier3_stress.rs` | Covered |
+| Local loopback contract fails | ObservationUsesAuthoritativeSemanticState | `tests/contract_local_loopback.rs` | Covered |
+| Contract suite fails | SharedFlowExecutionIsSemantic | `tests/contract_suite.rs` | Covered |
+
 ## Boundaries
 - This crate is tooling and test infrastructure. It is not part of the runtime layer stack.
 - It does not define Aura effect traits, domain semantics, or protocol safety rules.

@@ -1,3 +1,5 @@
+//! Phase 2 regression tests.
+
 #![allow(missing_docs)]
 
 use std::path::Path;

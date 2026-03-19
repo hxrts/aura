@@ -1,3 +1,5 @@
+//! Phase 2 routing replay tests.
+
 #![allow(missing_docs)]
 
 use std::path::PathBuf;

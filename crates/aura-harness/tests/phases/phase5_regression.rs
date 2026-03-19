@@ -1,3 +1,5 @@
+//! Phase 5 regression tests.
+
 #![allow(missing_docs)]
 
 use std::fs;

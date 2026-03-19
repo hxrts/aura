@@ -1,3 +1,5 @@
+//! Tier 3 holepunch stress tests.
+
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;

@@ -1,3 +1,5 @@
+//! Phase 3 state machine transition tests.
+
 #![allow(missing_docs)]
 
 use std::path::PathBuf;

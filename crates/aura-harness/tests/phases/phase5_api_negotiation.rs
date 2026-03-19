@@ -1,3 +1,5 @@
+//! Phase 5 API negotiation tests.
+
 #![allow(missing_docs)]
 
 use std::path::PathBuf;

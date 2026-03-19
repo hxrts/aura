@@ -1,3 +1,5 @@
+//! Phase 1 tool API correctness tests.
+
 #![allow(missing_docs)]
 
 use aura_harness::config::{

@@ -1,3 +1,5 @@
+//! Contract suite validation tests.
+
 #![allow(missing_docs)]
 
 use std::path::PathBuf;

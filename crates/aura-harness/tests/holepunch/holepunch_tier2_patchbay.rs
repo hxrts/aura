@@ -1,3 +1,5 @@
+//! Tier 2 holepunch patchbay tests.
+
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;
