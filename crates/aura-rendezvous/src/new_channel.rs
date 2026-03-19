@@ -748,6 +748,8 @@ fn generate_channel_id(
 mod tests {
     use super::*;
 
+    /// Rotating to the same or lower epoch is rejected — accepting stale
+    /// epochs would let old keys decrypt new messages.
     #[test]
     fn channel_rotate_regression_marks_typed_error() {
         let local = AuthorityId::new_from_entropy([1u8; 32]);
@@ -769,6 +771,8 @@ mod tests {
         );
     }
 
+    /// Completing a handshake in the wrong phase produces a typed failure
+    /// rather than undefined channel state.
     #[test]
     fn handshake_invalid_state_marks_typed_failure() {
         let local = AuthorityId::new_from_entropy([5u8; 32]);

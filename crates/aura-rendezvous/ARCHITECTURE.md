@@ -83,6 +83,39 @@ Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) requires receipt validity windows and replay prevention.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) requires epoch validity and transport safety properties.
 
+## Testing
+
+### Strategy
+
+Channel lifecycle correctness and descriptor validity are the primary concerns.
+Integration tests in `tests/channel/` verify end-to-end flows from descriptor
+publication through handshake completion. Inline tests verify channel state
+machine transitions, fact reduction, flood deduplication, and protocol
+serialization.
+
+### Running tests
+
+```
+cargo test -p aura-rendezvous
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Epoch regression accepted (stale keys) | `src/new_channel.rs` `channel_rotate_regression_marks_typed_error` | Covered |
+| Handshake invalid state produces undefined channel | `src/new_channel.rs` `handshake_invalid_state_marks_typed_failure` | Covered |
+| Expired descriptor accepted | `tests/channel/` `test_channel_establishment_rejects_expired_descriptor` | Covered |
+| Descriptor validity window wrong | `src/facts.rs` `test_descriptor_validity` | Covered |
+| Channel context non-commutative (peers can't find channel) | `src/facts.rs` `test_channel_context_is_commutative` | Covered |
+| Descriptor context mismatch accepted | `src/facts.rs` `test_reducer_rejects_context_mismatch_for_descriptor` | Covered |
+| PSK mismatch not detected | `tests/channel/` `test_handshake_psk_mismatch_detection` | Covered |
+| Flood packet replayed | `src/flood/propagation.rs` `test_seen_nonces_check_and_mark` | Covered |
+| Nonce tracker unbounded memory | `src/flood/propagation.rs` `test_seen_nonces_capacity_clear` | Covered |
+| Missing capability allows connect | `tests/channel/` `test_missing_capability_blocks_connect` | Covered |
+| Insufficient budget allows publish | `tests/channel/` `test_insufficient_flow_budget_blocks_publish` | Covered |
+| E2E discovery → channel flow broken | `tests/channel/` `test_complete_discovery_to_channel_flow` | Covered |
+
 ## Boundaries
 - Transport-level connections live in aura-transport.
 - Runtime descriptor cache lives in aura-agent.

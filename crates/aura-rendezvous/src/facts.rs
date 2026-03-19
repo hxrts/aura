@@ -661,6 +661,8 @@ mod tests {
         }
     }
 
+    /// Descriptor valid only within [valid_from, valid_until). Expired
+    /// descriptors must be rejected to prevent stale rendezvous reuse.
     #[test]
     fn test_descriptor_validity() {
         let descriptor = RendezvousDescriptor {
@@ -724,6 +726,8 @@ mod tests {
         }
     }
 
+    /// Channel context derivation is commutative: (A,B) == (B,A). If not,
+    /// peers derive different contexts and can't find each other's channels.
     #[test]
     fn test_channel_context_is_commutative() {
         let a = test_authority();
@@ -784,6 +788,8 @@ mod tests {
         assert!(binding.is_some());
     }
 
+    /// Reducer rejects descriptor facts with wrong context — prevents
+    /// cross-context descriptor contamination.
     #[test]
     fn test_reducer_rejects_context_mismatch_for_descriptor() {
         let reducer = RendezvousFactReducer;

@@ -414,6 +414,8 @@ mod tests {
         assert!(seen.is_empty());
     }
 
+    /// At capacity, tracker auto-clears and retains only the newest nonce —
+    /// bounded memory for replay protection.
     #[test]
     fn test_seen_nonces_capacity_clear() {
         let mut seen = SeenNonces::with_max_size(3);
