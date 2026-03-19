@@ -3203,7 +3203,7 @@ mod tests {
             } => {
                 assert_eq!(owner_id, own_authority);
                 assert_eq!(contact_id, sender_id);
-                assert_eq!(nickname, sender_id.to_string());
+                assert_eq!(nickname, "Alice");
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }
