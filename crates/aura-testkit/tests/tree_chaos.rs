@@ -1,3 +1,5 @@
+//! Tree chaos and fault injection tests.
+
 #![allow(warnings)]
 #![cfg(any())] // TODO: Re-enable when chaos testing infrastructure is ready
 #![allow(missing_docs)]

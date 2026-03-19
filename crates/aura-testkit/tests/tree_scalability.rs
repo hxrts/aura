@@ -1,3 +1,5 @@
+//! Tree scalability tests under load.
+
 #![allow(warnings)]
 #![cfg(any())]
 #![allow(missing_docs)]

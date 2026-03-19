@@ -1,3 +1,5 @@
+//! Protocol peer view integration tests.
+
 #![allow(missing_docs)]
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::{Bottom, JoinSemilattice};

@@ -1,3 +1,5 @@
+//! Runtime integration tests for testkit bridge.
+
 #![allow(warnings)]
 #![cfg(any())]
 #![allow(missing_docs)]

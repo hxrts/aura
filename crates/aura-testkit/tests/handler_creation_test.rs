@@ -1,3 +1,5 @@
+//! Handler creation and initialization tests.
+
 #![allow(warnings)]
 #![cfg(any())]
 #![allow(missing_docs)]

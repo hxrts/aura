@@ -1,3 +1,5 @@
+//! Protocol tree persistent storage tests.
+
 #![allow(missing_docs)]
 use aura_journal::commitment_tree::TreeState;
 use aura_protocol::effects::TreeEffects;

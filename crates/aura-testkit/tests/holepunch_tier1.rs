@@ -1,3 +1,5 @@
+//! Tier 1 holepunch NAT traversal tests.
+
 #![allow(missing_docs)]
 
 use std::time::Duration;

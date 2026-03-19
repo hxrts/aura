@@ -1,3 +1,5 @@
+//! Golden fixture conformance tests.
+
 #![allow(missing_docs)]
 
 use aura_testkit::{load_conformance_artifact_file, replay_conformance_artifact};

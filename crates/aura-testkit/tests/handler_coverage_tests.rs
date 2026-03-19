@@ -1,3 +1,5 @@
+//! Handler coverage validation — ensures every effect type has a testkit handler.
+
 #![allow(warnings)]
 #![cfg(any())]
 #![allow(missing_docs)]

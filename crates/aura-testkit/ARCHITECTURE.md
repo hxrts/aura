@@ -80,6 +80,42 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines expected observable semantics.
 - [Testing Guide](../../docs/804_testing_guide.md) defines mock fidelity requirements.
+## Testing
+
+### Strategy
+
+Mock contract fidelity and handler coverage are the primary concerns.
+Tests are organized into `tests/amp/` for AMP fixtures, `tests/consensus/`
+for consensus differential and conformance, `tests/protocol/` for protocol
+fixtures, and `tests/conformance/` for cross-implementation conformance.
+Top-level files cover handler coverage, effects, performance, and tree tests.
+
+### Running tests
+
+```
+cargo test -p aura-testkit
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Effect type has no testkit handler | MockContractFidelity | `tests/handler_coverage_tests.rs` | Covered |
+| Handler creation fails | MockContractFidelity | `tests/handler_creation_test.rs` | Covered |
+| Effect handler behavior wrong | MockContractFidelity | `tests/effect_handlers_test.rs`, `tests/effects_test.rs` | Covered |
+| AMP channel fixture wrong | — | `tests/amp/amp_channel.rs` | Covered |
+| AMP consensus fixture wrong | — | `tests/amp/amp_consensus.rs` | Covered |
+| Consensus differential fails | — | `tests/consensus/consensus_differential.rs` | Covered |
+| Consensus ITF conformance wrong | — | `tests/consensus/consensus_itf_conformance.rs` | Covered |
+| FROST pipelining broken | — | `tests/consensus/frost_pipelining_tests.rs` | Covered |
+| Golden fixture drifts from production | MockContractFidelity | `tests/conformance/conformance_golden_fixtures.rs` | Covered |
+| Lean differential fails | — | `tests/conformance/lean_differential.rs` | Covered |
+| Time control non-deterministic | MockContractFidelity | `tests/unified_time_integration.rs` | Covered |
+| Tree under chaos diverges | — | `tests/tree_chaos.rs` | Covered |
+| Tree under load fails | — | `tests/tree_scalability.rs` | Covered |
+| Performance regression detected | — | `tests/performance_regression.rs` | Covered |
+| Byzantine capability differential | — | `tests/byzantine_capability_differential.rs` | Covered |
+
 ## Boundaries
 - Foundation layers should create internal test utilities instead.
 - Production handlers live in aura-effects (stateless).
