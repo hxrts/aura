@@ -1,3 +1,8 @@
+//! Guarded AMP anti-entropy integration tests.
+//!
+//! Verifies that AMP anti-entropy operations go through the guard chain
+//! with correct capability and flow budget enforcement.
+
 #![allow(missing_docs)]
 use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};

@@ -1,3 +1,8 @@
+//! Fault invariant monitoring tests.
+//!
+//! Verifies that protocol property monitors detect invariant violations
+//! under fault injection and report them as structured events.
+
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 

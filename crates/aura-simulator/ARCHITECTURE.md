@@ -87,6 +87,42 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic interpretation constraints.
 - [Simulator](../../docs/119_simulator.md) defines replay and determinism expectations.
+## Testing
+
+### Strategy
+
+Deterministic replay and protocol simulation fidelity are the primary
+concerns. Integration tests verify each simulated protocol produces
+correct outcomes. Property tests verify consensus and choreography
+invariants under fault injection. ITF trace replay verifies conformance
+with Quint formal models.
+
+### Running tests
+
+```
+cargo test -p aura-simulator
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Same seed produces different execution | DeterministicReplay | `src/scenarios/` `simulation_time_handler_deterministic_start` | Covered |
+| Replay transcript mismatch | DeterministicReplay | `src/async_host.rs` `async_host_replay_matches_recorded_transcript` | Covered |
+| Replay mismatch not detected | DeterministicReplay | `src/async_host.rs` `async_host_replay_detects_mismatch` | Covered |
+| Parity diverges between sync/async hosts | TelltaleParityBoundaryStable | `src/async_host.rs` `async_host_parity_matches_sync_host_on_representative_suite` | Covered |
+| Surface mapping doesn't match required surfaces | TelltaleArtifactMappingCanonical | `src/telltale_parity.rs` `canonical_surface_mapping_matches_required_surfaces` | Covered |
+| Parity report artifact unstable | TelltaleArtifactMappingCanonical | `src/telltale_parity.rs` `file_lane_writes_stable_report_artifact` | Covered |
+| Consensus protocol simulation wrong | — | `tests/consensus_protocol_test.rs`, `tests/consensus_property_tests.rs` | Covered |
+| Invitation protocol simulation wrong | — | `tests/invitation_protocol_test.rs` | Covered |
+| Recovery protocol simulation wrong | — | `tests/recovery_protocol_test.rs` | Covered |
+| Guardian ceremony simulation wrong | — | `tests/guardian_ceremony_test.rs`, `tests/guardian_setup_protocol_test.rs` | Covered |
+| Fault injection leaks to non-faulty paths | — | `tests/protocol_fault_injection.rs` | Covered |
+| ITF trace replay diverges from Quint | — | `tests/itf_trace_replay.rs` | Covered |
+| Liveness under partitions fails | — | `tests/liveness_under_partitions.rs` | Covered |
+| Guard interpreter not deterministic | DeterministicReplay | `src/effects/guard_interpreter.rs` `test_deterministic_nonce_generation` | Covered |
+| Property monitor misses invariant violation | — | `tests/fault_invariant_monitor.rs` | Covered |
+
 ## Boundaries
 - Must NOT be imported by Layers 1-5.
 - Composable fault injection combines with production effects.

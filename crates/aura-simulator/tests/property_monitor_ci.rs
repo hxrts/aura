@@ -1,3 +1,8 @@
+//! Property monitor CI integration tests.
+//!
+//! Verifies that property monitors produce deterministic trend reports
+//! and can be used in CI pipelines for regression detection.
+
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 
