@@ -88,6 +88,33 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantVectorClockConsistent`.
+## Testing
+
+### Strategy
+
+Reconciliation purity and digest determinism are the primary concerns.
+Integration tests in `tests/reconciliation/` validate digest computation,
+serialization roundtrips, and config defaults. Inline tests cover pure
+reconciliation helpers and broadcast rate limiting.
+
+### Running tests
+
+```
+cargo test -p aura-anti-entropy
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Status |
+|---------------------|-----------|--------|
+| Reconciliation non-deterministic | InvariantAntiEntropyReconciliationPurity | Covered (`src/pure.rs` inline) |
+| Vector clock order violated | InvariantVectorClockConsistent | Covered (Quint) |
+| Digest order-dependent | — | Covered (`tests/reconciliation/`) |
+| Digest non-deterministic | — | Covered (`tests/reconciliation/`) |
+| Broadcast rate limiting broken | — | Covered (`src/broadcast.rs` inline) |
+| Back pressure threshold ignored | — | Covered (`src/broadcast.rs` inline) |
+| Sync error codes collide | — | Covered (`tests/reconciliation/`) |
+
 ## Boundaries
 - No guardless network sends.
 - Storage helpers are shared via `aura_journal::commitment_tree::storage`.
