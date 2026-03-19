@@ -220,8 +220,11 @@ mod tests {
         assert_eq!(c1, c2, "Branch commitment should be deterministic");
     }
 
+    /// Every input to commit_branch must independently affect the output.
+    /// If any field can change without changing the hash, an attacker can
+    /// substitute that field and reuse a valid commitment.
     #[test]
-    fn test_commit_branch_changes_with_inputs() {
+    fn commit_branch_changes_when_any_input_changes() {
         let policy = Policy::Threshold { m: 2, n: 3 };
         let node_idx = NodeIndex(1);
         let epoch = Epoch::new(42);
@@ -230,34 +233,43 @@ mod tests {
 
         let base = commit_branch(node_idx, epoch, &policy, &left, &right);
 
-        // Different epoch
+        let diff_index = commit_branch(NodeIndex(2), epoch, &policy, &left, &right);
+        assert_ne!(base, diff_index, "node_index must affect commitment");
+
         let diff_epoch = commit_branch(node_idx, Epoch::new(43), &policy, &left, &right);
-        assert_ne!(base, diff_epoch, "Different epoch should change commitment");
+        assert_ne!(base, diff_epoch, "epoch must affect commitment");
 
-        // Different policy
         let diff_policy = commit_branch(node_idx, epoch, &Policy::All, &left, &right);
-        assert_ne!(
-            base, diff_policy,
-            "Different policy should change commitment"
-        );
+        assert_ne!(base, diff_policy, "policy must affect commitment");
 
-        // Different left child
         let mut left2 = left;
         left2[0] = 1;
         let diff_left = commit_branch(node_idx, epoch, &policy, &left2, &right);
-        assert_ne!(
-            base, diff_left,
-            "Different left child should change commitment"
-        );
+        assert_ne!(base, diff_left, "left child must affect commitment");
 
-        // Different right child
         let mut right2 = right;
         right2[0] = 2;
         let diff_right = commit_branch(node_idx, epoch, &policy, &left, &right2);
-        assert_ne!(
-            base, diff_right,
-            "Different right child should change commitment"
-        );
+        assert_ne!(base, diff_right, "right child must affect commitment");
+    }
+
+    /// Same differential for leaf: every input must independently affect output.
+    #[test]
+    fn commit_leaf_changes_when_any_input_changes() {
+        let leaf_id = LeafId(5);
+        let epoch = Epoch::new(42);
+        let pubkey = vec![1, 2, 3, 4];
+
+        let base = commit_leaf(leaf_id, epoch, &pubkey);
+
+        let diff_id = commit_leaf(LeafId(6), epoch, &pubkey);
+        assert_ne!(base, diff_id, "leaf_id must affect commitment");
+
+        let diff_epoch = commit_leaf(leaf_id, Epoch::new(43), &pubkey);
+        assert_ne!(base, diff_epoch, "epoch must affect commitment");
+
+        let diff_pubkey = commit_leaf(leaf_id, epoch, &[5, 6, 7, 8]);
+        assert_ne!(base, diff_pubkey, "pubkey must affect commitment");
     }
 
     #[test]
@@ -272,29 +284,7 @@ mod tests {
         assert_eq!(c1, c2, "Leaf commitment should be deterministic");
     }
 
-    #[test]
-    fn test_commit_leaf_changes_with_inputs() {
-        let leaf_id = LeafId(5);
-        let epoch = Epoch::new(42);
-        let pubkey = vec![1, 2, 3, 4];
-
-        let base = commit_leaf(leaf_id, epoch, &pubkey);
-
-        // Different epoch
-        let diff_epoch = commit_leaf(leaf_id, Epoch::new(43), &pubkey);
-        assert_ne!(base, diff_epoch, "Different epoch should change commitment");
-
-        // Different leaf ID
-        let diff_id = commit_leaf(LeafId(6), epoch, &pubkey);
-        assert_ne!(base, diff_id, "Different leaf ID should change commitment");
-
-        // Different public key
-        let diff_pubkey = commit_leaf(leaf_id, epoch, &[5, 6, 7, 8]);
-        assert_ne!(
-            base, diff_pubkey,
-            "Different pubkey should change commitment"
-        );
-    }
+    // Replaced by commit_leaf_changes_when_any_input_changes above.
 
     #[test]
     fn test_policy_hash_deterministic() {

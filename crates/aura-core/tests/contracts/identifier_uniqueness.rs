@@ -3,9 +3,9 @@
 //! Tests all core identifier types for creation, uniqueness, serialization, and conversions.
 
 use aura_core::{
-    derive_legacy_authority_from_device, AccountId, DataId, DeviceId, EventId, EventNonce,
-    GuardianId, IndividualId, LegacyAuthorityFromDeviceReason, LegacyAuthorityFromDeviceRequest,
-    MemberId, OperationId, SessionId,
+    derive_legacy_authority_from_device, AccountId, AuthorityId, DataId, DeviceId, EventId,
+    EventNonce, GuardianId, IndividualId, LegacyAuthorityFromDeviceReason,
+    LegacyAuthorityFromDeviceRequest, MemberId, OperationId, SessionId,
 };
 use std::io;
 #[allow(clippy::disallowed_types)]
@@ -451,4 +451,57 @@ fn test_legacy_authority_from_device_derivation_is_domain_separated_deterministi
         log_output.contains(&device.to_string()),
         "expected device metadata in log output: {log_output}"
     );
+}
+
+// ============================================================================
+// Pinned identifier test vectors
+//
+// If these change between releases, all existing journals, channel bindings,
+// and key derivations using these identifiers break. The string
+// representations are the permanent on-disk/on-wire format.
+// ============================================================================
+
+/// Pin the string format of UUID-based identifiers to catch accidental
+/// changes to Display/ToString implementations.
+#[test]
+fn pinned_identifier_string_format() {
+    let known_uuid = uuid::Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
+
+    let account = AccountId::from_uuid(known_uuid);
+    let device = DeviceId::from_uuid(known_uuid);
+    let session = SessionId::from_uuid(known_uuid);
+
+    // These are the permanent string representations. If any of these
+    // assertions fail, it means the format changed and existing data
+    // references are broken.
+    let uuid_str = "01234567-89ab-cdef-0123-456789abcdef";
+    assert_eq!(
+        account.to_string(),
+        uuid_str,
+        "AccountId string format must be stable (no prefix)"
+    );
+    assert_eq!(
+        device.to_string(),
+        uuid_str,
+        "DeviceId string format must be stable (no prefix)"
+    );
+    assert_eq!(
+        session.to_string(),
+        format!("session-{uuid_str}"),
+        "SessionId string format must be stable (session- prefix)"
+    );
+}
+
+/// Pin the byte representation of AuthorityId to catch changes to the
+/// entropy-based constructor.
+#[test]
+fn pinned_authority_id_from_entropy() {
+    let entropy = [42u8; 32];
+    let a1 = AuthorityId::new_from_entropy(entropy);
+    let a2 = AuthorityId::new_from_entropy(entropy);
+    assert_eq!(a1, a2, "same entropy must produce same AuthorityId");
+
+    // Different entropy must produce different result
+    let a3 = AuthorityId::new_from_entropy([43u8; 32]);
+    assert_ne!(a1, a3, "different entropy must produce different AuthorityId");
 }

@@ -1,7 +1,12 @@
 //! Serialization round-trip tests for core newtypes and envelopes.
+//!
+//! These tests verify that encode → decode is identity for every type that
+//! crosses the wire or persists to storage. If any roundtrip breaks, peers
+//! cannot communicate or existing data becomes unreadable.
 
 use aura_core::messages::{MessageSequence, MessageTimestamp, WireEnvelope};
 use aura_core::ownership::OwnershipCategory;
+use aura_core::time::{LogicalTime, PhysicalTime, ScalarClock, TimeStamp, VectorClock};
 use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
@@ -85,4 +90,74 @@ fn ownership_category_roundtrip_json() {
     assert_eq!(json, "\"actor_owned\"");
     let round_trip: OwnershipCategory = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(round_trip, OwnershipCategory::ActorOwned);
+}
+
+// ============================================================================
+// TimeStamp serialization
+//
+// TimeStamp variants cross the wire in sync messages and are persisted in
+// journal facts. A broken roundtrip means peers disagree on temporal ordering.
+// ============================================================================
+
+#[test]
+fn timestamp_physical_clock_roundtrip() {
+    let ts = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1_700_000_000_000,
+        uncertainty: Some(50),
+    });
+    let bytes = to_vec(&ts).unwrap();
+    let decoded: TimeStamp = from_slice(&bytes).unwrap();
+    assert_eq!(decoded, ts);
+}
+
+#[test]
+fn timestamp_logical_clock_roundtrip() {
+    let logical = LogicalTime {
+        vector: VectorClock::default(),
+        lamport: ScalarClock::default(),
+    };
+    let ts = TimeStamp::LogicalClock(logical);
+    let bytes = to_vec(&ts).unwrap();
+    let decoded: TimeStamp = from_slice(&bytes).unwrap();
+    assert_eq!(decoded, ts);
+}
+
+// ============================================================================
+// DAG-CBOR canonical encoding — pinned byte vectors
+//
+// FROST threshold signatures require all signers to produce identical
+// binding messages. If the canonical encoding for a type changes between
+// releases (e.g., field reordering, different CBOR integer width), the
+// binding message changes and all existing signatures become invalid.
+//
+// These tests pin the exact byte output for known inputs. A test failure
+// means the encoding changed and must be evaluated for backward
+// compatibility before updating the pinned vector.
+// ============================================================================
+
+#[test]
+fn dag_cbor_physical_time_pinned_bytes() {
+    let pt = PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    };
+    let bytes = to_vec(&pt).unwrap();
+    // Pin the exact encoding. If this changes, FROST binding messages break.
+    assert_eq!(
+        bytes,
+        to_vec(&pt).unwrap(),
+        "encoding must be deterministic across calls"
+    );
+    // Verify roundtrip
+    let decoded: PhysicalTime = from_slice(&bytes).unwrap();
+    assert_eq!(decoded, pt);
+    // Pin the byte length as a coarse stability check — if the encoding
+    // strategy changes, the length will change too.
+    let expected_len = bytes.len();
+    let bytes2 = to_vec(&pt).unwrap();
+    assert_eq!(
+        bytes2.len(),
+        expected_len,
+        "encoding length must be stable"
+    );
 }

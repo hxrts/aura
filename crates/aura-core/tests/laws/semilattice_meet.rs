@@ -357,3 +357,70 @@ mod helper_tests {
         }
     }
 }
+
+// ============================================================================
+// Cap MeetSemiLattice laws
+//
+// Cap is the capability frontier type. Meet computes the greatest lower
+// bound (most restrictive combined authority). If meet is not commutative
+// or associative, capability evaluation will differ depending on merge
+// order, a security-critical divergence.
+// ============================================================================
+
+#[cfg(test)]
+mod cap_laws {
+    use aura_core::domain::journal::Cap;
+    use aura_core::semilattice::MeetSemiLattice;
+
+    /// meet(a, a) = a — idempotence
+    #[test]
+    fn cap_meet_idempotent() {
+        let empty = Cap::new();
+        assert_eq!(empty.meet(&empty), empty, "empty ⊓ empty = empty");
+    }
+
+    /// meet(a, b) = meet(b, a) — commutativity
+    #[test]
+    fn cap_meet_commutative() {
+        let a = Cap::new();
+        let b = Cap::new();
+        assert_eq!(a.meet(&b), b.meet(&a), "Cap meet must be commutative");
+    }
+
+    /// meet(bottom, x) = bottom — bottom is absorbing
+    #[test]
+    fn cap_meet_bottom_absorbing() {
+        let bottom = Cap::new(); // empty token = bottom
+        let other = Cap::new();
+        assert_eq!(
+            bottom.meet(&other),
+            Cap::new(),
+            "bottom ⊓ anything = bottom"
+        );
+    }
+
+    /// Tokens from different issuers are incomparable → meet produces bottom.
+    /// This tests the security property: you can't combine authority from
+    /// different trust roots.  Uses Biscuit API to construct real tokens.
+    #[test]
+    fn cap_meet_different_issuers_produces_bottom() {
+        let key_a = biscuit_auth::KeyPair::new();
+        let key_b = biscuit_auth::KeyPair::new();
+
+        let token_a = biscuit_auth::Biscuit::builder()
+            .build(&key_a)
+            .expect("build token A");
+        let token_b = biscuit_auth::Biscuit::builder()
+            .build(&key_b)
+            .expect("build token B");
+
+        let cap_a =
+            Cap::from_biscuit_with_key(&token_a, &key_a.public()).expect("wrap token A");
+        let cap_b =
+            Cap::from_biscuit_with_key(&token_b, &key_b.public()).expect("wrap token B");
+
+        let result = cap_a.meet(&cap_b);
+        // Different issuers → incomparable → bottom
+        assert_eq!(result, Cap::new(), "different issuers must produce bottom");
+    }
+}
