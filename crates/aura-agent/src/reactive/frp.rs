@@ -127,27 +127,27 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         };
         let _subscription_task_handle =
             tasks.spawn_cancellable_named("reactive.dynamic.map", async move {
-            // Signal that we're ready to receive
-            let _ = ready_tx.send(());
+                // Signal that we're ready to receive
+                let _ = ready_tx.send(());
 
-            loop {
-                match rx.recv().await {
-                    Ok(value) => {
-                        let transformed = f(value.as_ref());
-                        mapped_clone.set(transformed).await;
+                loop {
+                    match rx.recv().await {
+                        Ok(value) => {
+                            let transformed = f(value.as_ref());
+                            mapped_clone.set(transformed).await;
+                        }
+                        Err(RecvError::Lagged(_)) => {
+                            // Re-sync from the latest state on lag to avoid stale values.
+                            let latest = {
+                                let state = state.state.read().await;
+                                state.value.clone()
+                            };
+                            let transformed = f(latest.as_ref());
+                            mapped_clone.set(transformed).await;
+                        }
+                        Err(RecvError::Closed) => break,
                     }
-                    Err(RecvError::Lagged(_)) => {
-                        // Re-sync from the latest state on lag to avoid stale values.
-                        let latest = {
-                            let state = state.state.read().await;
-                            state.value.clone()
-                        };
-                        let transformed = f(latest.as_ref());
-                        mapped_clone.set(transformed).await;
-                    }
-                    Err(RecvError::Closed) => break,
                 }
-            }
             });
 
         // Wait for the spawned task to signal ready - ensures deterministic behavior
@@ -190,44 +190,44 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         };
         let _subscription_task_handle =
             tasks.spawn_cancellable_named("reactive.dynamic.combine", async move {
-            loop {
-                tokio::select! {
-                    res = rx_self.recv() => {
-                        match res {
-                            Ok(_) | Err(RecvError::Lagged(_)) => {
-                                let a = {
-                                    let state = self_state.state.read().await;
-                                    state.value.clone()
-                                };
-                                let b = {
-                                    let state = other_state.state.read().await;
-                                    state.value.clone()
-                                };
-                                let result = f(a.as_ref(), b.as_ref());
-                                combined_clone.set(result).await;
+                loop {
+                    tokio::select! {
+                        res = rx_self.recv() => {
+                            match res {
+                                Ok(_) | Err(RecvError::Lagged(_)) => {
+                                    let a = {
+                                        let state = self_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let b = {
+                                        let state = other_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let result = f(a.as_ref(), b.as_ref());
+                                    combined_clone.set(result).await;
+                                }
+                                Err(RecvError::Closed) => break,
                             }
-                            Err(RecvError::Closed) => break,
                         }
-                    }
-                    res = rx_other.recv() => {
-                        match res {
-                            Ok(_) | Err(RecvError::Lagged(_)) => {
-                                let a = {
-                                    let state = self_state.state.read().await;
-                                    state.value.clone()
-                                };
-                                let b = {
-                                    let state = other_state.state.read().await;
-                                    state.value.clone()
-                                };
-                                let result = f(a.as_ref(), b.as_ref());
-                                combined_clone.set(result).await;
+                        res = rx_other.recv() => {
+                            match res {
+                                Ok(_) | Err(RecvError::Lagged(_)) => {
+                                    let a = {
+                                        let state = self_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let b = {
+                                        let state = other_state.state.read().await;
+                                        state.value.clone()
+                                    };
+                                    let result = f(a.as_ref(), b.as_ref());
+                                    combined_clone.set(result).await;
+                                }
+                                Err(RecvError::Closed) => break,
                             }
-                            Err(RecvError::Closed) => break,
                         }
                     }
                 }
-            }
             });
 
         combined
@@ -261,25 +261,25 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         };
         let _subscription_task_handle =
             tasks.spawn_cancellable_named("reactive.dynamic.filter", async move {
-            loop {
-                match rx.recv().await {
-                    Ok(value) => {
-                        if predicate(value.as_ref()) {
-                            filtered_clone.set_arc(value).await;
+                loop {
+                    match rx.recv().await {
+                        Ok(value) => {
+                            if predicate(value.as_ref()) {
+                                filtered_clone.set_arc(value).await;
+                            }
                         }
-                    }
-                    Err(RecvError::Lagged(_)) => {
-                        let latest = {
-                            let state = state.state.read().await;
-                            state.value.clone()
-                        };
-                        if predicate(latest.as_ref()) {
-                            filtered_clone.set_arc(latest).await;
+                        Err(RecvError::Lagged(_)) => {
+                            let latest = {
+                                let state = state.state.read().await;
+                                state.value.clone()
+                            };
+                            if predicate(latest.as_ref()) {
+                                filtered_clone.set_arc(latest).await;
+                            }
                         }
+                        Err(RecvError::Closed) => break,
                     }
-                    Err(RecvError::Closed) => break,
                 }
-            }
             });
 
         filtered
@@ -312,25 +312,25 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         };
         let _subscription_task_handle =
             tasks.spawn_cancellable_named("reactive.dynamic.fold", async move {
-            loop {
-                match rx.recv().await {
-                    Ok(value) => {
-                        let acc = folded_clone.get().await;
-                        let new_acc = f(acc, value.as_ref());
-                        folded_clone.set(new_acc).await;
+                loop {
+                    match rx.recv().await {
+                        Ok(value) => {
+                            let acc = folded_clone.get().await;
+                            let new_acc = f(acc, value.as_ref());
+                            folded_clone.set(new_acc).await;
+                        }
+                        Err(RecvError::Lagged(_)) => {
+                            let latest = {
+                                let state = state.state.read().await;
+                                state.value.clone()
+                            };
+                            let acc = folded_clone.get().await;
+                            let new_acc = f(acc, latest.as_ref());
+                            folded_clone.set(new_acc).await;
+                        }
+                        Err(RecvError::Closed) => break,
                     }
-                    Err(RecvError::Lagged(_)) => {
-                        let latest = {
-                            let state = state.state.read().await;
-                            state.value.clone()
-                        };
-                        let acc = folded_clone.get().await;
-                        let new_acc = f(acc, latest.as_ref());
-                        folded_clone.set(new_acc).await;
-                    }
-                    Err(RecvError::Closed) => break,
                 }
-            }
             });
 
         folded

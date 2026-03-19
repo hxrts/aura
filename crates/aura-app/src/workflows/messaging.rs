@@ -24,6 +24,7 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
+    issue_channel_invitation_created_proof, prove_channel_membership_ready,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
@@ -706,13 +707,15 @@ async fn deliver_message_fact_remotely(
             .into());
         }
         if attempted_fanout_total == 0 {
-            return Err(super::error::WorkflowError::DeliveryPrerequisitesNeverConverged {
-                peer: channel_id.to_string(),
-                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                detail: last_connectivity_error
-                    .unwrap_or_else(|| "no recipient fanout attempt executed".to_string()),
-            }
-            .into());
+            return Err(
+                super::error::WorkflowError::DeliveryPrerequisitesNeverConverged {
+                    peer: channel_id.to_string(),
+                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                    detail: last_connectivity_error
+                        .unwrap_or_else(|| "no recipient fanout attempt executed".to_string()),
+                }
+                .into(),
+            );
         }
         if !failed_fanout.is_empty() {
             return Err(super::error::WorkflowError::DeliveryFanoutUnavailable {
@@ -950,12 +953,9 @@ fn select_pending_channel_invitation(
         .cloned()
         .collect();
 
-    if let Some(exact) = candidates
-        .iter()
-        .find(|invitation| {
-            channel_id_from_pending_channel_invitation(invitation) == Some(requested_channel_id)
-        })
-    {
+    if let Some(exact) = candidates.iter().find(|invitation| {
+        channel_id_from_pending_channel_invitation(invitation) == Some(requested_channel_id)
+    }) {
         return Some(exact.clone());
     }
 
@@ -980,10 +980,15 @@ async fn try_join_via_pending_channel_invitation(
     else {
         return Ok(false);
     };
-    let invited_channel_id = channel_id_from_pending_channel_invitation(&invitation)
-        .ok_or_else(|| AuraError::invalid("pending channel invitation missing invited channel id"))?;
+    let invited_channel_id =
+        channel_id_from_pending_channel_invitation(&invitation).ok_or_else(|| {
+            AuraError::invalid("pending channel invitation missing invited channel id")
+        })?;
 
-    if let Err(error) = runtime.accept_invitation(invitation.invitation_id.as_str()).await {
+    if let Err(error) = runtime
+        .accept_invitation(invitation.invitation_id.as_str())
+        .await
+    {
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
             return Err(
                 super::error::runtime_call("accept pending channel invitation", error).into(),
@@ -1516,9 +1521,9 @@ pub(crate) async fn authoritative_local_channel_id_for_context(
         if channel.context_id != Some(context_id) {
             return false;
         }
-        normalized_name_hint.as_ref().is_none_or(|name_hint| {
-            normalize_channel_name(&channel.name) == *name_hint
-        })
+        normalized_name_hint
+            .as_ref()
+            .is_none_or(|name_hint| normalize_channel_name(&channel.name) == *name_hint)
     }) {
         return Some(channel.id);
     }
@@ -1783,14 +1788,11 @@ async fn warm_channel_connectivity(
     channel_id: ChannelId,
     context_id: ContextId,
 ) -> bool {
-    let policy = match workflow_retry_policy(
-        8,
-        Duration::from_millis(150),
-        Duration::from_millis(750),
-    ) {
-        Ok(policy) => policy,
-        Err(_) => return false,
-    };
+    let policy =
+        match workflow_retry_policy(8, Duration::from_millis(150), Duration::from_millis(750)) {
+            Ok(policy) => policy,
+            Err(_) => return false,
+        };
     let result = execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         let recipients =
             recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
@@ -2242,7 +2244,11 @@ pub async fn create_channel_with_authoritative_binding(
     .await;
 
     match &result {
-        Ok(_) => owner.publish_phase(SemanticOperationPhase::Succeeded).await?,
+        Ok(_) => {
+            owner
+                .publish_phase(SemanticOperationPhase::Succeeded)
+                .await?
+        }
         Err(error) => {
             owner
                 .publish_failure(
@@ -2284,7 +2290,9 @@ pub async fn join_channel(
             .await
             .unwrap_or(false);
         if intent_error_is_not_found(&error) && !canonical_state_exists {
-            return Err(JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error());
+            return Err(
+                JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
+            );
         }
         if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists
             && !canonical_state_exists
@@ -2348,7 +2356,11 @@ pub async fn join_channel_by_name_with_instance(
 
 #[aura_macros::semantic_owner(
     owner = "join_channel_by_name_with_instance",
-    terminal = "publish_failure",
+    terminal = "publish_success_with",
+    postcondition = "channel_membership_ready",
+    proof = crate::workflows::semantic_facts::ChannelMembershipReadyProof,
+    depends_on = "channel_target_resolved,authoritative_context_materialized",
+    child_ops = "",
     category = "move_owned"
 )]
 async fn join_channel_by_name_owned(
@@ -2393,14 +2405,18 @@ async fn join_channel_by_name_owned(
         if !channel_exists_locally {
             create_channel(app_core, channel_name, None, &known_members, 0, 0).await?;
         }
-        owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
+        owner
+            .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
+            .await?;
         return Ok(());
     }
 
     if !channel_exists_locally
         && try_join_via_pending_channel_invitation(app_core, channel_id).await?
     {
-        owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
+        owner
+            .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
+            .await?;
         return Ok(());
     }
 
@@ -2438,7 +2454,9 @@ async fn join_channel_by_name_owned(
             _error
         );
     }
-    owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
+    owner
+        .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
+        .await?;
     Ok(())
 }
 
@@ -2482,7 +2500,8 @@ pub async fn leave_channel_by_name(
 ) -> Result<(), AuraError> {
     let mut candidate_ids = matching_chat_channel_ids(app_core, channel_name).await;
     if candidate_ids.is_empty() {
-        candidate_ids.push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
+        candidate_ids
+            .push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
     }
 
     // Channel views can transiently carry duplicate IDs for the same display name
@@ -2753,20 +2772,21 @@ async fn send_message_ref_owned(
 
     let (channel_id, channel_label) = match &channel {
         ChannelRef::Id(id) => (*id, id.to_string()),
-        ChannelRef::Name(name) => match resolve_chat_channel_id_from_state_or_input(app_core, name).await
-        {
-            Ok(channel_id) => (channel_id, name.clone()),
-            Err(error) => {
-                return fail_send_message(
-                    owner,
-                    SendMessageError::ChannelResolution {
-                        channel: name.clone(),
-                        detail: error.to_string(),
-                    },
-                )
-                .await;
+        ChannelRef::Name(name) => {
+            match resolve_chat_channel_id_from_state_or_input(app_core, name).await {
+                Ok(channel_id) => (channel_id, name.clone()),
+                Err(error) => {
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::ChannelResolution {
+                            channel: name.clone(),
+                            detail: error.to_string(),
+                        },
+                    )
+                    .await;
+                }
             }
-        },
+        }
     };
 
     let backend = messaging_backend(app_core).await;
@@ -3081,7 +3101,9 @@ async fn send_message_ref_owned(
     })
     .await?;
 
-    owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
+    owner
+        .publish_phase(SemanticOperationPhase::Succeeded)
+        .await?;
 
     Ok(message_id)
 }
@@ -3373,7 +3395,11 @@ pub async fn invite_user_to_channel_with_context(
 
 #[aura_macros::semantic_owner(
     owner = "invite_user_to_channel_with_context",
-    terminal = "publish_failure",
+    terminal = "publish_success_with",
+    postcondition = "channel_invitation_created",
+    proof = crate::workflows::semantic_facts::ChannelInvitationCreatedProof,
+    depends_on = "target_authority_resolved,channel_target_resolved",
+    child_ops = "",
     category = "move_owned"
 )]
 async fn invite_user_to_channel_with_context_owned(
@@ -3468,7 +3494,13 @@ async fn invite_user_to_channel_with_context_owned(
         }
     }
 
-    result
+    let invitation_id = result?;
+    owner
+        .publish_success_with(issue_channel_invitation_created_proof(
+            invitation_id.clone(),
+        ))
+        .await?;
+    Ok(invitation_id)
 }
 
 /// Invite a canonical authority to a canonical channel.
@@ -3486,17 +3518,7 @@ pub async fn invite_authority_to_channel(
         SemanticOperationKind::InviteActorToChannel,
     );
     invite_authority_to_channel_with_context(
-        app_core,
-        receiver,
-        channel_id,
-        None,
-        None,
-        &owner,
-        None,
-        None,
-        None,
-        message,
-        ttl_ms,
+        app_core, receiver, channel_id, None, None, &owner, None, None, None, message, ttl_ms,
     )
     .await
 }
@@ -3728,6 +3750,47 @@ mod tests {
                     && status.phase == SemanticOperationPhase::Succeeded
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn test_join_channel_success_implies_membership_ready_postcondition() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        join_channel_by_name_with_instance(
+            &app_core,
+            "shared-parity-lab",
+            Some(OperationInstanceId("join-postcondition-1".to_string())),
+        )
+        .await
+        .unwrap();
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        let status = facts.iter().find_map(|fact| match fact {
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id,
+                instance_id,
+                status,
+                ..
+            } if *operation_id == OperationId::join_channel()
+                && instance_id
+                    .as_ref()
+                    .is_some_and(|id| id.0 == "join-postcondition-1") =>
+            {
+                Some(status.clone())
+            }
+            _ => None,
+        });
+        let status = status.expect("join operation status must exist");
+        assert_eq!(status.kind, SemanticOperationKind::JoinChannel);
+        assert_eq!(status.phase, SemanticOperationPhase::Succeeded);
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                if channel.name.as_deref() == Some("shared-parity-lab")
+        )));
     }
 
     #[tokio::test]
@@ -4183,7 +4246,8 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let instance_id = OperationInstanceId("join-channel-2".to_string());
-        let result = join_channel_by_name_with_instance(&app_core, "   ", Some(instance_id.clone())).await;
+        let result =
+            join_channel_by_name_with_instance(&app_core, "   ", Some(instance_id.clone())).await;
         assert!(result.is_err());
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;

@@ -201,8 +201,7 @@ fn reduce_authority_is_deterministic_across_insertion_orders() {
 
     let state_fwd = reduce_authority(&journal_fwd).expect("forward reduction");
     let state_rev = reduce_authority(&journal_rev).expect("reverse reduction");
-    let state_interleaved =
-        reduce_authority(&journal_interleaved).expect("interleaved reduction");
+    let state_interleaved = reduce_authority(&journal_interleaved).expect("interleaved reduction");
 
     // All three must produce identical tree state
     assert_eq!(
@@ -279,5 +278,9 @@ fn journal_join_preserves_all_facts() {
     );
     // merged should have union of both (some overlap at seeds 3,4)
     // A has 5 facts (0..5), B has 5 facts (3..8), union is 8 distinct
-    assert_eq!(merged.size(), 8, "merged journal should have union of facts");
+    assert_eq!(
+        merged.size(),
+        8,
+        "merged journal should have union of facts"
+    );
 }

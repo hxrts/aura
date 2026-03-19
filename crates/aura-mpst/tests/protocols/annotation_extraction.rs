@@ -68,9 +68,15 @@ fn multiple_annotations_preserve_document_order() {
     let effects = extract_aura_annotations(choreography).expect("extract annotations");
 
     // Find the indices of each effect type for Alice
-    let guard_idx = effects.iter().position(|e| matches!(e, AuraEffect::GuardCapability { .. }));
-    let cost_idx = effects.iter().position(|e| matches!(e, AuraEffect::FlowCost { .. }));
-    let leak_idx = effects.iter().position(|e| matches!(e, AuraEffect::Leakage { .. }));
+    let guard_idx = effects
+        .iter()
+        .position(|e| matches!(e, AuraEffect::GuardCapability { .. }));
+    let cost_idx = effects
+        .iter()
+        .position(|e| matches!(e, AuraEffect::FlowCost { .. }));
+    let leak_idx = effects
+        .iter()
+        .position(|e| matches!(e, AuraEffect::Leakage { .. }));
 
     assert!(guard_idx.is_some(), "guard_capability must be extracted");
     assert!(cost_idx.is_some(), "flow_cost must be extracted");

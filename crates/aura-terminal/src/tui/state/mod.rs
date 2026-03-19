@@ -771,7 +771,12 @@ mod tests {
             None,
             OperationState::Succeeded,
         );
-        state.set_authoritative_operation_state(operation_id, None, None, OperationState::Submitting);
+        state.set_authoritative_operation_state(
+            operation_id,
+            None,
+            None,
+            OperationState::Submitting,
+        );
 
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Submitting);
@@ -849,13 +854,17 @@ mod tests {
 
         state.set_authoritative_operation_state(
             operation_id.clone(),
-            Some(OperationInstanceId("tui-op-invitation_accept-3".to_string())),
+            Some(OperationInstanceId(
+                "tui-op-invitation_accept-3".to_string(),
+            )),
             None,
             OperationState::Submitting,
         );
         state.set_authoritative_operation_state(
             operation_id,
-            Some(OperationInstanceId("tui-op-invitation_accept-2".to_string())),
+            Some(OperationInstanceId(
+                "tui-op-invitation_accept-2".to_string(),
+            )),
             None,
             OperationState::Succeeded,
         );
@@ -876,7 +885,9 @@ mod tests {
 
         state.set_authoritative_operation_state(
             operation_id.clone(),
-            Some(OperationInstanceId("tui-op-invitation_accept-2".to_string())),
+            Some(OperationInstanceId(
+                "tui-op-invitation_accept-2".to_string(),
+            )),
             Some(SemanticOperationCausality::new(
                 aura_core::OwnerEpoch::new(0),
                 aura_core::PublicationSequence::new(5),
@@ -885,7 +896,9 @@ mod tests {
         );
         state.set_authoritative_operation_state(
             operation_id,
-            Some(OperationInstanceId("tui-op-invitation_accept-9".to_string())),
+            Some(OperationInstanceId(
+                "tui-op-invitation_accept-9".to_string(),
+            )),
             Some(SemanticOperationCausality::new(
                 aura_core::OwnerEpoch::new(0),
                 aura_core::PublicationSequence::new(4),

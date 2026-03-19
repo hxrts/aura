@@ -782,7 +782,8 @@ impl CommandResolver {
             }
             ResolvedCommand::Ban { target, reason } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel = self.resolve_current_channel(snapshot, Some(hint), "ban", false)?;
+                    let channel =
+                        self.resolve_current_channel(snapshot, Some(hint), "ban", false)?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -883,7 +884,8 @@ impl CommandResolver {
             }
             ResolvedCommand::Op { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel = self.resolve_current_channel(snapshot, Some(hint), "op", false)?;
+                    let channel =
+                        self.resolve_current_channel(snapshot, Some(hint), "op", false)?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -1417,7 +1419,9 @@ async fn execute_membership(
             channel,
         } => match channel {
             ChannelResolveOutcome::Existing { channel_id, .. } => {
-                messaging::join_channel(app_core, channel_id.0).await.map(|_| ())
+                messaging::join_channel(app_core, channel_id.0)
+                    .await
+                    .map(|_| ())
             }
             ChannelResolveOutcome::WillCreate { .. } => {
                 messaging::join_channel_by_name(app_core, channel_name)
@@ -1497,14 +1501,8 @@ async fn execute_moderation(
         }
         ResolvedCommand::Invite { target } => {
             let channel_id = scope_channel_id(&plan.scope, "invite")?;
-            messaging::invite_authority_to_channel(
-                app_core,
-                target.0,
-                channel_id.0,
-                None,
-                None,
-            )
-            .await?;
+            messaging::invite_authority_to_channel(app_core, target.0, channel_id.0, None, None)
+                .await?;
             Ok(Some("invitation sent".to_string()))
         }
         _ => Err(AuraError::invalid("invalid moderation command")),
@@ -1746,8 +1744,7 @@ mod tests {
     use crate::{
         signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
         ui_contract::{
-            AuthoritativeSemanticFact, OperationId, SemanticOperationKind,
-            SemanticOperationPhase,
+            AuthoritativeSemanticFact, OperationId, SemanticOperationKind, SemanticOperationPhase,
         },
         workflows::signals::read_signal_or_default,
     };

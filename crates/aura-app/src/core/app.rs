@@ -354,8 +354,7 @@ impl AppCore {
         // Idempotent init: check the *last* signal registered by
         // register_app_signals so that a partial registration (e.g. chat
         // registered but later signals failed) is detected and retried.
-        let sentinel_id =
-            (*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).id();
+        let sentinel_id = (*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).id();
         if self.reactive.is_registered(sentinel_id) {
             return Ok(());
         }
@@ -773,10 +772,10 @@ impl AppCore {
         &self,
     ) -> Result<
         Option<(
-        SettingsBridgeState,
-        Vec<BridgeDeviceInfo>,
-        Vec<BridgeAuthorityInfo>,
-    )>,
+            SettingsBridgeState,
+            Vec<BridgeDeviceInfo>,
+            Vec<BridgeAuthorityInfo>,
+        )>,
         IntentError,
     > {
         let Some(runtime) = self.runtime.as_ref() else {

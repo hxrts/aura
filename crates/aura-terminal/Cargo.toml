@@ -21,10 +21,12 @@ required-features = ["terminal"]
 
 [[test]]
 name = "demo_peer_count"
+path = "tests/demo/demo_peer_count.rs"
 required-features = ["development"]
 
 [[test]]
 name = "demo_amp_channel_echo"
+path = "tests/demo/demo_amp_channel_echo.rs"
 required-features = ["development"]
 
 [[test]]

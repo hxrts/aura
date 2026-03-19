@@ -165,14 +165,16 @@ impl SettingsCallbacks {
                     .await;
 
                     let status_handle = start.status_handle.clone();
-                    ctx.remember_key_rotation_ceremony(start.cancel_handle).await;
+                    ctx.remember_key_rotation_ceremony(start.cancel_handle)
+                        .await;
 
                     // Prime status quickly (best-effort) so the modal has counters immediately.
-                    if let Ok(status) = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
-                        ctx.app_core_raw(),
-                        &status_handle,
-                    )
-                    .await
+                    if let Ok(status) =
+                        aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                            ctx.app_core_raw(),
+                            &status_handle,
+                        )
+                        .await
                     {
                         send_ui_update_required(
                             &tx,

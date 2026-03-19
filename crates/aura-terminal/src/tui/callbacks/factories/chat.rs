@@ -83,7 +83,7 @@ impl ChatCallbacks {
                                 "accept_pending_channel_invitation callback panicked: {message}"
                             )
                         } else {
-                                "accept_pending_channel_invitation callback panicked".to_string()
+                            "accept_pending_channel_invitation callback panicked".to_string()
                         };
                         send_ui_update_reliable(
                             &tx,
@@ -110,9 +110,8 @@ impl ChatCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 let operation_instance_id = operation.map(|operation| {
                     let operation_instance_id = operation.harness_handle().instance_id().clone();
-                    let _ = operation.handoff_to_app_workflow(
-                        SemanticOperationTransferScope::SendChatMessage,
-                    );
+                    let _ = operation
+                        .handoff_to_app_workflow(SemanticOperationTransferScope::SendChatMessage);
                     operation_instance_id
                 });
 
@@ -485,38 +484,41 @@ impl ChatCallbacks {
     }
 
     fn make_join_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> JoinChannelCallback {
-        Arc::new(move |channel_name: String, operation: Option<WorkflowHandoffOperationOwner>| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let app_core = ctx.app_core_raw().clone();
-            spawn_ctx(ctx.clone(), async move {
-                let operation_instance_id = operation
-                    .as_ref()
-                    .map(|operation| operation.harness_handle().instance_id().clone());
-                if let Some(operation) = operation {
-                    let _ = operation.handoff_to_app_workflow(SemanticOperationTransferScope::JoinChannel);
-                }
-                match aura_app::ui::workflows::messaging::join_channel_by_name_with_instance(
-                    &app_core,
-                    &channel_name,
-                    operation_instance_id,
-                )
-                .await
-                {
-                    Ok(()) => {}
-                    Err(error) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "chat",
-                                format!("Join channel failed: {error}"),
-                            )),
-                        )
-                        .await;
+        Arc::new(
+            move |channel_name: String, operation: Option<WorkflowHandoffOperationOwner>| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let app_core = ctx.app_core_raw().clone();
+                spawn_ctx(ctx.clone(), async move {
+                    let operation_instance_id = operation
+                        .as_ref()
+                        .map(|operation| operation.harness_handle().instance_id().clone());
+                    if let Some(operation) = operation {
+                        let _ = operation
+                            .handoff_to_app_workflow(SemanticOperationTransferScope::JoinChannel);
                     }
-                }
-            });
-        })
+                    match aura_app::ui::workflows::messaging::join_channel_by_name_with_instance(
+                        &app_core,
+                        &channel_name,
+                        operation_instance_id,
+                    )
+                    .await
+                    {
+                        Ok(()) => {}
+                        Err(error) => {
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "chat",
+                                    format!("Join channel failed: {error}"),
+                                )),
+                            )
+                            .await;
+                        }
+                    }
+                });
+            },
+        )
     }
 
     fn make_list_participants(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {

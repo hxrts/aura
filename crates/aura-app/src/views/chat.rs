@@ -419,7 +419,9 @@ impl ChatState {
             merge_channel_projection(&mut canonical, previous);
         }
 
-        let mut merged_messages = next_channel_messages.remove(&canonical.id).unwrap_or_default();
+        let mut merged_messages = next_channel_messages
+            .remove(&canonical.id)
+            .unwrap_or_default();
         if let Some(mut previous_messages) = next_channel_messages.remove(from) {
             for message in &mut previous_messages {
                 message.channel_id = canonical.id;
@@ -961,7 +963,10 @@ mod tests {
 
         // Should return None for unknown channel
         let count = state.mark_finalized_up_to_epoch(&unknown_channel, 10);
-        assert_eq!(count, None, "unknown channel should return None, not Some(0)");
+        assert_eq!(
+            count, None,
+            "unknown channel should return None, not Some(0)"
+        );
     }
 
     #[test]
@@ -1090,7 +1095,10 @@ mod tests {
         let canonical = state
             .channel(&canonical_id)
             .expect("canonical channel present");
-        assert_eq!(canonical.context_id, Some(ContextId::new_from_entropy([1u8; 32])));
+        assert_eq!(
+            canonical.context_id,
+            Some(ContextId::new_from_entropy([1u8; 32]))
+        );
         assert_eq!(canonical.topic.as_deref(), Some("stale"));
         assert_eq!(canonical.unread_count, 3);
         assert_eq!(canonical.last_finalized_epoch, 3);

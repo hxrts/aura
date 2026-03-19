@@ -1,8 +1,7 @@
 use crate::{
     effects::task::{CancellationToken, NeverCancel, TaskSpawner},
     effects::{CapabilityKey, CapabilityTokenRequest},
-    AuraError, ProtocolErrorCode,
-    TimeoutBudget,
+    AuraError, ProtocolErrorCode, TimeoutBudget,
 };
 use futures::future::{BoxFuture, LocalBoxFuture};
 use serde::{Deserialize, Serialize};
@@ -84,6 +83,103 @@ impl SemanticOwnerProtocol {
 
     pub const fn best_effort_policy(self) -> SemanticOwnerBestEffortPolicy {
         self.best_effort_policy
+    }
+}
+
+/// Declared authoritative postcondition for a semantic owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SemanticOwnerPostcondition {
+    name: &'static str,
+}
+
+impl SemanticOwnerPostcondition {
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+}
+
+/// Typed proof that a semantic owner's declared postcondition now holds.
+///
+/// Proofs are witnesses of state truth, not authority tokens. They should be
+/// minted only by sanctioned capability-gated helpers after the authoritative
+/// state transition has actually been established.
+pub trait SemanticSuccessProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition;
+}
+
+/// Declared dependency edge for a semantic owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SemanticOwnerDependency {
+    name: &'static str,
+}
+
+impl SemanticOwnerDependency {
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+}
+
+/// Declared child-operation allowance for a semantic owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SemanticOwnerChildOperation {
+    name: &'static str,
+}
+
+impl SemanticOwnerChildOperation {
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+}
+
+/// Sanctioned child-operation spawner for semantic owners that must delegate
+/// required continuation work into an explicit child operation.
+#[derive(Clone)]
+pub struct ChildOperationSpawner {
+    inner: OwnedTaskSpawner,
+}
+
+impl std::fmt::Debug for ChildOperationSpawner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChildOperationSpawner")
+            .finish_non_exhaustive()
+    }
+}
+
+impl ChildOperationSpawner {
+    pub fn new(inner: OwnedTaskSpawner) -> Self {
+        Self { inner }
+    }
+
+    pub fn shutdown_token(&self) -> &OwnedShutdownToken {
+        self.inner.shutdown_token()
+    }
+
+    pub fn spawn_child_operation(
+        &self,
+        _child: SemanticOwnerChildOperation,
+        fut: BoxFuture<'static, ()>,
+    ) {
+        self.inner.spawn(fut);
+    }
+
+    pub fn spawn_local_child_operation(
+        &self,
+        _child: SemanticOwnerChildOperation,
+        fut: LocalBoxFuture<'static, ()>,
+    ) {
+        self.inner.spawn_local(fut);
     }
 }
 
@@ -613,12 +709,7 @@ impl<Domain, Message, HandleId> SupervisionRegistration<Domain, Message, HandleI
         &self.handle
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        ActorDeclaration<Domain, Message>,
-        OwnedTaskHandle<HandleId>,
-    ) {
+    pub fn into_parts(self) -> (ActorDeclaration<Domain, Message>, OwnedTaskHandle<HandleId>) {
         (self.declaration, self.handle)
     }
 }
@@ -936,11 +1027,8 @@ impl<OperationId, InstanceId, Trace> OperationContext<OperationId, InstanceId, T
         InstanceId: Clone,
         Trace: Clone,
     {
-        let publication = AuthorizedProgressPublication::authorize(
-            capability,
-            self.metadata(),
-            progress,
-        );
+        let publication =
+            AuthorizedProgressPublication::authorize(capability, self.metadata(), progress);
         self.publication_sequence = self.publication_sequence.next();
         publication
     }
@@ -1009,8 +1097,13 @@ pub trait OwnerPublication: sealed::Sealed {
     fn trace_context(&self) -> &Self::Trace;
 }
 
-impl<OperationId, InstanceId, Trace> sealed::Sealed for OperationContext<OperationId, InstanceId, Trace> {}
-impl<OperationId, InstanceId, Trace> OwnerAwait for OperationContext<OperationId, InstanceId, Trace> {
+impl<OperationId, InstanceId, Trace> sealed::Sealed
+    for OperationContext<OperationId, InstanceId, Trace>
+{
+}
+impl<OperationId, InstanceId, Trace> OwnerAwait
+    for OperationContext<OperationId, InstanceId, Trace>
+{
     fn owned_shutdown_token(&self) -> &OwnedShutdownToken {
         self.shutdown_token()
     }
@@ -1073,9 +1166,8 @@ pub mod capability_gated {
         issue_operation_context, ownership_capability_token_request_for,
         ActorIngressMutationCapability, AuthorizedActorIngressMutation,
         AuthorizedProgressPublication, AuthorizedReadinessPublication,
-        AuthorizedTerminalPublication, LifecyclePublicationCapability,
-        OperationContextCapability, OwnershipCapability, OwnershipTransferCapability,
-        ReadinessPublicationCapability,
+        AuthorizedTerminalPublication, LifecyclePublicationCapability, OperationContextCapability,
+        OwnershipCapability, OwnershipTransferCapability, ReadinessPublicationCapability,
     };
 }
 
@@ -1231,6 +1323,10 @@ ownership_capability_wrapper!(
 ownership_capability_wrapper!(
     /// Capability required to publish authoritative readiness updates.
     ReadinessPublicationCapability
+);
+ownership_capability_wrapper!(
+    /// Capability required to mint typed semantic postcondition proofs.
+    PostconditionProofCapability
 );
 ownership_capability_wrapper!(
     /// Capability required to mutate actor-owned state through sanctioned ingress.
@@ -1459,9 +1555,9 @@ mod tests {
         issue_operation_context, issue_operation_handle, issue_owner_token,
         ActorIngressMutationCapability, AuthorizedActorIngressMutation,
         AuthorizedReadinessPublication, LifecyclePublicationCapability, OperationContextCapability,
-        OperationProgress, OperationTimeoutBudget, OwnedShutdownToken, OwnershipCapability,
-        OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
-        OwnershipTransferCapability, OwnerEpoch, PublicationSequence, ReadinessPublicationCapability,
+        OperationProgress, OperationTimeoutBudget, OwnedShutdownToken, OwnerEpoch,
+        OwnershipCapability, OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
+        OwnershipTransferCapability, PublicationSequence, ReadinessPublicationCapability,
         TerminalOutcome, Terminality, TraceContext,
     };
     use crate::{effects::CapabilityKey, AuraError, ProtocolErrorCode};
@@ -1594,7 +1690,10 @@ mod tests {
             .begin_terminal::<(), &'static str>(&capability)
             .succeed(());
         assert_eq!(terminal.capability().as_str(), "semantic:lifecycle");
-        assert!(matches!(terminal.outcome(), TerminalOutcome::Succeeded { .. }));
+        assert!(matches!(
+            terminal.outcome(),
+            TerminalOutcome::Succeeded { .. }
+        ));
     }
 
     #[test]

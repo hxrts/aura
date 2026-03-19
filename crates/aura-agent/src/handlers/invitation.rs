@@ -2756,8 +2756,7 @@ async fn execute_notify_peer(
     };
 
     if best_effort_network_failures {
-        best_effort_send_envelope(effects, "notify peer with invitation failed", envelope)
-            .await?;
+        best_effort_send_envelope(effects, "notify peer with invitation failed", envelope).await?;
     } else {
         effects.send_envelope(envelope).await.map_err(|e| {
             AgentError::effects(format!("Failed to notify peer with invitation: {e}"))

@@ -107,7 +107,10 @@ fn encoding_changes_when_content_changes() {
     let bytes_b = try_encode_fact(&type_id, version, &fact_b).expect("encode b");
     let bytes_c = try_encode_fact(&type_id, version, &fact_c).expect("encode c");
 
-    assert_ne!(bytes_a, bytes_b, "different id must produce different bytes");
+    assert_ne!(
+        bytes_a, bytes_b,
+        "different id must produce different bytes"
+    );
     assert_ne!(
         bytes_a, bytes_c,
         "different payload must produce different bytes"
@@ -130,8 +133,7 @@ fn encoding_content_hash_is_pinned() {
     let content_hash = hash::hash(&bytes);
 
     // Roundtrip must be exact
-    let decoded: TestFact =
-        try_decode_fact(&type_id, version, &bytes).expect("decode");
+    let decoded: TestFact = try_decode_fact(&type_id, version, &bytes).expect("decode");
     assert_eq!(decoded, fact);
 
     // The encoding must be deterministic so the hash is stable
@@ -145,9 +147,5 @@ fn encoding_content_hash_is_pinned() {
     // Pin the byte length as a coarse drift detector. A changed length
     // definitively means the encoding changed.
     let pinned_len = bytes.len();
-    assert_eq!(
-        bytes.len(),
-        pinned_len,
-        "encoding length must be stable"
-    );
+    assert_eq!(bytes.len(), pinned_len, "encoding length must be stable");
 }

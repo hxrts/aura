@@ -1691,8 +1691,8 @@ mod tests {
         // Tree state should be retrievable (empty but deterministic)
         let state = effect_system.get_current_state().await.unwrap();
         assert_eq!(state.epoch, aura_core::Epoch::initial()); // fresh tree starts at epoch 0
-        // An empty tree legitimately has a zero root commitment — the important
-        // thing is that the handler responds without error.
+                                                              // An empty tree legitimately has a zero root commitment — the important
+                                                              // thing is that the handler responds without error.
         assert_eq!(
             state.root_commitment, [0u8; 32],
             "empty tree should have zero root commitment"

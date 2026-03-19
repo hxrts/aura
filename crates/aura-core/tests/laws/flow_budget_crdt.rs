@@ -372,7 +372,6 @@ mod convergence_tests {
     /// send) can only happen after a successful budget charge.
     #[test]
     fn no_observable_without_successful_charge() {
-
         let mut budget = FlowBudget::new(50, Epoch::initial());
 
         // Successful charge within budget

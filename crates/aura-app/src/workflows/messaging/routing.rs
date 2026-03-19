@@ -116,9 +116,13 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
     }
 
     let chat = chat_snapshot(app_core).await;
-    if let Some((channel, _)) =
-        resolve_matching_chat_channel_candidate(&chat, raw, &raw_lower, normalized_name, &normalized_lower)
-    {
+    if let Some((channel, _)) = resolve_matching_chat_channel_candidate(
+        &chat,
+        raw,
+        &raw_lower,
+        normalized_name,
+        &normalized_lower,
+    ) {
         return Ok(channel.id);
     }
 

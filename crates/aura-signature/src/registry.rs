@@ -406,10 +406,7 @@ mod tests {
         let unknown_id = AuthorityId::new_from_entropy([99u8; 32]);
 
         let result = verifier.verify_authority(unknown_id);
-        assert!(
-            result.is_err(),
-            "unregistered authority must be rejected"
-        );
+        assert!(result.is_err(), "unregistered authority must be rejected");
     }
 
     /// Idempotent status update (same status) must succeed.

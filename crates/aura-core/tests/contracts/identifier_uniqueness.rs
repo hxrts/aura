@@ -513,7 +513,10 @@ fn pinned_authority_id_from_entropy() {
 
     // Different entropy must produce different result
     let a3 = AuthorityId::new_from_entropy([43u8; 32]);
-    assert_ne!(a1, a3, "different entropy must produce different AuthorityId");
+    assert_ne!(
+        a1, a3,
+        "different entropy must produce different AuthorityId"
+    );
 }
 
 // ============================================================================

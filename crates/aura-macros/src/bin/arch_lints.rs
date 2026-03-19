@@ -7,7 +7,10 @@ use std::process::Command;
 use proc_macro2::Span;
 use quote::ToTokens;
 use syn::spanned::Spanned;
-use syn::{Attribute, Expr, ExprLit, File, ImplItem, Item, ItemConst, ItemFn, ItemImpl, ItemStruct, Lit, Meta};
+use syn::{
+    Attribute, Expr, ExprLit, File, ImplItem, Item, ItemConst, ItemFn, ItemImpl, ItemStruct, Lit,
+    Meta,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LintMode {
@@ -124,10 +127,7 @@ fn run() -> Result<(), String> {
         for violation in violations {
             eprintln!("{violation}");
         }
-        return Err(format!(
-            "{} violations remain",
-            mode.display_name()
-        ));
+        return Err(format!("{} violations remain", mode.display_name()));
     }
 
     println!("{}: clean", mode.display_name());
@@ -174,8 +174,9 @@ fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     for entry in fs::read_dir(path)
         .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
     {
-        let entry = entry
-            .map_err(|error| format!("failed to read directory entry {}: {error}", path.display()))?;
+        let entry = entry.map_err(|error| {
+            format!("failed to read directory entry {}: {error}", path.display())
+        })?;
         let entry_path = entry.path();
         if entry_path.is_dir() {
             collect_rust_files(&entry_path, files)?;
@@ -234,7 +235,9 @@ fn scan_effect_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
                     violations.push(format_violation(
                         file,
                         item_trait.ident.span(),
-                        format!("infrastructure effect trait `{name}` must be defined in aura-core"),
+                        format!(
+                            "infrastructure effect trait `{name}` must be defined in aura-core"
+                        ),
                     ));
                 }
             }
@@ -256,11 +259,16 @@ fn scan_effect_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
                     ));
                 }
 
-                if APP_EFFECT_TRAITS.contains(&trait_name.as_str()) && in_aura_effects && !is_test_like {
+                if APP_EFFECT_TRAITS.contains(&trait_name.as_str())
+                    && in_aura_effects
+                    && !is_test_like
+                {
                     violations.push(format_violation(
                         file,
                         item_impl.impl_token.span,
-                        format!("application effect impl `{trait_name}` must not live in aura-effects"),
+                        format!(
+                            "application effect impl `{trait_name}` must not live in aura-effects"
+                        ),
                     ));
                 }
             }
@@ -298,14 +306,20 @@ fn scan_effect_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
         scan_line_patterns(
             file,
             source,
-            &[("tokio::", "direct tokio usage is outside the allowed runtime-aware layers")],
+            &[(
+                "tokio::",
+                "direct tokio usage is outside the allowed runtime-aware layers",
+            )],
             &ignored_lines,
             &mut violations,
         );
         scan_line_patterns(
             file,
             source,
-            &[("async_std::", "direct async-std usage is outside the allowed runtime-aware layers")],
+            &[(
+                "async_std::",
+                "direct async-std usage is outside the allowed runtime-aware layers",
+            )],
             &ignored_lines,
             &mut violations,
         );
@@ -316,8 +330,14 @@ fn scan_effect_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
             file,
             source,
             &[
-                ("tokio::", "aura-app runtime-neutral source may not use tokio directly"),
-                ("async_std::", "aura-app runtime-neutral source may not use async-std directly"),
+                (
+                    "tokio::",
+                    "aura-app runtime-neutral source may not use tokio directly",
+                ),
+                (
+                    "async_std::",
+                    "aura-app runtime-neutral source may not use async-std directly",
+                ),
             ],
             &ignored_lines,
             &mut violations,
@@ -329,8 +349,14 @@ fn scan_effect_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
             file,
             source,
             &[
-                ("tokio::", "aura-sync runtime-neutral source may not use tokio directly"),
-                ("async_std::", "aura-sync runtime-neutral source may not use async-std directly"),
+                (
+                    "tokio::",
+                    "aura-sync runtime-neutral source may not use tokio directly",
+                ),
+                (
+                    "async_std::",
+                    "aura-sync runtime-neutral source may not use async-std directly",
+                ),
             ],
             &ignored_lines,
             &mut violations,
@@ -358,25 +384,82 @@ fn scan_impure_escapes(file: &Path, source: &str, syntax: &File) -> Vec<String> 
         file,
         source,
         &[
-            ("std::fs::", "direct std::fs usage must go through storage effects"),
-            ("std::io::File", "direct file I/O must go through storage effects"),
-            ("std::io::BufReader", "direct file I/O must go through storage effects"),
-            ("std::io::BufWriter", "direct file I/O must go through storage effects"),
-            ("std::net::", "direct std::net usage must go through network effects"),
-            ("TcpStream", "direct TcpStream usage must go through network effects"),
-            ("TcpListener", "direct TcpListener usage must go through network effects"),
-            ("UdpSocket", "direct UdpSocket usage must go through network effects"),
-            ("SystemTime::now", "wall-clock access must go through time effects"),
-            ("Instant::now", "monotonic time access must go through time effects"),
-            ("chrono::Utc::now", "wall-clock access must go through time effects"),
-            ("chrono::Local::now", "wall-clock access must go through time effects"),
-            ("tokio::time::sleep", "sleep must go through shared time helpers or effect traits"),
-            ("std::thread::sleep", "sleep must go through shared time helpers or effect traits"),
-            ("async_std::task::sleep", "sleep must go through shared time helpers or effect traits"),
-            ("rand::thread_rng", "randomness must go through randomness effects"),
-            ("thread_rng()", "randomness must go through randomness effects"),
-            ("rand::random", "randomness must go through randomness effects"),
-            ("uuid::Uuid::new_v4", "UUID generation must go through the approved wrapper/effect"),
+            (
+                "std::fs::",
+                "direct std::fs usage must go through storage effects",
+            ),
+            (
+                "std::io::File",
+                "direct file I/O must go through storage effects",
+            ),
+            (
+                "std::io::BufReader",
+                "direct file I/O must go through storage effects",
+            ),
+            (
+                "std::io::BufWriter",
+                "direct file I/O must go through storage effects",
+            ),
+            (
+                "std::net::",
+                "direct std::net usage must go through network effects",
+            ),
+            (
+                "TcpStream",
+                "direct TcpStream usage must go through network effects",
+            ),
+            (
+                "TcpListener",
+                "direct TcpListener usage must go through network effects",
+            ),
+            (
+                "UdpSocket",
+                "direct UdpSocket usage must go through network effects",
+            ),
+            (
+                "SystemTime::now",
+                "wall-clock access must go through time effects",
+            ),
+            (
+                "Instant::now",
+                "monotonic time access must go through time effects",
+            ),
+            (
+                "chrono::Utc::now",
+                "wall-clock access must go through time effects",
+            ),
+            (
+                "chrono::Local::now",
+                "wall-clock access must go through time effects",
+            ),
+            (
+                "tokio::time::sleep",
+                "sleep must go through shared time helpers or effect traits",
+            ),
+            (
+                "std::thread::sleep",
+                "sleep must go through shared time helpers or effect traits",
+            ),
+            (
+                "async_std::task::sleep",
+                "sleep must go through shared time helpers or effect traits",
+            ),
+            (
+                "rand::thread_rng",
+                "randomness must go through randomness effects",
+            ),
+            (
+                "thread_rng()",
+                "randomness must go through randomness effects",
+            ),
+            (
+                "rand::random",
+                "randomness must go through randomness effects",
+            ),
+            (
+                "uuid::Uuid::new_v4",
+                "UUID generation must go through the approved wrapper/effect",
+            ),
         ],
         &ignored_lines,
         &mut violations,
@@ -397,11 +480,26 @@ fn scan_concurrency(file: &Path, source: &str, syntax: &File) -> Vec<String> {
         file,
         source,
         &[
-            ("tokio::task::block_in_place", "blocking bridge is forbidden in protected modules"),
-            ("Handle::current().block_on", "Handle::current().block_on is forbidden in protected modules"),
-            ("mpsc::unbounded_channel(", "unbounded channels are forbidden in protected modules"),
-            ("async_channel::unbounded(", "unbounded channels are forbidden in protected modules"),
-            ("mpsc::unbounded(", "unbounded channels are forbidden in protected modules"),
+            (
+                "tokio::task::block_in_place",
+                "blocking bridge is forbidden in protected modules",
+            ),
+            (
+                "Handle::current().block_on",
+                "Handle::current().block_on is forbidden in protected modules",
+            ),
+            (
+                "mpsc::unbounded_channel(",
+                "unbounded channels are forbidden in protected modules",
+            ),
+            (
+                "async_channel::unbounded(",
+                "unbounded channels are forbidden in protected modules",
+            ),
+            (
+                "mpsc::unbounded(",
+                "unbounded channels are forbidden in protected modules",
+            ),
         ],
         &ignored_lines,
         &mut violations,
@@ -422,9 +520,18 @@ fn scan_crypto_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<Strin
         file,
         source,
         &[
-            ("use ed25519_dalek", "ed25519_dalek must stay behind aura-core wrappers"),
-            ("OsRng", "OsRng must stay behind the approved randomness boundary"),
-            ("getrandom::", "getrandom must stay behind the approved randomness boundary"),
+            (
+                "use ed25519_dalek",
+                "ed25519_dalek must stay behind aura-core wrappers",
+            ),
+            (
+                "OsRng",
+                "OsRng must stay behind the approved randomness boundary",
+            ),
+            (
+                "getrandom::",
+                "getrandom must stay behind the approved randomness boundary",
+            ),
         ],
         &ignored_lines,
         &mut violations,
@@ -441,7 +548,10 @@ fn scan_style(file: &Path, source: &str, syntax: &File) -> Vec<String> {
         scan_line_patterns(
             file,
             source,
-            &[("bincode::", "bincode usage is forbidden; use the canonical serialization helpers")],
+            &[(
+                "bincode::",
+                "bincode usage is forbidden; use the canonical serialization helpers",
+            )],
             &ignored_test_lines(syntax),
             &mut violations,
         );
@@ -450,12 +560,20 @@ fn scan_style(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     if path.starts_with("crates/aura-core/src/") {
         for item in &syntax.items {
             match item {
-                Item::Const(item_const) => maybe_flag_constant_without_units(file, item_const, &mut violations),
-                Item::Fn(item_fn) => maybe_flag_builder_without_must_use(file, item_fn, &mut violations),
+                Item::Const(item_const) => {
+                    maybe_flag_constant_without_units(file, item_const, &mut violations)
+                }
+                Item::Fn(item_fn) => {
+                    maybe_flag_builder_without_must_use(file, item_fn, &mut violations)
+                }
                 Item::Impl(item_impl) => {
                     for impl_item in &item_impl.items {
                         if let ImplItem::Fn(method) = impl_item {
-                            maybe_flag_builder_method_without_must_use(file, method, &mut violations);
+                            maybe_flag_builder_method_without_must_use(
+                                file,
+                                method,
+                                &mut violations,
+                            );
                         }
                     }
                 }
@@ -518,7 +636,10 @@ fn maybe_flag_constant_without_units(
     violations: &mut Vec<String>,
 ) {
     let name = item_const.ident.to_string();
-    if !name.chars().all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_') {
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+    {
         return;
     }
 
@@ -582,8 +703,17 @@ fn is_integer_type(ty: &syn::Type) -> bool {
         syn::Type::Path(type_path) => type_path.path.segments.last().is_some_and(|segment| {
             matches!(
                 segment.ident.to_string().as_str(),
-                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64"
-                    | "i128" | "isize"
+                "u8" | "u16"
+                    | "u32"
+                    | "u64"
+                    | "u128"
+                    | "usize"
+                    | "i8"
+                    | "i16"
+                    | "i32"
+                    | "i64"
+                    | "i128"
+                    | "isize"
             )
         }),
         _ => false,
@@ -601,8 +731,8 @@ fn is_integer_literal(expr: &Expr) -> bool {
 
 fn has_allowed_constant_suffix(name: &str) -> bool {
     [
-        "_MS", "_BYTES", "_COUNT", "_SIZE", "_MAX", "_MIN", "_LEN", "_LIMIT", "_DEPTH",
-        "_HEIGHT", "_BITS", "_SECS", "_NANOS",
+        "_MS", "_BYTES", "_COUNT", "_SIZE", "_MAX", "_MIN", "_LEN", "_LIMIT", "_DEPTH", "_HEIGHT",
+        "_BITS", "_SECS", "_NANOS",
     ]
     .iter()
     .any(|suffix| name.ends_with(suffix))
@@ -797,7 +927,11 @@ fn attr_marks_test_scope(attr: &Attribute) -> bool {
     if path.is_ident("test") {
         return true;
     }
-    if path.segments.last().is_some_and(|segment| segment.ident == "test") {
+    if path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "test")
+    {
         return true;
     }
     if path.is_ident("cfg") {
@@ -814,7 +948,9 @@ fn flag_mock_handler_items(file: &Path, item: &Item, violations: &mut Vec<String
                 violations.push(format_violation(
                     file,
                     item_struct.ident.span(),
-                    format!("mock/in-memory handler `{name}` belongs in aura-testkit, not aura-effects"),
+                    format!(
+                        "mock/in-memory handler `{name}` belongs in aura-testkit, not aura-effects"
+                    ),
                 ));
             }
         }
@@ -824,7 +960,9 @@ fn flag_mock_handler_items(file: &Path, item: &Item, violations: &mut Vec<String
                 violations.push(format_violation(
                     file,
                     item_enum.ident.span(),
-                    format!("mock/in-memory handler `{name}` belongs in aura-testkit, not aura-effects"),
+                    format!(
+                        "mock/in-memory handler `{name}` belongs in aura-testkit, not aura-effects"
+                    ),
                 ));
             }
         }
@@ -834,7 +972,9 @@ fn flag_mock_handler_items(file: &Path, item: &Item, violations: &mut Vec<String
                 violations.push(format_violation(
                     file,
                     item_fn.sig.ident.span(),
-                    format!("mock/in-memory handler `{name}` belongs in aura-testkit, not aura-effects"),
+                    format!(
+                        "mock/in-memory handler `{name}` belongs in aura-testkit, not aura-effects"
+                    ),
                 ));
             }
         }

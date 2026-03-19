@@ -9,6 +9,7 @@ use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
+use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, QuiescenceSnapshot, RuntimeFact,
     SemanticOperationPhase, SemanticOperationStatus,
@@ -23,7 +24,6 @@ use aura_app::{
     },
     AppCore,
 };
-use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -2080,7 +2080,10 @@ impl UiController {
         self.runtime_device_enrollment_ceremony
             .lock()
             .ok()
-            .and_then(|mut slot| slot.as_mut().and_then(|ceremony| ceremony.cancel_handle.take()))
+            .and_then(|mut slot| {
+                slot.as_mut()
+                    .and_then(|ceremony| ceremony.cancel_handle.take())
+            })
     }
 
     pub(crate) fn clear_runtime_device_enrollment_ceremony(&self) {

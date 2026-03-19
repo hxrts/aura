@@ -39,8 +39,8 @@ use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
 use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
-    ceremonies as ceremony_workflows, context as context_workflows,
-    settings as settings_workflows, system as system_workflows,
+    ceremonies as ceremony_workflows, context as context_workflows, settings as settings_workflows,
+    system as system_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
@@ -874,9 +874,12 @@ impl IoContext {
     }
 
     pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<CeremonyHandle> {
-        ceremony_workflows::start_device_removal_ceremony(self.app_core.raw(), device_id.to_string())
-            .await
-            .map_err(TerminalError::from)
+        ceremony_workflows::start_device_removal_ceremony(
+            self.app_core.raw(),
+            device_id.to_string(),
+        )
+        .await
+        .map_err(TerminalError::from)
     }
 
     pub async fn import_device_enrollment_code(&self, code: &str) -> TerminalResult<()> {
@@ -1196,7 +1199,10 @@ impl IoContext {
             status_handle: handle.status_handle(),
             cancel_handle: Some(handle),
         };
-        self.ceremony_handles.write().await.insert(ceremony_id, entry);
+        self.ceremony_handles
+            .write()
+            .await
+            .insert(ceremony_id, entry);
     }
 
     pub async fn key_rotation_ceremony_status_handle(
@@ -1222,7 +1228,9 @@ impl IoContext {
             TerminalError::NotFound(format!("Unknown ceremony handle for {ceremony_id}"))
         })?;
         entry.cancel_handle.take().ok_or_else(|| {
-            TerminalError::NotFound(format!("Ceremony handle already consumed for {ceremony_id}"))
+            TerminalError::NotFound(format!(
+                "Ceremony handle already consumed for {ceremony_id}"
+            ))
         })
     }
 

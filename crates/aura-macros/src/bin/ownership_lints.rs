@@ -8,15 +8,19 @@ use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
-    AttrStyle, Block, Expr, ExprAwait, ExprCall, ExprGroup, ExprMethodCall, ExprParen,
-    ExprPath, ExprReference, File, ImplItem, ImplItemFn, Item, ItemFn, ItemStruct, ReturnType,
-    Type, Visibility,
+    AttrStyle, Block, Expr, ExprAwait, ExprCall, ExprGroup, ExprMethodCall, ExprParen, ExprPath,
+    ExprReference, File, ImplItem, ImplItemFn, Item, ItemFn, ItemStruct, Local, MetaNameValue, Pat,
+    ReturnType, Token, Type, Visibility,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LintMode {
     SemanticOwnerBoundedAwaits,
     BestEffortSideEffectBoundary,
+    SemanticOwnerDetachedContinuation,
+    SemanticOwnerNoSpawn,
+    SemanticOwnerProofSuccess,
+    ParityCriticalIgnoredResults,
     ActorOwnedTaskSpawn,
     AsyncSessionOwnership,
     FrontendSemanticHandoffBoundary,
@@ -32,6 +36,10 @@ impl LintMode {
         match value {
             "semantic-owner-bounded-awaits" => Ok(Self::SemanticOwnerBoundedAwaits),
             "best-effort-side-effect-boundary" => Ok(Self::BestEffortSideEffectBoundary),
+            "semantic-owner-detached-continuation" => Ok(Self::SemanticOwnerDetachedContinuation),
+            "semantic-owner-no-spawn" => Ok(Self::SemanticOwnerNoSpawn),
+            "semantic-owner-proof-success" => Ok(Self::SemanticOwnerProofSuccess),
+            "parity-critical-ignored-results" => Ok(Self::ParityCriticalIgnoredResults),
             "actor-owned-task-spawn" => Ok(Self::ActorOwnedTaskSpawn),
             "async-session-ownership" => Ok(Self::AsyncSessionOwnership),
             "frontend-semantic-handoff-boundary" => Ok(Self::FrontendSemanticHandoffBoundary),
@@ -48,6 +56,10 @@ impl LintMode {
         match self {
             Self::SemanticOwnerBoundedAwaits => "semantic-owner-bounded-awaits",
             Self::BestEffortSideEffectBoundary => "best-effort-side-effect-boundary",
+            Self::SemanticOwnerDetachedContinuation => "semantic-owner-detached-continuation",
+            Self::SemanticOwnerNoSpawn => "semantic-owner-no-spawn",
+            Self::SemanticOwnerProofSuccess => "semantic-owner-proof-success",
+            Self::ParityCriticalIgnoredResults => "parity-critical-ignored-results",
             Self::ActorOwnedTaskSpawn => "actor-owned-task-spawn",
             Self::AsyncSessionOwnership => "async-session-ownership",
             Self::FrontendSemanticHandoffBoundary => "frontend-semantic-handoff-boundary",
@@ -105,6 +117,21 @@ fn run() -> Result<(), String> {
             LintMode::BestEffortSideEffectBoundary => {
                 "best-effort boundaries still own raw side effects or primary lifecycle publication".to_string()
             }
+            LintMode::SemanticOwnerDetachedContinuation => {
+                "semantic owners still launch detached continuation work after terminal publication"
+                    .to_string()
+            }
+            LintMode::SemanticOwnerNoSpawn => {
+                "semantic owners still spawn directly instead of using explicit child-operation ownership"
+                    .to_string()
+            }
+            LintMode::SemanticOwnerProofSuccess => {
+                "proof-bound semantic owners still publish plain success or omit typed proof-bearing success"
+                    .to_string()
+            }
+            LintMode::ParityCriticalIgnoredResults => {
+                "parity-critical helper results are still being discarded silently".to_string()
+            }
             LintMode::ActorOwnedTaskSpawn => {
                 "raw task spawning or async ownership escape hatches remain outside sanctioned modules"
                     .to_string()
@@ -155,8 +182,9 @@ fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     for entry in fs::read_dir(path)
         .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
     {
-        let entry = entry
-            .map_err(|error| format!("failed to read directory entry {}: {error}", path.display()))?;
+        let entry = entry.map_err(|error| {
+            format!("failed to read directory entry {}: {error}", path.display())
+        })?;
         let entry_path = entry.path();
         if entry_path.is_dir() {
             collect_rust_files(&entry_path, files)?;
@@ -186,7 +214,12 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         }
         LintMode::TimeoutPolicyBoundary => return scan_timeout_policy_boundary(file, syntax),
         LintMode::TimeDomainUsage => return scan_time_domain_usage(file, syntax),
-        LintMode::SemanticOwnerBoundedAwaits | LintMode::BestEffortSideEffectBoundary => {}
+        LintMode::SemanticOwnerBoundedAwaits
+        | LintMode::BestEffortSideEffectBoundary
+        | LintMode::SemanticOwnerDetachedContinuation
+        | LintMode::SemanticOwnerNoSpawn
+        | LintMode::SemanticOwnerProofSuccess
+        | LintMode::ParityCriticalIgnoredResults => {}
     }
 
     let mut violations = Vec::new();
@@ -254,6 +287,13 @@ fn scan_function(
             has_marker_attr(attrs, "semantic_owner") || contains_handoff
         }
         LintMode::BestEffortSideEffectBoundary => has_marker_attr(attrs, "best_effort_boundary"),
+        LintMode::SemanticOwnerDetachedContinuation => has_marker_attr(attrs, "semantic_owner"),
+        LintMode::SemanticOwnerNoSpawn => has_marker_attr(attrs, "semantic_owner"),
+        LintMode::SemanticOwnerProofSuccess => semantic_owner_declares_proof(attrs),
+        LintMode::ParityCriticalIgnoredResults => {
+            has_marker_attr(attrs, "semantic_owner")
+                || has_marker_attr(attrs, "best_effort_boundary")
+        }
         LintMode::ActorOwnedTaskSpawn
         | LintMode::AsyncSessionOwnership
         | LintMode::FrontendSemanticHandoffBoundary
@@ -277,6 +317,9 @@ fn scan_function(
         first_handoff_line: None,
         first_terminal_publication_line: None,
         best_effort_awaits: Vec::new(),
+        declared_terminal_helpers: semantic_owner_terminal_helpers(attrs),
+        requires_typed_success_proof: semantic_owner_declares_proof(attrs),
+        found_proof_success_call: false,
     };
     visitor.visit_block(block);
     visitor.finish();
@@ -304,6 +347,9 @@ struct OwnershipVisitor<'a> {
     first_handoff_line: Option<usize>,
     first_terminal_publication_line: Option<usize>,
     best_effort_awaits: Vec<(Span, String)>,
+    declared_terminal_helpers: Vec<String>,
+    requires_typed_success_proof: bool,
+    found_proof_success_call: bool,
 }
 
 impl OwnershipVisitor<'_> {
@@ -319,7 +365,7 @@ impl OwnershipVisitor<'_> {
     }
 
     fn note_terminal_publication(&mut self, span: Span, call_name: &str, tokens: &str) {
-        if is_terminal_publication_call(call_name, tokens) {
+        if is_terminal_publication_call(call_name, tokens, &self.declared_terminal_helpers) {
             let line = span.start().line;
             self.first_terminal_publication_line = Some(
                 self.first_terminal_publication_line
@@ -362,6 +408,46 @@ impl OwnershipVisitor<'_> {
                 }
             }
         }
+
+        if self.mode == LintMode::SemanticOwnerProofSuccess
+            && self.requires_typed_success_proof
+            && !self.found_proof_success_call
+        {
+            self.violations.push(format!(
+                "{}:1:1: proof-bound semantic owner `{}` never publishes success through publish_success_with(...)",
+                self.file.display(),
+                self.function_name
+            ));
+        }
+    }
+
+    fn check_post_terminal_call(&mut self, span: Span, call_name: &str, rendered: String) {
+        if self.mode != LintMode::SemanticOwnerDetachedContinuation {
+            return;
+        }
+        let line = span.start().line;
+        let Some(terminal_line) = self.first_terminal_publication_line else {
+            return;
+        };
+        if line <= terminal_line {
+            return;
+        }
+        let normalized = call_name.replace(' ', "");
+        let is_detached_continuation = normalized.starts_with("launch_")
+            || normalized.starts_with("spawn_")
+            || matches!(
+                normalized.as_str(),
+                "tokio::spawn" | "std::thread::spawn" | "thread::spawn" | "spawn_local"
+            );
+        if is_detached_continuation {
+            self.push_violation(
+                span,
+                format!(
+                    "semantic owner `{}` launches detached continuation after terminal publication: {}",
+                    self.function_name, rendered
+                ),
+            );
+        }
     }
 }
 
@@ -378,6 +464,50 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
         let method_name = node.method.to_string();
         let tokens = node.to_token_stream().to_string();
         self.note_terminal_publication(node.span(), &method_name, &tokens);
+        self.check_post_terminal_call(node.span(), &method_name, tokens.clone());
+        if self.mode == LintMode::SemanticOwnerProofSuccess {
+            if method_name == "publish_success_with" {
+                self.found_proof_success_call = true;
+            }
+            if method_name == "publish_phase"
+                && tokens.contains("SemanticOperationPhase :: Succeeded")
+            {
+                self.push_violation(
+                    node.span(),
+                    format!(
+                        "proof-bound semantic owner `{}` publishes plain success instead of publish_success_with(...): {}",
+                        self.function_name, tokens
+                    ),
+                );
+            }
+        }
+        if self.mode == LintMode::BestEffortSideEffectBoundary {
+            if is_primary_lifecycle_publication_name(
+                &method_name,
+                &tokens,
+                &self.declared_terminal_helpers,
+            ) {
+                self.push_violation(
+                    node.span(),
+                    format!(
+                        "best-effort function `{}` publishes primary lifecycle directly: {}",
+                        self.function_name, tokens
+                    ),
+                );
+            } else if is_forbidden_best_effort_call_name(
+                &method_name,
+                &tokens,
+                &self.declared_terminal_helpers,
+            ) {
+                self.push_violation(
+                    node.span(),
+                    format!(
+                        "best-effort function `{}` performs parity-critical work directly: {}",
+                        self.function_name, tokens
+                    ),
+                );
+            }
+        }
 
         visit::visit_expr_method_call(self, node);
     }
@@ -386,18 +516,36 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
         if let Some(call_name) = expr_call_name(&node.func) {
             let tokens = node.to_token_stream().to_string();
             self.note_terminal_publication(node.span(), &call_name, &tokens);
+            self.check_post_terminal_call(node.span(), &call_name, tokens.clone());
 
-            if self.mode == LintMode::BestEffortSideEffectBoundary
-                && is_primary_lifecycle_publication_name(&call_name)
-            {
-                self.push_violation(
-                    node.span(),
-                    format!(
-                        "best-effort function `{}` publishes primary lifecycle directly: {}",
-                        self.function_name,
-                        node.to_token_stream()
-                    ),
-                );
+            if self.mode == LintMode::BestEffortSideEffectBoundary {
+                if is_primary_lifecycle_publication_name(
+                    &call_name,
+                    &tokens,
+                    &self.declared_terminal_helpers,
+                ) {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "best-effort function `{}` publishes primary lifecycle directly: {}",
+                            self.function_name,
+                            node.to_token_stream()
+                        ),
+                    );
+                } else if is_forbidden_best_effort_call_name(
+                    &call_name,
+                    &tokens,
+                    &self.declared_terminal_helpers,
+                ) {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "best-effort function `{}` performs parity-critical work directly: {}",
+                            self.function_name,
+                            node.to_token_stream()
+                        ),
+                    );
+                }
             }
         }
 
@@ -406,7 +554,10 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
 
     fn visit_expr_await(&mut self, node: &'ast ExprAwait) {
         let line = node.span().start().line;
-        self.first_await_line = Some(self.first_await_line.map_or(line, |existing| existing.min(line)));
+        self.first_await_line = Some(
+            self.first_await_line
+                .map_or(line, |existing| existing.min(line)),
+        );
 
         match self.mode {
             LintMode::SemanticOwnerBoundedAwaits => {
@@ -454,7 +605,11 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     }
                 }
                 if let Some(call_name) = awaited_call_name(&node.base) {
-                    if is_primary_lifecycle_publication_name(&call_name) {
+                    if is_primary_lifecycle_publication_name(
+                        &call_name,
+                        &node.base.to_token_stream().to_string(),
+                        &self.declared_terminal_helpers,
+                    ) {
                         self.push_violation(
                             node.span(),
                             format!(
@@ -465,7 +620,22 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     }
                 }
             }
+            LintMode::SemanticOwnerNoSpawn => {
+                if let Some(call_name) = awaited_call_name(&node.base) {
+                    if is_forbidden_owner_spawn_name(&call_name) {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "semantic owner `{}` spawns directly instead of using explicit child operations: {}",
+                                self.function_name, call_name
+                            ),
+                        );
+                    }
+                }
+            }
+            LintMode::SemanticOwnerProofSuccess | LintMode::ParityCriticalIgnoredResults => {}
             LintMode::ActorOwnedTaskSpawn
+            | LintMode::SemanticOwnerDetachedContinuation
             | LintMode::AsyncSessionOwnership
             | LintMode::FrontendSemanticHandoffBoundary
             | LintMode::HarnessMoveOwnershipBoundary
@@ -476,6 +646,49 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
         }
 
         visit::visit_expr_await(self, node);
+    }
+
+    fn visit_local(&mut self, node: &'ast Local) {
+        if self.mode == LintMode::ParityCriticalIgnoredResults
+            && matches!(&node.pat, Pat::Wild(_))
+            && node
+                .init
+                .as_ref()
+                .and_then(|init| ignored_result_call_name(&init.expr))
+                .is_some_and(|call_name| is_parity_critical_call_name(&call_name))
+        {
+            let call_name = ignored_result_call_name(&node.init.as_ref().unwrap().expr)
+                .unwrap_or_else(|| "<unknown>".to_string());
+            self.push_violation(
+                node.span(),
+                format!(
+                    "parity-critical result discarded in `{}`: {}",
+                    self.function_name, call_name
+                ),
+            );
+        }
+        visit::visit_local(self, node);
+    }
+
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        if self.mode == LintMode::ParityCriticalIgnoredResults {
+            let rendered = node.cond.to_token_stream().to_string();
+            if rendered.contains("if let Err")
+                && ignored_result_call_name(&node.cond)
+                    .is_some_and(|call_name| is_parity_critical_call_name(&call_name))
+            {
+                let call_name =
+                    ignored_result_call_name(&node.cond).unwrap_or_else(|| "<unknown>".to_string());
+                self.push_violation(
+                    node.span(),
+                    format!(
+                        "parity-critical error discarded in `{}`: {}",
+                        self.function_name, call_name
+                    ),
+                );
+            }
+        }
+        visit::visit_expr_if(self, node);
     }
 }
 
@@ -532,32 +745,159 @@ fn awaited_call_name(expr: &Expr) -> Option<String> {
     }
 }
 
-fn expr_call_name(expr: &Expr) -> Option<String> {
+fn ignored_result_call_name(expr: &Expr) -> Option<String> {
     match strip_expression(expr) {
-        Expr::Path(path) => path.path.segments.last().map(|segment| segment.ident.to_string()),
+        Expr::Await(expr_await) => awaited_call_name(&expr_await.base),
+        Expr::Call(expr_call) => expr_call_name(&expr_call.func),
+        Expr::MethodCall(method_call) => Some(method_call.method.to_string()),
         _ => None,
     }
 }
 
-fn is_primary_lifecycle_publication_name(name: &str) -> bool {
-    matches!(
-        name,
-        "publish_authoritative_operation_phase"
-            | "publish_authoritative_operation_phase_with_instance"
-            | "publish_authoritative_operation_failure"
-            | "publish_authoritative_operation_failure_with_instance"
-            | "publish_invitation_operation_status"
-            | "publish_invitation_operation_failure"
-            | "publish_pending_channel_accept_success"
-    )
+fn expr_call_name(expr: &Expr) -> Option<String> {
+    match strip_expression(expr) {
+        Expr::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string()),
+        _ => None,
+    }
 }
 
-fn is_terminal_publication_call(name: &str, tokens: &str) -> bool {
-    is_primary_lifecycle_publication_name(name)
+fn semantic_owner_terminal_helpers(attrs: &[syn::Attribute]) -> Vec<String> {
+    attrs
+        .iter()
+        .filter(|attr| {
+            matches!(attr.style, AttrStyle::Outer)
+                && attr
+                    .path()
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "semantic_owner")
+        })
+        .filter_map(|attr| {
+            let metas = attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<MetaNameValue, Token![,]>::parse_terminated,
+                )
+                .ok()?;
+            metas.into_iter().find_map(|meta| {
+                if !meta.path.is_ident("terminal") {
+                    return None;
+                }
+                match meta.value {
+                    Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(value),
+                        ..
+                    }) => Some(value.value()),
+                    _ => None,
+                }
+            })
+        })
+        .collect()
+}
+
+fn semantic_owner_declares_proof(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        matches!(attr.style, AttrStyle::Outer)
+            && attr
+                .path()
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "semantic_owner")
+            && attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<MetaNameValue, Token![,]>::parse_terminated,
+                )
+                .ok()
+                .is_some_and(|metas| metas.into_iter().any(|meta| meta.path.is_ident("proof")))
+    })
+}
+
+fn is_primary_lifecycle_publication_name(
+    name: &str,
+    tokens: &str,
+    declared_terminal_helpers: &[String],
+) -> bool {
+    if declared_terminal_helpers
+        .iter()
+        .any(|helper| helper == name)
+    {
+        return true;
+    }
+
+    matches!(name, "publish_phase" | "publish_failure")
+        || (name.starts_with("publish_")
+            && (tokens.contains("SemanticOperationPhase ::")
+                || tokens.contains("SemanticOperationError")
+                || name.contains("failure")))
+}
+
+fn is_terminal_publication_call(
+    name: &str,
+    tokens: &str,
+    declared_terminal_helpers: &[String],
+) -> bool {
+    is_primary_lifecycle_publication_name(name, tokens, declared_terminal_helpers)
         && (name.contains("failure")
             || tokens.contains("SemanticOperationPhase :: Succeeded")
             || tokens.contains("SemanticOperationPhase :: Failed")
             || tokens.contains("SemanticOperationPhase :: Cancelled"))
+}
+
+fn is_forbidden_owner_spawn_name(name: &str) -> bool {
+    let normalized = name.replace(' ', "");
+    matches!(
+        normalized.as_str(),
+        "spawn"
+            | "spawn_local"
+            | "spawn_cancellable"
+            | "spawn_local_cancellable"
+            | "tokio::spawn"
+            | "std::thread::spawn"
+            | "thread::spawn"
+    ) || normalized.starts_with("launch_")
+}
+
+fn is_forbidden_best_effort_call_name(
+    name: &str,
+    tokens: &str,
+    declared_terminal_helpers: &[String],
+) -> bool {
+    let normalized = name.replace(' ', "");
+    if normalized.starts_with("best_effort_") {
+        return false;
+    }
+
+    is_primary_lifecycle_publication_name(name, tokens, declared_terminal_helpers)
+        || is_parity_critical_call_name(name)
+}
+
+fn is_parity_critical_call_name(name: &str) -> bool {
+    let normalized = name.replace(' ', "");
+    let prefixes = [
+        "accept_",
+        "apply_authoritative_",
+        "commit_",
+        "create_",
+        "ensure_",
+        "join_",
+        "leave_",
+        "mark_",
+        "materialize_",
+        "project_",
+        "publish_",
+        "reconcile_",
+        "refresh_authoritative_",
+        "register_",
+        "require_",
+        "resolve_",
+        "wait_for_",
+        "warm_",
+    ];
+    prefixes.iter().any(|prefix| normalized.starts_with(prefix))
+        || matches!(normalized.as_str(), "publish_phase" | "publish_failure")
 }
 
 fn strip_expression(mut expr: &Expr) -> &Expr {
@@ -604,7 +944,8 @@ const HARNESS_MOVE_APPROVED_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
 ];
 
-const FRONTEND_INTERNAL_OWNER_SUFFIXES: &[&str] = &["crates/aura-terminal/src/tui/semantic_lifecycle.rs"];
+const FRONTEND_INTERNAL_OWNER_SUFFIXES: &[&str] =
+    &["crates/aura-terminal/src/tui/semantic_lifecycle.rs"];
 const FRONTEND_SUBMIT_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
@@ -890,7 +1231,8 @@ fn scan_frontend_semantic_handoff_boundary(file: &Path, syntax: &File) -> Vec<St
                 {
                     self.push_violation(
                         node.span(),
-                        "local semantic owner allocation escaped the sanctioned boundary".to_string(),
+                        "local semantic owner allocation escaped the sanctioned boundary"
+                            .to_string(),
                     );
                 }
                 if path.contains("WorkflowHandoffOperationOwner::submit")
@@ -898,7 +1240,8 @@ fn scan_frontend_semantic_handoff_boundary(file: &Path, syntax: &File) -> Vec<St
                 {
                     self.push_violation(
                         node.span(),
-                        "workflow handoff owner allocation escaped the sanctioned boundary".to_string(),
+                        "workflow handoff owner allocation escaped the sanctioned boundary"
+                            .to_string(),
                     );
                 }
             }

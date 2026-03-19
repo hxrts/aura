@@ -1,49 +1,44 @@
 //! Handler creation and initialization tests.
-
-#![allow(warnings)]
-#![cfg(any())]
-#![allow(missing_docs)]
-#![doc = "Handler creation integration tests"]
-//! Test basic handler creation and functionality
 //!
-//! Uses aura-testkit for deterministic, reproducible tests
+//! Validates that testkit handlers can be created in all execution modes
+//! and that the effect builder API works correctly.
 
-use aura_testkit::{create_test_fixture, TestEffectsBuilder, TestExecutionMode};
+#![allow(clippy::expect_used)]
 
-/// Test basic handler creation using testkit
+use aura_testkit::{create_test_fixture, TestEffectsBuilder, TestEffectHandler};
+
+/// Test basic fixture creation provides a valid device ID.
 #[tokio::test]
 async fn test_composite_handler_creation() {
     let fixture = create_test_fixture()
         .await
         .expect("Failed to create test fixture");
 
-    // Testkit provides deterministic device IDs and contexts
     let device_id = fixture.device_id();
     assert_ne!(device_id.to_string(), "");
 }
 
-/// Test effect support using testkit builder
+/// Test that the effects builder produces handlers with the correct
+/// execution mode.
 #[tokio::test]
 async fn test_effect_support() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
     let effects = TestEffectsBuilder::for_unit_tests(device_id)
-        .with_seed(42) // Deterministic
+        .with_seed(42)
         .build()
         .expect("Failed to build test effects");
 
-    // Test context provides deterministic execution mode
     assert_eq!(
         effects.execution_mode(),
         aura_core::effects::ExecutionMode::Testing
     );
 }
 
-/// Test execution mode using testkit
+/// Unit test mode and simulation mode produce the expected execution modes.
 #[tokio::test]
 async fn test_execution_mode() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
-    // Test different execution modes
     let unit_test_effects = TestEffectsBuilder::for_unit_tests(device_id)
         .build()
         .expect("Failed to build unit test effects");
@@ -62,22 +57,19 @@ async fn test_execution_mode() {
     );
 }
 
-/// Test fixture creation modes
+/// All three builder modes (unit, integration, simulation) produce valid handlers.
 #[tokio::test]
 async fn test_fixture_modes() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
-    // Unit test mode
     let _ = TestEffectsBuilder::for_unit_tests(device_id)
         .build()
         .expect("Failed to create unit test fixture");
 
-    // Integration test mode
     let _ = TestEffectsBuilder::for_integration_tests(device_id)
         .build()
         .expect("Failed to create integration test fixture");
 
-    // Simulation mode
     let _ = TestEffectsBuilder::for_simulation(device_id)
         .with_seed(42)
         .build()

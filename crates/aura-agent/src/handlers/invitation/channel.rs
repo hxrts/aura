@@ -428,7 +428,6 @@ impl<'a> InvitationChannelHandler<'a> {
         invite.context_id
     }
 
-    #[aura_macros::best_effort_boundary]
     pub(super) async fn materialize_channel_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,

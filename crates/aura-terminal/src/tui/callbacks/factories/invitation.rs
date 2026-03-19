@@ -180,12 +180,14 @@ impl InvitationsCallbacks {
     }
 
     fn make_import(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ImportInvitationOwnedCallback {
-        Arc::new(move |code: String, operation: WorkflowHandoffOperationOwner| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            spawn_ctx(ctx.clone(), async move {
-                run_invitation_import_flow(ctx, tx, code, operation).await;
-            });
-        })
+        Arc::new(
+            move |code: String, operation: WorkflowHandoffOperationOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                spawn_ctx(ctx.clone(), async move {
+                    run_invitation_import_flow(ctx, tx, code, operation).await;
+                });
+            },
+        )
     }
 }

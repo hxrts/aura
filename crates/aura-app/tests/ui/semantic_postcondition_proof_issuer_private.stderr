@@ -1,0 +1,5 @@
+error[E0433]: failed to resolve: could not find `semantic_facts` in `workflows`
+ --> tests/ui/semantic_postcondition_proof_issuer_private.rs:2:38
+  |
+2 |     let _ = aura_app::ui::workflows::semantic_facts::issue_channel_membership_ready_proof;
+  |                                      ^^^^^^^^^^^^^^ could not find `semantic_facts` in `workflows`

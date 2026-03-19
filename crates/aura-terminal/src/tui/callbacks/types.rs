@@ -4,9 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::tui::semantic_lifecycle::{
-    LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
-};
+use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::state::DeviceId;
 use aura_core::AuthorityId;
 
@@ -27,8 +25,9 @@ pub(crate) type IdOwnedCallback =
 pub type TwoStringCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 pub(crate) type TwoStringOwnedCallback =
     Arc<dyn Fn(String, String, Option<WorkflowHandoffOperationOwner>) + Send + Sync>;
-pub(crate) type TwoStringContextOwnedCallback =
-    Arc<dyn Fn(String, String, Option<String>, Option<WorkflowHandoffOperationOwner>) + Send + Sync>;
+pub(crate) type TwoStringContextOwnedCallback = Arc<
+    dyn Fn(String, String, Option<String>, Option<WorkflowHandoffOperationOwner>) + Send + Sync,
+>;
 
 /// Callback that takes three string arguments.
 pub type ThreeStringCallback = Arc<dyn Fn(String, String, String) + Send + Sync>;
@@ -38,7 +37,9 @@ pub type StringOptStringCallback = Arc<dyn Fn(String, Option<String>) + Send + S
 
 /// Callback that takes a string, optional string, and a list of strings.
 pub(crate) type StringOptStringVecU8Callback = Arc<
-    dyn Fn(String, Option<String>, Vec<String>, u8, Option<LocalTerminalOperationOwner>) + Send + Sync,
+    dyn Fn(String, Option<String>, Vec<String>, u8, Option<LocalTerminalOperationOwner>)
+        + Send
+        + Sync,
 >;
 
 /// Callback that takes two u8 values.

@@ -1232,22 +1232,25 @@ fn submit_runtime_modal_action(
                     let rerender_for_status = rerender.clone();
                     spawn(async move {
                         match controller.runtime_device_enrollment_status_handle() {
-                            Some(status_handle) => match ceremony_workflows::get_key_rotation_ceremony_status(
-                                &app_core,
-                                &status_handle,
-                            )
-                            .await
-                            {
-                                Ok(status) => controller.update_runtime_device_enrollment_status(
-                                    status.accepted_count,
-                                    status.total_count,
-                                    status.threshold,
-                                    status.is_complete,
-                                    status.has_failed,
-                                    status.error_message,
-                                ),
-                                Err(error) => controller.runtime_error_toast(error.to_string()),
-                            },
+                            Some(status_handle) => {
+                                match ceremony_workflows::get_key_rotation_ceremony_status(
+                                    &app_core,
+                                    &status_handle,
+                                )
+                                .await
+                                {
+                                    Ok(status) => controller
+                                        .update_runtime_device_enrollment_status(
+                                            status.accepted_count,
+                                            status.total_count,
+                                            status.threshold,
+                                            status.is_complete,
+                                            status.has_failed,
+                                            status.error_message,
+                                        ),
+                                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                                }
+                            }
                             None => controller
                                 .runtime_error_toast("No active enrollment ceremony handle"),
                         }
@@ -1319,7 +1322,9 @@ fn submit_runtime_modal_action(
                                 )
                                 .await
                             }
-                            _ => invitation_workflows::accept_invitation(&app_core, invitation).await,
+                            _ => {
+                                invitation_workflows::accept_invitation(&app_core, invitation).await
+                            }
                         };
 
                         match accepted {
@@ -1360,7 +1365,9 @@ fn submit_runtime_modal_action(
                                         let display_name = nickname
                                             .clone()
                                             .filter(|value| !value.trim().is_empty())
-                                            .unwrap_or_else(|| invitation_info.sender_id.to_string());
+                                            .unwrap_or_else(|| {
+                                                invitation_info.sender_id.to_string()
+                                            });
                                         controller_for_import
                                             .complete_runtime_contact_invitation_acceptance(
                                                 invitation_info.sender_id,
@@ -2119,13 +2126,15 @@ fn cancel_runtime_modal_action(
     let rerender_for_cancel = rerender.clone();
     spawn(async move {
         match controller.take_runtime_device_enrollment_ceremony() {
-            Some(handle) => match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, handle).await {
-                Ok(()) => {
-                    controller.complete_runtime_modal_success("Device enrollment canceled");
-                    controller.clear_runtime_device_enrollment_ceremony();
+            Some(handle) => {
+                match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, handle).await {
+                    Ok(()) => {
+                        controller.complete_runtime_modal_success("Device enrollment canceled");
+                        controller.clear_runtime_device_enrollment_ceremony();
+                    }
+                    Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
-                Err(error) => controller.runtime_error_toast(error.to_string()),
-            },
+            }
             None => controller.runtime_error_toast("No active enrollment ceremony handle"),
         }
         rerender_for_cancel();

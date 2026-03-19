@@ -1,35 +1,32 @@
 //! Effect handler integration tests.
-
-#![allow(warnings)]
-#![cfg(any())]
-#![allow(missing_docs)]
-//! Tests for individual effect traits and their implementations
-#![doc = include_str!("../../../README.md")]
 //!
-//! Uses aura-testkit for deterministic, reproducible testing
+//! Tests for individual effect traits and their testkit implementations.
+//! Verifies execution modes, deterministic key generation, time acceleration,
+//! and storage/network mock configuration.
+
+#![allow(clippy::expect_used)]
 
 use aura_testkit::{test_key_pair, TestEffectHandler, TestEffectsBuilder};
 
-/// Test crypto effects through testkit
+/// Crypto effects context has the correct execution mode.
 #[tokio::test]
 async fn test_crypto_effects() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
     let effects = TestEffectsBuilder::for_unit_tests(device_id)
-        .with_seed(42) // Deterministic
+        .with_seed(42)
         .build()
         .expect("Failed to build test effects");
 
-    // Verify the effects context was created with correct execution mode
     assert_eq!(
         effects.execution_mode(),
         aura_core::effects::ExecutionMode::Testing
     );
 }
 
-/// Test deterministic key generation
+/// Same seed produces identical key pairs — determinism is required for
+/// reproducible tests.
 #[tokio::test]
 async fn test_deterministic_keys() {
-    // Test that testkit provides deterministic key generation
     let (sk1, vk1) = test_key_pair(42);
     let (sk2, vk2) = test_key_pair(42);
 
@@ -37,12 +34,11 @@ async fn test_deterministic_keys() {
     assert_eq!(sk1.to_bytes(), sk2.to_bytes());
 }
 
-/// Test different execution modes
+/// All three builder modes produce the expected execution mode.
 #[tokio::test]
 async fn test_execution_modes() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
-    // Unit test mode (full mocking)
     let unit_effects = TestEffectsBuilder::for_unit_tests(device_id)
         .build()
         .expect("Failed to create unit test effects");
@@ -51,7 +47,6 @@ async fn test_execution_modes() {
         aura_core::effects::ExecutionMode::Testing
     );
 
-    // Simulation mode (deterministic behavior)
     let sim_effects = TestEffectsBuilder::for_simulation(device_id)
         .with_seed(123)
         .build()
@@ -61,39 +56,38 @@ async fn test_execution_modes() {
         aura_core::effects::ExecutionMode::Simulation { seed: 123 }
     );
 
-    // Integration test mode (selective mocking)
+    // Integration mode uses real handlers → Simulation execution mode
     let int_effects = TestEffectsBuilder::for_integration_tests(device_id)
         .build()
         .expect("Failed to create integration effects");
     assert_eq!(
         int_effects.execution_mode(),
-        aura_core::effects::ExecutionMode::Testing
+        aura_core::effects::ExecutionMode::Simulation { seed: 42 }
     );
 }
 
-/// Test time acceleration for faster tests
+/// Time acceleration config produces a valid handler.
 #[tokio::test]
 async fn test_time_acceleration() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
+    // Integration mode with time acceleration → Simulation execution mode
     let effects = TestEffectsBuilder::for_integration_tests(device_id)
-        .with_time_acceleration(10.0) // 10x faster
+        .with_time_acceleration(10.0)
         .build()
         .expect("Failed to create accelerated effects");
 
-    // Verify effects were created with time acceleration config
     assert_eq!(
         effects.execution_mode(),
-        aura_core::effects::ExecutionMode::Testing
+        aura_core::effects::ExecutionMode::Simulation { seed: 42 }
     );
 }
 
-/// Test storage configuration
+/// Mock and directory-backed storage configs produce valid handlers.
 #[tokio::test]
 async fn test_storage_config() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
-    // Test with mock storage (default for unit tests)
     let mock_effects = TestEffectsBuilder::for_unit_tests(device_id)
         .with_mock_storage(true)
         .build()
@@ -103,23 +97,22 @@ async fn test_storage_config() {
         aura_core::effects::ExecutionMode::Testing
     );
 
-    // Test with custom storage directory
+    // Integration mode uses real storage → Simulation execution mode
     let dir_effects = TestEffectsBuilder::for_integration_tests(device_id)
         .with_storage_dir(std::path::PathBuf::from("/tmp/aura-test"))
         .build()
         .expect("Failed to create dir storage effects");
     assert_eq!(
         dir_effects.execution_mode(),
-        aura_core::effects::ExecutionMode::Testing
+        aura_core::effects::ExecutionMode::Simulation { seed: 42 }
     );
 }
 
-/// Test network mocking configuration
+/// Mock and real network configs produce valid handlers.
 #[tokio::test]
 async fn test_network_config() {
     let device_id = aura_core::types::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
-    // Test with mock network (default for unit tests)
     let mock_effects = TestEffectsBuilder::for_unit_tests(device_id)
         .with_mock_network(true)
         .build()
@@ -129,8 +122,8 @@ async fn test_network_config() {
         aura_core::effects::ExecutionMode::Testing
     );
 
-    // Test with real network (for integration)
-    let real_effects = TestEffectsBuilder::for_integration_tests(device_id)
+    // Real network + mock storage → Testing (mock_storage is still true)
+    let real_effects = TestEffectsBuilder::for_unit_tests(device_id)
         .with_mock_network(false)
         .build()
         .expect("Failed to create real network effects");

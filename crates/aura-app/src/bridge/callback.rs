@@ -136,7 +136,11 @@ impl ObserverRegistry {
 
     fn log_observer_panic(id: u64, callback: &str) {
         #[cfg(feature = "instrumented")]
-        tracing::error!(observer_id = id, callback, "state observer panicked during notification");
+        tracing::error!(
+            observer_id = id,
+            callback,
+            "state observer panicked during notification"
+        );
         #[cfg(not(feature = "instrumented"))]
         eprintln!("state observer {id} panicked during {callback} notification");
     }
@@ -147,7 +151,9 @@ impl ObserverRegistry {
         F: FnMut(&dyn StateObserver, T),
     {
         for (id, observer) in &self.observers {
-            let result = catch_unwind(AssertUnwindSafe(|| notify(observer.as_ref(), value.clone())));
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                notify(observer.as_ref(), value.clone())
+            }));
             if result.is_err() {
                 Self::log_observer_panic(*id, callback);
             }
@@ -230,10 +236,7 @@ mod tests {
 
     impl StateObserver for RecordingObserver {
         fn on_chat_changed(&self, _state: ChatState) {
-            self.notifications
-                .lock()
-                .expect("lock")
-                .push("chat");
+            self.notifications.lock().expect("lock").push("chat");
         }
 
         fn on_recovery_changed(&self, _state: RecoveryState) {}

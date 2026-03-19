@@ -86,7 +86,10 @@ fn content_address_is_deterministic() {
     // Different content must produce different IDs
     let different = b"hello world!";
     let id3 = ContentId::from_bytes(different);
-    assert_ne!(id1, id3, "different content must produce different ContentId");
+    assert_ne!(
+        id1, id3,
+        "different content must produce different ContentId"
+    );
 }
 
 /// ContentId hash is stable across repeated calls — needed for dedup.
@@ -160,18 +163,10 @@ fn overlapping_content_id_merge() {
     let terms_a: BTreeSet<String> = ["term-a"].iter().map(|s| s.to_string()).collect();
     let terms_b: BTreeSet<String> = ["term-b"].iter().map(|s| s.to_string()).collect();
 
-    let entry_a = SearchIndexEntry::new(
-        content_id.to_string(),
-        terms_a,
-        Vec::new(),
-        test_time(100),
-    );
-    let entry_b = SearchIndexEntry::new(
-        content_id.to_string(),
-        terms_b,
-        Vec::new(),
-        test_time(200),
-    );
+    let entry_a =
+        SearchIndexEntry::new(content_id.to_string(), terms_a, Vec::new(), test_time(100));
+    let entry_b =
+        SearchIndexEntry::new(content_id.to_string(), terms_b, Vec::new(), test_time(200));
 
     let mut state_a = StorageState::new();
     state_a.add_content(content_id.clone(), entry_a, authority_a, test_time(100));
@@ -189,5 +184,8 @@ fn overlapping_content_id_merge() {
 
     // Join must be commutative even with overlapping keys
     let merged_rev = state_b.join(&state_a);
-    assert_eq!(merged, merged_rev, "overlapping key merge must be commutative");
+    assert_eq!(
+        merged, merged_rev,
+        "overlapping key merge must be commutative"
+    );
 }

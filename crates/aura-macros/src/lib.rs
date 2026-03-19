@@ -26,8 +26,7 @@ use syn::visit::{self, Visit};
 use syn::{
     parse_quote, Block, Error, Expr, ExprAwait, ExprCall, ExprGroup, ExprLit, ExprMethodCall,
     ExprParen, ExprReference, FnArg, GenericArgument, ImplItemFn, ItemEnum, ItemFn, ItemStruct,
-    Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Token, Type,
-    TypePath,
+    Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Token, Type, TypePath,
 };
 
 mod ceremony_facts;
@@ -375,6 +374,10 @@ pub fn ownership_lifecycle(attr: TokenStream, item: TokenStream) -> TokenStream 
 struct SemanticOwnerAttr {
     owner: LitStr,
     terminal: LitStr,
+    postcondition: LitStr,
+    proof: Option<Type>,
+    depends_on: Vec<LitStr>,
+    child_ops: Vec<LitStr>,
     category: LitStr,
 }
 
@@ -431,19 +434,34 @@ impl Parse for ActorOwnedAttr {
 
         Ok(Self {
             owner: owner.ok_or_else(|| {
-                Error::new(proc_macro2::Span::call_site(), "actor_owned requires `owner = \"...\"`")
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_owned requires `owner = \"...\"`",
+                )
             })?,
             domain: domain.ok_or_else(|| {
-                Error::new(proc_macro2::Span::call_site(), "actor_owned requires `domain = \"...\"`")
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_owned requires `domain = \"...\"`",
+                )
             })?,
             gate: gate.ok_or_else(|| {
-                Error::new(proc_macro2::Span::call_site(), "actor_owned requires `gate = \"...\"`")
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_owned requires `gate = \"...\"`",
+                )
             })?,
             command: command.ok_or_else(|| {
-                Error::new(proc_macro2::Span::call_site(), "actor_owned requires `command = Type`")
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_owned requires `command = Type`",
+                )
             })?,
             capacity: capacity.ok_or_else(|| {
-                Error::new(proc_macro2::Span::call_site(), "actor_owned requires `capacity = N`")
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_owned requires `capacity = N`",
+                )
             })?,
             category: category.ok_or_else(|| {
                 Error::new(
@@ -460,6 +478,10 @@ impl Parse for SemanticOwnerAttr {
         let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
         let mut owner = None;
         let mut terminal = None;
+        let mut postcondition = None;
+        let mut proof = None;
+        let mut depends_on = None;
+        let mut child_ops = None;
         let mut category = None;
 
         for meta in metas {
@@ -467,12 +489,26 @@ impl Parse for SemanticOwnerAttr {
                 owner = Some(expect_string_literal(&meta, "owner")?);
             } else if meta.path.is_ident("terminal") {
                 terminal = Some(expect_string_literal(&meta, "terminal")?);
+            } else if meta.path.is_ident("postcondition") {
+                postcondition = Some(expect_string_literal(&meta, "postcondition")?);
+            } else if meta.path.is_ident("proof") {
+                proof = Some(expect_type_value(&meta, "proof")?);
+            } else if meta.path.is_ident("depends_on") {
+                depends_on = Some(parse_optional_list_literal(&expect_string_literal(
+                    &meta,
+                    "depends_on",
+                )?)?);
+            } else if meta.path.is_ident("child_ops") {
+                child_ops = Some(parse_optional_list_literal(&expect_string_literal(
+                    &meta,
+                    "child_ops",
+                )?)?);
             } else if meta.path.is_ident("category") {
                 category = Some(expect_string_literal(&meta, "category")?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
-                    "unsupported semantic_owner attribute key; expected `owner`, `terminal`, or `category`",
+                    "unsupported semantic_owner attribute key; expected `owner`, `terminal`, `postcondition`, `proof`, `depends_on`, `child_ops`, or `category`",
                 ));
             }
         }
@@ -485,6 +521,25 @@ impl Parse for SemanticOwnerAttr {
                 Error::new(
                     proc_macro2::Span::call_site(),
                     "semantic_owner requires `terminal = \"...\"`",
+                )
+            })?,
+            postcondition: postcondition.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "semantic_owner requires `postcondition = \"...\"`",
+                )
+            })?,
+            proof,
+            depends_on: depends_on.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "semantic_owner requires `depends_on = \"a,b,...\"` (use empty string for none)",
+                )
+            })?,
+            child_ops: child_ops.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "semantic_owner requires `child_ops = \"a,b,...\"` (use empty string for none)",
                 )
             })?,
             category: category.ok_or_else(|| {
@@ -544,9 +599,14 @@ impl Parse for OwnershipLifecycleAttr {
             if meta.path.is_ident("initial") {
                 initial = Some(expect_string_literal(&meta, "initial")?);
             } else if meta.path.is_ident("ordered") {
-                ordered = Some(parse_list_literal(&expect_string_literal(&meta, "ordered")?)?);
+                ordered = Some(parse_list_literal(&expect_string_literal(
+                    &meta, "ordered",
+                )?)?);
             } else if meta.path.is_ident("terminals") {
-                terminals = Some(parse_list_literal(&expect_string_literal(&meta, "terminals")?)?);
+                terminals = Some(parse_list_literal(&expect_string_literal(
+                    &meta,
+                    "terminals",
+                )?)?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
@@ -636,6 +696,13 @@ fn parse_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
     Ok(parsed)
 }
 
+fn parse_optional_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
+    if list.value().trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    parse_list_literal(list)
+}
+
 fn transform_semantic_owner(item: TokenStream, config: SemanticOwnerAttr) -> TokenStream {
     if let Ok(function) = syn::parse::<ItemFn>(item.clone()) {
         return transform_semantic_owner_fn(function, config).into();
@@ -651,8 +718,16 @@ fn transform_semantic_owner(item: TokenStream, config: SemanticOwnerAttr) -> Tok
     .into()
 }
 
-fn transform_semantic_owner_fn(mut function: ItemFn, config: SemanticOwnerAttr) -> proc_macro2::TokenStream {
+fn transform_semantic_owner_fn(
+    mut function: ItemFn,
+    config: SemanticOwnerAttr,
+) -> proc_macro2::TokenStream {
     let owner = config.owner.clone();
+    let terminal = config.terminal.clone();
+    let postcondition = config.postcondition.clone();
+    let proof = config.proof.clone();
+    let depends_on = config.depends_on.clone();
+    let child_ops = config.child_ops.clone();
     if let Err(error) = validate_semantic_owner_signature(
         &function.sig.inputs,
         function.sig.asyncness.is_some(),
@@ -679,6 +754,51 @@ fn transform_semantic_owner_fn(mut function: ItemFn, config: SemanticOwnerAttr) 
         parse_quote! {
             let _: ::aura_core::BoundaryDeclarationCategory =
                 ::aura_core::BoundaryDeclarationCategory::MoveOwned;
+        },
+    );
+    function.block.stmts.insert(
+        3,
+        parse_quote! {
+            let _: ::aura_core::SemanticOwnerPostcondition =
+                ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
+        },
+    );
+    if let Some(proof) = proof.clone() {
+        function.block.stmts.insert(
+            4,
+            parse_quote! {
+                let _: fn(#proof) = |proof| {
+                    let _: ::aura_core::SemanticOwnerPostcondition =
+                        ::aura_core::SemanticSuccessProof::declared_postcondition(&proof);
+                };
+            },
+        );
+    }
+    let proof_stmt_count = usize::from(proof.is_some());
+    for (index, dependency) in depends_on.iter().enumerate() {
+        let stmt_index = 4 + proof_stmt_count + index;
+        function.block.stmts.insert(
+            stmt_index,
+            parse_quote! {
+                let _: ::aura_core::SemanticOwnerDependency =
+                    ::aura_core::SemanticOwnerDependency::new(#dependency);
+            },
+        );
+    }
+    for (index, child_op) in child_ops.iter().enumerate() {
+        let stmt_index = 4 + proof_stmt_count + depends_on.len() + index;
+        function.block.stmts.insert(
+            stmt_index,
+            parse_quote! {
+                let _: ::aura_core::SemanticOwnerChildOperation =
+                    ::aura_core::SemanticOwnerChildOperation::new(#child_op);
+            },
+        );
+    }
+    function.block.stmts.insert(
+        4 + proof_stmt_count + depends_on.len() + child_ops.len(),
+        parse_quote! {
+            let _: &'static str = #terminal;
         },
     );
     quote!(#function)
@@ -689,6 +809,11 @@ fn transform_semantic_owner_impl_fn(
     config: SemanticOwnerAttr,
 ) -> proc_macro2::TokenStream {
     let owner = config.owner.clone();
+    let terminal = config.terminal.clone();
+    let postcondition = config.postcondition.clone();
+    let proof = config.proof.clone();
+    let depends_on = config.depends_on.clone();
+    let child_ops = config.child_ops.clone();
     if let Err(error) = validate_semantic_owner_signature(
         &function.sig.inputs,
         function.sig.asyncness.is_some(),
@@ -715,6 +840,51 @@ fn transform_semantic_owner_impl_fn(
         parse_quote! {
             let _: ::aura_core::BoundaryDeclarationCategory =
                 ::aura_core::BoundaryDeclarationCategory::MoveOwned;
+        },
+    );
+    function.block.stmts.insert(
+        3,
+        parse_quote! {
+            let _: ::aura_core::SemanticOwnerPostcondition =
+                ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
+        },
+    );
+    if let Some(proof) = proof.clone() {
+        function.block.stmts.insert(
+            4,
+            parse_quote! {
+                let _: fn(#proof) = |proof| {
+                    let _: ::aura_core::SemanticOwnerPostcondition =
+                        ::aura_core::SemanticSuccessProof::declared_postcondition(&proof);
+                };
+            },
+        );
+    }
+    let proof_stmt_count = usize::from(proof.is_some());
+    for (index, dependency) in depends_on.iter().enumerate() {
+        let stmt_index = 4 + proof_stmt_count + index;
+        function.block.stmts.insert(
+            stmt_index,
+            parse_quote! {
+                let _: ::aura_core::SemanticOwnerDependency =
+                    ::aura_core::SemanticOwnerDependency::new(#dependency);
+            },
+        );
+    }
+    for (index, child_op) in child_ops.iter().enumerate() {
+        let stmt_index = 4 + proof_stmt_count + depends_on.len() + index;
+        function.block.stmts.insert(
+            stmt_index,
+            parse_quote! {
+                let _: ::aura_core::SemanticOwnerChildOperation =
+                    ::aura_core::SemanticOwnerChildOperation::new(#child_op);
+            },
+        );
+    }
+    function.block.stmts.insert(
+        4 + proof_stmt_count + depends_on.len() + child_ops.len(),
+        parse_quote! {
+            let _: &'static str = #terminal;
         },
     );
     quote!(#function)
@@ -889,11 +1059,7 @@ fn build_ownership_lifecycle(
         .map(|variant| variant.ident.to_string())
         .collect::<Vec<_>>();
     let initial = config.initial.value();
-    let ordered = config
-        .ordered
-        .iter()
-        .map(LitStr::value)
-        .collect::<Vec<_>>();
+    let ordered = config.ordered.iter().map(LitStr::value).collect::<Vec<_>>();
     let terminals = config
         .terminals
         .iter()
@@ -992,7 +1158,9 @@ fn validate_semantic_owner_body(block: &Block) -> SynResult<()> {
     visitor.visit_block(block);
 
     if has_handoff {
-        if let (Some(await_span), Some(handoff_span)) = (visitor.first_await_span, visitor.first_handoff_span) {
+        if let (Some(await_span), Some(handoff_span)) =
+            (visitor.first_await_span, visitor.first_handoff_span)
+        {
             if await_span.start().line < handoff_span.start().line {
                 return Err(Error::new(
                     await_span,
@@ -1185,7 +1353,12 @@ struct OwnerBodyValidator {
 }
 
 impl OwnerBodyValidator {
-    fn note_terminal_publication(&mut self, span: proc_macro2::Span, call_name: &str, tokens: &str) {
+    fn note_terminal_publication(
+        &mut self,
+        span: proc_macro2::Span,
+        call_name: &str,
+        tokens: &str,
+    ) {
         if is_terminal_publication_call(call_name, tokens) {
             let line = span.start().line;
             self.first_terminal_publication_line = Some(
@@ -1222,10 +1395,8 @@ impl<'ast> Visit<'ast> for OwnerBodyValidator {
         if let Some(method_call) = method_call_on_ident(&node.base, "runtime")
             .or_else(|| method_call_on_ident(&node.base, "effects"))
         {
-            self.raw_runtime_or_effect_await.get_or_insert((
-                node.span(),
-                method_call.to_token_stream().to_string(),
-            ));
+            self.raw_runtime_or_effect_await
+                .get_or_insert((node.span(), method_call.to_token_stream().to_string()));
         }
 
         if let Some(call_name) = awaited_call_name(&node.base) {
@@ -1340,7 +1511,11 @@ fn awaited_call_name(expr: &Expr) -> Option<String> {
 
 fn expr_call_name(expr: &Expr) -> Option<String> {
     match strip_expression(expr) {
-        Expr::Path(path) => path.path.segments.last().map(|segment| segment.ident.to_string()),
+        Expr::Path(path) => path
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string()),
         _ => None,
     }
 }
@@ -1391,11 +1566,17 @@ fn type_path_contains_operation_context(type_path: &TypePath) -> bool {
         return true;
     }
 
-    type_path.path.segments.iter().any(|segment| match &segment.arguments {
-        PathArguments::AngleBracketed(arguments) => arguments.args.iter().any(|arg| match arg {
-            GenericArgument::Type(inner_ty) => type_contains_operation_context(inner_ty),
+    type_path
+        .path
+        .segments
+        .iter()
+        .any(|segment| match &segment.arguments {
+            PathArguments::AngleBracketed(arguments) => {
+                arguments.args.iter().any(|arg| match arg {
+                    GenericArgument::Type(inner_ty) => type_contains_operation_context(inner_ty),
+                    _ => false,
+                })
+            }
             _ => false,
-        }),
-        _ => false,
-    })
+        })
 }

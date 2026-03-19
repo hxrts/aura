@@ -64,10 +64,7 @@ impl<Domain, C> Clone for ServiceActorHandle<Domain, C> {
     fn clone(&self) -> Self {
         Self {
             name: self.name,
-            ingress: BoundedActorIngress::new(
-                self.ingress.owner_name(),
-                self.ingress.capacity(),
-            ),
+            ingress: BoundedActorIngress::new(self.ingress.owner_name(), self.ingress.capacity()),
             cmd_tx: self.cmd_tx.clone(),
         }
     }
@@ -180,7 +177,11 @@ mod tests {
         assert_eq!(handle.ingress().capacity(), 2);
         assert_eq!(mailbox.ingress().capacity(), 2);
 
-        handle.cmd_tx.send(7).await.expect("send into bounded mailbox");
+        handle
+            .cmd_tx
+            .send(7)
+            .await
+            .expect("send into bounded mailbox");
         assert_eq!(mailbox.recv().await, Some(7));
     }
 
@@ -314,19 +315,17 @@ mod tests {
                 let backpressure_seen = backpressure_seen.clone();
                 let sender_attempted = sender_attempted.clone();
                 let receiver_drained = receiver_drained.clone();
-                thread::spawn(move || {
-                    match mailbox.try_send(2u8) {
-                        Ok(()) => panic!("full mailbox must reject the first retry-free send"),
-                        Err(value) => {
-                            backpressure_seen.store(true, Ordering::SeqCst);
-                            sender_attempted.store(true, Ordering::SeqCst);
-                            while !receiver_drained.load(Ordering::SeqCst) {
-                                thread::yield_now();
-                            }
-                            mailbox
-                                .try_send(value)
-                                .expect("mailbox admits command after receiver drains");
+                thread::spawn(move || match mailbox.try_send(2u8) {
+                    Ok(()) => panic!("full mailbox must reject the first retry-free send"),
+                    Err(value) => {
+                        backpressure_seen.store(true, Ordering::SeqCst);
+                        sender_attempted.store(true, Ordering::SeqCst);
+                        while !receiver_drained.load(Ordering::SeqCst) {
+                            thread::yield_now();
                         }
+                        mailbox
+                            .try_send(value)
+                            .expect("mailbox admits command after receiver drains");
                     }
                 })
             };

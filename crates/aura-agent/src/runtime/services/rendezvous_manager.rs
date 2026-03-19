@@ -787,31 +787,31 @@ impl RendezvousManager {
 
         let _cleanup_task_handle =
             tasks.spawn_periodic("descriptor_cleanup", time.clone(), interval, move || {
-            let time = time.clone();
-            let shared = Arc::clone(&shared);
-            async move {
-                let now_ms = match time.physical_time().await {
-                    Ok(t) => t.ts_ms,
-                    Err(error) => {
-                        tracing::debug!(
-                            event = "runtime.service.rendezvous.cleanup.skipped",
-                            reason = %error,
-                            "Skipping rendezvous descriptor cleanup"
-                        );
-                        return true;
-                    }
-                };
+                let time = time.clone();
+                let shared = Arc::clone(&shared);
+                async move {
+                    let now_ms = match time.physical_time().await {
+                        Ok(t) => t.ts_ms,
+                        Err(error) => {
+                            tracing::debug!(
+                                event = "runtime.service.rendezvous.cleanup.skipped",
+                                reason = %error,
+                                "Skipping rendezvous descriptor cleanup"
+                            );
+                            return true;
+                        }
+                    };
 
-                if let Some(commands) = shared.commands.lock().await.clone() {
-                    let _ = commands
-                        .request(|reply| RendezvousCommand::CleanupExpiredDescriptors {
-                            now_ms,
-                            reply,
-                        })
-                        .await;
+                    if let Some(commands) = shared.commands.lock().await.clone() {
+                        let _ = commands
+                            .request(|reply| RendezvousCommand::CleanupExpiredDescriptors {
+                                now_ms,
+                                reply,
+                            })
+                            .await;
+                    }
+                    true
                 }
-                true
-            }
             });
     }
 
@@ -1171,22 +1171,23 @@ impl RendezvousManager {
             let lan_cache_tasks = tasks.clone();
             let commands = commands.clone();
 
-            let _cache_task_handle = lan_cache_tasks.spawn_named("cache_discovered_peer", async move {
-                let _ = commands
-                    .request(|reply| RendezvousCommand::CacheDiscoveredPeer {
-                        local_authority_id,
-                        peer: peer_clone.clone(),
-                        reply,
-                    })
-                    .await;
+            let _cache_task_handle =
+                lan_cache_tasks.spawn_named("cache_discovered_peer", async move {
+                    let _ = commands
+                        .request(|reply| RendezvousCommand::CacheDiscoveredPeer {
+                            local_authority_id,
+                            peer: peer_clone.clone(),
+                            reply,
+                        })
+                        .await;
 
-                tracing::info!(
-                    event = "runtime.service.rendezvous.lan_peer_cached",
-                    authority = %peer.authority_id,
-                    addr = %peer.source_addr,
-                    "Cached LAN-discovered peer"
-                );
-            });
+                    tracing::info!(
+                        event = "runtime.service.rendezvous.lan_peer_cached",
+                        authority = %peer.authority_id,
+                        addr = %peer.source_addr,
+                        "Cached LAN-discovered peer"
+                    );
+                });
         });
 
         let lan_service = Arc::new(lan_service);

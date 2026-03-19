@@ -414,10 +414,8 @@ mod cap_laws {
             .build(&key_b)
             .expect("build token B");
 
-        let cap_a =
-            Cap::from_biscuit_with_key(&token_a, &key_a.public()).expect("wrap token A");
-        let cap_b =
-            Cap::from_biscuit_with_key(&token_b, &key_b.public()).expect("wrap token B");
+        let cap_a = Cap::from_biscuit_with_key(&token_a, &key_a.public()).expect("wrap token A");
+        let cap_b = Cap::from_biscuit_with_key(&token_b, &key_b.public()).expect("wrap token B");
 
         let result = cap_a.meet(&cap_b);
         // Different issuers → incomparable → bottom

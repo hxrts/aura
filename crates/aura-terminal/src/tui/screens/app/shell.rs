@@ -36,8 +36,7 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
-    monitor_key_rotation_ceremony, start_device_threshold_ceremony,
-    start_guardian_ceremony,
+    monitor_key_rotation_ceremony, start_device_threshold_ceremony, start_guardian_ceremony,
 };
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
@@ -179,9 +178,7 @@ use crate::tui::props::{
     extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
     extract_notifications_view_props, extract_settings_view_props,
 };
-use crate::tui::semantic_lifecycle::{
-    LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
-};
+use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
     harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiOperation,
@@ -517,7 +514,9 @@ fn execute_harness_followup_command(
                 .or_else(|| resolve_committed_selected_channel_id(state, &channels))
                 .or(visible_message_channel_id)
             {
-                let handle = operation.as_ref().map(WorkflowHandoffOperationOwner::harness_handle);
+                let handle = operation
+                    .as_ref()
+                    .map(WorkflowHandoffOperationOwner::harness_handle);
                 (cb.chat.on_send)(channel_id, content, operation);
                 Ok(handle)
             } else {

@@ -107,7 +107,10 @@ pub async fn start_guardian_ceremony(
     core.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
         .map(|ceremony_id| {
-            CeremonyHandle::new(ceremony_id, crate::runtime_bridge::CeremonyKind::GuardianRotation)
+            CeremonyHandle::new(
+                ceremony_id,
+                crate::runtime_bridge::CeremonyKind::GuardianRotation,
+            )
         })
         .map_err(|e| ceremony_op("start guardian ceremony", e).into())
 }
@@ -123,7 +126,10 @@ pub async fn start_device_threshold_ceremony(
     core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
         .await
         .map(|ceremony_id| {
-            CeremonyHandle::new(ceremony_id, crate::runtime_bridge::CeremonyKind::DeviceRotation)
+            CeremonyHandle::new(
+                ceremony_id,
+                crate::runtime_bridge::CeremonyKind::DeviceRotation,
+            )
         })
         .map_err(|e| ceremony_op("start device threshold ceremony", e).into())
 }
@@ -172,7 +178,9 @@ pub async fn start_device_enrollment_ceremony(
             .await;
         }
     };
-    owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
+    owner
+        .publish_phase(SemanticOperationPhase::Succeeded)
+        .await?;
     let handle = CeremonyHandle::new(
         start.ceremony_id.clone(),
         crate::runtime_bridge::CeremonyKind::DeviceEnrollment,
@@ -202,7 +210,10 @@ pub async fn start_device_removal_ceremony(
         .initiate_device_removal_ceremony(device_id)
         .await
         .map(|ceremony_id| {
-            CeremonyHandle::new(ceremony_id, crate::runtime_bridge::CeremonyKind::DeviceRemoval)
+            CeremonyHandle::new(
+                ceremony_id,
+                crate::runtime_bridge::CeremonyKind::DeviceRemoval,
+            )
         })
         .map_err(|e| ceremony_op("start device removal", e).into())
 }

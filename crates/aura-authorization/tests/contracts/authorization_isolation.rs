@@ -24,9 +24,7 @@ fn cross_authority_token_rejected() {
     let authority_b = TokenAuthority::new(AuthorityId::new_from_entropy([2u8; 32]));
     let recipient = AuthorityId::new_from_entropy([3u8; 32]);
 
-    let token = authority_a
-        .create_token(recipient)
-        .expect("token creation");
+    let token = authority_a.create_token(recipient).expect("token creation");
 
     // Evaluated by B's bridge (different root key)
     let bridge_b = BiscuitAuthorizationBridge::new(
@@ -63,9 +61,7 @@ fn token_without_capability_denied() {
     // Build a token with NO capabilities — only basic facts
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
     builder
-        .add_fact(biscuit_auth::macros::fact!(
-            "authority(\"some-authority\")"
-        ))
+        .add_fact(biscuit_auth::macros::fact!("authority(\"some-authority\")"))
         .unwrap();
     let token = builder.build(&keypair).unwrap();
 

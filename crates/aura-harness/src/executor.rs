@@ -1436,7 +1436,9 @@ fn execute_semantic_intent(
             context
                 .channel_name_by_id
                 .insert(channel_id.clone(), channel_name.clone());
-            context.current_channel_id.insert(instance_id.clone(), channel_id);
+            context
+                .current_channel_id
+                .insert(instance_id.clone(), channel_id);
             record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
@@ -1615,7 +1617,9 @@ fn execute_semantic_intent(
                 context
                     .channel_name_by_id
                     .insert(channel_id.clone(), channel_name.clone());
-                context.current_channel_id.insert(instance_id.clone(), channel_id);
+                context
+                    .current_channel_id
+                    .insert(instance_id.clone(), channel_id);
             }
             Ok(())
         }
@@ -3880,12 +3884,12 @@ mod tests {
         RunSection, ScreenSource,
     };
     use crate::coordinator::HarnessCoordinator;
-    use aura_app::ui::scenarios::ScenarioAction;
     use aura_app::ui::contract::{
         ConfirmationState, FieldId, ListId, ListItemSnapshot, ListSnapshot, OperationId,
         OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
         RuntimeEventSnapshot, ScreenId, SelectionSnapshot, UiReadiness, UiSnapshot,
     };
+    use aura_app::ui::scenarios::ScenarioAction;
     use aura_app::ui_contract::{
         next_projection_revision, ChannelFactKey, QuiescenceSnapshot, QuiescenceState,
     };
@@ -5316,12 +5320,10 @@ mod tests {
         let mut context = ScenarioContext::default();
         context.vars.insert(
             "shared_channel_id".to_string(),
-            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
-                .to_string(),
+            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76".to_string(),
         );
         context.channel_name_by_id.insert(
-            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
-                .to_string(),
+            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76".to_string(),
             "shared-parity-lab".to_string(),
         );
 
@@ -5348,13 +5350,10 @@ mod tests {
         };
         let response = SemanticCommandResponse::accepted_without_value();
 
-        let error = require_semantic_unit_submission_with_exact_handle(
-            &step,
-            "join_channel",
-            response,
-        )
-        .err()
-        .unwrap_or_else(|| panic!("missing handle must fail"));
+        let error =
+            require_semantic_unit_submission_with_exact_handle(&step, "join_channel", response)
+                .err()
+                .unwrap_or_else(|| panic!("missing handle must fail"));
 
         assert!(
             error
@@ -5417,8 +5416,7 @@ mod tests {
             .insert("bob".to_string(), "shared-parity-lab".to_string());
         context.current_channel_id.insert(
             "bob".to_string(),
-            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
-                .to_string(),
+            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76".to_string(),
         );
 
         let mut snapshot = UiSnapshot::loading(ScreenId::Chat);

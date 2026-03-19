@@ -169,9 +169,7 @@ impl AppCoreContext {
         &self,
         handle: aura_app::ui::workflows::ceremonies::CeremonyHandle,
     ) {
-        self.io_context
-            .remember_key_rotation_ceremony(handle)
-            .await;
+        self.io_context.remember_key_rotation_ceremony(handle).await;
     }
 
     pub async fn key_rotation_ceremony_status_handle(
@@ -193,7 +191,9 @@ impl AppCoreContext {
     }
 
     pub async fn forget_key_rotation_ceremony(&self, ceremony_id: &str) {
-        self.io_context.forget_key_rotation_ceremony(ceremony_id).await;
+        self.io_context
+            .forget_key_rotation_ceremony(ceremony_id)
+            .await;
     }
 
     pub async fn add_error_toast(&self, id: impl Into<String>, message: impl Into<String>) {

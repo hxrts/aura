@@ -1252,11 +1252,15 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
-        Err(IntentError::no_agent("Sync status not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Sync status not available in offline mode",
+        ))
     }
 
     async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError> {
-        Err(IntentError::no_agent("Sync peers not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Sync peers not available in offline mode",
+        ))
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
@@ -1304,7 +1308,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
-        Err(IntentError::no_agent("LAN peers not available in offline mode"))
+        Err(IntentError::no_agent(
+            "LAN peers not available in offline mode",
+        ))
     }
 
     async fn send_lan_invitation(
@@ -1526,7 +1532,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
-        Err(IntentError::no_agent("Settings not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Settings not available in offline mode",
+        ))
     }
 
     async fn has_account_config(&self) -> Result<bool, IntentError> {
@@ -1540,7 +1548,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
-        Err(IntentError::no_agent("Devices not available in offline mode"))
+        Err(IntentError::no_agent(
+            "Devices not available in offline mode",
+        ))
     }
 
     async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
@@ -1620,9 +1630,11 @@ mod tests {
         assert_eq!(bridge.authority_id(), authority);
         assert!(!bridge.is_authenticated().await);
         assert!(!bridge.has_signing_capability().await);
-        assert!(!bridge
-            .is_peer_online(AuthorityId::new_from_entropy([43u8; 32]))
-            .await);
+        assert!(
+            !bridge
+                .is_peer_online(AuthorityId::new_from_entropy([43u8; 32]))
+                .await
+        );
         assert!(bridge.try_get_sync_peers().await.is_err());
         assert!(bridge.try_get_discovered_peers().await.is_err());
         assert!(bridge.try_get_lan_peers().await.is_err());

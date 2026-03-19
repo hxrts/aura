@@ -17,8 +17,8 @@ use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::{
     time::PhysicalTime, AuraError, ExponentialBackoffPolicy, PostTerminalBestEffort,
-    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
-    TimeoutExecutionProfile, TimeoutRunError,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
+    TimeoutRunError,
 };
 
 const DEFAULT_HARNESS_CONVERGENCE_ROUNDS: usize = 8;

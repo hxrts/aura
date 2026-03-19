@@ -230,9 +230,7 @@ pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerSta
 
 // Threshold signing service types
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use reconfiguration::{
-    CoherenceStatus, ReconfigurationError, SessionFootprintClass,
-};
+pub use reconfiguration::{CoherenceStatus, ReconfigurationError, SessionFootprintClass};
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::services::ThresholdSigningService;
 #[cfg(feature = "choreo-backend-telltale-vm")]

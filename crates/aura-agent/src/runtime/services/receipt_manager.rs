@@ -185,67 +185,72 @@ impl ReceiptManager {
         let retention_ms = self.config.retention_period.as_millis() as u64;
         let interval = self.config.cleanup_interval;
 
-        let _cleanup_task_handle =
-            tasks.spawn_interval_until_named("receipt.cleanup", time.clone(), interval, move || {
-            let shared = Arc::clone(&shared);
-            let time = time.clone();
+        let _cleanup_task_handle = tasks.spawn_interval_until_named(
+            "receipt.cleanup",
+            time.clone(),
+            interval,
+            move || {
+                let shared = Arc::clone(&shared);
+                let time = time.clone();
 
-            async move {
-                // Get current time
-                let now_ms = match time.physical_time().await {
-                    Ok(t) => t.ts_ms,
-                    Err(e) => {
-                        tracing::warn!("Receipt cleanup: failed to get time: {}", e);
-                        return true; // Continue task
-                    }
-                };
-
-                // Calculate cutoff timestamp
-                let cutoff = now_ms.saturating_sub(retention_ms);
-
-                // Prune expired receipts
-                let count = with_state_mut_validated(
-                    &shared.state,
-                    |state| {
-                        let expired_ids: Vec<ReceiptId> = state
-                            .receipts
-                            .iter()
-                            .filter(|(_, r)| r.timestamp < cutoff)
-                            .map(|(id, _)| *id)
-                            .collect();
-                        let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
-                        let count = expired_ids.len();
-
-                        if count > 0 {
-                            for id in &expired_ids {
-                                state.receipts.remove(id);
-                            }
-
-                            for chain in state.chains.values_mut() {
-                                chain.retain(|id| !expired_set.contains(id));
-                            }
-                            state.chains.retain(|_, chain| !chain.is_empty());
+                async move {
+                    // Get current time
+                    let now_ms = match time.physical_time().await {
+                        Ok(t) => t.ts_ms,
+                        Err(e) => {
+                            tracing::warn!("Receipt cleanup: failed to get time: {}", e);
+                            return true; // Continue task
                         }
+                    };
 
-                        count
-                    },
-                    |state| state.validate(),
-                )
-                .await;
+                    // Calculate cutoff timestamp
+                    let cutoff = now_ms.saturating_sub(retention_ms);
 
-                if count > 0 {
-                    let remaining = shared.state.read().await.receipts.len();
-                    tracing::debug!(
-                        pruned = count,
-                        cutoff_ms = cutoff,
-                        remaining,
-                        "Pruned expired receipts"
-                    );
+                    // Prune expired receipts
+                    let count = with_state_mut_validated(
+                        &shared.state,
+                        |state| {
+                            let expired_ids: Vec<ReceiptId> = state
+                                .receipts
+                                .iter()
+                                .filter(|(_, r)| r.timestamp < cutoff)
+                                .map(|(id, _)| *id)
+                                .collect();
+                            let expired_set: HashSet<ReceiptId> =
+                                expired_ids.iter().copied().collect();
+                            let count = expired_ids.len();
+
+                            if count > 0 {
+                                for id in &expired_ids {
+                                    state.receipts.remove(id);
+                                }
+
+                                for chain in state.chains.values_mut() {
+                                    chain.retain(|id| !expired_set.contains(id));
+                                }
+                                state.chains.retain(|_, chain| !chain.is_empty());
+                            }
+
+                            count
+                        },
+                        |state| state.validate(),
+                    )
+                    .await;
+
+                    if count > 0 {
+                        let remaining = shared.state.read().await.receipts.len();
+                        tracing::debug!(
+                            pruned = count,
+                            cutoff_ms = cutoff,
+                            remaining,
+                            "Pruned expired receipts"
+                        );
+                    }
+
+                    true // Continue running
                 }
-
-                true // Continue running
-            }
-            });
+            },
+        );
 
         tracing::info!(
             interval_secs = self.config.cleanup_interval.as_secs(),

@@ -220,6 +220,12 @@ Macro declaration rule:
 - `#[aura_macros::semantic_owner(owner = "...", terminal = "...", category = "move_owned")]`
   is the sanctioned declaration surface for move-owned semantic workflow
   boundaries
+- semantic owners must also declare:
+  - `postcondition = "..."` for the authoritative state guaranteed by success
+  - `depends_on = "a,b,..."` for prerequisite readiness edges
+  - `child_ops = "a,b,..."` for sanctioned semantically required child work
+  - `proof = Type` whenever success is only valid if a typed postcondition
+    witness has been established
 - `#[aura_macros::capability_boundary(category = "capability_gated", capability = "...")]`
   is the sanctioned declaration surface for capability-bearing mint/publication
   helpers
@@ -231,8 +237,7 @@ Macro declaration rule:
 
 ## Owner Body Rules
 
-Once a function is designated as a semantic owner, its body is constrained more
-strictly than ordinary async code.
+Once a function is designated as a semantic owner, its body is constrained more strictly than ordinary async code.
 
 Allowed:
 
@@ -248,11 +253,48 @@ Forbidden:
   publication
 - retaining a frontend-local owner while awaiting an app-owned workflow
 - detached work that still owns terminal responsibility
+- direct spawn from a semantic owner except through an explicitly declared
+  child-operation surface
+- silently discarding parity-critical results or errors
 - ad hoc local retries, sleeps, or polling loops
 
 If a semantic owner needs long-lived convergence, that convergence must be
 owned by a dedicated `ActorOwned` coordinator and expressed as typed readiness
 or typed terminal lifecycle, not as an unbounded await hidden inside a helper.
+
+## Typed Success Proofs
+
+Declared postconditions are not documentation-only. For parity-critical
+operation families, `Succeeded` should be tied to an opaque typed proof surface
+whenever the authoritative postcondition is stronger than "the function
+returned `Ok`".
+
+The required pattern is:
+
+- capability-gated code performs the authoritative mutation, readiness check,
+  or materialization step
+- that sanctioned helper mints an opaque proof witness such as
+  `ChannelMembershipReadyProof`
+- the semantic owner publishes terminal success by consuming that proof through
+  the canonical success path
+
+This is intentionally different from a capability token:
+
+- a capability answers who is allowed to act
+- a proof answers what has become true
+
+Proofs must therefore be minted by capability-gated code, but the proof itself
+must not be the authority token.
+
+The canonical direction is:
+
+- `#[aura_macros::semantic_owner(..., postcondition = "...", proof = Type)]`
+- owner success goes through `publish_success_with(proof)` or the equivalent
+  canonical proof-bearing success helper
+- plain `publish_phase(Succeeded)` is forbidden for proof-bound owners
+
+Proof constructors stay private. External code must not be able to forge a
+proof witness, and the compile-fail suites should prove that boundary.
 
 ## Best-Effort Separation
 
@@ -271,26 +313,36 @@ Best-effort work:
 - must run only after terminal publication, or under a different owner with its
   own explicit lifecycle
 - must not prevent the submitted operation from leaving `Submitting`
+- must not directly publish parity-critical lifecycle or readiness
+- must not directly perform parity-critical mutation such as committing facts,
+  materializing authoritative state, registering required ownership, or other
+  work that a later parity-critical operation depends on
 
-This rule is stronger than "use timeouts". A bounded best-effort step is still
-architecturally wrong if it owns the primary operation's terminal state.
+If a step mutates authoritative state required by a later semantic operation,
+it is not best-effort. It belongs either:
+
+- inside the canonical semantic owner before `Succeeded`, or
+- inside a distinct owned child operation with its own explicit lifecycle and dependency edge
+
+This rule is stronger than "use timeouts". A bounded best-effort step is still architecturally wrong if it owns the primary operation's terminal state.
 
 ## Correct-By-Construction Requirements
 
-For parity-critical operation families, "correct by construction" means the
-following should eventually be true everywhere:
+For parity-critical operation families, "correct by construction" means the following should eventually be true everywhere:
 
 - submission uses one canonical typed owner wrapper
 - owner handoff uses one canonical consumed transfer API
 - terminal publication uses one capability-gated API family
+- success implies one declared authoritative postcondition
+- proof-bound success consumes one opaque typed proof minted by sanctioned
+  capability-gated code
 - bounded awaits use one approved timeout-budget helper family
 - retries use one approved retry-policy helper family
-- best-effort work uses one explicit helper family that cannot publish or delay
-  primary terminal state
+- best-effort work uses one explicit helper family that cannot publish or delay primary terminal state
+- semantic owners do not spawn except through declared child-operation APIs
+- parity-critical results are not ignored or downgraded to logging-only paths
 
-If a new operation family cannot yet use those canonical wrappers, that is
-technical debt that should be tracked explicitly. New parallel helper stacks
-should not be introduced.
+If a new operation family cannot yet use those canonical wrappers, that is technical debt that should be tracked explicitly. New parallel helper stacks should not be introduced.
 
 ## Enforcement Ratchet
 
@@ -319,7 +371,12 @@ the following:
 - terminal state cannot regress
 - stale owner or stale handle cannot advance state
 - canonical owner publishes terminal state within a bounded budget
+- `Succeeded` implies the semantic owner's declared postcondition holds
+- proof-bound `Succeeded` consumes the correct typed witness for that declared
+  postcondition
 - best-effort failure cannot block terminal publication
+- no later parity-critical operation can depend on hidden best-effort work to
+  make a successful operation "actually true"
 - frontend-local submission state cannot mask authoritative terminal state after
   handoff
 - older authoritative instances cannot overwrite newer local submissions
@@ -329,20 +386,17 @@ not yet fully migrated to the ownership model.
 
 ## Frontend Handoff Rule
 
-Layer 7 frontends are primarily `Observed`, but they are allowed to own a very
-small local submission window. That window is subject to a strict rule:
+Layer 7 frontends are primarily `Observed`, but they are allowed to own a very small local submission window. That window is subject to a strict rule:
 
 - if the frontend owns terminal publication, it must settle locally
 - if the app/runtime owns terminal publication, the frontend must relinquish
   local ownership before awaiting the app/runtime workflow
 
-There is no supported middle state where the frontend keeps a local submitting
-record "just in case" while the canonical workflow runs elsewhere.
+There is no supported middle state where the frontend keeps a local submitting record "just in case" while the canonical workflow runs elsewhere.
 
 ## Time And Ownership
 
-Timeouts and backoffs are part of ownership, not incidental implementation
-detail.
+Timeouts and backoffs are part of ownership, not incidental implementation detail.
 
 For every parity-critical async path, the architecture must identify:
 
@@ -351,9 +405,7 @@ For every parity-critical async path, the architecture must identify:
 - whether the wait is terminally required or best-effort
 - what happens when the budget is exhausted
 
-Wall-clock time remains a local choice in Aura's time model, but timeout policy
-ownership is not a local choice. A path that can wait forever without a
-declared owner and terminal consequence is an ownership violation.
+Wall-clock time remains a local choice in Aura's time model, but timeout policy ownership is not a local choice. A path that can wait forever without a declared owner and terminal consequence is an ownership violation.
 
 ## Layer Guidance
 
@@ -431,6 +483,13 @@ Current enforcement split:
 - `trybuild` compile-fail suites in `aura-core` and `aura-app` prove that
   forbidden ownership/publication patterns do not compile.
 - Rust-native lint binaries in `aura-macros` provide syntax-level fences for:
+  - proof-bound semantic owners using plain `Succeeded` publication instead of
+    proof-bearing success
+  - semantic owners publishing success and then launching detached continuation
+  - semantic owners spawning outside explicit child-operation ownership
+  - silent discard of parity-critical results and errors
+  - best-effort boundaries performing direct parity-critical mutation or
+    publication
   - raw spawn / raw task-handle escape hatches
   - frontend semantic handoff bypasses
   - raw timeout/time-domain usage in protected modules
@@ -460,6 +519,17 @@ Shell checks such as semantic-owner bounded-await and frontend/harness boundary
 wrappers are secondary fences for narrow escape hatches, not the source of
 truth for semantic correctness.
 
+For proof-bearing postconditions specifically, the desired enforcement order is:
+
+1. private proof constructors
+2. capability-gated proof minting helpers
+3. `#[semantic_owner(..., proof = Type)]`
+4. compile-fail tests proving proofs cannot be forged or minted from the wrong
+   module
+5. AST-backed linting that rejects plain `Succeeded` publication in proof-bound
+   owners
+6. invariant tests proving the proof-minting helper is semantically honest
+
 Scripts alone are not sufficient. The API must make the wrong pattern hard or impossible first.
 
 ## Review Checklist
@@ -471,8 +541,11 @@ When adding or modifying a parity-critical path, ask these questions:
 - How is authority transferred?
 - What capability authorizes mutation or publication?
 - What is the typed terminal success/failure contract?
+- What authoritative postcondition does `Succeeded` actually guarantee?
+- Does success require a typed proof witness, and where is that proof minted?
 - Where does local submission ownership end and canonical workflow ownership begin?
 - Which awaits are terminally required, and which are best-effort only?
+- Is any later parity-critical step relying on hidden best-effort follow-up?
 - What bounded budget owns each required wait and retry?
 - What legacy bypasses should be deleted rather than preserved?
 

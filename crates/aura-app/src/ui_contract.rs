@@ -855,10 +855,7 @@ pub struct SemanticOperationCausality {
 
 impl SemanticOperationCausality {
     #[must_use]
-    pub const fn new(
-        owner_epoch: OwnerEpoch,
-        publication_sequence: PublicationSequence,
-    ) -> Self {
+    pub const fn new(owner_epoch: OwnerEpoch, publication_sequence: PublicationSequence) -> Self {
         Self {
             owner_epoch,
             publication_sequence,
@@ -868,7 +865,10 @@ impl SemanticOperationCausality {
     #[must_use]
     pub fn is_older_than(self, other: Self) -> bool {
         (self.owner_epoch.value(), self.publication_sequence.value())
-            < (other.owner_epoch.value(), other.publication_sequence.value())
+            < (
+                other.owner_epoch.value(),
+                other.publication_sequence.value(),
+            )
     }
 }
 
@@ -3272,8 +3272,8 @@ mod tests {
         SemanticFailureCode, SemanticFailureDomain, SemanticOperationCausality,
         SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
         SemanticOperationStatus, SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId,
-        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot,
-        ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
+        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
+        BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
         BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
         FRONTEND_EXECUTION_BOUNDARIES, FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
         PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
@@ -3505,14 +3505,13 @@ mod tests {
 
     #[test]
     fn semantic_operation_phase_generated_lifecycle_rejects_terminal_regression() {
-        assert!(SemanticOperationPhase::Submitted.can_transition_to(
-            SemanticOperationPhase::WorkflowDispatched
-        ));
+        assert!(SemanticOperationPhase::Submitted
+            .can_transition_to(SemanticOperationPhase::WorkflowDispatched));
         assert!(SemanticOperationPhase::DeliveryReady
             .can_transition_to(SemanticOperationPhase::Succeeded));
-        assert!(!SemanticOperationPhase::Succeeded.can_transition_to(
-            SemanticOperationPhase::Failed
-        ));
+        assert!(
+            !SemanticOperationPhase::Succeeded.can_transition_to(SemanticOperationPhase::Failed)
+        );
     }
 
     #[test]

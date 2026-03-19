@@ -24,8 +24,8 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::{EffectCommand, OpResponse};
 use crate::tui::semantic_lifecycle::{
-    authoritative_operation_status_update, SemanticOperationTransferScope,
-    WorkflowHandoffOperationOwner, LocalTerminalOperationOwner,
+    authoritative_operation_status_update, LocalTerminalOperationOwner,
+    SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
 };
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
@@ -104,7 +104,8 @@ async fn run_invitation_import_flow(
     code: String,
     operation: WorkflowHandoffOperationOwner,
 ) {
-    let transfer = operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
+    let transfer =
+        operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
     let app_core = ctx.app_core_raw().clone();
     let invitation = import_invitation_details(&app_core, &code).await.ok();

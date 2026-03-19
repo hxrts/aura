@@ -192,7 +192,8 @@ impl TaskSupervisor {
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
-        self.root.spawn_interval_until_named(name, time_effects, interval, f)
+        self.root
+            .spawn_interval_until_named(name, time_effects, interval, f)
     }
 
     #[must_use = "retain or explicitly discard the owned task handle"]

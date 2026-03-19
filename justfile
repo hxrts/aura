@@ -640,6 +640,10 @@ ci-ownership-policy:
     just ci-capability-boundaries
     just ci-typed-errors
     just ci-semantic-owner-awaits
+    just ci-semantic-owner-detached-continuation
+    just ci-semantic-owner-no-spawn
+    just ci-semantic-owner-proof-success
+    just ci-parity-critical-ignored-results
     just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
     just ci-frontend-handoff-boundary
@@ -667,6 +671,18 @@ ci-typed-errors:
 
 ci-semantic-owner-awaits:
     bash scripts/check/semantic-owner-bounded-awaits.sh
+
+ci-semantic-owner-detached-continuation:
+    bash scripts/check/semantic-owner-detached-continuation.sh
+
+ci-semantic-owner-no-spawn:
+    bash scripts/check/semantic-owner-no-spawn.sh
+
+ci-semantic-owner-proof-success:
+    bash scripts/check/semantic-owner-proof-success.sh
+
+ci-parity-critical-ignored-results:
+    bash scripts/check/parity-critical-ignored-results.sh
 
 ci-best-effort-side-effects:
     bash scripts/check/best-effort-side-effect-boundary.sh

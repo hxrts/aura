@@ -263,11 +263,11 @@ pub async fn handle_invitations(
                             | InvitationBridgeType::Channel { .. }
                             | InvitationBridgeType::Guardian { .. }
                     ) {
-                        if let Err(e) = aura_app::ui::workflows::invitation::accept_imported_invitation(
-                            app_core,
-                            invitation,
-                        )
-                        .await
+                        if let Err(e) =
+                            aura_app::ui::workflows::invitation::accept_imported_invitation(
+                                app_core, invitation,
+                            )
+                            .await
                         {
                             return Some(Err(OpError::typed(
                                 OpFailureCode::AcceptInvitation,
@@ -319,17 +319,17 @@ pub async fn handle_invitations(
 
         EffectCommand::AcceptInvitation { invitation_id } => {
             match resolve_pending_invitation_handle(app_core, invitation_id).await {
-                Ok(handle) => match aura_app::ui::workflows::invitation::accept_invitation(
-                    app_core, handle,
-                )
-                .await
-                {
-                    Ok(()) => Some(Ok(OpResponse::Ok)),
-                    Err(e) => Some(Err(OpError::typed(
-                        OpFailureCode::AcceptInvitation,
-                        format!("Failed to accept invitation: {e}"),
-                    ))),
-                },
+                Ok(handle) => {
+                    match aura_app::ui::workflows::invitation::accept_invitation(app_core, handle)
+                        .await
+                    {
+                        Ok(()) => Some(Ok(OpResponse::Ok)),
+                        Err(e) => Some(Err(OpError::typed(
+                            OpFailureCode::AcceptInvitation,
+                            format!("Failed to accept invitation: {e}"),
+                        ))),
+                    }
+                }
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::AcceptInvitation,
                     format!("Failed to resolve invitation handle: {e}"),
@@ -339,17 +339,17 @@ pub async fn handle_invitations(
 
         EffectCommand::DeclineInvitation { invitation_id } => {
             match resolve_pending_invitation_handle(app_core, invitation_id).await {
-                Ok(handle) => match aura_app::ui::workflows::invitation::decline_invitation(
-                    app_core, handle,
-                )
-                .await
-                {
-                    Ok(()) => Some(Ok(OpResponse::Ok)),
-                    Err(e) => Some(Err(OpError::typed(
-                        OpFailureCode::DeclineInvitation,
-                        format!("Failed to decline invitation: {e}"),
-                    ))),
-                },
+                Ok(handle) => {
+                    match aura_app::ui::workflows::invitation::decline_invitation(app_core, handle)
+                        .await
+                    {
+                        Ok(()) => Some(Ok(OpResponse::Ok)),
+                        Err(e) => Some(Err(OpError::typed(
+                            OpFailureCode::DeclineInvitation,
+                            format!("Failed to decline invitation: {e}"),
+                        ))),
+                    }
+                }
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::DeclineInvitation,
                     format!("Failed to resolve invitation handle: {e}"),
@@ -359,17 +359,17 @@ pub async fn handle_invitations(
 
         EffectCommand::CancelInvitation { invitation_id } => {
             match resolve_pending_invitation_handle(app_core, invitation_id).await {
-                Ok(handle) => match aura_app::ui::workflows::invitation::cancel_invitation(
-                    app_core, handle,
-                )
-                .await
-                {
-                    Ok(()) => Some(Ok(OpResponse::Ok)),
-                    Err(e) => Some(Err(OpError::typed(
-                        OpFailureCode::CancelInvitation,
-                        format!("Failed to cancel invitation: {e}"),
-                    ))),
-                },
+                Ok(handle) => {
+                    match aura_app::ui::workflows::invitation::cancel_invitation(app_core, handle)
+                        .await
+                    {
+                        Ok(()) => Some(Ok(OpResponse::Ok)),
+                        Err(e) => Some(Err(OpError::typed(
+                            OpFailureCode::CancelInvitation,
+                            format!("Failed to cancel invitation: {e}"),
+                        ))),
+                    }
+                }
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::CancelInvitation,
                     format!("Failed to resolve invitation handle: {e}"),

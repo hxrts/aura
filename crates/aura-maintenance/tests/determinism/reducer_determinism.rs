@@ -123,15 +123,13 @@ fn snapshot_proposal_then_completion_lifecycle() {
         std::collections::BTreeMap::new(),
         1000,
     );
-    let completion = MaintenanceFact::SnapshotCompleted(
-        aura_maintenance::SnapshotCompleted::new(
-            auth,
-            proposal_id,
-            snapshot,
-            std::collections::BTreeSet::new(),
-            vec![0xAA; 64],
-        ),
-    );
+    let completion = MaintenanceFact::SnapshotCompleted(aura_maintenance::SnapshotCompleted::new(
+        auth,
+        proposal_id,
+        snapshot,
+        std::collections::BTreeSet::new(),
+        vec![0xAA; 64],
+    ));
 
     let mut delta = MaintenanceFactDelta::default();
     delta.merge(&reducer.apply(&proposal));
@@ -159,11 +157,8 @@ fn cache_invalidation_is_additive() {
         vec![key.clone()],
         Epoch::new(1),
     ));
-    let inv2 = MaintenanceFact::CacheInvalidated(CacheInvalidated::new(
-        auth,
-        vec![key],
-        Epoch::new(2),
-    ));
+    let inv2 =
+        MaintenanceFact::CacheInvalidated(CacheInvalidated::new(auth, vec![key], Epoch::new(2)));
 
     let mut delta = MaintenanceFactDelta::default();
     delta.merge(&reducer.apply(&inv1));

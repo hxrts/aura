@@ -20,8 +20,8 @@ use js_sys::{Array, Function, Object, Promise, Reflect, JSON};
 use serde_json::from_str;
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell as StdRefCell;
-use std::rc::Rc;
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
@@ -216,9 +216,7 @@ fn selected_authority_id(controller: &UiController) -> Option<String> {
         })
 }
 
-async fn schedule_browser_ui_mutation(
-    action: impl FnOnce() + 'static,
-) -> Result<(), JsValue> {
+async fn schedule_browser_ui_mutation(action: impl FnOnce() + 'static) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("window unavailable"))?;
     let (tx, rx) = oneshot::channel::<()>();
     let action = Rc::new(StdRefCell::new(Some(Box::new(action) as Box<dyn FnOnce()>)));
@@ -230,11 +228,10 @@ async fn schedule_browser_ui_mutation(
         let _ = tx.send(());
     });
     window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(
-            callback.as_ref().unchecked_ref(),
-            0,
-        )
-        .map_err(|error| JsValue::from_str(&format!("failed to schedule UI mutation: {error:?}")))?;
+        .set_timeout_with_callback_and_timeout_and_arguments_0(callback.as_ref().unchecked_ref(), 0)
+        .map_err(|error| {
+            JsValue::from_str(&format!("failed to schedule UI mutation: {error:?}"))
+        })?;
     callback.forget();
     rx.await
         .map_err(|_| JsValue::from_str("scheduled UI mutation dropped before execution"))?;
@@ -286,10 +283,7 @@ async fn submit_semantic_command(
                         ),
                         Err(error) => update_semantic_debug(
                             "create_account_rebootstrap_error",
-                            Some(&format!(
-                                "{}: {error:?}",
-                                account_name_for_rebootstrap
-                            )),
+                            Some(&format!("{}: {error:?}", account_name_for_rebootstrap)),
                         ),
                     }
                 });
@@ -418,9 +412,10 @@ async fn submit_semantic_command(
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let code = invitation_workflows::export_invitation(&app_core, invitation.invitation_id())
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let code =
+                invitation_workflows::export_invitation(&app_core, invitation.invitation_id())
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
             controller.write_clipboard(&code);
             controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
                 receiver_authority_id: Some(authority_id.to_string()),
@@ -736,19 +731,26 @@ fn update_semantic_debug(event: &str, detail: Option<&str>) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let debug = Reflect::get(window.as_ref(), &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"))
-        .ok()
-        .filter(|value| !value.is_null() && !value.is_undefined())
-        .unwrap_or_else(|| {
-            let object = Object::new();
-            let _ = Reflect::set(
-                window.as_ref(),
-                &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
-                object.as_ref(),
-            );
-            object.into()
-        });
-    let _ = Reflect::set(&debug, &JsValue::from_str("last_event"), &JsValue::from_str(event));
+    let debug = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+    )
+    .ok()
+    .filter(|value| !value.is_null() && !value.is_undefined())
+    .unwrap_or_else(|| {
+        let object = Object::new();
+        let _ = Reflect::set(
+            window.as_ref(),
+            &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+            object.as_ref(),
+        );
+        object.into()
+    });
+    let _ = Reflect::set(
+        &debug,
+        &JsValue::from_str("last_event"),
+        &JsValue::from_str(event),
+    );
     let _ = Reflect::set(
         &debug,
         &JsValue::from_str("last_detail"),
@@ -907,22 +909,16 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
                 let request_json = request_json.clone();
                 shared_web_task_owner().spawn_local(async move {
                     update_semantic_debug("raw_entry", None);
-                    web_sys::console::log_1(
-                        &"[web-harness] submit_semantic_command entry".into(),
-                    );
+                    web_sys::console::log_1(&"[web-harness] submit_semantic_command entry".into());
                     let outcome: Result<JsValue, JsValue> = async {
                         let controller = current_controller()?;
-                        let request = from_str::<SemanticCommandRequest>(&request_json).map_err(
-                            |error| {
+                        let request =
+                            from_str::<SemanticCommandRequest>(&request_json).map_err(|error| {
                                 JsValue::from_str(&format!(
                                     "invalid semantic command request: {error}"
                                 ))
-                            },
-                        )?;
-                        update_semantic_debug(
-                            "raw_parsed",
-                            Some(&format!("{:?}", request.intent)),
-                        );
+                            })?;
+                        update_semantic_debug("raw_parsed", Some(&format!("{:?}", request.intent)));
                         web_sys::console::log_1(
                             &format!(
                                 "[web-harness] submit_semantic_command intent={:?}",

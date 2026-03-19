@@ -77,11 +77,17 @@ fn composite_extension_preserves_guard_chain_order() {
 
     // Verify ordering matches the guard chain: capability → cost → journal
     assert!(
-        matches!(composite.extensions[0], ConcreteExtension::ValidateCapability(..)),
+        matches!(
+            composite.extensions[0],
+            ConcreteExtension::ValidateCapability(..)
+        ),
         "first extension must be ValidateCapability"
     );
     assert!(
-        matches!(composite.extensions[1], ConcreteExtension::ChargeFlowCost(..)),
+        matches!(
+            composite.extensions[1],
+            ConcreteExtension::ChargeFlowCost(..)
+        ),
         "second extension must be ChargeFlowCost"
     );
     assert!(

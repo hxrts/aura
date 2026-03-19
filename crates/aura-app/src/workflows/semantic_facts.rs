@@ -3,10 +3,11 @@ use std::sync::{Arc, LazyLock};
 use async_lock::{Mutex, RwLock};
 use aura_core::{
     issue_operation_context, AuraError, AuthorizedProgressPublication,
-    AuthorizedReadinessPublication, AuthorizedTerminalPublication, LifecyclePublicationCapability,
-    OperationContext, OperationContextCapability, OperationProgress, OperationTimeoutBudget,
-    OwnedShutdownToken, OwnerEpoch, PublicationSequence, ReadinessPublicationCapability,
-    TerminalOutcome, TraceContext,
+    AuthorizedReadinessPublication, AuthorizedTerminalPublication, ChannelId,
+    LifecyclePublicationCapability, OperationContext, OperationContextCapability,
+    OperationProgress, OperationTimeoutBudget, OwnedShutdownToken, OwnerEpoch,
+    PostconditionProofCapability, PublicationSequence, ReadinessPublicationCapability,
+    SemanticOwnerPostcondition, SemanticSuccessProof, TerminalOutcome, TraceContext,
 };
 
 use crate::signal_defs::{
@@ -47,6 +48,8 @@ static SEMANTIC_OPERATION_CONTEXT_CAPABILITY: LazyLock<OperationContextCapabilit
     LazyLock::new(|| OperationContextCapability::new("aura-app:semantic-operation-context"));
 static SEMANTIC_READINESS_PUBLICATION_CAPABILITY: LazyLock<ReadinessPublicationCapability> =
     LazyLock::new(|| ReadinessPublicationCapability::new("aura-app:semantic-readiness"));
+static SEMANTIC_POSTCONDITION_PROOF_CAPABILITY: LazyLock<PostconditionProofCapability> =
+    LazyLock::new(|| PostconditionProofCapability::new("aura-app:semantic-postcondition-proof"));
 
 /// Return the sanctioned lifecycle-publication capability for shared semantic
 /// operation status publication.
@@ -54,7 +57,8 @@ static SEMANTIC_READINESS_PUBLICATION_CAPABILITY: LazyLock<ReadinessPublicationC
     category = "capability_gated",
     capability = "semantic_lifecycle"
 )]
-pub(in crate::workflows) fn semantic_lifecycle_publication_capability() -> &'static LifecyclePublicationCapability {
+pub(in crate::workflows) fn semantic_lifecycle_publication_capability(
+) -> &'static LifecyclePublicationCapability {
     &SEMANTIC_LIFECYCLE_PUBLICATION_CAPABILITY
 }
 
@@ -62,9 +66,18 @@ pub(in crate::workflows) fn semantic_lifecycle_publication_capability() -> &'sta
     category = "capability_gated",
     capability = "semantic_readiness"
 )]
-pub(in crate::workflows) fn semantic_readiness_publication_capability() -> &'static ReadinessPublicationCapability
-{
+pub(in crate::workflows) fn semantic_readiness_publication_capability(
+) -> &'static ReadinessPublicationCapability {
     &SEMANTIC_READINESS_PUBLICATION_CAPABILITY
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+pub(in crate::workflows) fn semantic_postcondition_proof_capability(
+) -> &'static PostconditionProofCapability {
+    &SEMANTIC_POSTCONDITION_PROOF_CAPABILITY
 }
 
 #[aura_macros::capability_boundary(
@@ -75,6 +88,42 @@ fn authorize_readiness_publication(
     fact: AuthoritativeSemanticFact,
 ) -> AuthorizedReadinessPublication<AuthoritativeSemanticFact> {
     AuthorizedReadinessPublication::authorize(semantic_readiness_publication_capability(), fact)
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct ChannelMembershipReadyProof {
+    channel_id: ChannelId,
+}
+
+impl SemanticSuccessProof for ChannelMembershipReadyProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("channel_membership_ready")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct ChannelInvitationCreatedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for ChannelInvitationCreatedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("channel_invitation_created")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct InvitationAcceptedOrMaterializedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for InvitationAcceptedOrMaterializedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("invitation_accepted_or_materialized")
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -127,12 +176,10 @@ impl SemanticWorkflowOwner {
         instance_id: Option<OperationInstanceId>,
         kind: SemanticOperationKind,
     ) -> Self {
-        let publication_state = issue_semantic_operation_context(
-            operation_id.clone(),
-            instance_id.clone(),
-        )
-        .map(|context| SemanticWorkflowPublicationState::Exact(Some(context)))
-        .unwrap_or(SemanticWorkflowPublicationState::Legacy);
+        let publication_state =
+            issue_semantic_operation_context(operation_id.clone(), instance_id.clone())
+                .map(|context| SemanticWorkflowPublicationState::Exact(Some(context)))
+                .unwrap_or(SemanticWorkflowPublicationState::Legacy);
         Self {
             app_core: app_core.clone(),
             operation_id,
@@ -157,47 +204,45 @@ impl SemanticWorkflowOwner {
         let publication = {
             let mut state = self.publication_state.lock().await;
             match &mut *state {
-                SemanticWorkflowPublicationState::Exact(context) => {
-                    match phase {
-                        SemanticOperationPhase::Succeeded => {
-                            let Some(context) = context.take() else {
-                                return Err(AuraError::invalid(
-                                    "semantic workflow owner has already published terminal lifecycle",
-                                ));
-                            };
-                            Some(ExactOperationLifecyclePublication::success_from_context(
-                                semantic_lifecycle_publication_capability(),
-                                context,
-                                self.kind,
-                            ))
-                        }
-                        SemanticOperationPhase::Cancelled => {
-                            let Some(context) = context.take() else {
-                                return Err(AuraError::invalid(
-                                    "semantic workflow owner has already published terminal lifecycle",
-                                ));
-                            };
-                            Some(ExactOperationLifecyclePublication::cancelled_from_context(
-                                semantic_lifecycle_publication_capability(),
-                                context,
-                                self.kind,
-                            ))
-                        }
-                        _ => {
-                            let Some(context) = context.as_mut() else {
-                                return Err(AuraError::invalid(
-                                    "semantic workflow owner has already published terminal lifecycle",
-                                ));
-                            };
-                            Some(ExactOperationLifecyclePublication::phase_from_context(
-                                semantic_lifecycle_publication_capability(),
-                                context,
-                                self.kind,
-                                phase,
-                            ))
-                        }
+                SemanticWorkflowPublicationState::Exact(context) => match phase {
+                    SemanticOperationPhase::Succeeded => {
+                        let Some(context) = context.take() else {
+                            return Err(AuraError::invalid(
+                                "semantic workflow owner has already published terminal lifecycle",
+                            ));
+                        };
+                        Some(ExactOperationLifecyclePublication::success_from_context(
+                            semantic_lifecycle_publication_capability(),
+                            context,
+                            self.kind,
+                        ))
                     }
-                }
+                    SemanticOperationPhase::Cancelled => {
+                        let Some(context) = context.take() else {
+                            return Err(AuraError::invalid(
+                                "semantic workflow owner has already published terminal lifecycle",
+                            ));
+                        };
+                        Some(ExactOperationLifecyclePublication::cancelled_from_context(
+                            semantic_lifecycle_publication_capability(),
+                            context,
+                            self.kind,
+                        ))
+                    }
+                    _ => {
+                        let Some(context) = context.as_mut() else {
+                            return Err(AuraError::invalid(
+                                "semantic workflow owner has already published terminal lifecycle",
+                            ));
+                        };
+                        Some(ExactOperationLifecyclePublication::phase_from_context(
+                            semantic_lifecycle_publication_capability(),
+                            context,
+                            self.kind,
+                            phase,
+                        ))
+                    }
+                },
                 SemanticWorkflowPublicationState::Legacy => None,
             }
         };
@@ -211,6 +256,47 @@ impl SemanticWorkflowOwner {
                 self.instance_id.clone(),
                 self.kind,
                 phase,
+            )
+            .await
+        }
+    }
+
+    pub(in crate::workflows) async fn publish_success_with<Proof>(
+        &self,
+        proof: Proof,
+    ) -> Result<(), AuraError>
+    where
+        Proof: SemanticSuccessProof,
+    {
+        let _postcondition = proof.declared_postcondition();
+        let publication = {
+            let mut state = self.publication_state.lock().await;
+            match &mut *state {
+                SemanticWorkflowPublicationState::Exact(context) => {
+                    let Some(context) = context.take() else {
+                        return Err(AuraError::invalid(
+                            "semantic workflow owner has already published terminal lifecycle",
+                        ));
+                    };
+                    Some(ExactOperationLifecyclePublication::success_from_context(
+                        semantic_lifecycle_publication_capability(),
+                        context,
+                        self.kind,
+                    ))
+                }
+                SemanticWorkflowPublicationState::Legacy => None,
+            }
+        };
+        if let Some(publication) = publication {
+            publish_exact_operation_lifecycle(&self.app_core, publication).await
+        } else {
+            publish_authoritative_operation_phase_with_instance(
+                &self.app_core,
+                semantic_lifecycle_publication_capability(),
+                self.operation_id.clone(),
+                self.instance_id.clone(),
+                self.kind,
+                SemanticOperationPhase::Succeeded,
             )
             .await
         }
@@ -286,6 +372,17 @@ impl SemanticWorkflowOwner {
             ),
         })
     }
+
+    pub(in crate::workflows) async fn terminal_success_fact_with<Proof>(
+        &self,
+        proof: Proof,
+    ) -> Result<AuthoritativeSemanticFact, AuraError>
+    where
+        Proof: SemanticSuccessProof,
+    {
+        let _postcondition = proof.declared_postcondition();
+        self.terminal_success_fact().await
+    }
 }
 
 #[aura_macros::capability_boundary(
@@ -308,6 +405,65 @@ pub(in crate::workflows) fn issue_semantic_operation_context(
             TraceContext::detached(),
         )
     })
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
+pub(in crate::workflows) fn issue_channel_membership_ready_proof(
+    channel_id: ChannelId,
+) -> ChannelMembershipReadyProof {
+    let _ = semantic_postcondition_proof_capability();
+    ChannelMembershipReadyProof { channel_id }
+}
+
+#[allow(dead_code)]
+pub(in crate::workflows) async fn prove_channel_membership_ready(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Result<ChannelMembershipReadyProof, AuraError> {
+    let channel_id_string = channel_id.to_string();
+    let facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    if facts.iter().any(|fact| {
+        matches!(
+            fact,
+            AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                if channel.id.as_deref() == Some(channel_id_string.as_str())
+        )
+    }) {
+        Ok(issue_channel_membership_ready_proof(channel_id))
+    } else {
+        Err(AuraError::from(
+            crate::workflows::error::WorkflowError::Precondition(
+                "ChannelMembershipReady proof requires an authoritative readiness fact",
+            ),
+        ))
+    }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
+pub(in crate::workflows) fn issue_channel_invitation_created_proof(
+    invitation_id: aura_core::InvitationId,
+) -> ChannelInvitationCreatedProof {
+    let _ = semantic_postcondition_proof_capability();
+    ChannelInvitationCreatedProof { invitation_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
+    invitation_id: aura_core::InvitationId,
+) -> InvitationAcceptedOrMaterializedProof {
+    let _ = semantic_postcondition_proof_capability();
+    InvitationAcceptedOrMaterializedProof { invitation_id }
 }
 
 impl ExactOperationLifecyclePublication {
@@ -338,14 +494,18 @@ impl ExactOperationLifecyclePublication {
                 context.publish_update(capability, OperationProgress::submitted()),
             ),
             SemanticOperationPhase::Cancelled => ExactLifecyclePublication::Terminal(
-                context.begin_terminal::<(), SemanticOperationError>(capability).cancel(),
+                context
+                    .begin_terminal::<(), SemanticOperationError>(capability)
+                    .cancel(),
             ),
             SemanticOperationPhase::Succeeded => ExactLifecyclePublication::Terminal(
                 context
                     .begin_terminal::<(), SemanticOperationError>(capability)
                     .succeed(()),
             ),
-            phase => ExactLifecyclePublication::Progress(context.publish_progress(capability, phase)),
+            phase => {
+                ExactLifecyclePublication::Progress(context.publish_progress(capability, phase))
+            }
         };
         Self {
             operation_id,
@@ -377,7 +537,9 @@ impl ExactOperationLifecyclePublication {
             SemanticOperationPhase::Submitted => ExactLifecyclePublication::Progress(
                 context.publish_update(capability, OperationProgress::submitted()),
             ),
-            phase => ExactLifecyclePublication::Progress(context.publish_progress(capability, phase)),
+            phase => {
+                ExactLifecyclePublication::Progress(context.publish_progress(capability, phase))
+            }
         };
         Self {
             operation_id,
@@ -494,8 +656,15 @@ impl ExactOperationLifecyclePublication {
     pub(in crate::workflows) fn into_fact(self) -> AuthoritativeSemanticFact {
         let status = match self.publication {
             ExactLifecyclePublication::Progress(publication) => {
-                let (_capability, _operation_id, _instance_id, _owner_epoch, _publication_sequence, _trace_context, progress) =
-                    publication.into_parts();
+                let (
+                    _capability,
+                    _operation_id,
+                    _instance_id,
+                    _owner_epoch,
+                    _publication_sequence,
+                    _trace_context,
+                    progress,
+                ) = publication.into_parts();
                 match progress {
                     OperationProgress::Submitted => {
                         SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Submitted)
@@ -506,8 +675,15 @@ impl ExactOperationLifecyclePublication {
                 }
             }
             ExactLifecyclePublication::Terminal(publication) => {
-                let (_capability, _operation_id, _instance_id, _owner_epoch, _publication_sequence, _trace_context, outcome) =
-                    publication.into_parts();
+                let (
+                    _capability,
+                    _operation_id,
+                    _instance_id,
+                    _owner_epoch,
+                    _publication_sequence,
+                    _trace_context,
+                    outcome,
+                ) = publication.into_parts();
                 match outcome {
                     TerminalOutcome::Succeeded { .. } => {
                         SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded)
@@ -683,12 +859,7 @@ pub(in crate::workflows) async fn publish_authoritative_operation_phase_with_ins
     } else {
         publish_authoritative_semantic_fact(
             app_core,
-            authorize_readiness_publication(operation_phase_fact(
-                operation_id,
-                None,
-                kind,
-                phase,
-            )),
+            authorize_readiness_publication(operation_phase_fact(operation_id, None, kind, phase)),
         )
         .await
     }
@@ -798,7 +969,9 @@ mod tests {
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.contains(&AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::invitation_accept(),
-            instance_id: Some(OperationInstanceId("tui-op-invitation_accept-3".to_string())),
+            instance_id: Some(OperationInstanceId(
+                "tui-op-invitation_accept-3".to_string()
+            )),
             causality: None,
             status: SemanticOperationStatus::new(
                 SemanticOperationKind::AcceptPendingChannelInvitation,
@@ -863,7 +1036,9 @@ mod tests {
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.contains(&AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::invitation_accept(),
-            instance_id: Some(OperationInstanceId("tui-op-invitation_accept-7".to_string())),
+            instance_id: Some(OperationInstanceId(
+                "tui-op-invitation_accept-7".to_string()
+            )),
             causality: Some(SemanticOperationCausality {
                 owner_epoch: OwnerEpoch::new(2),
                 publication_sequence: PublicationSequence::new(5),

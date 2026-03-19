@@ -17,9 +17,9 @@ use crate::signal_defs::{
     NETWORK_STATUS_SIGNAL_NAME, SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL_NAME,
 };
+use crate::workflows::runtime::workflow_best_effort;
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::workflows::snapshot_policy::contacts_snapshot;
-use crate::workflows::runtime::workflow_best_effort;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -204,7 +204,9 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     // runtime-side convergence that did not originate from a direct UI action.
     #[cfg(feature = "signals")]
     {
-        let _ = best_effort.capture(emit_chat_snapshot_signal(app_core)).await;
+        let _ = best_effort
+            .capture(emit_chat_snapshot_signal(app_core))
+            .await;
     }
 
     // Refresh contacts state (infallible)
@@ -213,14 +215,10 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     // Refresh invitations state (infallible read + fallible readiness)
     let _ = super::invitation::list_invitations(app_core).await;
     let _ = best_effort
-        .capture(super::invitation::refresh_authoritative_invitation_readiness(
-            app_core,
-        ))
+        .capture(super::invitation::refresh_authoritative_invitation_readiness(app_core))
         .await;
     let _ = best_effort
-        .capture(super::invitation::refresh_authoritative_contact_link_readiness(
-            app_core,
-        ))
+        .capture(super::invitation::refresh_authoritative_contact_link_readiness(app_core))
         .await;
 
     // Refresh settings state
@@ -257,14 +255,14 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
 
     #[cfg(feature = "signals")]
     {
-        let _ = best_effort.capture(emit_chat_snapshot_signal(app_core)).await;
+        let _ = best_effort
+            .capture(emit_chat_snapshot_signal(app_core))
+            .await;
     }
     #[cfg(feature = "signals")]
     {
         let _ = best_effort
-            .capture(super::messaging::refresh_authoritative_channel_membership_readiness(
-                app_core,
-            ))
+            .capture(super::messaging::refresh_authoritative_channel_membership_readiness(app_core))
             .await;
     }
 

@@ -963,44 +963,44 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
     let tcp_connection_group = tcp_accept_group.clone();
     let _tcp_accept_task_handle =
         tcp_accept_group.spawn_cancellable_named("tcp_accept_loop", async move {
-        loop {
-            let (mut stream, addr) = match listener.accept().await {
-                Ok((stream, addr)) => (stream, addr),
-                Err(err) => {
-                    tracing::warn!(error = %err, "LAN transport accept failed");
-                    let now_ms = time_effects
-                        .physical_time()
-                        .await
-                        .ok()
-                        .map(|t| t.ts_ms)
-                        .unwrap_or(0);
-                    let mut metrics = metrics.write().await;
-                    metrics.accept_errors = metrics.accept_errors.saturating_add(1);
-                    if now_ms > 0 {
-                        metrics.last_error_ms = now_ms;
+            loop {
+                let (mut stream, addr) = match listener.accept().await {
+                    Ok((stream, addr)) => (stream, addr),
+                    Err(err) => {
+                        tracing::warn!(error = %err, "LAN transport accept failed");
+                        let now_ms = time_effects
+                            .physical_time()
+                            .await
+                            .ok()
+                            .map(|t| t.ts_ms)
+                            .unwrap_or(0);
+                        let mut metrics = metrics.write().await;
+                        metrics.accept_errors = metrics.accept_errors.saturating_add(1);
+                        if now_ms > 0 {
+                            metrics.last_error_ms = now_ms;
+                        }
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
-            let effects = effects.clone();
-            let metrics = metrics.clone();
-            let time_effects = time_effects.clone();
-            let connection_group = tcp_connection_group.clone();
-            let now_ms = time_effects
-                .physical_time()
-                .await
-                .ok()
-                .map(|t| t.ts_ms)
-                .unwrap_or(0);
-            {
-                let mut metrics = metrics.write().await;
-                metrics.connections_accepted = metrics.connections_accepted.saturating_add(1);
-                if now_ms > 0 {
-                    metrics.last_accept_ms = now_ms;
+                let effects = effects.clone();
+                let metrics = metrics.clone();
+                let time_effects = time_effects.clone();
+                let connection_group = tcp_connection_group.clone();
+                let now_ms = time_effects
+                    .physical_time()
+                    .await
+                    .ok()
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0);
+                {
+                    let mut metrics = metrics.write().await;
+                    metrics.connections_accepted = metrics.connections_accepted.saturating_add(1);
+                    if now_ms > 0 {
+                        metrics.last_accept_ms = now_ms;
+                    }
                 }
-            }
-            let _connection_task =
+                let _connection_task =
                 connection_group.spawn_named(format!("tcp_connection.{addr}"), async move {
                 let mut len_buf = [0u8; 4];
                 if let Err(err) = stream.read_exact(&mut len_buf).await {
@@ -1090,7 +1090,7 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
 
                 let _ = handle_inbound_transport_envelope(effects, envelope).await;
                 });
-        }
+            }
         });
 
     let metrics = lan_transport.metrics_handle();
@@ -1098,115 +1098,119 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
         Arc::new(websocket_effects.time_effects().clone());
     let websocket_accept_group = parent_tasks.clone();
     let websocket_connection_group = websocket_accept_group.clone();
-    let _websocket_accept_task_handle = websocket_accept_group
-        .spawn_cancellable_named("websocket_accept_loop", async move {
-        loop {
-            let (stream, addr) = match websocket_listener.accept().await {
-                Ok((stream, addr)) => (stream, addr),
-                Err(err) => {
-                    tracing::warn!(error = %err, "LAN websocket accept failed");
-                    continue;
-                }
-            };
-
-            let effects = websocket_effects.clone();
-            let metrics = metrics.clone();
-            let time_effects = time_effects.clone();
-            let connection_group = websocket_connection_group.clone();
-            let _connection_task =
-                connection_group.spawn_named(format!("websocket_connection.{addr}"), async move {
-                let websocket = match accept_async(stream).await {
-                    Ok(websocket) => websocket,
+    let _websocket_accept_task_handle =
+        websocket_accept_group.spawn_cancellable_named("websocket_accept_loop", async move {
+            loop {
+                let (stream, addr) = match websocket_listener.accept().await {
+                    Ok((stream, addr)) => (stream, addr),
                     Err(err) => {
-                        tracing::debug!(
-                            error = %err,
-                            addr = %addr,
-                            "LAN websocket handshake failed"
-                        );
-                        return;
-                    }
-                };
-                let (mut sink, mut stream) = websocket.split();
-                while let Some(message) = stream.next().await {
-                    let message = match message {
-                        Ok(message) => message,
-                        Err(err) => {
-                            tracing::debug!(
-                                error = %err,
-                                addr = %addr,
-                                "LAN websocket read failed"
-                            );
-                            return;
-                        }
-                    };
-
-                    if !message.is_binary() {
+                        tracing::warn!(error = %err, "LAN websocket accept failed");
                         continue;
                     }
+                };
 
-                    let payload = message.into_data();
-                    let envelope = match aura_core::util::serialization::from_slice::<
-                        TransportEnvelope,
-                    >(&payload)
-                    {
-                        Ok(envelope) => envelope,
-                        Err(err) => {
-                            tracing::debug!(
-                                error = %err,
-                                addr = %addr,
-                                "LAN websocket decode failed"
-                            );
-                            let mut metrics = metrics.write().await;
-                            metrics.decode_errors = metrics.decode_errors.saturating_add(1);
-                            continue;
-                        }
-                    };
-
-                    let now_ms = time_effects
-                        .physical_time()
-                        .await
-                        .ok()
-                        .map(|t| t.ts_ms)
-                        .unwrap_or(0);
-                    {
-                        let mut metrics = metrics.write().await;
-                        metrics.frames_received = metrics.frames_received.saturating_add(1);
-                        metrics.bytes_received =
-                            metrics.bytes_received.saturating_add(payload.len() as u64);
-                        if now_ms > 0 {
-                            metrics.last_frame_ms = now_ms;
-                        }
-                    }
-
-                    if let Some(response) =
-                        handle_inbound_transport_envelope(effects.clone(), envelope).await
-                    {
-                        match aura_core::util::serialization::to_vec(&response) {
-                            Ok(bytes) => {
-                                if let Err(err) = sink
-                                    .send(tokio_tungstenite::tungstenite::Message::Binary(bytes))
-                                    .await
-                                {
-                                    tracing::debug!(
-                                        error = %err,
-                                        addr = %addr,
-                                        "LAN websocket response send failed"
-                                    );
-                                    return;
-                                }
-                            }
+                let effects = websocket_effects.clone();
+                let metrics = metrics.clone();
+                let time_effects = time_effects.clone();
+                let connection_group = websocket_connection_group.clone();
+                let _connection_task = connection_group.spawn_named(
+                    format!("websocket_connection.{addr}"),
+                    async move {
+                        let websocket = match accept_async(stream).await {
+                            Ok(websocket) => websocket,
                             Err(err) => {
                                 tracing::debug!(
                                     error = %err,
                                     addr = %addr,
-                                    "LAN websocket response encode failed"
+                                    "LAN websocket handshake failed"
                                 );
+                                return;
+                            }
+                        };
+                        let (mut sink, mut stream) = websocket.split();
+                        while let Some(message) = stream.next().await {
+                            let message = match message {
+                                Ok(message) => message,
+                                Err(err) => {
+                                    tracing::debug!(
+                                        error = %err,
+                                        addr = %addr,
+                                        "LAN websocket read failed"
+                                    );
+                                    return;
+                                }
+                            };
+
+                            if !message.is_binary() {
+                                continue;
+                            }
+
+                            let payload = message.into_data();
+                            let envelope = match aura_core::util::serialization::from_slice::<
+                                TransportEnvelope,
+                            >(&payload)
+                            {
+                                Ok(envelope) => envelope,
+                                Err(err) => {
+                                    tracing::debug!(
+                                        error = %err,
+                                        addr = %addr,
+                                        "LAN websocket decode failed"
+                                    );
+                                    let mut metrics = metrics.write().await;
+                                    metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                                    continue;
+                                }
+                            };
+
+                            let now_ms = time_effects
+                                .physical_time()
+                                .await
+                                .ok()
+                                .map(|t| t.ts_ms)
+                                .unwrap_or(0);
+                            {
+                                let mut metrics = metrics.write().await;
+                                metrics.frames_received = metrics.frames_received.saturating_add(1);
+                                metrics.bytes_received =
+                                    metrics.bytes_received.saturating_add(payload.len() as u64);
+                                if now_ms > 0 {
+                                    metrics.last_frame_ms = now_ms;
+                                }
+                            }
+
+                            if let Some(response) =
+                                handle_inbound_transport_envelope(effects.clone(), envelope).await
+                            {
+                                match aura_core::util::serialization::to_vec(&response) {
+                                    Ok(bytes) => {
+                                        if let Err(err) = sink
+                                            .send(tokio_tungstenite::tungstenite::Message::Binary(
+                                                bytes,
+                                            ))
+                                            .await
+                                        {
+                                            tracing::debug!(
+                                                error = %err,
+                                                addr = %addr,
+                                                "LAN websocket response send failed"
+                                            );
+                                            return;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        tracing::debug!(
+                                            error = %err,
+                                            addr = %addr,
+                                            "LAN websocket response encode failed"
+                                        );
+                                    }
+                                }
                             }
                         }
-                    }
-                }
-                });
-        }
+                    },
+                );
+            }
         });
 }
 
