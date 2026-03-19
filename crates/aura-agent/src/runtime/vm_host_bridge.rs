@@ -502,7 +502,7 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
             protocol_id: manifest.protocol_id.clone(),
             message,
         })?;
-    let _claimed_fragments = effects
+    let claimed_fragments = effects
         .claim_vm_fragments_for_manifest(current_owner_label, manifest)
         .map_err(|message| AuraVmSessionOpenError::FragmentClaim {
             protocol_id: manifest.protocol_id.clone(),
@@ -520,8 +520,8 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
     )
     .await;
     if open_result.is_err() {
-        if let Some(session_id) = claimed_session_id {
-            let _ = effects.release_vm_fragments_for_session(session_id);
+        if claimed_session_id.is_some() {
+            let _ = effects.release_vm_fragments(&claimed_fragments);
         }
     }
     open_result
@@ -1099,6 +1099,51 @@ mod tests {
             .await
             .expect("owned session ends");
         assert!(effects.vm_fragment_snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_manifest_open_releases_only_newly_claimed_fragments() {
+        let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([0x42; 16]));
+        let effects = test_effects(authority_id);
+        let session_id = Uuid::from_u128(0xABCE);
+        let roles = vec![authority_device_role(authority_id, 0)];
+        let existing_manifest = manifest_with_bundles("aura.existing.protocol", &["bundle-a"]);
+        let failing_manifest = manifest_with_bundles("aura.failing.protocol", &["bundle-b"]);
+        let global_type = GlobalType::End;
+
+        let owner = effects
+            .start_owned_choreography_session("vm_host_bridge_test_owner", session_id, roles)
+            .await
+            .expect("owned session starts");
+
+        effects
+            .claim_vm_fragments_for_manifest(owner.owner_label.clone(), &existing_manifest)
+            .expect("preexisting fragment claim succeeds");
+
+        let local_types = BTreeMap::new();
+        let error = open_manifest_vm_session_admitted(
+            effects.as_ref(),
+            &failing_manifest,
+            "Role",
+            &global_type,
+            &local_types,
+            AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .expect_err("open should fail after claiming bundle-b");
+        assert!(matches!(
+            error,
+            AuraVmSessionOpenError::RoleScopedImage { .. }
+        ));
+
+        let snapshot = effects.vm_fragment_snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].0.fragment_key, "bundle:bundle-a");
+
+        effects
+            .end_owned_choreography_session(&owner)
+            .await
+            .expect("owned session ends");
     }
 
     #[tokio::test]

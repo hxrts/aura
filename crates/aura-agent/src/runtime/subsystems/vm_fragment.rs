@@ -195,6 +195,20 @@ impl VmFragmentRegistry {
         fragment_ids
     }
 
+    /// Release one explicit set of claimed fragments.
+    pub(in crate::runtime) fn release_fragments(
+        &mut self,
+        fragment_ids: &[VmFragmentId],
+    ) -> Vec<VmFragmentId> {
+        let mut released = Vec::new();
+        for fragment_id in fragment_ids {
+            if self.owners.remove(fragment_id).is_some() {
+                released.push(fragment_id.clone());
+            }
+        }
+        released
+    }
+
     /// Snapshot every active fragment owner record.
     #[cfg(test)]
     pub fn snapshot(&self) -> Vec<(VmFragmentId, VmFragmentOwnerRecord)> {
@@ -315,6 +329,28 @@ mod tests {
             err,
             VmFragmentOwnershipError::OwnerConflict { .. }
         ));
+    }
+
+    #[test]
+    fn release_fragments_removes_only_selected_claims() {
+        let mut registry = VmFragmentRegistry::new();
+        let session_id = runtime_session(3);
+        let left = manifest("aura.test.left", &["bundle-a"]);
+        let right = manifest("aura.test.right", &["bundle-b"]);
+
+        let left_claims = registry
+            .claim_manifest(session_id, "owner-a", &left)
+            .expect("left claim succeeds");
+        let right_claims = registry
+            .claim_manifest(session_id, "owner-a", &right)
+            .expect("right claim succeeds");
+
+        let released = registry.release_fragments(&right_claims);
+        assert_eq!(released, right_claims);
+
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].0, left_claims[0]);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 #![allow(clippy::expect_used)]
 
-use aura_testkit::{create_test_fixture, TestEffectsBuilder, TestEffectHandler};
+use aura_testkit::{create_test_fixture, TestEffectHandler, TestEffectsBuilder};
 
 /// Test basic fixture creation provides a valid device ID.
 #[tokio::test]

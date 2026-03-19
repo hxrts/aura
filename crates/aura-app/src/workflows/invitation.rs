@@ -234,6 +234,13 @@ fn new_channel_invitation_stage_tracker(stage: &'static str) -> ChannelInvitatio
     Arc::new(std::sync::Mutex::new(stage))
 }
 
+#[cfg(feature = "signals")]
+fn update_accept_reconcile_stage(tracker: &ChannelInvitationStageTracker, stage: &'static str) {
+    if let Ok(mut guard) = tracker.lock() {
+        *guard = stage;
+    }
+}
+
 async fn timeout_channel_invitation_stage_with_deadline<T>(
     runtime: Option<&Arc<dyn crate::runtime_bridge::RuntimeBridge>>,
     stage: &'static str,
@@ -802,6 +809,7 @@ async fn reconcile_channel_invitation_acceptance(
     context_hint: Option<ContextId>,
     channel_name_hint: Option<&str>,
 ) -> Result<(), AcceptInvitationError> {
+    let stage_tracker = new_channel_invitation_stage_tracker("reconcile_channel_invitation:start");
     let reconcile_budget = match workflow_timeout_budget(
         runtime,
         Duration::from_millis(invitation_accept_reconcile_timeout_ms(
@@ -827,6 +835,7 @@ async fn reconcile_channel_invitation_acceptance(
             sender_id,
             context_hint,
             channel_name_hint,
+            &stage_tracker,
         )
     })
     .await;
@@ -836,10 +845,14 @@ async fn reconcile_channel_invitation_acceptance(
         Err(error) => {
             let detail = match error {
                 TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+                    let stage = stage_tracker
+                        .lock()
+                        .map(|guard| *guard)
+                        .unwrap_or("reconcile_channel_invitation:unknown");
                     format!(
-                    "accept_invitation timed out in stage reconcile_channel_invitation after {}ms",
-                    reconcile_budget.timeout_ms()
-                )
+                        "accept_invitation timed out in stage reconcile_channel_invitation after {}ms (last_stage={stage})",
+                        reconcile_budget.timeout_ms()
+                    )
                 }
                 TimeoutRunError::Timeout(timeout_error) => timeout_error.to_string(),
                 TimeoutRunError::Operation(operation_error) => operation_error.to_string(),
@@ -1250,12 +1263,17 @@ async fn reconcile_accepted_channel_invitation(
     sender_id: AuthorityId,
     context_hint: Option<ContextId>,
     channel_name_hint: Option<&str>,
+    stage_tracker: &ChannelInvitationStageTracker,
 ) -> Result<(), AuraError> {
     const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
     const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
 
     let mut authoritative_context = context_hint;
     if authoritative_context.is_none() {
+        update_accept_reconcile_stage(
+            stage_tracker,
+            "reconcile_channel_invitation:resolve_context",
+        );
         let policy = workflow_retry_policy(
             CHANNEL_CONTEXT_ATTEMPTS as u32,
             Duration::from_millis(CHANNEL_CONTEXT_BACKOFF_MS),
@@ -1288,34 +1306,17 @@ async fn reconcile_accepted_channel_invitation(
             "Accepted channel invitation but no authoritative context was materialized",
         ))
     })?;
-    let local_channel_id = {
-        let policy = workflow_retry_policy(
-            CHANNEL_CONTEXT_ATTEMPTS as u32,
-            Duration::from_millis(CHANNEL_CONTEXT_BACKOFF_MS),
-            Duration::from_millis(CHANNEL_CONTEXT_BACKOFF_MS),
-        )?;
-        execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
-            if let Some(local_channel_id) =
-                crate::workflows::messaging::authoritative_local_channel_id_for_context(
-                    app_core,
-                    authoritative_context,
-                    channel_name_hint,
-                )
-                .await
-            {
-                return Ok(local_channel_id);
-            }
-            converge_runtime(runtime).await;
-            Err(AuraError::from(super::error::WorkflowError::Precondition(
-                "Accepted channel invitation but no local channel identity was materialized",
-            )))
-        })
-        .await
-        .map_err(|error| match error {
-            RetryRunError::Timeout(timeout_error) => AuraError::from(timeout_error),
-            RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
-        })?
-    };
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:resolve_local_channel_id",
+    );
+    // Shared channel invitation acceptance is keyed by the invited canonical
+    // channel id. Do not remap it through a context-local home identity.
+    let local_channel_id = channel_id;
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:project_channel_peer_membership",
+    );
     crate::workflows::messaging::project_channel_peer_membership_with_context(
         app_core,
         local_channel_id,
@@ -1324,15 +1325,40 @@ async fn reconcile_accepted_channel_invitation(
         channel_name_hint,
     )
     .await?;
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:ensure_runtime_channel_state",
+    );
+    if !crate::workflows::messaging::runtime_channel_state_exists(
+        app_core,
+        runtime,
+        local_channel_id,
+    )
+    .await?
+    {
+        update_accept_reconcile_stage(stage_tracker, "reconcile_channel_invitation:join_channel");
+        crate::workflows::messaging::join_channel(app_core, local_channel_id).await?;
+    }
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:wait_for_runtime_channel_state",
+    );
+    crate::workflows::messaging::wait_for_runtime_channel_state(
+        app_core,
+        runtime,
+        local_channel_id,
+    )
+    .await?;
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:refresh_channel_membership_readiness",
+    );
     crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(app_core)
         .await?;
-    if crate::workflows::snapshot_policy::chat_snapshot(app_core)
-        .await
-        .channel(&local_channel_id)
-        .is_none()
-    {
-        let _ = crate::workflows::messaging::join_channel(app_core, local_channel_id).await;
-    }
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:converge_runtime",
+    );
     converge_runtime(runtime).await;
     Ok(())
 }
@@ -1345,6 +1371,7 @@ async fn reconcile_accepted_channel_invitation(
     _sender_id: AuthorityId,
     _context_hint: Option<ContextId>,
     _channel_name_hint: Option<&str>,
+    _stage_tracker: &ChannelInvitationStageTracker,
 ) -> Result<(), AuraError> {
     converge_runtime(runtime).await;
     Ok(())

@@ -1543,24 +1543,10 @@ async fn local_channel_id_for_accepted_pending_invitation(
     fallback_channel_id: ChannelId,
 ) -> ChannelId {
     match &invitation.invitation_type {
-        InvitationBridgeType::Channel {
-            context_id: Some(context_id),
-            nickname_suggestion,
-            ..
-        } => authoritative_local_channel_id_for_context(
-            app_core,
-            *context_id,
-            nickname_suggestion.as_deref(),
-        )
-        .await
-        .unwrap_or(fallback_channel_id),
-        InvitationBridgeType::Channel {
-            context_id: None,
-            nickname_suggestion: Some(channel_name),
-            ..
-        } => resolve_chat_channel_id_from_state_or_input(app_core, channel_name)
-            .await
-            .unwrap_or(fallback_channel_id),
+        InvitationBridgeType::Channel { .. } => {
+            let _ = app_core;
+            fallback_channel_id
+        }
         _ => fallback_channel_id,
     }
 }
@@ -1594,7 +1580,7 @@ pub(crate) async fn require_authoritative_context_id_for_channel(
     })
 }
 
-async fn runtime_channel_state_exists(
+pub(in crate::workflows) async fn runtime_channel_state_exists(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
@@ -1609,7 +1595,7 @@ async fn runtime_channel_state_exists(
         .map_err(|error| super::error::runtime_call("inspect channel state", error).into())
 }
 
-async fn wait_for_runtime_channel_state(
+pub(in crate::workflows) async fn wait_for_runtime_channel_state(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,

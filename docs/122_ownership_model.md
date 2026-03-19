@@ -317,6 +317,10 @@ Best-effort work:
 - must not directly perform parity-critical mutation such as committing facts,
   materializing authoritative state, registering required ownership, or other
   work that a later parity-critical operation depends on
+- must not use the `best_effort_*` naming surface unless they actually obey the
+  best-effort contract above; Aura treats that prefix as a reserved ownership
+  boundary and lints it accordingly even when the helper forgot to add an
+  explicit `#[best_effort_boundary]`
 
 If a step mutates authoritative state required by a later semantic operation,
 it is not best-effort. It belongs either:
@@ -490,6 +494,8 @@ Current enforcement split:
   - silent discard of parity-critical results and errors
   - best-effort boundaries performing direct parity-critical mutation or
     publication
+  - helpers named `best_effort_*` being treated as real best-effort boundaries
+    rather than advisory comments
   - raw spawn / raw task-handle escape hatches
   - frontend semantic handoff bypasses
   - raw timeout/time-domain usage in protected modules

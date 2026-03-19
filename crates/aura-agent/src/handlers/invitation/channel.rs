@@ -67,7 +67,7 @@ impl<'a> InvitationChannelHandler<'a> {
         }
     }
 
-    async fn best_effort_create_channel(
+    async fn attempt_channel_checkpoint_provision(
         &self,
         effects: &AuraEffectSystem,
         context_id: ContextId,
@@ -139,7 +139,7 @@ impl<'a> InvitationChannelHandler<'a> {
         }
     }
 
-    async fn best_effort_join_channel(
+    async fn attempt_channel_membership_provision(
         &self,
         effects: &AuraEffectSystem,
         context_id: ContextId,
@@ -212,6 +212,48 @@ impl<'a> InvitationChannelHandler<'a> {
         }
     }
 
+    async fn require_channel_join(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        participant: AuthorityId,
+    ) -> AgentResult<()> {
+        let started_at = effects
+            .physical_time()
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &started_at,
+            Duration::from_millis(INVITATION_CHANNEL_JOIN_TIMEOUT_MS),
+        )
+        .map_err(|error| AgentError::effects(error.to_string()))?;
+
+        let join_result = execute_with_timeout_budget(effects, &budget, || async {
+            effects
+                .join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant,
+                })
+                .await
+        })
+        .await;
+
+        match join_result {
+            Ok(()) => Ok(()),
+            Err(TimeoutRunError::Timeout(error)) => Err(AgentError::effects(error.to_string())),
+            Err(TimeoutRunError::Operation(error)) => {
+                let lowered = error.to_string().to_ascii_lowercase();
+                if lowered.contains("already") || lowered.contains("exists") {
+                    Ok(())
+                } else {
+                    Err(AgentError::effects(error.to_string()))
+                }
+            }
+        }
+    }
+
     #[aura_macros::best_effort_boundary]
     pub(super) async fn provision_amp_channel_for_inbound_chat_fact(
         &self,
@@ -247,7 +289,7 @@ impl<'a> InvitationChannelHandler<'a> {
             return;
         }
 
-        self.best_effort_create_channel(
+        self.attempt_channel_checkpoint_provision(
             effects,
             context_id,
             channel_id,
@@ -262,7 +304,7 @@ impl<'a> InvitationChannelHandler<'a> {
         }
 
         for participant in participants {
-            self.best_effort_join_channel(
+            self.attempt_channel_membership_provision(
                 effects,
                 context_id,
                 channel_id,
@@ -435,14 +477,8 @@ impl<'a> InvitationChannelHandler<'a> {
     ) -> AgentResult<()> {
         let own_id = self.handler.context.authority.authority_id();
 
-        self.best_effort_join_channel(
-            effects,
-            invite.context_id,
-            invite.channel_id,
-            own_id,
-            "Failed to join invited channel (continuing)",
-        )
-        .await;
+        self.require_channel_join(effects, invite.context_id, invite.channel_id, own_id)
+            .await?;
 
         if !self
             .handler

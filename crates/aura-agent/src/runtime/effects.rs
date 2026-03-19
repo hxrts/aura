@@ -670,6 +670,21 @@ impl AuraEffectSystem {
         released
     }
 
+    /// Release one explicit set of locally owned fragments.
+    pub(crate) fn release_vm_fragments(&self, fragment_ids: &[VmFragmentId]) -> Vec<VmFragmentId> {
+        let released = self
+            .vm_fragment_registry
+            .write()
+            .release_fragments(fragment_ids);
+        if !released.is_empty() {
+            tracing::debug!(
+                fragment_count = released.len(),
+                "released explicitly claimed local VM fragments"
+            );
+        }
+        released
+    }
+
     #[cfg(test)]
     pub fn vm_fragment_snapshot(
         &self,

@@ -20,8 +20,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use aura_composition::{
-    CompositeHandler, Handler, HandlerContext, HandlerError, RegisterAllOptions,
-    RegistrableHandler,
+    CompositeHandler, Handler, HandlerContext, HandlerError, RegisterAllOptions, RegistrableHandler,
 };
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_protocol::handlers::AuraContext;
@@ -208,10 +207,7 @@ fn test_handler_factory_coverage() {
 
     // Test testing mode
     let testing_handler = AuraHandlerFactory::for_testing(device_id);
-    assert_eq!(
-        testing_handler.execution_mode(),
-        ExecutionMode::Testing
-    );
+    assert_eq!(testing_handler.execution_mode(), ExecutionMode::Testing);
 
     // Test production mode — protocol-layer factory intentionally returns Err
     // because production handler assembly is owned by aura-agent

@@ -14,11 +14,11 @@
 
 #![allow(clippy::disallowed_methods)]
 
+use aura_core::semilattice::JoinSemilattice;
 use aura_core::{
     tree::{snapshot::Snapshot, AttestedOp, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
     DeviceId, Epoch, Hash32,
 };
-use aura_core::semilattice::JoinSemilattice;
 use aura_journal::algebra::OpLog;
 use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
 use aura_protocol::state::PeerView;

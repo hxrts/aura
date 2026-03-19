@@ -130,7 +130,7 @@ async fn timeout_prepare_invitation_stage<T>(
         })
 }
 
-async fn timeout_best_effort_network_stage<T>(
+async fn timeout_deferred_network_stage<T>(
     effects: &AuraEffectSystem,
     stage: &'static str,
     future: impl Future<Output = AgentResult<T>>,
@@ -155,12 +155,12 @@ async fn timeout_best_effort_network_stage<T>(
         })
 }
 
-async fn best_effort_send_envelope(
+async fn attempt_network_send_envelope(
     effects: &AuraEffectSystem,
     stage: &'static str,
     envelope: TransportEnvelope,
 ) -> AgentResult<()> {
-    timeout_best_effort_network_stage(effects, stage, async {
+    timeout_deferred_network_stage(effects, stage, async {
         effects
             .send_envelope(envelope)
             .await
@@ -1006,7 +1006,7 @@ impl InvitationHandler {
                         receipt: None,
                     };
 
-                    if let Err(error) = best_effort_send_envelope(
+                    if let Err(error) = attempt_network_send_envelope(
                         &effects,
                         "device enrollment acceptance envelope send failed",
                         envelope,
@@ -2526,7 +2526,7 @@ pub(crate) async fn execute_invitation_effect_commands(
         );
 
         let result = if best_effort_network_failures && is_network_side_effect {
-            timeout_best_effort_network_stage(
+            timeout_deferred_network_stage(
                 effects,
                 "accept_network_side_effect",
                 execute_effect_command(
@@ -2756,7 +2756,8 @@ async fn execute_notify_peer(
     };
 
     if best_effort_network_failures {
-        best_effort_send_envelope(effects, "notify peer with invitation failed", envelope).await?;
+        attempt_network_send_envelope(effects, "notify peer with invitation failed", envelope)
+            .await?;
     } else {
         effects.send_envelope(envelope).await.map_err(|e| {
             AgentError::effects(format!("Failed to notify peer with invitation: {e}"))

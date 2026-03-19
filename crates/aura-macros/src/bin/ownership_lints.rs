@@ -286,7 +286,10 @@ fn scan_function(
         LintMode::SemanticOwnerBoundedAwaits => {
             has_marker_attr(attrs, "semantic_owner") || contains_handoff
         }
-        LintMode::BestEffortSideEffectBoundary => has_marker_attr(attrs, "best_effort_boundary"),
+        LintMode::BestEffortSideEffectBoundary => {
+            has_marker_attr(attrs, "best_effort_boundary")
+                || function_name.starts_with("best_effort_")
+        }
         LintMode::SemanticOwnerDetachedContinuation => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerNoSpawn => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerProofSuccess => semantic_owner_declares_proof(attrs),
