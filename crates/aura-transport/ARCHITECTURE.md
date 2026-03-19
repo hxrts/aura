@@ -77,6 +77,36 @@ Verification hooks:
 Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines `InvariantReceiptValidityWindow` and `InvariantCrossEpochReplayPrevention`.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantSequenceMonotonic` and `InvariantContextIsolation`.
+## Testing
+
+### Strategy
+
+aura-transport defines wire protocol types. If serialization breaks, peers
+can't communicate. If context isolation breaks, messages leak across
+relationships. If epoch validation breaks, replay attacks succeed.
+
+### Running tests
+
+```
+cargo test -p aura-transport --test wire  # wire protocol contracts
+cargo test -p aura-transport --lib        # inline unit tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Envelope serialization changes | — | `tests/wire/envelope_roundtrip.rs` | covered |
+| Connection state machine invalid | — | `tests/wire/envelope_roundtrip.rs` | covered |
+| Context A message delivered in context B | InvariantContextIsolation | `tests/wire/context_isolation.rs` | covered (+ ScopedEnvelope fix) |
+| AMP ratchet rejects valid messages | — | `tests/wire/amp_ratchet.rs` | covered |
+| Old-epoch message accepted | InvariantCrossEpochReplayPrevention | `tests/wire/context_isolation.rs` | covered |
+| Future non-pending epoch accepted | InvariantCrossEpochReplayPrevention | `tests/wire/context_isolation.rs` | covered |
+| Generation outside window accepted | InvariantSequenceMonotonic | `tests/wire/context_isolation.rs` | covered (boundary tests) |
+| Window boundary off-by-one | InvariantSequenceMonotonic | `src/amp.rs` inline | covered |
+| Message key derivation non-deterministic | — | `src/amp.rs` inline | covered |
+| Privacy level semantics wrong | — | `src/types/envelope.rs` inline | covered |
+
 ## Boundaries
 - No actual network I/O (use TransportEffects).
 - Transport handlers live in aura-effects.

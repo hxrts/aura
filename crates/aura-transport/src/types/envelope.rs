@@ -163,7 +163,12 @@ impl Envelope {
 }
 
 impl ScopedEnvelope {
-    /// Create scoped envelope from base envelope
+    /// Create scoped envelope from base envelope.
+    ///
+    /// Validates that the envelope supports context scoping and that its
+    /// embedded context_id matches the requested scope. This prevents
+    /// wrapping an envelope created for context A in a ScopedEnvelope
+    /// claiming context B.
     pub fn new(
         envelope: Envelope,
         context_id: ContextId,
@@ -175,6 +180,15 @@ impl ScopedEnvelope {
             return Err(aura_core::AuraError::invalid(
                 "Envelope does not support context scoping",
             ));
+        }
+
+        // Verify context_id consistency — prevent context mismatch attacks
+        if let Some(env_ctx) = envelope.context_id {
+            if env_ctx != context_id {
+                return Err(aura_core::AuraError::invalid(format!(
+                    "Envelope context_id ({env_ctx}) does not match requested scope ({context_id})"
+                )));
+            }
         }
 
         Ok(Self {

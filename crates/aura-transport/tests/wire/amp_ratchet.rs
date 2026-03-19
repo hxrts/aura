@@ -1,8 +1,11 @@
-//! Integration-ish tests for AMP transport helpers using simulated state.
+//! AMP ratchet protocol contracts — window acceptance, epoch validation,
+//! and cross-epoch replay prevention.
 
 use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_transport::amp::{derive_for_recv, derive_for_send, AmpHeader, AmpRatchetState};
 
+/// Messages within 2× the skip window are accepted even if out-of-order —
+/// the dual-window design allows for reordering during transit.
 #[test]
 fn dual_window_out_of_order_accepts_within_span() {
     let ctx = ContextId::new_from_entropy([1u8; 32]);

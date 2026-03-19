@@ -1,6 +1,8 @@
-//! Transport types round-trip tests.
-
-#![allow(clippy::expect_used, missing_docs)]
+//! Envelope serialization roundtrip and connection state machine contracts.
+//!
+//! If envelope serialization breaks, peers cannot decode each other's
+//! messages. If connection state transitions are invalid, channels get
+//! stuck in limbo states.
 
 use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -10,6 +12,9 @@ use aura_transport::types::{
     PrivacyLevel,
 };
 
+/// Context-scoped envelope survives DAG-CBOR roundtrip with all fields
+/// intact — message_id, frame_type, privacy_level, capability_hint,
+/// frame_size, payload, and context_id.
 #[test]
 fn envelope_round_trip() {
     let payload = b"transport payload".to_vec();
@@ -34,6 +39,8 @@ fn envelope_round_trip() {
     assert_eq!(decoded.context_id, Some(context_id));
 }
 
+/// Connection state machine: Connecting → Established → Closing → Closed
+/// with correct timestamps and close reasons at each transition.
 #[test]
 fn connection_state_transitions() {
     let peer = AuthorityId::new_from_entropy([3u8; 32]);
