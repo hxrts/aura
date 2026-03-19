@@ -1,3 +1,5 @@
+//! Callback wiring integration tests (batch 1).
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,

@@ -1,3 +1,5 @@
+//! Regression test: demo mobile enrollment flow.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
