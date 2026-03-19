@@ -1,3 +1,9 @@
+//! Compile-fail boundary tests for aura-macros proc-macro crate.
+//!
+//! Valid inputs must compile. Invalid inputs must produce clear errors.
+//! If a valid choreography is rejected or an invalid one is silently
+//! accepted, the DSL contract is broken.
+
 struct TrybuildLock {
     path: std::path::PathBuf,
 }
@@ -35,28 +41,34 @@ fn acquire_trybuild_lock() -> TrybuildLock {
     }
 }
 
+/// Choreography annotations: valid inputs compile, invalid inputs produce
+/// clear errors with guidance toward the fix.
 #[test]
 fn choreography_annotation_validation() {
     let _lock = acquire_trybuild_lock();
     let t = trybuild::TestCases::new();
-    t.pass("tests/trybuild/valid_annotations.rs");
-    t.pass("tests/trybuild/ceremony_facts_valid.rs");
-    t.pass("tests/trybuild/semantic_owner_valid.rs");
-    t.pass("tests/trybuild/actor_owned_valid.rs");
-    t.pass("tests/trybuild/capability_boundary_valid.rs");
-    t.pass("tests/trybuild/ownership_lifecycle_valid.rs");
-    t.compile_fail("tests/trybuild/parameterized_roles_and_parallel.rs");
-    t.compile_fail("tests/trybuild/invalid_flow_cost.rs");
-    t.compile_fail("tests/trybuild/invalid_guard_capability.rs");
-    t.compile_fail("tests/trybuild/incoherent_self_send.rs");
-    t.compile_fail("tests/trybuild/missing_namespace.rs");
-    t.compile_fail("tests/trybuild/semantic_owner_missing_context.rs");
-    t.compile_fail("tests/trybuild/semantic_owner_missing_owner.rs");
-    t.compile_fail("tests/trybuild/semantic_owner_missing_category.rs");
-    t.compile_fail("tests/trybuild/semantic_owner_missing_terminal_path.rs");
-    t.compile_fail("tests/trybuild/actor_owned_missing_capacity.rs");
-    t.compile_fail("tests/trybuild/actor_owned_missing_gate.rs");
-    t.compile_fail("tests/trybuild/actor_owned_bypass_without_macro.rs");
-    t.compile_fail("tests/trybuild/capability_boundary_missing_category.rs");
-    t.compile_fail("tests/trybuild/ownership_lifecycle_invalid_variant.rs");
+    // Valid choreographies must compile
+    t.pass("tests/boundaries/valid_annotations.rs");
+    t.pass("tests/boundaries/ceremony_facts_valid.rs");
+    // Ownership macro valid cases
+    t.pass("tests/boundaries/semantic_owner_valid.rs");
+    t.pass("tests/boundaries/actor_owned_valid.rs");
+    t.pass("tests/boundaries/capability_boundary_valid.rs");
+    t.pass("tests/boundaries/ownership_lifecycle_valid.rs");
+    // Invalid choreographies must produce clear errors
+    t.compile_fail("tests/boundaries/parameterized_roles_and_parallel.rs");
+    t.compile_fail("tests/boundaries/invalid_flow_cost.rs");
+    t.compile_fail("tests/boundaries/invalid_guard_capability.rs");
+    t.compile_fail("tests/boundaries/incoherent_self_send.rs");
+    t.compile_fail("tests/boundaries/missing_namespace.rs");
+    // Ownership macro rejection cases
+    t.compile_fail("tests/boundaries/semantic_owner_missing_context.rs");
+    t.compile_fail("tests/boundaries/semantic_owner_missing_owner.rs");
+    t.compile_fail("tests/boundaries/semantic_owner_missing_category.rs");
+    t.compile_fail("tests/boundaries/semantic_owner_missing_terminal_path.rs");
+    t.compile_fail("tests/boundaries/actor_owned_missing_capacity.rs");
+    t.compile_fail("tests/boundaries/actor_owned_missing_gate.rs");
+    t.compile_fail("tests/boundaries/actor_owned_bypass_without_macro.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_missing_category.rs");
+    t.compile_fail("tests/boundaries/ownership_lifecycle_invalid_variant.rs");
 }

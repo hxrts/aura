@@ -86,6 +86,51 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.
 - [MPST and Choreography](../../docs/110_mpst_and_choreography.md) defines projection expectations.
+## Testing
+
+### Strategy
+
+aura-macros is a proc-macro crate — all work happens at compile time. The
+critical concern is that valid inputs compile and invalid inputs produce
+clear errors. If a valid choreography is rejected or an invalid one is
+silently accepted, the DSL contract is broken.
+
+### Running tests
+
+```
+cargo test -p aura-macros --test compile_fail  # boundary tests
+cargo test -p aura-macros --lib                # inline unit tests
+```
+
+To regenerate `.stderr` files after intentional changes:
+```
+TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test file | Status |
+|---------------------|----------|--------|
+| Valid choreography annotations rejected | `boundaries/valid_annotations.rs` | covered (pass) |
+| Valid ceremony facts rejected | `boundaries/ceremony_facts_valid.rs` | covered (pass) |
+| Valid semantic_owner rejected | `boundaries/semantic_owner_valid.rs` | covered (pass) |
+| Valid actor_owned rejected | `boundaries/actor_owned_valid.rs` | covered (pass) |
+| Valid capability_boundary rejected | `boundaries/capability_boundary_valid.rs` | covered (pass) |
+| Valid ownership_lifecycle rejected | `boundaries/ownership_lifecycle_valid.rs` | covered (pass) |
+| Invalid flow_cost silently accepted | `boundaries/invalid_flow_cost.rs` | covered (compile_fail) |
+| Invalid guard_capability accepted | `boundaries/invalid_guard_capability.rs` | covered (compile_fail) |
+| Self-send accepted | `boundaries/incoherent_self_send.rs` | covered (compile_fail) |
+| Missing namespace accepted | `boundaries/missing_namespace.rs` | covered (compile_fail) |
+| semantic_owner missing context | `boundaries/semantic_owner_missing_context.rs` | covered (compile_fail) |
+| semantic_owner missing owner | `boundaries/semantic_owner_missing_owner.rs` | covered (compile_fail) |
+| semantic_owner missing category | `boundaries/semantic_owner_missing_category.rs` | covered (compile_fail) |
+| semantic_owner missing terminal | `boundaries/semantic_owner_missing_terminal_path.rs` | covered (compile_fail) |
+| actor_owned missing capacity | `boundaries/actor_owned_missing_capacity.rs` | covered (compile_fail) |
+| actor_owned missing gate | `boundaries/actor_owned_missing_gate.rs` | covered (compile_fail) |
+| actor_owned bypass without macro | `boundaries/actor_owned_bypass_without_macro.rs` | covered (compile_fail) |
+| capability_boundary missing category | `boundaries/capability_boundary_missing_category.rs` | covered (compile_fail) |
+| ownership_lifecycle invalid variant | `boundaries/ownership_lifecycle_invalid_variant.rs` | covered (compile_fail) |
+
 ## Boundaries
 - No runtime code or effect implementations.
 - Generated code uses types from aura-mpst for choreographies.
