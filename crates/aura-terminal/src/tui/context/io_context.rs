@@ -36,14 +36,15 @@ use aura_app::ui::signals::{
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
-use aura_app::ui::workflows::ceremonies::CeremonyHandle;
+use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
-    context as context_workflows, settings as settings_workflows, system as system_workflows,
+    ceremonies as ceremony_workflows, context as context_workflows,
+    settings as settings_workflows, system as system_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
-use aura_core::{AuthorityId, CeremonyId};
+use aura_core::AuthorityId;
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::tui::{resolve_storage_path, TuiMode};
@@ -63,6 +64,11 @@ use crate::tui::hooks::{
 pub struct AuthoritySwitchRequest {
     pub authority_id: aura_core::types::identifiers::AuthorityId,
     pub nickname_suggestion: Option<String>,
+}
+
+struct StoredCeremonyHandle {
+    status_handle: CeremonyStatusHandle,
+    cancel_handle: Option<CeremonyHandle>,
 }
 
 // ============================================================================
@@ -234,7 +240,7 @@ impl IoContextBuilder {
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
-        let ceremony_kinds = Arc::new(RwLock::new(HashMap::new()));
+        let ceremony_handles = Arc::new(RwLock::new(HashMap::new()));
         let requested_authority_switch = Arc::new(std::sync::Mutex::new(None));
 
         let dispatch = DispatchHelper::new(
@@ -267,7 +273,7 @@ impl IoContextBuilder {
             invited_lan_peers,
             current_context,
             channel_modes,
-            ceremony_kinds,
+            ceremony_handles,
             tasks,
             pending_runtime_bootstrap: self.pending_runtime_bootstrap,
             requested_authority_switch,
@@ -305,19 +311,21 @@ pub struct IoContext {
     invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
-    ceremony_kinds: Arc<RwLock<HashMap<String, CeremonyKind>>>,
+    ceremony_handles: Arc<RwLock<HashMap<String, StoredCeremonyHandle>>>,
     tasks: Arc<UiTaskOwner>,
     pending_runtime_bootstrap: bool,
     requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
 }
 
 /// Lightweight TUI-facing result of starting device enrollment.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DeviceEnrollmentStartInfo {
     pub ceremony_id: String,
     pub enrollment_code: String,
     pub pending_epoch: Epoch,
     pub device_id: String,
+    pub status_handle: CeremonyStatusHandle,
+    pub cancel_handle: CeremonyHandle,
 }
 
 impl IoContext {
@@ -848,62 +856,27 @@ impl IoContext {
         nickname_suggestion: &str,
         invitee_authority_id: Option<AuthorityId>,
     ) -> TerminalResult<DeviceEnrollmentStartInfo> {
-        match self
-            .operational
-            .execute(&EffectCommand::AddDevice {
-                nickname_suggestion: nickname_suggestion.to_string(),
-                invitee_authority_id,
-            })
-            .await
-        {
-            Some(Ok(OpResponse::DeviceEnrollmentStarted {
-                ceremony_id,
-                enrollment_code,
-                pending_epoch,
-                device_id,
-            })) => Ok(DeviceEnrollmentStartInfo {
-                ceremony_id,
-                enrollment_code,
-                pending_epoch,
-                device_id,
-            }),
-            Some(Ok(other)) => Err(TerminalError::structured_operation(
-                OpFailureCode::StartDeviceEnrollment.as_str(),
-                format!("Unexpected response: {other:?}"),
-            )),
-            Some(Err(err)) => {
-                let terr: TerminalError = err.clone().into();
-                self.operational.emit_error(terr).await;
-                Err(err.into())
-            }
-            None => Err(TerminalError::NotImplemented(
-                "AddDevice not handled".to_string(),
-            )),
-        }
+        let start = ceremony_workflows::start_device_enrollment_ceremony(
+            self.app_core.raw(),
+            nickname_suggestion.to_string(),
+            invitee_authority_id,
+        )
+        .await
+        .map_err(TerminalError::from)?;
+        Ok(DeviceEnrollmentStartInfo {
+            ceremony_id: start.ceremony_id.to_string(),
+            enrollment_code: start.enrollment_code,
+            pending_epoch: start.pending_epoch,
+            device_id: start.device_id.to_string(),
+            status_handle: start.status_handle,
+            cancel_handle: start.handle,
+        })
     }
 
-    pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<String> {
-        match self
-            .operational
-            .execute(&EffectCommand::RemoveDevice {
-                device_id: device_id.to_string(),
-            })
+    pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<CeremonyHandle> {
+        ceremony_workflows::start_device_removal_ceremony(self.app_core.raw(), device_id.to_string())
             .await
-        {
-            Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })) => Ok(ceremony_id),
-            Some(Ok(other)) => Err(TerminalError::structured_operation(
-                OpFailureCode::RemoveDevice.as_str(),
-                format!("Unexpected response: {other:?}"),
-            )),
-            Some(Err(err)) => {
-                let terr: TerminalError = err.clone().into();
-                self.operational.emit_error(terr).await;
-                Err(err.into())
-            }
-            None => Err(TerminalError::NotImplemented(
-                "RemoveDevice not handled".to_string(),
-            )),
-        }
+            .map_err(TerminalError::from)
     }
 
     pub async fn import_device_enrollment_code(&self, code: &str) -> TerminalResult<()> {
@@ -1217,29 +1190,44 @@ impl IoContext {
         *self.current_context.write().await = context_id;
     }
 
-    pub async fn remember_key_rotation_ceremony(&self, ceremony_id: String, kind: CeremonyKind) {
-        self.ceremony_kinds.write().await.insert(ceremony_id, kind);
+    pub async fn remember_key_rotation_ceremony(&self, handle: CeremonyHandle) {
+        let ceremony_id = handle.ceremony_id().to_string();
+        let entry = StoredCeremonyHandle {
+            status_handle: handle.status_handle(),
+            cancel_handle: Some(handle),
+        };
+        self.ceremony_handles.write().await.insert(ceremony_id, entry);
     }
 
-    pub async fn key_rotation_ceremony_handle(
+    pub async fn key_rotation_ceremony_status_handle(
         &self,
         ceremony_id: &str,
-    ) -> TerminalResult<CeremonyHandle> {
-        let kind = self
-            .ceremony_kinds
+    ) -> TerminalResult<CeremonyStatusHandle> {
+        self.ceremony_handles
             .read()
             .await
             .get(ceremony_id)
-            .copied()
-            .ok_or_else(|| TerminalError::NotFound(format!("Unknown ceremony handle for {ceremony_id}")))?;
-        Ok(CeremonyHandle::legacy_from_id(
-            CeremonyId::new(ceremony_id.to_string()),
-            kind,
-        ))
+            .map(|entry| entry.status_handle.clone())
+            .ok_or_else(|| {
+                TerminalError::NotFound(format!("Unknown ceremony status handle for {ceremony_id}"))
+            })
+    }
+
+    pub async fn take_key_rotation_ceremony_handle(
+        &self,
+        ceremony_id: &str,
+    ) -> TerminalResult<CeremonyHandle> {
+        let mut handles = self.ceremony_handles.write().await;
+        let entry = handles.get_mut(ceremony_id).ok_or_else(|| {
+            TerminalError::NotFound(format!("Unknown ceremony handle for {ceremony_id}"))
+        })?;
+        entry.cancel_handle.take().ok_or_else(|| {
+            TerminalError::NotFound(format!("Ceremony handle already consumed for {ceremony_id}"))
+        })
     }
 
     pub async fn forget_key_rotation_ceremony(&self, ceremony_id: &str) {
-        self.ceremony_kinds.write().await.remove(ceremony_id);
+        self.ceremony_handles.write().await.remove(ceremony_id);
     }
 
     pub async fn get_channel_mode(&self, channel_id: &str) -> ChannelMode {

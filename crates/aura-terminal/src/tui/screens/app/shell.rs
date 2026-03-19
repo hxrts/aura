@@ -3348,6 +3348,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         };
 
                                         let app_core = app_core_for_ceremony.clone();
+                                        let io_ctx = io_ctx_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
                                         let tasks = tasks_for_events.clone();
@@ -3356,9 +3357,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             let app = app_core.raw();
                                             match start_guardian_ceremony(app, threshold, n, ids).await {
                                                 Ok(ceremony_handle) => {
+                                                    let status_handle = ceremony_handle.status_handle();
+                                                    io_ctx.remember_key_rotation_ceremony(ceremony_handle).await;
                                                     let k = threshold.value();
                                                     tracing::info!(
-                                                        ceremony_id = %ceremony_handle.ceremony_id(),
+                                                        ceremony_id = %status_handle.ceremony_id(),
                                                         threshold = k,
                                                         guardians = n,
                                                         "Guardian ceremony initiated, waiting for guardian responses"
@@ -3375,7 +3378,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         // Prime the modal with an initial status update so `ceremony_id` is
                                                         // available immediately for UI cancel.
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                            ceremony_id: ceremony_handle.ceremony_id().to_string(),
+                                                            ceremony_id: status_handle.ceremony_id().to_string(),
                                                             kind: aura_app::ui::types::CeremonyKind::GuardianRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
@@ -3401,7 +3404,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
-                                                            &ceremony_handle,
+                                                            &status_handle,
                                                             tokio::time::Duration::from_millis(500),
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
@@ -3481,6 +3484,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         };
 
                                         let app_core = app_core_for_ceremony.clone();
+                                        let io_ctx = io_ctx_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
                                         let tasks = tasks_for_events.clone();
@@ -3497,10 +3501,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .await
                                             {
                                                 Ok(ceremony_handle) => {
+                                                    let status_handle = ceremony_handle.status_handle();
+                                                    io_ctx.remember_key_rotation_ceremony(ceremony_handle).await;
                                                     let k = threshold.value();
                                                     tracing::info!(
                                                         "Multifactor ceremony initiated: {} ({}-of-{})",
-                                                        ceremony_handle.ceremony_id(),
+                                                        status_handle.ceremony_id(),
                                                         k,
                                                         n
                                                     );
@@ -3516,7 +3522,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                                     if let Some(tx) = update_tx.clone() {
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                            ceremony_id: ceremony_handle.ceremony_id().to_string(),
+                                                            ceremony_id: status_handle.ceremony_id().to_string(),
                                                             kind: aura_app::ui::types::CeremonyKind::DeviceRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
@@ -3541,7 +3547,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
-                                                            &ceremony_handle,
+                                                            &status_handle,
                                                             tokio::time::Duration::from_millis(500),
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
@@ -3598,7 +3604,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
-                                            let handle = match io_ctx.key_rotation_ceremony_handle(&ceremony_id).await {
+                                            let handle = match io_ctx.take_key_rotation_ceremony_handle(&ceremony_id).await {
                                                 Ok(handle) => handle,
                                                 Err(e) => {
                                                     tracing::error!("Failed to resolve guardian ceremony handle: {}", e);
@@ -3645,7 +3651,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
-                                            let handle = match io_ctx.key_rotation_ceremony_handle(&ceremony_id).await {
+                                            let handle = match io_ctx.take_key_rotation_ceremony_handle(&ceremony_id).await {
                                                 Ok(handle) => handle,
                                                 Err(e) => {
                                                     tracing::error!("Failed to resolve ceremony handle: {}", e);

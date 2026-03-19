@@ -167,19 +167,29 @@ impl AppCoreContext {
 
     pub async fn remember_key_rotation_ceremony(
         &self,
-        ceremony_id: String,
-        kind: aura_app::ui::prelude::CeremonyKind,
+        handle: aura_app::ui::workflows::ceremonies::CeremonyHandle,
     ) {
         self.io_context
-            .remember_key_rotation_ceremony(ceremony_id, kind)
+            .remember_key_rotation_ceremony(handle)
             .await;
     }
 
-    pub async fn key_rotation_ceremony_handle(
+    pub async fn key_rotation_ceremony_status_handle(
+        &self,
+        ceremony_id: &str,
+    ) -> TerminalResult<aura_app::ui::workflows::ceremonies::CeremonyStatusHandle> {
+        self.io_context
+            .key_rotation_ceremony_status_handle(ceremony_id)
+            .await
+    }
+
+    pub async fn take_key_rotation_ceremony_handle(
         &self,
         ceremony_id: &str,
     ) -> TerminalResult<aura_app::ui::workflows::ceremonies::CeremonyHandle> {
-        self.io_context.key_rotation_ceremony_handle(ceremony_id).await
+        self.io_context
+            .take_key_rotation_ceremony_handle(ceremony_id)
+            .await
     }
 
     pub async fn forget_key_rotation_ceremony(&self, ceremony_id: &str) {

@@ -217,14 +217,9 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .await
         .expect("accept device enrollment invitation should succeed");
 
-    let enrollment_handle =
-        aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
-            aura_core::CeremonyId::new(start.ceremony_id.clone()),
-            aura_app::ui::prelude::CeremonyKind::DeviceEnrollment,
-        );
     let status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        &enrollment_handle,
+        &start.status_handle,
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,
@@ -240,20 +235,15 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
     wait_for_device_present(&env.app_core_a, &start.device_id).await;
 
     // Now remove the enrolled device.
-    let removal_ceremony_id = env
+    let removal_handle = env
         .ctx_a
         .start_device_removal(&start.device_id)
         .await
         .expect("start_device_removal should succeed");
 
-    let removal_handle =
-        aura_app::ui::workflows::ceremonies::CeremonyHandle::legacy_from_id(
-            aura_core::CeremonyId::new(removal_ceremony_id),
-            aura_app::ui::prelude::CeremonyKind::DeviceRemoval,
-        );
     let removal_status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
-        &removal_handle,
+        &removal_handle.status_handle(),
         Duration::from_millis(50),
         |_| {},
         tokio::time::sleep,

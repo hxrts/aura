@@ -23,6 +23,7 @@ use aura_app::{
     },
     AppCore,
 };
+use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -1624,6 +1625,11 @@ pub struct RenderedHarnessSnapshot {
     pub raw_screen: String,
 }
 
+struct RuntimeDeviceEnrollmentCeremony {
+    status_handle: CeremonyStatusHandle,
+    cancel_handle: Option<CeremonyHandle>,
+}
+
 pub struct UiController {
     app_core: Arc<AsyncRwLock<AppCore>>,
     model: RwLock<UiModel>,
@@ -1631,6 +1637,7 @@ pub struct UiController {
     authority_switcher: Option<Arc<dyn Fn(AuthorityId) + Send + Sync>>,
     ui_snapshot_sink: Mutex<Option<UiSnapshotSink>>,
     rerender: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    runtime_device_enrollment_ceremony: Mutex<Option<RuntimeDeviceEnrollmentCeremony>>,
 }
 
 type UiSnapshotSink = Arc<dyn Fn(UiSnapshot) + Send + Sync>;
@@ -1678,6 +1685,7 @@ impl UiController {
             authority_switcher,
             ui_snapshot_sink: Mutex::new(None),
             rerender: Mutex::new(None),
+            runtime_device_enrollment_ceremony: Mutex::new(None),
         }
     }
 
@@ -2043,6 +2051,15 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub(crate) fn set_runtime_device_enrollment_ceremony(&self, handle: CeremonyHandle) {
+        if let Ok(mut slot) = self.runtime_device_enrollment_ceremony.lock() {
+            *slot = Some(RuntimeDeviceEnrollmentCeremony {
+                status_handle: handle.status_handle(),
+                cancel_handle: Some(handle),
+            });
+        }
+    }
+
     pub(crate) fn set_runtime_device_enrollment_ceremony_id(&self, ceremony_id: CeremonyId) {
         let mut model = write_model(&self.model);
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
@@ -2050,6 +2067,26 @@ impl UiController {
         }
         drop(model);
         self.request_rerender();
+    }
+
+    pub(crate) fn runtime_device_enrollment_status_handle(&self) -> Option<CeremonyStatusHandle> {
+        self.runtime_device_enrollment_ceremony
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|ceremony| ceremony.status_handle.clone()))
+    }
+
+    pub(crate) fn take_runtime_device_enrollment_ceremony(&self) -> Option<CeremonyHandle> {
+        self.runtime_device_enrollment_ceremony
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.as_mut().and_then(|ceremony| ceremony.cancel_handle.take()))
+    }
+
+    pub(crate) fn clear_runtime_device_enrollment_ceremony(&self) {
+        if let Ok(mut slot) = self.runtime_device_enrollment_ceremony.lock() {
+            *slot = None;
+        }
     }
 
     pub(crate) fn update_runtime_device_enrollment_status(
@@ -2103,6 +2140,7 @@ impl UiController {
     }
 
     pub(crate) fn complete_runtime_device_enrollment_ready(&self) {
+        self.clear_runtime_device_enrollment_ceremony();
         let mut model = write_model(&self.model);
         dismiss_modal(&mut model);
         drop(model);

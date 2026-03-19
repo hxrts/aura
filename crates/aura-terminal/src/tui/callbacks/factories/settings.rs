@@ -164,31 +164,13 @@ impl SettingsCallbacks {
                     )
                     .await;
 
-                    ctx.remember_key_rotation_ceremony(
-                        start.ceremony_id.clone(),
-                        aura_app::ui::prelude::CeremonyKind::DeviceEnrollment,
-                    )
-                    .await;
-
-                    let handle = match ctx.key_rotation_ceremony_handle(&start.ceremony_id).await {
-                        Ok(handle) => handle,
-                        Err(error) => {
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "devices",
-                                    format!("Device enrollment ceremony handle unavailable: {error}"),
-                                )),
-                            )
-                            .await;
-                            return;
-                        }
-                    };
+                    let status_handle = start.status_handle.clone();
+                    ctx.remember_key_rotation_ceremony(start.cancel_handle).await;
 
                     // Prime status quickly (best-effort) so the modal has counters immediately.
                     if let Ok(status) = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
                         ctx.app_core_raw(),
-                        &handle,
+                        &status_handle,
                     )
                     .await
                     {
@@ -216,7 +198,7 @@ impl SettingsCallbacks {
                     spawn_ctx(ctx.clone(), async move {
                         let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                             ctx.app_core_raw(),
-                            &handle,
+                            &status_handle,
                             Duration::from_millis(500),
                             |status| {
                                 let _ = send_ui_update_lossy(
@@ -253,13 +235,14 @@ impl SettingsCallbacks {
             let device_id_clone = device_id.to_string();
 
             spawn_ctx(ctx.clone(), async move {
-                let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
-                    Ok(id) => id,
+                let handle = match ctx.start_device_removal(&device_id_clone).await {
+                    Ok(handle) => handle,
                     Err(_e) => {
                         tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
                         return;
                     }
                 };
+                let status_handle = handle.status_handle();
 
                 send_ui_update_required(
                     &tx,
@@ -270,26 +253,7 @@ impl SettingsCallbacks {
                 )
                 .await;
 
-                ctx.remember_key_rotation_ceremony(
-                    ceremony_id.clone(),
-                    aura_app::ui::prelude::CeremonyKind::DeviceRemoval,
-                )
-                .await;
-
-                let handle = match ctx.key_rotation_ceremony_handle(&ceremony_id).await {
-                    Ok(handle) => handle,
-                    Err(error) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "device-removal-failed",
-                                format!("Device removal ceremony handle unavailable: {error}"),
-                            )),
-                        )
-                        .await;
-                        return;
-                    }
-                };
+                ctx.remember_key_rotation_ceremony(handle).await;
 
                 #[cfg(feature = "development")]
                 {
@@ -311,7 +275,7 @@ impl SettingsCallbacks {
                 spawn_ctx(ctx.clone(), async move {
                     match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                         ctx.app_core_raw(),
-                        &handle,
+                        &status_handle,
                         Duration::from_millis(250),
                         |_| {},
                         physical_sleep,
