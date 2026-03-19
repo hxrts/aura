@@ -39,6 +39,7 @@ use aura_relational::ContactFact;
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
+#[path = "../support/mod.rs"]
 mod support;
 use support::read_error_signal;
 

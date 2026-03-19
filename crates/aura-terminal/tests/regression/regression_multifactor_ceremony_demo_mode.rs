@@ -42,6 +42,7 @@ use aura_relational::ContactFact;
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
+#[path = "../support/mod.rs"]
 mod support;
 
 /// Regression test: Multifactor ceremony should fail gracefully when mobile device lacks transport.

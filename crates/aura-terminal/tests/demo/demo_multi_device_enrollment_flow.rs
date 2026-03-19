@@ -1,3 +1,5 @@
+//! Demo-mode multi-device enrollment flow test.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,

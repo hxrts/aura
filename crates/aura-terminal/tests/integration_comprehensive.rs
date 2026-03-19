@@ -1,3 +1,5 @@
+//! Comprehensive terminal integration tests.
+
 #![allow(
     missing_docs,
     dead_code,

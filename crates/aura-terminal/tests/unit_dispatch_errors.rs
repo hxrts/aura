@@ -1,3 +1,5 @@
+//! Unit tests for dispatch error handling.
+
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 

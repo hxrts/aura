@@ -26,6 +26,7 @@ use aura_terminal::handlers::tui::create_account;
 use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::{handlers::tui::TuiMode, ids};
 
+#[path = "../support/mod.rs"]
 mod support;
 
 async fn wait_for_contacts(app_core: &Arc<RwLock<AppCore>>, expected: &[AuthorityId]) {

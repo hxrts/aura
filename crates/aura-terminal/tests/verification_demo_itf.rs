@@ -1,3 +1,5 @@
+//! Demo ITF trace verification tests.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,

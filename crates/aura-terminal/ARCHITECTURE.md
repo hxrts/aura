@@ -168,6 +168,40 @@ Verification hooks:
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines interface layer boundaries.
 - [Effect System and Runtime](../../docs/103_effect_system.md) defines signal and workflow integration.
+## Testing
+
+### Strategy
+
+UI boundary correctness and demo mode fidelity are the primary concerns.
+Tests are organized into `tests/demo/` for demo-mode flows, `tests/wiring/`
+for callback and signal dispatch, `tests/regression/` for bug regressions,
+and top-level files for integration, unit, and verification tests.
+
+### Running tests
+
+```
+cargo test -p aura-terminal
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Demo mode diverges from production paths | `tests/demo/` (8 files) | Covered |
+| Callback dispatches wrong operation | `tests/wiring/` (3 callback files) | Covered |
+| Reactive signal dropped or glitches | `tests/wiring/integration_reactive_dispatch.rs` | Covered |
+| Signal wiring incorrect | `tests/wiring/integration_signals.rs` | Covered |
+| State machine invalid transition | `tests/unit_state_machine.rs` | Covered |
+| Slash command parsed wrong | `tests/unit_slash_commands.rs` | Covered |
+| Dispatch error not surfaced | `tests/unit_dispatch_errors.rs` | Covered |
+| Guardian display E2E broken | `tests/e2e_guardian_display.rs` | Covered |
+| Terminal state lifecycle wrong | `tests/e2e_terminal_state.rs` | Covered |
+| Effect command integration broken | `tests/integration_effect_commands.rs` | Covered |
+| Bridge integration broken | `tests/integration_bridge.rs` | Covered |
+| Demo mobile enrollment regression | `tests/regression/regression_demo_mobile_enrollment.rs` | Covered |
+| Guardian ceremony no-peers regression | `tests/regression/regression_guardian_ceremony_no_peers.rs` | Covered |
+| ITF trace verification wrong | `tests/verification_demo_itf.rs` | Covered |
+
 ## Boundaries
 - Business logic lives in aura-app.
 - Effect implementations live in aura-effects.

@@ -1,3 +1,5 @@
+//! Unit tests for TUI state machine transitions.
+
 #![allow(
     missing_docs,
     dead_code,

@@ -1,13 +1,16 @@
+//! Demo-mode device enrollment flow test.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::disallowed_methods,
     clippy::needless_borrows_for_generic_args
 )]
-//! # Demo Device Removal Flow E2E Test
+//! # Demo Device Enrollment Flow E2E Test
 //!
-//! Validates that Settings → Remove device starts a real device removal ceremony,
-//! commits the rotation + RemoveLeaf tree op, and updates SETTINGS_SIGNAL.
+//! Validates that Settings → Add device starts a real device enrollment ceremony,
+//! and that accepting the enrollment code on a second simulated device commits
+//! the ceremony and updates SETTINGS_SIGNAL device list.
 
 use async_lock::RwLock;
 use std::str::FromStr;
@@ -31,6 +34,7 @@ use uuid::Uuid;
 struct TestEnv {
     ctx_a: Arc<IoContext>,
     app_core_a: Arc<RwLock<AppCore>>,
+    _agent_a: Arc<aura_agent::AuraAgent>, // Kept alive to maintain agent state
     shared_transport: SharedTransport,
     authority_id: aura_core::AuthorityId,
     context_id: aura_core::ContextId,
@@ -38,8 +42,8 @@ struct TestEnv {
 }
 
 async fn setup_test_env() -> TestEnv {
-    let unique = Uuid::from_bytes([2; 16]);
-    let test_dir = std::env::temp_dir().join(format!("aura-device-remove-test-{unique}"));
+    let unique = Uuid::from_bytes([1; 16]);
+    let test_dir = std::env::temp_dir().join(format!("aura-device-enroll-test-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -50,7 +54,7 @@ async fn setup_test_env() -> TestEnv {
         .expect("Failed to create account");
 
     let shared_transport = SharedTransport::new();
-    let seed = 2030u64;
+    let seed = 2024u64;
     let effect_ctx =
         EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
@@ -94,6 +98,7 @@ async fn setup_test_env() -> TestEnv {
     TestEnv {
         ctx_a: Arc::new(ctx_a),
         app_core_a,
+        _agent_a: agent_a,
         shared_transport,
         authority_id,
         context_id,
@@ -101,8 +106,8 @@ async fn setup_test_env() -> TestEnv {
     }
 }
 
-async fn wait_for_device_present(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
-    let device_id = DeviceId::from_str(device_id).expect("device_id should parse");
+async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
+    let device_id = device_id.parse::<DeviceId>().expect("valid device id");
     let start = tokio::time::Instant::now();
     loop {
         let state = {
@@ -117,50 +122,25 @@ async fn wait_for_device_present(app_core: &Arc<RwLock<AppCore>>, device_id: &st
         }
 
         if start.elapsed() > Duration::from_secs(3) {
-            panic!(
-                "Timed out waiting for device {} ({} devices present)",
-                device_id,
-                state.devices.len()
-            );
+            let device_count = state.devices.len();
+            panic!("Timed out waiting for device {device_id} ({device_count} devices present)");
         }
 
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 
-async fn wait_for_device_absent(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
-    let device_id = DeviceId::from_str(device_id).expect("device_id should parse");
-    let start = tokio::time::Instant::now();
-    loop {
-        let state = {
-            let core = app_core.read().await;
-            core.read(&*SETTINGS_SIGNAL)
-                .await
-                .expect("Failed to read SETTINGS_SIGNAL")
-        };
-
-        if state.devices.iter().all(|d| d.id != device_id) {
-            return;
-        }
-
-        if start.elapsed() > Duration::from_secs(3) {
-            panic!(
-                "Timed out waiting for device {} to be removed ({} devices present)",
-                device_id,
-                state.devices.len()
-            );
-        }
-
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-}
-
-/// This test depends on device enrollment ceremony completing, which requires
-/// the full ceremony commit flow. See demo_device_enrollment_flow.rs for details.
-/// The enrollment ceremony threshold is reached but commit message isn't sent.
+/// This test requires full ceremony commit flow to be implemented.
+/// Currently, after the invited device accepts:
+/// 1. The acceptance message is processed and threshold is reached
+/// 2. BUT: The initiator needs to send a commit message to finalize
+/// 3. This commit phase isn't triggered in the current simulation setup
+///
+/// To fix: Either wire the commit flow through the simulation transport,
+/// or have the ceremony tracker auto-commit when threshold is reached for enrollments.
 #[tokio::test]
-#[ignore = "requires full ceremony commit flow - depends on enrollment completing first"]
-async fn demo_device_removal_flow_removes_device_from_settings() {
+#[ignore = "requires full ceremony commit flow - threshold reached but commit message not sent"]
+async fn demo_device_enrollment_flow_commits_and_updates_settings() {
     let env = setup_test_env().await;
 
     // Seed SETTINGS_SIGNAL from runtime so device list starts populated.
@@ -168,7 +148,7 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .await
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
-    // Enroll a second device (reuse the real enrollment ceremony).
+    // Start the ceremony via the same path used by Settings → Add device.
     // Use legacy bearer token mode (None for invitee_authority_id)
     let start = env
         .ctx_a
@@ -176,8 +156,9 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .await
         .expect("start_device_enrollment should succeed");
 
+    // Build the invited device agent using the device_id from the ceremony start.
     let new_device_id = DeviceId::from_str(&start.device_id).expect("device_id should parse");
-    let seed_b = 2031u64;
+    let seed_b = 2025u64;
     let effect_ctx_b = EffectContext::new(
         env.authority_id,
         env.context_id,
@@ -207,6 +188,7 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .expect("Failed to build invited device agent");
     let agent_b = Arc::new(agent_b);
 
+    // Import and accept the enrollment code on the invited device.
     let runtime_b = agent_b.as_runtime_bridge();
     let invitation = runtime_b
         .import_invitation(&start.enrollment_code)
@@ -217,6 +199,7 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .await
         .expect("accept device enrollment invitation should succeed");
 
+    // Wait for the initiator to observe completion.
     let status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
         &start.status_handle,
@@ -227,38 +210,13 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
     .await
     .expect("monitor_key_rotation_ceremony should complete");
 
-    assert!(
-        status.is_complete,
-        "enrollment ceremony should be committed"
-    );
-
-    wait_for_device_present(&env.app_core_a, &start.device_id).await;
-
-    // Now remove the enrolled device.
-    let removal_handle = env
-        .ctx_a
-        .start_device_removal(&start.device_id)
-        .await
-        .expect("start_device_removal should succeed");
-
-    let removal_status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
-        env.ctx_a.app_core_raw(),
-        &removal_handle.status_handle(),
-        Duration::from_millis(50),
-        |_| {},
-        tokio::time::sleep,
-    )
-    .await
-    .expect("monitor_key_rotation_ceremony should complete for removal");
-
-    assert!(
-        removal_status.is_complete,
-        "removal ceremony should be committed"
-    );
+    assert!(status.is_complete, "ceremony should be committed");
     assert_eq!(
-        removal_status.kind,
-        aura_app::runtime_bridge::CeremonyKind::DeviceRemoval
+        status.kind,
+        aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
     );
+    assert_eq!(status.accepted_count, 1);
 
-    wait_for_device_absent(&env.app_core_a, &start.device_id).await;
+    // Ensure SETTINGS_SIGNAL device list reflects the committed device membership.
+    wait_for_device(&env.app_core_a, &start.device_id).await;
 }

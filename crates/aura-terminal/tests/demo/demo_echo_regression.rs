@@ -29,6 +29,7 @@ use aura_terminal::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, Ec
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
+#[path = "../support/mod.rs"]
 mod support;
 
 /// REGRESSION TEST: Echo fails when contacts are imported via invite codes

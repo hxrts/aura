@@ -20,6 +20,7 @@ use aura_terminal::demo::{spawn_amp_inbox_listener, DemoSimulator, EchoPeer};
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
+#[path = "../support/mod.rs"]
 mod support;
 
 #[tokio::test]

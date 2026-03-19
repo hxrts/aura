@@ -1,3 +1,5 @@
+//! End-to-end terminal state lifecycle tests.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,

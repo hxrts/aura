@@ -1,3 +1,5 @@
+//! Effect command integration tests.
+
 #![allow(
     missing_docs,
     dead_code,

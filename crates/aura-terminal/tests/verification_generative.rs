@@ -1,3 +1,5 @@
+//! Generative verification tests.
+
 #![allow(
     missing_docs,
     dead_code,

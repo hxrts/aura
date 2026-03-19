@@ -1,3 +1,5 @@
+//! Demo-mode hint display tests.
+
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 

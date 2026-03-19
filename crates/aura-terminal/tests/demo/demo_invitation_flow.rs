@@ -1,3 +1,5 @@
+//! Demo-mode invitation flow test.
+
 #![allow(
     clippy::expect_used,
     clippy::unwrap_used,

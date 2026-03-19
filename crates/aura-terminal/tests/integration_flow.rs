@@ -1,3 +1,5 @@
+//! Terminal flow integration tests.
+
 #![allow(
     missing_docs,
     dead_code,
