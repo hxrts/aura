@@ -75,6 +75,32 @@ Verification hooks:
 Contract alignment:
 - [Verification](../../docs/120_verification.md) defines model-checking expectations.
 - [Project Structure](../../docs/999_project_structure.md#invariant-traceability) defines canonical invariant naming.
+## Testing
+
+### Strategy
+
+IR determinism and bridge transform correctness are the primary concerns.
+The single integration test (`tests/bridge_pipeline.rs`) verifies the full
+pipeline. Inline tests verify each bridge stage independently: import,
+export, validation, and format roundtrip.
+
+### Running tests
+
+```
+cargo test -p aura-quint
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Bridge bundle JSON roundtrip lossy | QuintIrDeterminism | `src/bridge_format.rs` `bridge_bundle_roundtrip_json` | Covered |
+| Import produces wrong properties | BridgeOwnershipQuint | `src/bridge_import.rs` `parses_importable_properties` | Covered |
+| Export produces invalid structure | BridgeOwnershipQuint | `src/bridge_export.rs` `exports_bundle_with_valid_structure` | Covered |
+| Cross-validation misses discrepancy | BridgeOwnershipQuint | `src/bridge_validate.rs` `cross_validation_reports_discrepancies` | Covered |
+| Cross-validation false positive | BridgeOwnershipQuint | `src/bridge_validate.rs` `cross_validation_passes_when_outcomes_match` | Covered |
+| Full pipeline broken | — | `tests/bridge_pipeline.rs` | Covered |
+
 ## Boundaries
 - Quint specifications live in verification/quint/.
 - Runtime simulation lives in aura-simulator.

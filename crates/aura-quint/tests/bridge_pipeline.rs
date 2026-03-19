@@ -1,3 +1,9 @@
+//! Bridge pipeline integration tests.
+//!
+//! Verifies the full Quint bridge pipeline: parse → compile → evaluate →
+//! extract. Tests cross-validation, bundle export, and invariant module
+//! generation.
+
 #![allow(clippy::expect_used)]
 
 use std::collections::BTreeMap;
