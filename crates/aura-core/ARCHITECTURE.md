@@ -151,16 +151,16 @@ value for a specific input, it belongs inline.
 | Branch/leaf commitment determinism | `src/tree/commitment.rs` | inline pinned | covered |
 | Binding message includes group pubkey | `src/tree/verification.rs` | inline | covered |
 | FROST sign → aggregate → verify | `src/crypto/tree_signing.rs` | inline | covered |
-| Commitment changes when any input changes | — | — | **missing** — needs differential test |
-| Signature replay across groups blocked | — | — | **missing** — needs cross-group test |
+| Commitment changes when any input changes | `src/tree/commitment.rs` | inline differential | covered |
+| Signature replay across groups blocked | `src/tree/verification.rs` | inline | covered |
 | **Algebraic laws** | | | |
 | JoinSemilattice — u64, Vec, BTreeMap | `tests/laws/semilattice_join.rs` | example | covered |
 | MeetSemilattice — u64, BTreeSet | `tests/laws/semilattice_meet.rs` | proptest | covered |
 | FlowBudget CRDT — join, merge, convergence | `tests/laws/flow_budget_crdt.rs` | proptest | covered |
 | Policy meet-semilattice | `tests/laws/tree_policy_meet.rs` | proptest | covered |
 | Time ordering across clock domains | `tests/laws/time_ordering.rs` | proptest | minimal (2 props) |
-| JoinSemilattice — Fact, FactValue | — | — | **missing** |
-| MeetSemilattice — Cap | — | — | **missing** |
+| JoinSemilattice — Fact, FactValue | `tests/laws/semilattice_join.rs` | example | covered |
+| MeetSemilattice — Cap | `tests/laws/semilattice_meet.rs` | example + Biscuit | covered |
 | FlowBudget epoch rotation monotonicity | `tests/laws/flow_budget_crdt.rs` | example | covered |
 | **Ownership boundaries** | | | |
 | TerminalPublisher: not clonable, no double publish | `tests/boundaries/` | compile-fail | covered |
@@ -172,13 +172,13 @@ value for a specific input, it belongs inline.
 | WireEnvelope, FactEnvelope roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
 | FlowCost, FlowNonce, ReceiptSig roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
 | OwnershipCategory roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
-| TimeStamp variant roundtrip | — | — | **missing** |
-| DAG-CBOR canonical encoding (byte-exact) | — | — | **missing** — critical for FROST |
+| TimeStamp variant roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| DAG-CBOR canonical encoding (byte-exact) | `tests/contracts/serialization_roundtrip.rs` | pinned length | partial |
 | **Identifier and key derivation** | | | |
 | AuthorityId, DeviceId, SessionId uniqueness | `tests/contracts/identifier_uniqueness.rs` | example + determ. | covered |
 | DKD derivation determinism | `tests/contracts/dkd_determinism.rs` | determinism | covered |
 | Content addressing (Hash32, ContentId) | `tests/contracts/content_addressing.rs` | roundtrip | covered |
-| Pinned test vectors (known input → known bytes) | — | — | **missing** |
+| Pinned string format + entropy derivation | `tests/contracts/identifier_uniqueness.rs` | pinned vectors | covered |
 | **Domain invariants** | | | |
 | Context isolation (no cross-context fact leakage) | — | — | **missing** — needs L1 test |
 | FlowBudget charge-before-send | `src/types/flow.rs` | inline | covered |
