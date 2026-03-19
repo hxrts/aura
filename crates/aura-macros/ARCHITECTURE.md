@@ -52,6 +52,16 @@ type-safe Rust code for distributed protocols.
 - `cargo check -p aura-macros`
 - `cargo test -p aura-macros -- --nocapture`
 
+### Enforcement Split
+
+- `aura-macros` is part of the compile-time enforcement path for boundary-shape
+  rules that can be expressed through generated surfaces or Rust-native linting.
+- `scripts/check/arch.sh` should not remain the primary enforcement path for a
+  rule when macro expansion, visibility, or linting can reject the pattern
+  earlier and more precisely.
+- Repo-wide topology, docs/governance, and semantic integration checks still
+  belong to `just check-arch`.
+
 ### Detailed Specifications
 
 ### InvariantChoreographyAnnotationProjection

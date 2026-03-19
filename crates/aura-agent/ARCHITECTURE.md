@@ -85,6 +85,14 @@ Rules:
 - `just ci-capability-boundaries`
 - targeted runtime/service tests in `cargo test -p aura-agent ...`
 
+Architecture/tooling split:
+- runtime ownership boundaries that can be closed by types, visibility,
+  sanctioned manager APIs, or compile-fail tests should not rely primarily on
+  shell grep checks
+- `just check-arch` remains the right gate for repo-wide runtime/integration
+  invariants such as layer boundaries, docs alignment, and semantic lifecycle
+  integration checks
+
 ### Required Ownership Tests
 
 Changes to `aura-agent` ownership boundaries should ship with:

@@ -137,6 +137,13 @@ Changes to parity-critical TUI ownership boundaries should ship with:
 - `just ci-frontend-handoff-boundary`
 - `just ci-actor-lifecycle`
 
+Architecture/tooling split:
+- direct import and boundary-shape violations should be pushed toward module
+  visibility, sanctioned facade APIs, compile-fail tests, and Rust-native lints
+- `just check-arch` remains the right place for repo-wide frontend integration
+  checks, docs traceability, and semantic/reactive heuristics that depend on
+  workspace context
+
 ### Detailed Specifications
 
 ### InvariantTerminalUiBoundary
