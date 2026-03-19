@@ -92,12 +92,12 @@ cargo test -p aura-protocol
 
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
-| Send without guard mediation | — | InvariantProtocolGuardMediation (arch check) |
-| Transport coordinator invalid transition | `tests/coordination/transport_coordinator.rs` | Covered |
+| Send without guard mediation | `aura-guards` `tests/chain/guard_chain_transport.rs` | Cross-crate |
+| Transport coordinator config/error handling | `tests/coordination/transport_coordinator.rs` | Covered |
 | Context mutation breaks immutability | `src/handlers/context/mod.rs` (inline) | Covered |
 | Version handshake rejects compatible peer | `src/handlers/version_handshake.rs` (inline) | Covered |
 | CRDT causal ordering violated | `src/effects/crdt/delivery.rs` (inline) | Covered |
-| Intent state ordering incorrect | `src/state/intent_state.rs` (inline) | Covered |
+| Intent state lattice ordering incorrect | `src/state/intent_state.rs` (inline, 7 tests) | Covered |
 | Peer connection retry budget wrong | `src/handlers/peer_connection.rs` (inline) | Covered |
 | Admission capability validation fails | `src/admission.rs` (inline) | Covered |
 
