@@ -18,7 +18,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 │   • aura-testkit    • aura-quint    • aura-harness │
 ├────────────────────────────────────────────────────┤
 │ Layer 7: User Interface                            │
-│   • aura-terminal                                  │
+│   • aura-terminal    • aura-ui       • aura-web    │
 ├────────────────────────────────────────────────────┤
 │ Layer 6: Runtime Composition                       │
 │   • aura-agent    • aura-simulator    • aura-app   │
@@ -496,7 +496,7 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **Dependencies**: All domain crates, `aura-effects`, `aura-composition`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
-## Layer 7: User Interface — `aura-terminal`
+## Layer 7: User Interface — `aura-terminal`, `aura-ui`, and `aura-web`
 
 **Purpose**: User-facing applications with main entry points.
 
@@ -509,9 +509,19 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 **`aura-terminal`**: Terminal-based interface combining CLI commands and an interactive TUI (Terminal User Interface). Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic and state management.
 
-**Key characteristic**: Contains `main()` entry point that users run directly. Binary is named `aura`.
+**`aura-ui`**: Shared Dioxus UI core. Owns cross-frontend semantic snapshot shaping, deterministic keyboard routing, and shared presentation state, while remaining platform agnostic and downstream of `aura-app`'s authoritative semantic contract.
 
-**Dependencies**: `aura-app`, `aura-agent`, `aura-core`, `aura-recovery`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
+**`aura-web`**: Browser/WASM shell. Mounts `aura-ui`, integrates browser-specific adapters and harness bridge surfaces, and remains an observed shell rather than a semantic owner for parity-critical workflows.
+
+**Key characteristics**:
+- Layer 7 includes both shell binaries (`aura-terminal`, `aura-web`) and the shared UI core (`aura-ui`) they consume.
+- `aura-terminal` and `aura-web` contain user-facing entry points and platform interop.
+- `aura-ui` stays platform neutral and expresses shared UI structure over `aura-app` contracts.
+
+**Dependencies**:
+- `aura-ui`: `aura-app`, `aura-core`
+- `aura-terminal`: `aura-app`, `aura-agent`, `aura-core`, `aura-recovery`, and selected Layer 4/5 crates needed for terminal shell integration
+- `aura-web`: `aura-ui`, `aura-app`, `aura-agent`, `aura-core`, `aura-effects`, and browser-only ecosystem crates for WASM interop
 
 ## Layer 8: Testing and Development Tools
 
@@ -596,6 +606,8 @@ crates/
 ├── aura-terminal        Terminal UI (CLI + TUI)
 ├── aura-testkit         Testing utilities and fixtures
 ├── aura-transport       P2P communication layer
+├── aura-ui              Shared Dioxus UI core
+├── aura-web             Browser frontend and harness bridge
 ├── aura-signature       Identity verification
 └── aura-authorization   Web-of-trust authorization
 ```
@@ -644,7 +656,9 @@ graph TD
     simulator[aura-simulator]
 
     %% Layer 7: Application
+    ui[aura-ui]
     terminal[aura-terminal]
+    web[aura-web]
 
     %% Layer 8: Testing
     testkit[aura-testkit]
@@ -792,6 +806,8 @@ graph TD
     simulator --> guards
 
     %% Layer 7 dependencies
+    ui --> app
+    ui --> core
     terminal --> app
     terminal --> core
     terminal --> agent
@@ -806,6 +822,11 @@ graph TD
     terminal --> chat
     terminal --> journal
     terminal --> relational
+    web --> ui
+    web --> app
+    web --> core
+    web --> agent
+    web --> effects
 
     %% Layer 8 dependencies
     testkit --> core
@@ -841,7 +862,7 @@ graph TD
     class guards,anti_entropy,consensus,amp,protocol orch
     class social,chat,relational,auth,rendezvous,invitation,recovery,sync feature
     class app,agent,simulator runtime
-    class terminal application
+    class ui,terminal,web application
     class testkit,quint,harness test
 ```
 

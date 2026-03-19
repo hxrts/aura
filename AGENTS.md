@@ -44,12 +44,12 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 | Layer | Crates | Purpose |
 |-------|--------|---------|
 | L1 Foundation | `aura-core` | Effect traits, domain types, crypto utilities |
-| L2 Specification | `aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-mpst`, `aura-macros` | Domain semantics, no runtime |
+| L2 Specification | `aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-maintenance`, `aura-mpst`, `aura-macros` | Domain semantics, no runtime |
 | L3 Implementation | `aura-effects`, `aura-composition` | Stateless handlers, composition |
 | L4 Orchestration | `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy` | Multi-party coordination |
 | L5 Features | `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync` | End-to-end protocols |
 | L6 Runtime | `aura-agent`, `aura-simulator`, `aura-app` | System assembly |
-| L7 Interface | `aura-terminal` | CLI/TUI entry points |
+| L7 Interface | `aura-terminal`, `aura-ui`, `aura-web` | Terminal shell, shared UI core, and browser shell |
 | L8 Testing | `aura-testkit`, `aura-quint`, `aura-harness` | Test infrastructure |
 
 ### Key Invariants
@@ -124,6 +124,8 @@ What am I implementing?
 ├─ Domain-specific logic → Domain crate (L2)
 ├─ Complete end-to-end protocol → Feature crate (L5)
 ├─ Runtime assembly → aura-agent (L6)
+├─ Shared UI/view logic → aura-ui (L7)
+├─ Browser/WASM shell → aura-web (L7)
 ├─ CLI/TUI command → aura-terminal (L7)
 └─ Mock/test handler → aura-testkit (L8)
 ```
@@ -160,7 +162,7 @@ Is this a Layer 2 domain crate?
 | L4 (Orchestration) | Multi-party coordination, guard chain, consensus runtime, cross-handler decisions | Effect definitions, single-party handlers, runtime assembly |
 | L5 (Features) | End-to-end protocols, OPERATION_CATEGORIES, domain facts | Runtime caches (those go in L6), UI concerns |
 | L6 (Runtime) | Lifecycle management, effect system assembly, runtime-owned caches | Handler implementations, protocol coordination |
-| L7 (`aura-terminal`) | CLI/TUI entry points, main() | Business logic (import from `aura-app` only) |
+| L7 (`aura-terminal`, `aura-ui`, `aura-web`) | Terminal shell, shared UI core, browser shell | Business logic (keep semantic ownership in `aura-app`; shells observe/submit rather than co-own) |
 | L8 (Testing) | Mock handlers, test fixtures, stateful test handlers | Production code |
 
 ### Crate Selection by Implementation
@@ -173,6 +175,8 @@ Is this a Layer 2 domain crate?
 | Guardian recovery | `aura-recovery` |
 | Journal fact validation | `aura-journal` |
 | Network transport | `aura-transport` (abstractions) + `aura-effects` (TCP) |
+| Shared UI/view logic | `aura-ui` |
+| Browser frontend / harness bridge | `aura-web` |
 | CLI command | `aura-terminal` |
 | Test scenario | `aura-testkit` |
 | Choreography protocol | Feature crate + `aura-mpst` |
