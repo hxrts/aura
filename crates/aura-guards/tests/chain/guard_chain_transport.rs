@@ -1,3 +1,9 @@
+//! Transport-layer guard chain enforcement.
+//!
+//! Verifies that SendEnvelope commands are blocked until the guard chain
+//! passes. If the chain is bypassed, messages escape without authorization
+//! or budget charging.
+
 #![allow(missing_docs)]
 use async_trait::async_trait;
 use aura_core::effects::authorization::AuthorizationError;

@@ -1,3 +1,8 @@
+//! Golden test: GuardPlan fields match a choreography-generated GuardRequest.
+//!
+//! If this test breaks, the guard plan construction has drifted from
+//! the choreography annotation contract.
+
 #![allow(missing_docs)]
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;

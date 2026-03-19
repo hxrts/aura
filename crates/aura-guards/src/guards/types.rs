@@ -368,6 +368,7 @@ mod tests {
         Other,
     }
 
+    /// Charge → Other → Send is a valid ordering.
     #[test]
     fn validate_charge_before_send_accepts_ordered() {
         let cmds = [Cmd::Charge, Cmd::Other, Cmd::Send];
@@ -381,6 +382,7 @@ mod tests {
         }
     }
 
+    /// Send without any preceding Charge is rejected.
     #[test]
     fn validate_charge_before_send_rejects_missing_charge() {
         let cmds = [Cmd::Other, Cmd::Send];
@@ -395,6 +397,7 @@ mod tests {
         assert!(matches!(err, GuardViolation::MissingChargeBeforeSend));
     }
 
+    /// Charge after Send is rejected — budget must be charged before transport.
     #[test]
     fn validate_charge_before_send_rejects_misordered_charge() {
         let cmds = [Cmd::Send, Cmd::Charge];

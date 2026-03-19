@@ -389,6 +389,7 @@ mod tests {
         AuthorityId::new_from_entropy([78u8; 32])
     }
 
+    /// Constructor and builder populate all fields correctly.
     #[tokio::test]
     async fn test_send_guard_chain_creation() {
         let authorization = CapabilityId::from("message:send");
@@ -409,6 +410,7 @@ mod tests {
         );
     }
 
+    /// Convenience factory produces the same result as the full constructor.
     #[tokio::test]
     async fn test_create_send_guard_convenience() {
         let authorization = CapabilityId::from("message:send");
@@ -424,6 +426,7 @@ mod tests {
         assert_eq!(guard.cost, cost);
     }
 
+    /// Denial reason string includes the correct failure cause(s).
     #[tokio::test]
     async fn test_denial_reason_formatting() {
         let authorization = CapabilityId::from("message:send");

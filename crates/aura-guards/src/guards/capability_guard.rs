@@ -262,6 +262,7 @@ mod tests {
     use aura_core::types::Epoch;
     use biscuit_auth::PublicKey;
 
+    /// Missing Biscuit token fails evaluation and charges no budget.
     #[tokio::test]
     async fn test_authority_operation_guard() {
         // Create mock bridge

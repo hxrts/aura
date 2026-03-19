@@ -79,6 +79,35 @@ Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines charge-before-send and flow budget invariants.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantSentMessagesHaveFacts` and `InvariantFlowBudgetNonNegative`.
 
+## Testing
+
+### Strategy
+
+Guard chain ordering and the charge-before-send invariant are the primary
+testing concerns. Integration tests in `tests/chain/` verify end-to-end chain
+behavior; inline tests verify individual guard correctness.
+
+### Running tests
+
+```
+cargo test -p aura-guards
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Guard chain ordering violated | `src/guards/pure.rs` (inline) | Covered |
+| Transport without guard evaluation | `tests/chain/guard_chain_transport.rs` | Covered |
+| CapGuard accepts missing capability | `src/guards/capability_guard.rs` (inline) | Covered |
+| FlowGuard accepts exhausted budget | `src/guards/pure.rs` (inline) | Covered |
+| JournalCoupler fails to couple fact | `src/guards/pure.rs` (inline) | Covered |
+| LeakageTracker fails to record | `src/guards/pure.rs` (inline) | Covered |
+| Choreography guard integration | `tests/chain/choreography_guards.rs` | Covered |
+| GuardPlan drifts from choreography | `tests/chain/guard_plan_golden.rs` | Covered |
+| Charge-before-send property | `tests/chain/guard_chain_properties.rs` | Covered |
+| Policy defaults incorrect | `src/guards/policy.rs` (inline) | Covered |
+
 ## Boundaries
 - No direct transport or storage calls inside guards.
 - Effect execution happens via interpreters (production, simulation, test).

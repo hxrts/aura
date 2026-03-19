@@ -327,6 +327,7 @@ mod tests {
         }
     }
 
+    /// CapGuard authorizes when matching metadata exists, producing no effects.
     #[test]
     fn test_capability_guard() {
         let guard = CapabilityGuard;
@@ -338,6 +339,7 @@ mod tests {
         assert!(outcome.effects.is_empty());
     }
 
+    /// FlowGuard produces a ChargeBudget effect when budget is sufficient.
     #[test]
     fn test_flow_budget_guard_success() {
         let guard = FlowBudgetGuard;
@@ -367,6 +369,7 @@ mod tests {
         }
     }
 
+    /// FlowGuard denies when requested cost exceeds remaining budget.
     #[test]
     fn test_flow_budget_guard_insufficient() {
         let guard = FlowBudgetGuard;
@@ -381,6 +384,7 @@ mod tests {
         );
     }
 
+    /// JournalCouplingGuard always produces an AppendJournal effect.
     #[test]
     fn test_journal_coupling_guard() {
         let guard = JournalCouplingGuard;
@@ -397,6 +401,7 @@ mod tests {
         ));
     }
 
+    /// LeakageGuard produces RecordLeakage only when metadata leakage > 0.
     #[test]
     fn test_leakage_tracking_guard() {
         let guard = LeakageTrackingGuard;
@@ -421,6 +426,8 @@ mod tests {
         }
     }
 
+    /// Standard chain (Cap → Flow → Journal → Leakage) produces all three
+    /// effect types when the request includes leakage metadata.
     #[test]
     fn test_guard_chain() {
         let chain = GuardChain::standard();
@@ -464,6 +471,7 @@ mod tests {
         assert!(has_leakage);
     }
 
+    /// Chain returns early on FlowGuard denial — no downstream effects leak.
     #[test]
     fn test_guard_chain_early_denial() {
         let chain = GuardChain::standard();

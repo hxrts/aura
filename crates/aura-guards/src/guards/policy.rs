@@ -271,6 +271,8 @@ mod tests {
     use super::*;
     use aura_authorization::EffectTiming;
 
+    /// Default policy: low-risk ops are immediate, medium require proposal,
+    /// critical require ceremony.
     #[test]
     fn test_guard_defaults() {
         let guard = EffectPolicyGuard::default();
@@ -286,6 +288,7 @@ mod tests {
         assert!(guard.requires_ceremony(&OperationType::RotateGuardians, None));
     }
 
+    /// Per-context override downgrades a proposal-required op to immediate.
     #[test]
     fn test_guard_with_context_override() {
         let mut guard = EffectPolicyGuard::default();
@@ -310,6 +313,8 @@ mod tests {
         assert!(guard.requires_proposal(&OperationType::RemoveChannelMember, None));
     }
 
+    /// `evaluate_with_metadata` returns deferred status and High security for
+    /// DeleteChannel.
     #[test]
     fn test_evaluate_with_metadata() {
         let guard = EffectPolicyGuard::default();
@@ -327,6 +332,7 @@ mod tests {
         );
     }
 
+    /// Error Display includes the operation name and failure reason.
     #[test]
     fn test_effect_policy_error_display() {
         let err = EffectPolicyError::ApprovalRequired {
@@ -343,6 +349,7 @@ mod tests {
         assert!(err.to_string().contains("ceremony"));
     }
 
+    /// `get_policy` returns the correct operation and security level.
     #[test]
     fn test_get_policy() {
         let guard = EffectPolicyGuard::default();

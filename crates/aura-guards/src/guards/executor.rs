@@ -868,6 +868,7 @@ mod tests {
         }
     }
 
+    /// GuardChainResult fields are accessible after construction.
     #[test]
     fn test_guard_chain_result() {
         let result = GuardChainResult {
@@ -884,6 +885,7 @@ mod tests {
         assert_eq!(result.execution_time_us, 1000);
     }
 
+    /// SendGuardChain → GuardRequest conversion preserves all fields.
     #[test]
     fn test_convert_send_guard_to_request() {
         use crate::guards::chain::SendGuardChain;
