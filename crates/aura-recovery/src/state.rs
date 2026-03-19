@@ -852,6 +852,50 @@ mod tests {
         );
     }
 
+    /// Duplicate share submission from the same guardian doesn't inflate
+    /// the share count. If deduplication fails, a single guardian could
+    /// satisfy the threshold alone by submitting multiple times.
+    #[test]
+    fn test_duplicate_share_submission_deduplicated() {
+        let ctx = test_context_id();
+        let account = test_authority_id(1);
+        let guardian1 = test_authority_id(2);
+
+        let facts = vec![
+            RecoveryFact::RecoveryInitiated {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                request_hash: test_hash(1),
+                initiated_at: pt(1000),
+            },
+            RecoveryFact::RecoveryShareSubmitted {
+                context_id: ctx,
+                guardian_id: guardian1,
+                trace_id: None,
+                share_hash: test_hash(2),
+                submitted_at: pt(2000),
+            },
+            // Same guardian submits again
+            RecoveryFact::RecoveryShareSubmitted {
+                context_id: ctx,
+                guardian_id: guardian1,
+                trace_id: None,
+                share_hash: test_hash(3),
+                submitted_at: pt(3000),
+            },
+        ];
+
+        let state = RecoveryState::from_facts(&facts);
+        let recovery = state.recovery_for_context(&ctx).unwrap();
+
+        assert_eq!(
+            recovery.shares_submitted.len(),
+            1,
+            "Duplicate share from same guardian must be deduplicated"
+        );
+    }
+
     #[test]
     fn test_active_operations_query() {
         let ctx1 = test_context_id();
