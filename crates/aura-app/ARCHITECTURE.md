@@ -189,6 +189,40 @@ Contract alignment:
   policy and timeout diagnostics.
 - [Verification and MBT Guide](../../docs/806_verification_guide.md) defines the
   Quint/simulator/harness handoff around the shared contract.
+## Testing
+
+### Strategy
+
+Workflow purity and shared UI contract authority are the primary concerns.
+Compile-fail tests in `tests/ui/` enforce type-level boundaries: private
+semantic owner types, handle consumption semantics, and workflow internals.
+Inline tests verify view reduction, shared contract consistency, and
+concurrent fact publication safety.
+
+### Running tests
+
+```
+cargo test -p aura-app
+cargo test -p aura-app --test compile_fail       # semantic boundary tests
+cargo test -p aura-app --test compile_fail_signals  # signal boundary tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Handle used after consumption | InvariantAppWorkflowPurity | `tests/ui/` cancel-after-cancel, accept-after-cancel, cancel-after-accept (3 compile-fail) | Covered |
+| Semantic owner type accessible from frontend | InvariantSharedUiContractAuthority | `tests/ui/` *_private.rs (9 compile-fail) | Covered |
+| String executor accepted where typed required | InvariantAppWorkflowPurity | `tests/ui/string_executor_rejected.rs` (compile-fail) | Covered |
+| Shared flow support contract inconsistent | InvariantSharedUiContractAuthority | `src/ui_contract.rs` `shared_flow_support_contract_is_consistent` | Covered |
+| Shared screen/modal/list not unique | InvariantSharedUiContractAuthority | `src/ui_contract.rs` `shared_screen_modal_and_list_support_is_unique_and_addressable` | Covered |
+| Screen module map uses non-canonical names | InvariantSharedUiContractAuthority | `src/ui_contract.rs` `shared_screen_module_map_uses_canonical_screen_names` | Covered |
+| Operation lifecycle allows terminal regression | InvariantAppWorkflowPurity | `src/ui_contract.rs` `semantic_operation_phase_generated_lifecycle_rejects_terminal_regression` | Covered |
+| Concurrent fact updates lose entries | InvariantAppWorkflowPurity | `src/workflows/semantic_facts.rs` `concurrent_authoritative_fact_updates_do_not_lose_entries` | Covered |
+| Operation lifecycle loses instance identity | InvariantAppWorkflowPurity | `src/workflows/semantic_facts.rs` `exact_operation_lifecycle_publication_retains_instance_identity` | Covered |
+| Signal boundary leaked | InvariantSharedUiContractAuthority | `tests/ui_signals/` (1 compile-fail) | Covered |
+| Home role E2E flow broken | — | `tests/home_role_e2e.rs` | Covered |
+
 ## Boundaries
 - No aura-agent imports (uses RuntimeBridge trait instead).
 - No direct effect implementations.
