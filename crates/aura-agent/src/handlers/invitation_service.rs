@@ -106,9 +106,9 @@ impl InvitationServiceApi {
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("sender_exchange", fut);
+                let _task_handle = tasks.spawn_local_named("sender_exchange", fut);
             } else {
-                tasks.spawn_named("sender_exchange", fut);
+                let _task_handle = tasks.spawn_named("sender_exchange", fut);
             }
         }
     }
@@ -157,9 +157,9 @@ impl InvitationServiceApi {
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("delivery", fut);
+                let _task_handle = tasks.spawn_local_named("delivery", fut);
             } else {
-                tasks.spawn_named("delivery", fut);
+                let _task_handle = tasks.spawn_named("delivery", fut);
             }
         }
     }
@@ -187,11 +187,11 @@ impl InvitationServiceApi {
         };
         #[cfg(target_arch = "wasm32")]
         {
-            tasks.spawn_local_named(task_name, fut);
+            let _task_handle = tasks.spawn_local_named(task_name, fut);
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            tasks.spawn_named(task_name, fut);
+            let _task_handle = tasks.spawn_named(task_name, fut);
         }
     }
 
@@ -223,9 +223,9 @@ impl InvitationServiceApi {
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("register", fut);
+                let _task_handle = tasks.spawn_local_named("register", fut);
             } else {
-                tasks.spawn_named("register", fut);
+                let _task_handle = tasks.spawn_named("register", fut);
             }
         }
     }
@@ -273,9 +273,9 @@ impl InvitationServiceApi {
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("accept_commit", fut);
+                let _task_handle = tasks.spawn_local_named("accept_commit", fut);
             } else {
-                tasks.spawn_named("accept_commit", fut);
+                let _task_handle = tasks.spawn_named("accept_commit", fut);
             }
         }
     }

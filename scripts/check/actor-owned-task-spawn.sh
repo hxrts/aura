@@ -23,6 +23,7 @@ fail() {
 
 approved_patterns=(
   '^crates/aura-agent/src/task_registry\.rs:'
+  '^crates/aura-agent/src/runtime/services/service_actor\.rs:.*thread::spawn'
   '^crates/aura-effects/src/reactive/handler\.rs:'
   '^crates/aura-effects/src/reactive/graph\.rs:'
   '^crates/aura-harness/src/backend/local_pty\.rs:.*thread::spawn'

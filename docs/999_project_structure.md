@@ -75,6 +75,15 @@ Two repo-wide rules apply across every layer:
 2. Parity-critical operations must end in typed terminal success, failure, or
    cancellation.
 
+For Layer 6 runtime code this means:
+
+- `aura-agent` owns the production structured-concurrency model
+- long-lived runtime services use actor-owned bounded ingress
+- session/delegation/fragment transfer stays move-owned even when hosted by
+  runtime services
+- raw task spawn is implementation detail inside the sanctioned supervisor
+  boundary, not a public runtime programming model
+
 If a parity-critical subsystem cannot explain who owns state, how ownership is
 transferred, and how failure terminates, the architecture is incomplete.
 

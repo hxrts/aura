@@ -17,7 +17,7 @@ use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::util::serialization::to_vec;
-use aura_core::{AuthorityId, DelegationReceipt, DeviceId};
+use aura_core::{AuthorityId, DelegationReceipt, DeviceId, OwnershipCategory};
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use telltale_vm::vm::StepResult;
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
 /// Configuration for the sync service manager
@@ -164,7 +164,7 @@ struct SyncManagerShared {
     lifecycle_state: Mutex<SyncManagerState>,
     configured_peers: Mutex<Vec<DeviceId>>,
     maintenance_tasks: Mutex<Option<TaskGroup>>,
-    commands: Mutex<Option<ServiceActorHandle<SyncCommand>>>,
+    commands: Mutex<Option<ServiceActorHandle<SyncServiceManager, SyncCommand>>>,
     lifecycle: Mutex<()>,
 }
 
@@ -235,7 +235,11 @@ pub struct SyncServiceManager {
 }
 
 impl SyncServiceManager {
-    async fn command_handle(&self) -> Result<ServiceActorHandle<SyncCommand>, ServiceError> {
+    pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::ActorOwned;
+
+    async fn command_handle(
+        &self,
+    ) -> Result<ServiceActorHandle<SyncServiceManager, SyncCommand>, ServiceError> {
         self.shared.commands.lock().await.clone().ok_or_else(|| {
             ServiceError::unavailable(
                 self.name(),
@@ -248,11 +252,12 @@ impl SyncServiceManager {
         &self,
         tasks: &TaskGroup,
         mut state: SyncState,
-    ) -> ServiceActorHandle<SyncCommand> {
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+    ) -> ServiceActorHandle<SyncServiceManager, SyncCommand> {
+        let (commands, mut mailbox) =
+            ServiceActorHandle::<SyncServiceManager, SyncCommand>::bounded(self.name(), 64);
 
-        tasks.spawn_named("command_actor", async move {
-            while let Some(command) = cmd_rx.recv().await {
+        let _command_actor_handle = tasks.spawn_named("command_actor", async move {
+            while let Some(command) = mailbox.recv().await {
                 match command {
                     SyncCommand::SnapshotState { reply } => {
                         let _ = reply.send(SyncStateSnapshot {
@@ -277,7 +282,7 @@ impl SyncServiceManager {
             }
         });
 
-        ServiceActorHandle::new(self.name(), cmd_tx)
+        commands
     }
 
     async fn state_snapshot(&self) -> Result<SyncStateSnapshot, ServiceError> {
@@ -506,7 +511,7 @@ impl SyncServiceManager {
         let max_peer_states = self.config.max_peer_states;
         let manager = self.clone();
 
-        tasks.spawn_interval_until_named(
+        let _maintenance_task_handle = tasks.spawn_interval_until_named(
             "sync.maintenance",
             time_effects.clone(),
             interval,

@@ -21,7 +21,7 @@ use aura_core::effects::secure::{
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
-use aura_core::AuraError;
+use aura_core::{AuraError, OwnershipCategory};
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LocalInterfaces, RendezvousConfig, RendezvousDescriptor,
     RendezvousFact, RendezvousService, TransportHint,
@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex};
 
 use super::lan_discovery::{LanDiscoveryMetrics, LanDiscoveryService};
 use super::service_actor::{validate_actor_transition, ActorLifecyclePhase, ServiceActorHandle};
@@ -350,13 +350,14 @@ struct RendezvousManagerShared {
     /// Owned task group for service-local background work.
     tasks: Mutex<Option<TaskGroup>>,
     /// Typed command ingress for rendezvous-owned mutable state.
-    commands: Mutex<Option<ServiceActorHandle<RendezvousCommand>>>,
+    commands: Mutex<Option<ServiceActorHandle<RendezvousManager, RendezvousCommand>>>,
     /// Serializes lifecycle transitions.
     lifecycle: Mutex<()>,
 }
 
 impl RendezvousManager {
     const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+    pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::ActorOwned;
 
     /// Create a new rendezvous manager
     pub fn new(
@@ -411,7 +412,9 @@ impl RendezvousManager {
         self.state().await == RendezvousManagerState::Running
     }
 
-    async fn command_handle(&self) -> Result<ServiceActorHandle<RendezvousCommand>, ServiceError> {
+    async fn command_handle(
+        &self,
+    ) -> Result<ServiceActorHandle<RendezvousManager, RendezvousCommand>, ServiceError> {
         self.shared.commands.lock().await.clone().ok_or_else(|| {
             ServiceError::unavailable(
                 self.name(),
@@ -424,11 +427,12 @@ impl RendezvousManager {
         &self,
         tasks: &TaskGroup,
         mut state: RendezvousState,
-    ) -> ServiceActorHandle<RendezvousCommand> {
-        let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+    ) -> ServiceActorHandle<RendezvousManager, RendezvousCommand> {
+        let (commands, mut mailbox) =
+            ServiceActorHandle::<RendezvousManager, RendezvousCommand>::bounded(self.name(), 64);
 
-        tasks.spawn_named("command_actor", async move {
-            while let Some(command) = cmd_rx.recv().await {
+        let _command_actor_handle = tasks.spawn_named("command_actor", async move {
+            while let Some(command) = mailbox.recv().await {
                 match command {
                     RendezvousCommand::Snapshot { reply } => {
                         let _ = reply.send(RendezvousSnapshot {
@@ -670,7 +674,7 @@ impl RendezvousManager {
             }
         });
 
-        ServiceActorHandle::new(self.name(), cmd_tx)
+        commands
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
@@ -781,7 +785,8 @@ impl RendezvousManager {
         let time = self.time.clone();
         let shared = Arc::clone(&self.shared);
 
-        tasks.spawn_periodic("descriptor_cleanup", time.clone(), interval, move || {
+        let _cleanup_task_handle =
+            tasks.spawn_periodic("descriptor_cleanup", time.clone(), interval, move || {
             let time = time.clone();
             let shared = Arc::clone(&shared);
             async move {
@@ -807,7 +812,7 @@ impl RendezvousManager {
                 }
                 true
             }
-        });
+            });
     }
 
     // ========================================================================
@@ -1166,7 +1171,7 @@ impl RendezvousManager {
             let lan_cache_tasks = tasks.clone();
             let commands = commands.clone();
 
-            lan_cache_tasks.spawn_named("cache_discovered_peer", async move {
+            let _cache_task_handle = lan_cache_tasks.spawn_named("cache_discovered_peer", async move {
                 let _ = commands
                     .request(|reply| RendezvousCommand::CacheDiscoveredPeer {
                         local_authority_id,

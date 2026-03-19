@@ -150,7 +150,7 @@ impl RuntimeMaintenanceService {
         let effects = self.effects.clone();
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_interval_until_named(
+                let _acceptance_task_handle = tasks.spawn_local_interval_until_named(
                     "invitation_acceptance",
                     time_effects.clone(),
                     Duration::from_secs(2),
@@ -172,7 +172,7 @@ impl RuntimeMaintenanceService {
                     },
                 );
             } else {
-                tasks.spawn_interval_until_named(
+                let _acceptance_task_handle = tasks.spawn_interval_until_named(
                     "invitation_acceptance",
                     time_effects.clone(),
                     Duration::from_secs(2),
@@ -200,7 +200,7 @@ impl RuntimeMaintenanceService {
             let effects = self.effects.clone();
             cfg_if::cfg_if! {
                 if #[cfg(target_arch = "wasm32")] {
-                    tasks.spawn_local_interval_until_named(
+                    let _handshake_task_handle = tasks.spawn_local_interval_until_named(
                         "rendezvous_handshakes",
                         time_effects.clone(),
                         Duration::from_secs(2),
@@ -221,7 +221,7 @@ impl RuntimeMaintenanceService {
                         },
                     );
                 } else {
-                    tasks.spawn_interval_until_named(
+                    let _handshake_task_handle = tasks.spawn_interval_until_named(
                         "rendezvous_handshakes",
                         time_effects.clone(),
                         Duration::from_secs(2),
@@ -249,7 +249,7 @@ impl RuntimeMaintenanceService {
             (self.sync_manager.clone(), self.rendezvous_manager.clone())
         {
             let interval = sync_peer_reconcile_interval(&sync_manager);
-            tasks.spawn_interval_until_named(
+            let _reconcile_task_handle = tasks.spawn_interval_until_named(
                 "sync_peer_reconcile",
                 time_effects.clone(),
                 interval,
@@ -297,7 +297,7 @@ impl RuntimeMaintenanceService {
             let device_id = self.device_id;
             cfg_if::cfg_if! {
                 if #[cfg(target_arch = "wasm32")] {
-                    tasks.spawn_local_interval_until_named(
+                    let _descriptor_refresh_task_handle = tasks.spawn_local_interval_until_named(
                         "lan_descriptor_refresh",
                         time_effects,
                         Duration::from_secs(60),
@@ -333,7 +333,7 @@ impl RuntimeMaintenanceService {
                         },
                     );
                 } else {
-                    tasks.spawn_interval_until_named(
+                    let _descriptor_refresh_task_handle = tasks.spawn_interval_until_named(
                         "lan_descriptor_refresh",
                         time_effects,
                         Duration::from_secs(60),

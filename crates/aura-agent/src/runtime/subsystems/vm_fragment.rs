@@ -1,6 +1,7 @@
 //! Local ownership registry for admitted VM fragments.
 
 use super::choreography::RuntimeChoreographySessionId;
+use aura_core::OwnershipCategory;
 use aura_mpst::CompositionManifest;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -61,6 +62,9 @@ pub(in crate::runtime) struct VmFragmentRegistry {
 }
 
 impl VmFragmentRegistry {
+    #[allow(dead_code)] // Boundary classification is part of the runtime ownership contract.
+    pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::MoveOwned;
+
     /// Create an empty fragment registry.
     #[cfg(test)]
     pub fn new() -> Self {

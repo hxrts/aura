@@ -340,7 +340,7 @@ impl CeremonyTracker {
         const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 
         let tracker = self.clone();
-        tasks.spawn_interval_until_named(
+        let _cleanup_task_handle = tasks.spawn_interval_until_named(
             "ceremony.timeout_cleanup",
             time_effects,
             CLEANUP_INTERVAL,

@@ -442,7 +442,7 @@ mod tests {
             let tasks = runtime.tasks();
             let activity_gate = runtime.activity_gate();
 
-            tasks.spawn_named("test.shutdown.load", async move {
+            let _task_handle = tasks.spawn_named("test.shutdown.load", async move {
                 std::future::pending::<()>().await;
             });
 

@@ -18,7 +18,10 @@ use crate::runtime::{
 };
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::effects::PhysicalTimeEffects;
-use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_core::{
+    execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskHandle, TimeoutBudget,
+    TimeoutRunError,
+};
 use aura_effects::time::PhysicalTimeHandler;
 use futures::future::{BoxFuture, LocalBoxFuture};
 use futures::FutureExt;
@@ -26,7 +29,6 @@ use futures::FutureExt;
 use parking_lot::Mutex;
 #[cfg(target_arch = "wasm32")]
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::Notify;
 #[cfg(not(target_arch = "wasm32"))]
@@ -95,17 +97,10 @@ enum TaskOutcome {
 }
 
 #[derive(Debug)]
-struct TaskExit {
-    task_id: u64,
-    task_name: String,
-    outcome: TaskOutcome,
-}
-
-#[derive(Debug)]
 struct TaskMetadata {
     task_name: String,
     #[cfg(not(target_arch = "wasm32"))]
-    handle: JoinHandle<()>,
+    handle: Option<JoinHandle<()>>,
 }
 
 struct TaskGroupShared {
@@ -115,8 +110,6 @@ struct TaskGroupShared {
     inherited_cancellation: Option<Arc<dyn CancellationToken>>,
     diagnostics: Option<Arc<RuntimeDiagnosticSink>>,
     tasks: Mutex<BTreeMap<u64, TaskMetadata>>,
-    exit_tx: mpsc::Sender<TaskExit>,
-    exit_rx: Mutex<mpsc::Receiver<TaskExit>>,
     notify: Arc<Notify>,
 }
 
@@ -147,80 +140,98 @@ impl TaskSupervisor {
         self.root.group(name)
     }
 
-    pub fn spawn_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.root.spawn_named(name, fut);
+        self.root.spawn_named(name, fut)
     }
 
-    pub fn spawn_cancellable_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_cancellable_named<F>(
+        &self,
+        name: impl Into<String>,
+        fut: F,
+    ) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.root.spawn_cancellable_named(name, fut);
+        self.root.spawn_cancellable_named(name, fut)
     }
 
-    pub fn spawn_local_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + 'static,
     {
-        self.root.spawn_local_named(name, fut);
+        self.root.spawn_local_named(name, fut)
     }
 
-    pub fn spawn_local_cancellable_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_cancellable_named<F>(
+        &self,
+        name: impl Into<String>,
+        fut: F,
+    ) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + 'static,
     {
-        self.root.spawn_local_cancellable_named(name, fut);
+        self.root.spawn_local_cancellable_named(name, fut)
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_interval_until_named<F, Fut>(
         &self,
         name: impl Into<String>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         f: F,
-    ) where
+    ) -> OwnedTaskHandle<u64>
+    where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
-        self.root
-            .spawn_interval_until_named(name, time_effects, interval, f);
+        self.root.spawn_interval_until_named(name, time_effects, interval, f)
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_local_interval_until_named<F, Fut>(
         &self,
         name: impl Into<String>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         f: F,
-    ) where
+    ) -> OwnedTaskHandle<u64>
+    where
         F: FnMut() -> Fut + 'static,
         Fut: Future<Output = bool> + 'static,
     {
         self.root
-            .spawn_local_interval_until_named(name, time_effects, interval, f);
+            .spawn_local_interval_until_named(name, time_effects, interval, f)
     }
 
-    pub fn spawn_child<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_child<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_named(name, fut);
+        self.spawn_named(name, fut)
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_periodic<F, Fut>(
         &self,
         name: impl Into<String>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         f: F,
-    ) where
+    ) -> OwnedTaskHandle<u64>
+    where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
-        self.spawn_interval_until_named(name, time_effects, interval, f);
+        self.spawn_interval_until_named(name, time_effects, interval, f)
     }
 
     pub fn request_cancellation(&self) {
@@ -278,7 +289,6 @@ impl Drop for TaskSupervisor {
 impl TaskGroup {
     fn root(name: impl Into<String>, diagnostics: Option<Arc<RuntimeDiagnosticSink>>) -> Self {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        let (exit_tx, exit_rx) = mpsc::channel(256);
         Self {
             shared: Arc::new(TaskGroupShared {
                 name: name.into(),
@@ -287,8 +297,6 @@ impl TaskGroup {
                 inherited_cancellation: None,
                 diagnostics,
                 tasks: Mutex::new(BTreeMap::new()),
-                exit_tx,
-                exit_rx: Mutex::new(exit_rx),
                 notify: Arc::new(Notify::new()),
             }),
         }
@@ -302,7 +310,6 @@ impl TaskGroup {
         let name = name.into();
         let full_name = format!("{}.{}", self.shared.name, name);
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        let (exit_tx, exit_rx) = mpsc::channel(256);
         TaskGroup {
             shared: Arc::new(TaskGroupShared {
                 name: full_name,
@@ -311,66 +318,81 @@ impl TaskGroup {
                 inherited_cancellation: Some(self.cancellation_token()),
                 diagnostics: self.shared.diagnostics.clone(),
                 tasks: Mutex::new(BTreeMap::new()),
-                exit_tx,
-                exit_rx: Mutex::new(exit_rx),
                 notify: Arc::new(Notify::new()),
             }),
         }
     }
 
-    pub fn spawn_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_boxed(name.into(), Box::pin(fut), None);
+        self.spawn_boxed(name.into(), Box::pin(fut), None)
     }
 
-    pub fn spawn_cancellable_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_cancellable_named<F>(
+        &self,
+        name: impl Into<String>,
+        fut: F,
+    ) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_boxed(name.into(), Box::pin(fut), None);
+        self.spawn_boxed(name.into(), Box::pin(fut), None)
     }
 
-    pub fn spawn_local_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + 'static,
     {
-        self.spawn_boxed_local(name.into(), Box::pin(fut), None);
+        self.spawn_boxed_local(name.into(), Box::pin(fut), None)
     }
 
-    pub fn spawn_local_cancellable_named<F>(&self, name: impl Into<String>, fut: F)
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_cancellable_named<F>(
+        &self,
+        name: impl Into<String>,
+        fut: F,
+    ) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + 'static,
     {
-        self.spawn_boxed_local(name.into(), Box::pin(fut), None);
+        self.spawn_boxed_local(name.into(), Box::pin(fut), None)
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_with_token<F>(
         &self,
         name: impl Into<String>,
         fut: F,
         token: Arc<dyn CancellationToken>,
-    ) where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        self.spawn_boxed(name.into(), Box::pin(fut), Some(token));
-    }
-
-    pub fn spawn_child<F>(&self, name: impl Into<String>, fut: F)
+    ) -> OwnedTaskHandle<u64>
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_named(name, fut);
+        self.spawn_boxed(name.into(), Box::pin(fut), Some(token))
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_child<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.spawn_named(name, fut)
+    }
+
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_interval_until_named<F, Fut>(
         &self,
         name: impl Into<String>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         mut f: F,
-    ) where
+    ) -> OwnedTaskHandle<u64>
+    where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
@@ -389,16 +411,18 @@ impl TaskGroup {
                 }
             }),
             None,
-        );
+        )
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_local_interval_until_named<F, Fut>(
         &self,
         name: impl Into<String>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         mut f: F,
-    ) where
+    ) -> OwnedTaskHandle<u64>
+    where
         F: FnMut() -> Fut + 'static,
         Fut: Future<Output = bool> + 'static,
     {
@@ -417,20 +441,22 @@ impl TaskGroup {
                 }
             }),
             None,
-        );
+        )
     }
 
+    #[must_use = "retain or explicitly discard the owned task handle"]
     pub fn spawn_periodic<F, Fut>(
         &self,
         name: impl Into<String>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         f: F,
-    ) where
+    ) -> OwnedTaskHandle<u64>
+    where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
-        self.spawn_interval_until_named(name, time_effects, interval, f);
+        self.spawn_interval_until_named(name, time_effects, interval, f)
     }
 
     pub fn request_cancellation(&self) {
@@ -462,7 +488,6 @@ impl TaskGroup {
         })?;
         let result = execute_with_timeout_budget(&time, &budget, || async {
             loop {
-                self.reconcile_exits();
                 if self.shared.tasks.lock().is_empty() {
                     return Ok::<(), ()>(());
                 }
@@ -483,7 +508,6 @@ impl TaskGroup {
     }
 
     pub fn force_abort_remaining(&self) -> Result<(), TaskSupervisionError> {
-        self.reconcile_exits();
         let mut tasks = self.shared.tasks.lock();
         if tasks.is_empty() {
             return Ok(());
@@ -492,7 +516,9 @@ impl TaskGroup {
         let mut aborted_tasks = Vec::with_capacity(tasks.len());
         #[cfg(not(target_arch = "wasm32"))]
         for (_, entry) in tasks.iter() {
-            entry.handle.abort();
+            if let Some(handle) = &entry.handle {
+                handle.abort();
+            }
             aborted_tasks.push(entry.task_name.clone());
             emit_task_diagnostic(
                 self.shared.diagnostics.as_ref(),
@@ -558,7 +584,6 @@ impl TaskGroup {
     }
 
     pub fn active_tasks(&self) -> Vec<String> {
-        self.reconcile_exits();
         self.shared
             .tasks
             .lock()
@@ -567,20 +592,57 @@ impl TaskGroup {
             .collect()
     }
 
+    fn register_task(&self, task_id: u64, task_name: String) {
+        self.shared.tasks.lock().insert(
+            task_id,
+            TaskMetadata {
+                task_name,
+                #[cfg(not(target_arch = "wasm32"))]
+                handle: None,
+            },
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn attach_native_handle(&self, task_id: u64, handle: JoinHandle<()>) {
+        if let Some(metadata) = self.shared.tasks.lock().get_mut(&task_id) {
+            metadata.handle = Some(handle);
+        }
+    }
+
+    fn complete_task(&self, task_id: u64, task_name: &str, outcome: TaskOutcome) {
+        let removed = self.shared.tasks.lock().remove(&task_id);
+        if removed.is_none() {
+            return;
+        }
+
+        if matches!(outcome, TaskOutcome::Cancelled | TaskOutcome::Panicked) {
+            tracing::warn!(
+                event = "runtime.task.exit_non_success",
+                task_group = %self.shared.name,
+                task_name = %task_name,
+                outcome = ?outcome,
+                "Supervised task exited abnormally"
+            );
+        }
+
+        self.shared.notify.notify_waiters();
+    }
+
     fn spawn_boxed(
         &self,
         task_name: String,
         fut: BoxFuture<'static, ()>,
         external_token: Option<Arc<dyn CancellationToken>>,
-    ) {
+    ) -> OwnedTaskHandle<u64> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
+        self.register_task(task_id, task_name.clone());
         let group_name = self.shared.name.clone();
-        let exit_tx = self.shared.exit_tx.clone();
-        let notify = self.shared.notify.clone();
         let mut shutdown_rx = self.shared.shutdown_tx.subscribe();
         let inherited = self.shared.inherited_cancellation.clone();
         let diagnostics = self.shared.diagnostics.clone();
         let task_name_for_wrapper = task_name.clone();
+        let group = self.clone();
 
         tracing::debug!(
             event = "runtime.task.spawned",
@@ -611,28 +673,14 @@ impl TaskGroup {
                 task_id,
                 &outcome,
             );
-
-            let _ = exit_tx.try_send(TaskExit {
-                task_id,
-                task_name: task_name_for_wrapper,
-                outcome,
-            });
-            notify.notify_waiters();
+            group.complete_task(task_id, &task_name_for_wrapper, outcome);
         });
 
         #[cfg(not(target_arch = "wasm32"))]
-        self.shared
-            .tasks
-            .lock()
-            .insert(task_id, TaskMetadata { task_name, handle });
+        self.attach_native_handle(task_id, handle);
 
         #[cfg(target_arch = "wasm32")]
         {
-            self.shared
-                .tasks
-                .lock()
-                .insert(task_id, TaskMetadata { task_name });
-
             spawn_local(async move {
                 let outcome = AssertUnwindSafe(async {
                     tokio::select! {
@@ -653,35 +701,14 @@ impl TaskGroup {
                     task_id,
                     &outcome,
                 );
-
-                let _ = exit_tx.try_send(TaskExit {
-                    task_id,
-                    task_name: task_name_for_wrapper,
-                    outcome,
-                });
-                notify.notify_waiters();
+                group.complete_task(task_id, &task_name_for_wrapper, outcome);
             });
         }
-    }
 
-    fn reconcile_exits(&self) {
-        let mut exit_rx = self.shared.exit_rx.lock();
-        while let Ok(exit) = exit_rx.try_recv() {
-            let removed = self.shared.tasks.lock().remove(&exit.task_id);
-            if removed.is_none() {
-                continue;
-            }
-
-            if matches!(exit.outcome, TaskOutcome::Cancelled | TaskOutcome::Panicked) {
-                tracing::warn!(
-                    event = "runtime.task.exit_non_success",
-                    task_group = %self.shared.name,
-                    task_name = %exit.task_name,
-                    outcome = ?exit.outcome,
-                    "Supervised task exited abnormally"
-                );
-            }
-        }
+        OwnedTaskHandle::new(
+            task_id,
+            OwnedShutdownToken::attached(self.cancellation_token()),
+        )
     }
 
     fn spawn_boxed_local(
@@ -689,15 +716,15 @@ impl TaskGroup {
         task_name: String,
         fut: LocalBoxFuture<'static, ()>,
         external_token: Option<Arc<dyn CancellationToken>>,
-    ) {
+    ) -> OwnedTaskHandle<u64> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
+        self.register_task(task_id, task_name.clone());
         let mut shutdown_rx = self.shared.shutdown_tx.subscribe();
         let inherited = self.shared.inherited_cancellation.clone();
-        let exit_tx = self.shared.exit_tx.clone();
-        let notify = self.shared.notify.clone();
         let group_name = self.shared.name.clone();
         let diagnostics = self.shared.diagnostics.clone();
         let task_name_for_wrapper = task_name.clone();
+        let group = self.clone();
 
         #[cfg(not(target_arch = "wasm32"))]
         let handle = tokio::task::spawn_local(async move {
@@ -720,28 +747,14 @@ impl TaskGroup {
                 task_id,
                 &outcome,
             );
-
-            let _ = exit_tx.try_send(TaskExit {
-                task_id,
-                task_name: task_name_for_wrapper,
-                outcome,
-            });
-            notify.notify_waiters();
+            group.complete_task(task_id, &task_name_for_wrapper, outcome);
         });
 
         #[cfg(not(target_arch = "wasm32"))]
-        self.shared
-            .tasks
-            .lock()
-            .insert(task_id, TaskMetadata { task_name, handle });
+        self.attach_native_handle(task_id, handle);
 
         #[cfg(target_arch = "wasm32")]
         {
-            self.shared
-                .tasks
-                .lock()
-                .insert(task_id, TaskMetadata { task_name });
-
             spawn_local(async move {
                 let outcome = AssertUnwindSafe(async {
                     tokio::select! {
@@ -762,15 +775,14 @@ impl TaskGroup {
                     task_id,
                     &outcome,
                 );
-
-                let _ = exit_tx.send(TaskExit {
-                    task_id,
-                    task_name: task_name_for_wrapper,
-                    outcome,
-                });
-                notify.notify_waiters();
+                group.complete_task(task_id, &task_name_for_wrapper, outcome);
             });
         }
+
+        OwnedTaskHandle::new(
+            task_id,
+            OwnedShutdownToken::attached(self.cancellation_token()),
+        )
     }
 }
 
@@ -812,16 +824,18 @@ impl CancellationToken for TaskGroupCancellationToken {
 
 impl TaskSpawner for TaskSupervisor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) {
-        self.spawn_named(COMPAT_TASK_NAME, fut);
+        let _ = self.spawn_named(COMPAT_TASK_NAME, fut);
     }
 
     fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
-        self.root
+        let _ = self
+            .root
             .spawn_boxed(COMPAT_TASK_NAME.to_string(), fut, Some(token));
     }
 
     fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
-        self.root
+        let _ = self
+            .root
             .spawn_boxed_local(COMPAT_TASK_NAME.to_string(), fut, None);
     }
 
@@ -830,7 +844,8 @@ impl TaskSpawner for TaskSupervisor {
         fut: LocalBoxFuture<'static, ()>,
         token: Arc<dyn CancellationToken>,
     ) {
-        self.root
+        let _ = self
+            .root
             .spawn_boxed_local(COMPAT_TASK_NAME.to_string(), fut, Some(token));
     }
 
@@ -932,7 +947,7 @@ mod tests {
         let supervisor = TaskSupervisor::new();
         let (started_tx, started_rx) = oneshot::channel();
 
-        supervisor.spawn_named("test.pending", async move {
+        let _task_handle = supervisor.spawn_named("test.pending", async move {
             let _ = started_tx.send(());
             futures::future::pending::<()>().await;
         });
@@ -951,7 +966,7 @@ mod tests {
         let child = supervisor.group("child");
         let (started_tx, started_rx) = oneshot::channel();
 
-        child.spawn_named("test.pending", async move {
+        let _task_handle = child.spawn_named("test.pending", async move {
             let _ = started_tx.send(());
             futures::future::pending::<()>().await;
         });
@@ -969,7 +984,7 @@ mod tests {
         let supervisor = TaskSupervisor::new();
         let (started_tx, started_rx) = oneshot::channel();
 
-        supervisor.spawn_named("test.pending", async move {
+        let _task_handle = supervisor.spawn_named("test.pending", async move {
             let _ = started_tx.send(());
             futures::future::pending::<()>().await;
         });
@@ -992,7 +1007,7 @@ mod tests {
         let supervisor = TaskSupervisor::with_diagnostics(diagnostics.clone());
         let (started_tx, started_rx) = oneshot::channel();
 
-        supervisor.spawn_named("test.pending", async move {
+        let _task_handle = supervisor.spawn_named("test.pending", async move {
             let _ = started_tx.send(());
             futures::future::pending::<()>().await;
         });
@@ -1046,6 +1061,44 @@ mod tests {
             assert!(
                 active.lock().unwrap().is_empty(),
                 "task bookkeeping should not leak active entries across shutdown races"
+            );
+        });
+    }
+
+    #[test]
+    fn loom_shutdown_token_propagation_reaches_child() {
+        loom::model(|| {
+            use loom::sync::atomic::{AtomicBool, Ordering};
+            use loom::sync::Arc as LoomArc;
+            use loom::thread;
+
+            let cancelled = LoomArc::new(AtomicBool::new(false));
+            let child_observed = LoomArc::new(AtomicBool::new(false));
+
+            let child = {
+                let cancelled = cancelled.clone();
+                let child_observed = child_observed.clone();
+                thread::spawn(move || {
+                    while !cancelled.load(Ordering::Acquire) {
+                        thread::yield_now();
+                    }
+                    child_observed.store(true, Ordering::Release);
+                })
+            };
+
+            let parent = {
+                let cancelled = cancelled.clone();
+                thread::spawn(move || {
+                    cancelled.store(true, Ordering::Release);
+                })
+            };
+
+            parent.join().expect("parent joins");
+            child.join().expect("child joins");
+
+            assert!(
+                child_observed.load(Ordering::Acquire),
+                "child cancellation observer must see parent-driven shutdown"
             );
         });
     }

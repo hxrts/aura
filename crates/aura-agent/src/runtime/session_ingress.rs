@@ -26,6 +26,7 @@ use super::vm_host_bridge::{
 };
 use super::{AuraChoreoEngine, AuraEffectSystem, AuraVmSchedulerSignals};
 use super::{AuraLinkBoundary, RuntimeBoundaryError, RuntimeSessionEvent};
+use aura_core::OwnershipCategory;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSessionOwner {
@@ -92,6 +93,10 @@ impl SessionIngressError {
             Self::OwnerTransfer { .. } => "owner_transfer",
         }
     }
+}
+
+impl RuntimeSessionOwner {
+    pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::MoveOwned;
 }
 
 impl From<SessionOwnershipError> for SessionIngressError {

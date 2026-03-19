@@ -961,7 +961,8 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
     let websocket_effects = effects.clone();
     let tcp_accept_group = parent_tasks.clone();
     let tcp_connection_group = tcp_accept_group.clone();
-    tcp_accept_group.spawn_cancellable_named("tcp_accept_loop", async move {
+    let _tcp_accept_task_handle =
+        tcp_accept_group.spawn_cancellable_named("tcp_accept_loop", async move {
         loop {
             let (mut stream, addr) = match listener.accept().await {
                 Ok((stream, addr)) => (stream, addr),
@@ -999,7 +1000,8 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                     metrics.last_accept_ms = now_ms;
                 }
             }
-            connection_group.spawn_named(format!("tcp_connection.{addr}"), async move {
+            let _connection_task =
+                connection_group.spawn_named(format!("tcp_connection.{addr}"), async move {
                 let mut len_buf = [0u8; 4];
                 if let Err(err) = stream.read_exact(&mut len_buf).await {
                     tracing::debug!(error = %err, addr = %addr, "LAN transport read len failed");
@@ -1087,16 +1089,17 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                 }
 
                 let _ = handle_inbound_transport_envelope(effects, envelope).await;
-            });
+                });
         }
-    });
+        });
 
     let metrics = lan_transport.metrics_handle();
     let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
         Arc::new(websocket_effects.time_effects().clone());
     let websocket_accept_group = parent_tasks.clone();
     let websocket_connection_group = websocket_accept_group.clone();
-    websocket_accept_group.spawn_cancellable_named("websocket_accept_loop", async move {
+    let _websocket_accept_task_handle = websocket_accept_group
+        .spawn_cancellable_named("websocket_accept_loop", async move {
         loop {
             let (stream, addr) = match websocket_listener.accept().await {
                 Ok((stream, addr)) => (stream, addr),
@@ -1110,7 +1113,8 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
             let metrics = metrics.clone();
             let time_effects = time_effects.clone();
             let connection_group = websocket_connection_group.clone();
-            connection_group.spawn_named(format!("websocket_connection.{addr}"), async move {
+            let _connection_task =
+                connection_group.spawn_named(format!("websocket_connection.{addr}"), async move {
                 let websocket = match accept_async(stream).await {
                     Ok(websocket) => websocket,
                     Err(err) => {
@@ -1201,9 +1205,9 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                         }
                     }
                 }
-            });
+                });
         }
-    });
+        });
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -10,7 +10,8 @@ use crate::runtime::{
 use aura_core::effects::{CapabilityKey, PhysicalTimeEffects, RuntimeCapabilityEffects};
 use aura_core::time::{ProvenancedTime, TimeStamp};
 use aura_core::{
-    AuthorityId, ComposedBundle, ContextId, DelegationReceipt, SessionFootprint, SessionId,
+    AuthorityId, ComposedBundle, ContextId, DelegationReceipt, OwnershipCategory,
+    SessionFootprint, SessionId,
 };
 use aura_effects::RuntimeCapabilityHandler;
 use aura_journal::fact::{ProtocolRelationalFact, RelationalFact, SessionDelegationFact};
@@ -137,6 +138,8 @@ pub enum ReconfigurationManagerError {
 }
 
 impl SessionDelegationTransfer {
+    pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::MoveOwned;
+
     #[must_use]
     pub fn new(
         session_id: SessionId,
@@ -184,6 +187,8 @@ impl Default for ReconfigurationManager {
 }
 
 impl ReconfigurationManager {
+    pub const OWNERSHIP_CATEGORY: OwnershipCategory = OwnershipCategory::MoveOwned;
+
     /// Create a new manager.
     #[must_use]
     pub fn new() -> Self {

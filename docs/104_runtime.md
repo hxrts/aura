@@ -105,10 +105,14 @@ Do not treat actor mailboxes as the ownership-transfer primitive for sessions or
 
 Preferred primitives:
 
-- `tokio::sync::mpsc` and `tokio::sync::oneshot` for channels.
+- `aura-core::BoundedActorIngress` for declaring parity-critical actor ingress.
+- crate-private service-actor handles/mailboxes in `aura-agent` for runtime
+  command routing.
+- `tokio::sync::oneshot` for typed request/reply acknowledgements.
 - `tokio::sync::watch` for snapshots rather than command routing.
 - `tokio::sync::Notify` for ownership-local wakeups.
-- Supervised task groups and actor loops.
+- supervised task groups and actor loops rooted in `TaskSupervisor` /
+  `TaskGroup`
 
 Forbidden in production:
 
@@ -116,6 +120,11 @@ Forbidden in production:
 - Ad hoc background loops without a task owner.
 - Direct session mutation from non-owner tasks.
 - Multi-writer service state as the default pattern.
+
+The only sanctioned raw spawn implementation boundary in production runtime
+code is `aura-agent`'s task registry. Other runtime code must go through
+owned task-group APIs and retain or explicitly discard the returned owned task
+handle.
 
 ## Lifecycle Management
 

@@ -227,9 +227,9 @@ impl LanDiscoveryService {
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("lan_announcer", fut);
+                let _task_handle = tasks.spawn_local_named("lan_announcer", fut);
             } else {
-                tasks.spawn_named("lan_announcer", fut);
+                let _task_handle = tasks.spawn_named("lan_announcer", fut);
             }
         }
     }
@@ -315,9 +315,9 @@ impl LanDiscoveryService {
         };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                tasks.spawn_local_named("lan_listener", fut);
+                let _task_handle = tasks.spawn_local_named("lan_listener", fut);
             } else {
-                tasks.spawn_named("lan_listener", fut);
+                let _task_handle = tasks.spawn_named("lan_listener", fut);
             }
         }
     }

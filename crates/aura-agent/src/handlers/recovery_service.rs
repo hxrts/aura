@@ -471,9 +471,11 @@ impl RecoveryServiceApi {
             };
             cfg_if::cfg_if! {
                 if #[cfg(target_arch = "wasm32")] {
-                    tasks.spawn_local_named(format!("guardian.{guardian_id}"), fut);
+                    let _task_handle =
+                        tasks.spawn_local_named(format!("guardian.{guardian_id}"), fut);
                 } else {
-                    tasks.spawn_named(format!("guardian.{guardian_id}"), fut);
+                    let _task_handle =
+                        tasks.spawn_named(format!("guardian.{guardian_id}"), fut);
                 }
             }
         }

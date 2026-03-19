@@ -75,6 +75,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Shared semantic lifecycle ownership**: `aura-app::workflows` owns authoritative parity-critical semantic lifecycle publication after handoff; `aura-terminal`, `aura-web`, and `aura-harness` submit and observe but do not keep parallel terminal publication paths
 - **Frontend/app facade boundary**: frontend parity-critical imports go through `aura_app::ui` and `aura_app::ui::workflows`; do not reach into crate-root `aura_app::workflows` or private semantic helper modules
 - **Runtime-private ownership boundaries**: raw VM admission helpers, VM fragment ownership registry mutation, and `ReconfigurationController` stay internal to `aura-agent`; use the sanctioned ingress and manager surfaces instead
+- **Runtime structured-concurrency boundary**: production raw spawn stays inside `aura-agent::task_registry`; long-lived runtime services use bounded actor ingress and owned task handles instead of ad hoc `tokio::spawn`
 - **Architecture enforcement split**: prefer type/API design, compile-fail
   tests, and Rust-native lints for syntactic or boundary-shape rules;
   `just check-arch` should stay focused on workspace topology, governance, and

@@ -26,7 +26,7 @@ pub mod reconfiguration_manager;
 pub mod recovery_manager;
 pub mod rendezvous_cache_manager;
 pub mod rendezvous_manager;
-pub mod service_actor;
+mod service_actor;
 pub mod session_manager;
 pub mod social_manager;
 pub mod state;
@@ -57,8 +57,6 @@ pub use reconfiguration_manager::{
 pub(crate) use recovery_manager::RecoveryManager;
 pub(crate) use rendezvous_cache_manager::RendezvousCacheManager;
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};
-#[allow(unused_imports)] // Re-exported for public API as the service-actor spine lands.
-pub use service_actor::{validate_actor_transition, ActorLifecyclePhase, ServiceActorHandle};
 pub(crate) use session_manager::SessionManager;
 pub use social_manager::{SocialManager, SocialManagerConfig, SocialManagerState};
 pub use sync_manager::{SyncManagerConfig, SyncManagerState, SyncServiceManager};

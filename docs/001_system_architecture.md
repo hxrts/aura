@@ -51,6 +51,14 @@ authoritative publication owner for parity-critical operation lifecycle.
 Frontend and harness layers may submit commands and observe results, but they
 do not keep a parallel source of semantic terminal truth after handoff.
 
+The runtime side is equally strict:
+
+- `aura-agent` is the only production structured-concurrency path
+- long-lived runtime state is actor-owned behind bounded ingress
+- session, endpoint, fragment, and delegation transfer remain move-owned
+- raw task spawning stays inside the runtime supervision boundary rather than
+  service code or frontend layers
+
 ## 1. Dual Semilattice Model
 
 Aura state consists of two complementary semilattices. Facts form a join-semilattice where information accumulates through the join operation. Capabilities form a meet-semilattice where authority restricts through the meet operation.

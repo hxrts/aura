@@ -185,7 +185,8 @@ impl ReceiptManager {
         let retention_ms = self.config.retention_period.as_millis() as u64;
         let interval = self.config.cleanup_interval;
 
-        tasks.spawn_interval_until_named("receipt.cleanup", time.clone(), interval, move || {
+        let _cleanup_task_handle =
+            tasks.spawn_interval_until_named("receipt.cleanup", time.clone(), interval, move || {
             let shared = Arc::clone(&shared);
             let time = time.clone();
 
@@ -244,7 +245,7 @@ impl ReceiptManager {
 
                 true // Continue running
             }
-        });
+            });
 
         tracing::info!(
             interval_secs = self.config.cleanup_interval.as_secs(),

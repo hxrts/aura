@@ -998,7 +998,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(120));
 
         #[cfg(not(target_arch = "wasm32"))]
-        tasks.spawn_interval_until_named(
+        let _monitor_task_handle = tasks.spawn_interval_until_named(
             "runtime_bridge.channel_invitation_monitor",
             time_effects.clone(),
             std::time::Duration::from_millis(1000),
@@ -1060,7 +1060,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         );
 
         #[cfg(target_arch = "wasm32")]
-        tasks.spawn_local_interval_until_named(
+        let _monitor_task_handle = tasks.spawn_local_interval_until_named(
             "runtime_bridge.channel_invitation_monitor",
             time_effects,
             std::time::Duration::from_millis(1000),

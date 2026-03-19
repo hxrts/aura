@@ -125,7 +125,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = mapped.shared.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable_named("reactive.dynamic.map", async move {
+        let _subscription_task_handle =
+            tasks.spawn_cancellable_named("reactive.dynamic.map", async move {
             // Signal that we're ready to receive
             let _ = ready_tx.send(());
 
@@ -147,7 +148,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     Err(RecvError::Closed) => break,
                 }
             }
-        });
+            });
 
         // Wait for the spawned task to signal ready - ensures deterministic behavior
         let _ = ready_rx.await;
@@ -187,7 +188,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = combined.shared.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable_named("reactive.dynamic.combine", async move {
+        let _subscription_task_handle =
+            tasks.spawn_cancellable_named("reactive.dynamic.combine", async move {
             loop {
                 tokio::select! {
                     res = rx_self.recv() => {
@@ -226,7 +228,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     }
                 }
             }
-        });
+            });
 
         combined
     }
@@ -257,7 +259,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = filtered.shared.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable_named("reactive.dynamic.filter", async move {
+        let _subscription_task_handle =
+            tasks.spawn_cancellable_named("reactive.dynamic.filter", async move {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
@@ -277,7 +280,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     Err(RecvError::Closed) => break,
                 }
             }
-        });
+            });
 
         filtered
     }
@@ -307,7 +310,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             let state = folded.shared.state.read().await;
             state.tasks.clone()
         };
-        tasks.spawn_cancellable_named("reactive.dynamic.fold", async move {
+        let _subscription_task_handle =
+            tasks.spawn_cancellable_named("reactive.dynamic.fold", async move {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
@@ -327,7 +331,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                     Err(RecvError::Closed) => break,
                 }
             }
-        });
+            });
 
         folded
     }

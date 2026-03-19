@@ -26,6 +26,14 @@ Ownership transfer must consume a handoff object or owner token. Stale holders m
 
 There must be exactly one live owner for the mutable state domain. Mutation happens through typed ingress, not shared mutable access. Long-lived background work must be supervised. Owner death must lead to explicit terminal state, failure, or shutdown.
 
+In practice, Aura's production `ActorOwned` runtime path is `aura-agent`:
+
+- bounded ingress is declared with `aura-core::BoundedActorIngress`
+- long-lived service ownership is internal to runtime service modules
+- shared actor handles/mailboxes are crate-private runtime internals, not a
+  public API for higher layers
+- raw spawn lives only inside the sanctioned supervision implementation
+
 ### `Observed`
 
 `Observed` code reads and presents authoritative state but does not own it. Use it for projections, UI rendering, harness reads, diagnostics, and reporting.

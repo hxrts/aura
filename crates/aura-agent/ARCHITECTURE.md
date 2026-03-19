@@ -77,6 +77,33 @@ Rules:
 - runtime helper modules may stage work, but they may not author frontend- or
   harness-visible semantic truth without the owning capability
 
+### Concrete Boundary Map
+
+Concrete parity-critical boundaries in this crate currently split as follows:
+
+- `ActorOwned`
+  - `runtime/services/sync_manager.rs` via `SyncServiceManager`
+  - `runtime/services/rendezvous_manager.rs` via `RendezvousManager`
+  - service-local supervision rooted in `task_registry.rs`
+- `MoveOwned`
+  - `runtime/services/reconfiguration_manager.rs` via `ReconfigurationManager`
+    and `SessionDelegationTransfer`
+  - `runtime/session_ingress.rs` via `RuntimeSessionOwner`
+  - `runtime/subsystems/vm_fragment.rs` via `VmFragmentRegistry`
+- `CapabilityGated`
+  - runtime reconfiguration admission in
+    `runtime/services/reconfiguration_manager.rs`
+  - session-owner capability checks in `runtime/session_ingress.rs`
+  - runtime-facing readiness/lifecycle publication through sanctioned runtime
+    coordinator paths
+
+Rules:
+
+- do not replace `MoveOwned` session/delegation transfer with an actor mailbox
+- do not route long-lived mutable service ownership through move-owned handles
+- do not author runtime-visible mutation/publication without the relevant
+  capability gate
+
 ### Verification Hooks
 
 - `cargo check -p aura-agent`
@@ -567,7 +594,7 @@ Failure mode:
 - Shutdown leaves orphan tasks running.
 
 Verification hooks:
-- `just ci-async-task-ownership`
+- `just ci-actor-lifecycle`
 - `just test-crate aura-agent`
 
 Contract alignment:
