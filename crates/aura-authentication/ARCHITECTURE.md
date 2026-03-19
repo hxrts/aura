@@ -103,6 +103,7 @@ cargo test -p aura-authentication
 | Expired challenge accepted | `src/guards.rs` `test_check_challenge_expiry` | Covered |
 | Fact serialization roundtrip lossy | `src/facts.rs` `test_fact_serialization` | Covered |
 | Reducer non-idempotent | `src/facts.rs` `test_reducer_idempotence` | Covered |
+| Guardian approval flow incorrect | `src/view.rs` `test_recovery_approval_flow`, `src/service.rs` `test_guardian_approval_request` | Covered |
 | DKD agreement mode wrong | `src/dkd.rs` `test_dkd_agreement_mode_requires_consensus` | Covered |
 | DKD contribution validation fails on mismatch | `src/dkd.rs` `test_contribution_validation` | Covered |
 
