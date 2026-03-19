@@ -101,25 +101,41 @@ Contract alignment:
 
 ### Strategy
 
-aura-core is a foundation crate — if its invariants break, every crate above it
-is unsound. Testing priorities follow the blast radius of a failure:
+aura-core is the foundation for a threshold-cryptographic P2P identity system.
+If its invariants break, every crate above it is silently unsound. Testing
+priorities follow the blast radius of a failure, not the amount of code:
 
-1. **Algebraic laws** (`tests/laws/`). If a semilattice law is violated, all
-   CRDTs diverge. Property tests with proptest verify associativity,
-   commutativity, idempotence, and monotonicity across implementations.
-2. **Ownership boundaries** (`tests/boundaries/`). If a boundary can be
+1. **Cryptographic commitment correctness** (`tests/laws/`, inline). A wrong
+   commitment hash means a forged tree operation passes verification. A wrong
+   binding message means signatures can be replayed across groups. These are
+   the highest-consequence bugs in the system and the hardest to detect in
+   production.
+
+2. **Algebraic laws** (`tests/laws/`). If a semilattice law is violated, CRDTs
+   diverge across peers and state never converges. Property tests with proptest
+   verify associativity, commutativity, idempotence, and monotonicity. Every
+   `JoinSemilattice` and `MeetSemilattice` implementation must have law
+   coverage — not just the primitives but the domain types built on them.
+
+3. **Ownership boundaries** (`tests/boundaries/`). If a boundary can be
    bypassed, the ownership model is advisory. Compile-fail tests with trybuild
    verify private constructors, consumed publishers, sealed traits, and
-   capability gates.
-3. **Serialization contracts** (`tests/contracts/`). If serialization breaks,
-   peers cannot communicate. Roundtrip tests for every type that crosses the
-   wire or persists to storage.
-4. **Identifier determinism** (`tests/contracts/`). If derivation changes,
-   existing data is unreadable. Pinned test vectors for known input/output
-   mappings.
-5. **Inline unit tests** (`src/**/mod tests`). Module-local behavior:
-   constructors, validation, edge cases. A change to the module should break
-   these and only these.
+   capability gates. Every new private constructor or sealed trait in
+   `ownership.rs` needs a corresponding boundary test.
+
+4. **Serialization determinism** (`tests/contracts/`). Peers must agree on
+   byte-level encoding for threshold signatures (FROST requires identical
+   binding messages) and content addressing (fact hashes must be reproducible).
+   Roundtrip tests are necessary but not sufficient — pinned test vectors that
+   lock specific bytes for specific inputs are the real contract.
+
+5. **Identifier and key derivation stability** (`tests/contracts/`). If
+   derivation changes, all existing journals, keys, and channel bindings break.
+   Pinned vectors (known input → known output) prevent silent drift.
+
+6. **Time system ordering** (`tests/laws/`). If time ordering is wrong, causal
+   consistency and privacy-preserving ordering both fail. All four clock
+   domains need ordering law coverage.
 
 ### Test placement rule
 
@@ -129,35 +145,46 @@ value for a specific input, it belongs inline.
 
 ### Coverage matrix
 
-| Area | Test location | Method | Status |
-|------|--------------|--------|--------|
+| What breaks if wrong | Test location | Method | Status |
+|---------------------|--------------|--------|--------|
+| **Cryptographic commitments** | | | |
+| Branch/leaf commitment determinism | `src/tree/commitment.rs` | inline pinned | covered |
+| Binding message includes group pubkey | `src/tree/verification.rs` | inline | covered |
+| FROST sign → aggregate → verify | `src/crypto/tree_signing.rs` | inline | covered |
+| Commitment changes when any input changes | — | — | **missing** — needs differential test |
+| Signature replay across groups blocked | — | — | **missing** — needs cross-group test |
 | **Algebraic laws** | | | |
-| JoinSemilattice — u64, Vec, BTreeMap | `tests/laws/semilattice_join.rs` | example-based | covered |
+| JoinSemilattice — u64, Vec, BTreeMap | `tests/laws/semilattice_join.rs` | example | covered |
 | MeetSemilattice — u64, BTreeSet | `tests/laws/semilattice_meet.rs` | proptest | covered |
-| FlowBudget CRDT — join, merge, convergence | `tests/laws/flow_budget_crdt.rs` | proptest + example | covered |
-| Policy meet-semilattice | `tests/laws/tree_policy_meet.rs` | proptest + example | covered |
-| Time ordering | `tests/laws/time_ordering.rs` | proptest | minimal (2 properties) |
+| FlowBudget CRDT — join, merge, convergence | `tests/laws/flow_budget_crdt.rs` | proptest | covered |
+| Policy meet-semilattice | `tests/laws/tree_policy_meet.rs` | proptest | covered |
+| Time ordering across clock domains | `tests/laws/time_ordering.rs` | proptest | minimal (2 props) |
 | JoinSemilattice — Fact, FactValue | — | — | **missing** |
 | MeetSemilattice — Cap | — | — | **missing** |
+| FlowBudget epoch rotation monotonicity | `tests/laws/flow_budget_crdt.rs` | example | covered |
 | **Ownership boundaries** | | | |
-| TerminalPublisher not clonable | `tests/boundaries/` | compile-fail | covered |
-| TerminalPublisher no double publish | `tests/boundaries/` | compile-fail | covered |
-| OperationContext private constructor | `tests/boundaries/` | compile-fail | covered |
-| OwnerToken stale after handoff | `tests/boundaries/` | compile-fail | covered |
-| Sealed owner traits | `tests/boundaries/` | compile-fail | covered |
+| TerminalPublisher: not clonable, no double publish | `tests/boundaries/` | compile-fail | covered |
+| OperationContext: private constructor | `tests/boundaries/` | compile-fail | covered |
+| OwnerToken: stale after handoff | `tests/boundaries/` | compile-fail | covered |
+| Sealed owner traits: external impl blocked | `tests/boundaries/` | compile-fail | covered |
 | Capability-gated publication (3 variants) | `tests/boundaries/` | compile-fail | covered |
-| **Serialization contracts** | | | |
-| WireEnvelope, FactEnvelope | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
-| FlowCost, FlowNonce, ReceiptSig | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
-| OwnershipCategory | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
-| TimeStamp variants | — | — | **missing** |
-| **Identifier determinism** | | | |
-| AuthorityId, DeviceId, SessionId | `tests/contracts/identifier_uniqueness.rs` | example + determinism | covered |
-| DKD derivation | `tests/contracts/dkd_determinism.rs` | determinism | covered |
+| **Serialization determinism** | | | |
+| WireEnvelope, FactEnvelope roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| FlowCost, FlowNonce, ReceiptSig roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| OwnershipCategory roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
+| TimeStamp variant roundtrip | — | — | **missing** |
+| DAG-CBOR canonical encoding (byte-exact) | — | — | **missing** — critical for FROST |
+| **Identifier and key derivation** | | | |
+| AuthorityId, DeviceId, SessionId uniqueness | `tests/contracts/identifier_uniqueness.rs` | example + determ. | covered |
+| DKD derivation determinism | `tests/contracts/dkd_determinism.rs` | determinism | covered |
 | Content addressing (Hash32, ContentId) | `tests/contracts/content_addressing.rs` | roundtrip | covered |
-| Pinned test vectors | — | — | **missing** |
+| Pinned test vectors (known input → known bytes) | — | — | **missing** |
+| **Domain invariants** | | | |
+| Context isolation (no cross-context fact leakage) | — | — | **missing** — needs L1 test |
+| FlowBudget charge-before-send | `src/types/flow.rs` | inline | covered |
+| Epoch monotonicity (no regression) | `tests/laws/flow_budget_crdt.rs` | example | covered |
 | **Scaling** | | | |
-| Consistency metadata at 10k scale | `tests/contracts/consistency_scaling.rs` | `#[ignore]` bench | covered |
+| Consistency metadata at 10k scale | `tests/contracts/consistency_scaling.rs` | `#[ignore]` | covered |
 
 ### Running tests
 
