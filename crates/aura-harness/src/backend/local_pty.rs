@@ -20,6 +20,9 @@ use aura_app::ui::contract::{
     OperationState, ScreenId, UiReadiness, UiSnapshot,
 };
 use aura_app::ui_contract::RuntimeFact;
+use nix::errno::Errno;
+use nix::sys::signal;
+use nix::unistd::Pid;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -224,15 +227,28 @@ impl LocalPtyBackend {
     }
 
     fn ensure_session_alive(&self, session: &RunningSession, context: &str) -> Result<()> {
-        if Self::reader_thread_alive(session) {
+        if Self::reader_thread_alive(session) && Self::child_process_alive(session) {
             return Ok(());
         }
         let screen = Self::read_screen(&session.parser);
+        let log_tail = self.tail_log(40).unwrap_or_default().join("\n");
         anyhow::bail!(
-            "local PTY instance {} exited before {context}; last_screen={:?}",
+            "local PTY instance {} exited before {context}; last_screen={:?} log_tail={}",
             self.config.id,
-            self.select_authoritative_screen(screen)
+            self.select_authoritative_screen(screen),
+            log_tail,
         );
+    }
+
+    fn child_process_alive(session: &RunningSession) -> bool {
+        let Some(pid) = session.child.process_id() else {
+            return true;
+        };
+        match signal::kill(Pid::from_raw(pid as i32), None) {
+            Ok(()) => true,
+            Err(Errno::EPERM) => true,
+            Err(_) => false,
+        }
     }
 
     fn is_cargo_program(program: &str) -> bool {
@@ -1000,8 +1016,8 @@ impl InstanceBackend for LocalPtyBackend {
         if !running {
             return Ok(false);
         }
-        let reader_alive = self.session.as_ref().is_some_and(Self::reader_thread_alive);
-        Ok(reader_alive)
+        let session = self.session.as_ref().expect("checked above");
+        Ok(Self::reader_thread_alive(session) && Self::child_process_alive(session))
     }
 
     fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
@@ -1029,17 +1045,20 @@ impl InstanceBackend for LocalPtyBackend {
                     return Ok(());
                 }
             }
-            if self
-                .session
-                .as_ref()
-                .and_then(|session| session.reader_thread.as_ref())
-                .is_some_and(|thread| thread.is_finished())
-            {
+            if self.session.as_ref().is_some_and(|session| {
+                session
+                    .reader_thread
+                    .as_ref()
+                    .is_some_and(|thread| thread.is_finished())
+                    || !Self::child_process_alive(session)
+            }) {
                 let screen = self.snapshot().unwrap_or_default();
+                let log_tail = self.tail_log(40).unwrap_or_default().join("\n");
                 anyhow::bail!(
-                    "local PTY instance {} exited before publishing an authoritative UI snapshot; screen={:?}",
+                    "local PTY instance {} exited before publishing an authoritative UI snapshot; screen={:?} log_tail={}",
                     self.config.id,
-                    screen
+                    screen,
+                    log_tail
                 );
             }
             if Instant::now() >= deadline {

@@ -502,18 +502,18 @@ fn channel_id_from_input(channel: &str) -> Result<ChannelId, AuraError> {
     routing::channel_id_from_input(channel)
 }
 
-async fn resolve_channel_id_from_state_or_input(
+async fn resolve_chat_channel_id_from_state_or_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
 ) -> Result<ChannelId, AuraError> {
-    routing::resolve_channel_id_from_state_or_input(app_core, channel_input).await
+    routing::resolve_chat_channel_id_from_state_or_input(app_core, channel_input).await
 }
 
-async fn matching_channel_ids(
+async fn matching_chat_channel_ids(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
 ) -> Vec<ChannelId> {
-    routing::matching_channel_ids(app_core, channel_input).await
+    routing::matching_chat_channel_ids(app_core, channel_input).await
 }
 
 fn hex_prefix(bytes: &[u8], byte_len: usize) -> String {
@@ -1524,7 +1524,7 @@ pub(crate) async fn authoritative_local_channel_id_for_context(
     }
 
     if let Some(channel_name_hint) = channel_name_hint {
-        return resolve_channel_id_from_state_or_input(app_core, channel_name_hint)
+        return resolve_chat_channel_id_from_state_or_input(app_core, channel_name_hint)
             .await
             .ok();
     }
@@ -1553,7 +1553,7 @@ async fn local_channel_id_for_accepted_pending_invitation(
             context_id: None,
             nickname_suggestion: Some(channel_name),
             ..
-        } => resolve_channel_id_from_state_or_input(app_core, channel_name)
+        } => resolve_chat_channel_id_from_state_or_input(app_core, channel_name)
             .await
             .unwrap_or(fallback_channel_id),
         _ => fallback_channel_id,
@@ -2374,7 +2374,7 @@ async fn join_channel_by_name_owned(
         return Err(error);
     }
 
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
+    let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
     let channel_exists_locally = {
         let chat = chat_snapshot(app_core).await;
         chat.channel(&channel_id).is_some()
@@ -2480,9 +2480,9 @@ pub async fn leave_channel_by_name(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
 ) -> Result<(), AuraError> {
-    let mut candidate_ids = matching_channel_ids(app_core, channel_name).await;
+    let mut candidate_ids = matching_chat_channel_ids(app_core, channel_name).await;
     if candidate_ids.is_empty() {
-        candidate_ids.push(resolve_channel_id_from_state_or_input(app_core, channel_name).await?);
+        candidate_ids.push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
     }
 
     // Channel views can transiently carry duplicate IDs for the same display name
@@ -2551,7 +2551,7 @@ pub async fn close_channel_by_name(
     channel_name: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
+    let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
     close_channel(app_core, channel_id, timestamp_ms).await
 }
 
@@ -2583,7 +2583,7 @@ pub async fn set_topic_by_name(
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await?;
+    let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
     set_topic(app_core, channel_id, text, timestamp_ms).await
 }
 
@@ -2753,7 +2753,7 @@ async fn send_message_ref_owned(
 
     let (channel_id, channel_label) = match &channel {
         ChannelRef::Id(id) => (*id, id.to_string()),
-        ChannelRef::Name(name) => match resolve_channel_id_from_state_or_input(app_core, name).await
+        ChannelRef::Name(name) => match resolve_chat_channel_id_from_state_or_input(app_core, name).await
         {
             Ok(channel_id) => (channel_id, name.clone()),
             Err(error) => {
@@ -3414,7 +3414,7 @@ async fn invite_user_to_channel_with_context_owned(
             "invite_user_to_channel",
             "resolve_channel_id",
             Some(deadline),
-            resolve_channel_id_from_state_or_input(app_core, channel_name_or_id),
+            resolve_chat_channel_id_from_state_or_input(app_core, channel_name_or_id),
         )
         .await?;
         let channel_name_hint = normalize_channel_name(channel_name_or_id);
@@ -4429,13 +4429,13 @@ mod tests {
         .await
         .unwrap();
 
-        let by_name = resolve_channel_id_from_state_or_input(&app_core, "slash-lab")
+        let by_name = resolve_chat_channel_id_from_state_or_input(&app_core, "slash-lab")
             .await
             .expect("name selector should resolve");
-        let by_hash = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab")
+        let by_hash = resolve_chat_channel_id_from_state_or_input(&app_core, "#slash-lab")
             .await
             .expect("#name selector should resolve");
-        let by_spaced_hash = resolve_channel_id_from_state_or_input(&app_core, "# slash-lab")
+        let by_spaced_hash = resolve_chat_channel_id_from_state_or_input(&app_core, "# slash-lab")
             .await
             .expect("# spaced selector should resolve");
 
@@ -4445,7 +4445,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_channel_id_uses_home_projection_when_chat_missing() {
+    async fn test_resolve_chat_channel_id_ignores_home_projection_when_chat_missing() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -4469,14 +4469,18 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let resolved = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab")
+        let resolved = resolve_chat_channel_id_from_state_or_input(&app_core, "#slash-lab")
             .await
-            .expect("home projection selector should resolve");
-        assert_eq!(resolved, home_id);
+            .expect("channel selector should derive channel identity");
+        assert_eq!(
+            resolved,
+            ChannelRef::Name("slash-lab".to_string()).to_channel_id()
+        );
+        assert_ne!(resolved, home_id);
     }
 
     #[tokio::test]
-    async fn test_resolve_channel_id_prefers_local_home_over_foreign_chat_placeholder() {
+    async fn test_resolve_chat_channel_id_prefers_chat_match_over_home_name_collision() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -4520,10 +4524,62 @@ mod tests {
         .await
         .unwrap();
 
-        let resolved = resolve_channel_id_from_state_or_input(&app_core, "shared-parity-lab")
+        let resolved = resolve_chat_channel_id_from_state_or_input(&app_core, "shared-parity-lab")
             .await
-            .expect("local home should win over foreign chat placeholder");
-        assert_eq!(resolved, local_home_id);
+            .expect("chat channel should win over home collision");
+        assert_eq!(resolved, foreign_chat_id);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_prefers_context_backed_chat_over_home_name_match() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let home_id = ChannelId::from_bytes(hash(b"resolve-home-name-collision"));
+        let chat_id = ChannelId::from_bytes(hash(b"resolve-chat-name-collision"));
+        let owner = AuthorityId::new_from_entropy([26u8; 32]);
+        let home_context_id = ContextId::new_from_entropy([27u8; 32]);
+        let chat_context_id = ContextId::new_from_entropy([28u8; 32]);
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home(HomeState::new(
+                home_id,
+                Some("shared-parity-lab".to_string()),
+                owner,
+                0,
+                home_context_id,
+            ));
+            core.views_mut().set_homes(homes);
+        }
+
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: chat_id,
+                context_id: Some(chat_context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 10,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        let resolved = resolve_chat_channel_id_from_state_or_input(&app_core, "shared-parity-lab")
+            .await
+            .expect("context-backed chat should win over home name collision");
+        assert_eq!(resolved, chat_id);
     }
 
     #[tokio::test]
@@ -4665,7 +4721,7 @@ mod tests {
             .await
             .expect("leave projection should preserve canonical channel entry");
 
-        let resolved = resolve_channel_id_from_state_or_input(&app_core, "slash-lab")
+        let resolved = resolve_chat_channel_id_from_state_or_input(&app_core, "slash-lab")
             .await
             .expect("name selector should resolve");
         assert_eq!(resolved, channel_id);

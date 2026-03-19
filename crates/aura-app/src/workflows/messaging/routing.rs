@@ -1,16 +1,13 @@
 use super::*;
-use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
 use crate::views::chat::{
     is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id, Channel,
 };
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::context::current_home_context_or_fallback;
-use crate::workflows::signals::read_signal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum ChannelMatchClass {
     Name,
-    HomeRef,
     Id,
 }
 
@@ -26,9 +23,6 @@ fn channel_matches_input(
 
     if id == raw || id_lower == raw_lower {
         return Some(ChannelMatchClass::Id);
-    }
-    if format!("home:{}", channel.id).eq_ignore_ascii_case(raw) {
-        return Some(ChannelMatchClass::HomeRef);
     }
     if channel.name.eq_ignore_ascii_case(normalized_name)
         || format!("# {}", channel.name).eq_ignore_ascii_case(raw)
@@ -64,13 +58,13 @@ fn better_chat_match(
     candidate_key > current_key
 }
 
-fn resolve_matching_chat_channel(
-    chat: &crate::views::chat::ChatState,
+fn resolve_matching_chat_channel_candidate<'a>(
+    chat: &'a crate::views::chat::ChatState,
     raw: &str,
     raw_lower: &str,
     normalized_name: &str,
     normalized_lower: &str,
-) -> Option<ChannelId> {
+) -> Option<(&'a Channel, ChannelMatchClass)> {
     let mut best: Option<(&Channel, ChannelMatchClass)> = None;
     for channel in chat.all_channels() {
         let Some(class) =
@@ -86,7 +80,7 @@ fn resolve_matching_chat_channel(
             Some(_) => {}
         }
     }
-    best.map(|(channel, _)| channel.id)
+    best
 }
 
 pub(super) fn parse_channel_ref(channel: &str) -> Result<ChannelSelector, AuraError> {
@@ -97,7 +91,7 @@ pub(super) fn channel_id_from_input(channel: &str) -> Result<ChannelId, AuraErro
     Ok(parse_channel_ref(channel)?.to_channel_id())
 }
 
-pub(super) async fn resolve_channel_id_from_state_or_input(
+pub(super) async fn resolve_chat_channel_id_from_state_or_input(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
 ) -> Result<ChannelId, AuraError> {
@@ -121,46 +115,17 @@ pub(super) async fn resolve_channel_id_from_state_or_input(
         }
     }
 
-    let mut homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
-    if homes.iter().next().is_none() {
-        let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
-            .await
-            .unwrap_or_default();
-        if signal_homes.iter().next().is_some() {
-            homes = signal_homes;
-        }
-    }
-    if let Some(home_id) = homes
-        .iter()
-        .filter_map(|(home_id, home)| {
-            let home_name = home.name.trim();
-            let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
-                || format!("home:{home_id}").eq_ignore_ascii_case(raw)
-                || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
-                || (!home_name.is_empty() && format!("#{home_name}").eq_ignore_ascii_case(raw))
-                || (!home_name.is_empty() && format!("# {home_name}").eq_ignore_ascii_case(raw));
-            is_match.then_some((*home_id, home.is_admin(), home.member_count))
-        })
-        .max_by_key(|(_, is_admin, member_count)| (u8::from(*is_admin), *member_count))
-        .map(|(home_id, _, _)| home_id)
-    {
-        return Ok(home_id);
-    }
-
     let chat = chat_snapshot(app_core).await;
-    if let Some(existing) =
-        resolve_matching_chat_channel(&chat, raw, &raw_lower, normalized_name, &normalized_lower)
+    if let Some((channel, _)) =
+        resolve_matching_chat_channel_candidate(&chat, raw, &raw_lower, normalized_name, &normalized_lower)
     {
-        return Ok(existing);
+        return Ok(channel.id);
     }
 
     Ok(selector.to_channel_id())
 }
 
-pub(super) async fn matching_channel_ids(
+pub(super) async fn matching_chat_channel_ids(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
 ) -> Vec<ChannelId> {
@@ -194,30 +159,6 @@ pub(super) async fn matching_channel_ids(
             if !matches.contains(&channel_id) {
                 matches.push(channel_id);
             }
-        }
-    }
-
-    let mut homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
-    if homes.iter().next().is_none() {
-        let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
-            .await
-            .unwrap_or_default();
-        if signal_homes.iter().next().is_some() {
-            homes = signal_homes;
-        }
-    }
-    for (home_id, home) in homes.iter() {
-        let home_name = home.name.trim();
-        let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
-            || format!("home:{home_id}").eq_ignore_ascii_case(raw)
-            || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
-            || (!home_name.is_empty() && format!("#{home_name}").eq_ignore_ascii_case(raw))
-            || (!home_name.is_empty() && format!("# {home_name}").eq_ignore_ascii_case(raw));
-        if is_match && !matches.contains(home_id) {
-            matches.push(*home_id);
         }
     }
 

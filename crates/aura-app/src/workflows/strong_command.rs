@@ -1116,15 +1116,6 @@ impl CommandResolver {
                 by_id.insert(channel.id, (channel.name.clone(), context));
             }
         }
-        for home in state.homes.all_homes() {
-            if home.name.eq_ignore_ascii_case(normalized) {
-                by_id.insert(
-                    home.id,
-                    (home.name.clone(), home.context_id.map(ResolvedContextId)),
-                );
-            }
-        }
-
         if by_id.len() == 1 {
             if let Some((channel_id, (_, context_id))) = by_id
                 .iter()
@@ -2006,6 +1997,71 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn resolver_does_not_treat_home_names_as_existing_channels() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let home_id = ChannelId::from_bytes([10u8; 32]);
+        let owner = AuthorityId::new_from_entropy([16u8; 32]);
+        let context_id = ContextId::new_from_entropy([17u8; 32]);
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home(crate::views::home::HomeState::new(
+                home_id,
+                Some("slash-lab".to_string()),
+                owner,
+                0,
+                context_id,
+            ));
+            core.views_mut().set_homes(homes);
+        }
+
+        let resolver = CommandResolver::default();
+        let snapshot = resolver.capture_snapshot(&app_core).await;
+
+        let join = resolver
+            .resolve(
+                ParsedCommand::Join {
+                    channel: "slash-lab".to_string(),
+                },
+                &snapshot,
+            )
+            .expect("join should treat unmatched channel name as create intent");
+        match join {
+            ResolvedCommand::Join {
+                channel:
+                    ChannelResolveOutcome::WillCreate {
+                        channel_id,
+                        channel_name,
+                    },
+                ..
+            } => {
+                assert_eq!(channel_name, "slash-lab");
+                assert_eq!(
+                    channel_id,
+                    ResolvedChannelId(ChannelRef::Name("slash-lab".to_string()).to_channel_id())
+                );
+            }
+            other => panic!("unexpected join resolution: {other:?}"),
+        }
+
+        let mode = resolver.resolve(
+            ParsedCommand::Mode {
+                channel: "slash-lab".to_string(),
+                flags: "+m".to_string(),
+            },
+            &snapshot,
+        );
+        assert!(matches!(
+            mode,
+            Err(CommandResolverError::UnknownTarget {
+                target: ResolveTarget::Channel,
+                ..
+            })
+        ));
     }
 
     #[test]

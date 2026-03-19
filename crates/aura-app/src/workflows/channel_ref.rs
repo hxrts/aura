@@ -35,7 +35,7 @@ impl ChannelRef {
 
 #[cfg_attr(not(feature = "signals"), allow(dead_code))]
 fn normalize_channel_str(channel: &str) -> &str {
-    channel.strip_prefix("home:").unwrap_or(channel)
+    channel
 }
 
 /// Strict typed selector for channel/home references in command and workflow paths.
@@ -52,18 +52,6 @@ impl ChannelSelector {
         let raw = input.trim();
         if raw.is_empty() {
             return Err(AuraError::invalid("Channel selector cannot be empty"));
-        }
-
-        if let Some(home_encoded) = raw.strip_prefix("home:") {
-            let encoded = home_encoded.trim();
-            if encoded.is_empty() {
-                return Err(AuraError::invalid(
-                    "Channel selector 'home:' is missing an ID",
-                ));
-            }
-            return encoded.parse::<ChannelId>().map(Self::Id).map_err(|_| {
-                AuraError::invalid(format!("Invalid home channel ID selector: {raw}"))
-            });
         }
 
         if let Ok(id) = raw.parse::<ChannelId>() {
@@ -151,14 +139,12 @@ mod tests {
     }
 
     #[test]
-    fn channel_selector_rejects_malformed_home_id_selector() {
+    fn channel_selector_rejects_home_selectors() {
         let error = match ChannelSelector::parse("home:not-a-channel-id") {
             Ok(value) => panic!("malformed home selector must fail: {value:?}"),
             Err(error) => error,
         };
-        assert!(error
-            .to_string()
-            .contains("Invalid home channel ID selector"));
+        assert!(error.to_string().contains("Invalid channel selector"));
     }
 
     #[test]
