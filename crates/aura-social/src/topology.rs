@@ -427,6 +427,8 @@ mod tests {
         assert!(!same_home_members.contains(&local)); // Self excluded
     }
 
+    /// Relationships upgrade (Neighborhood → Home) but never downgrade —
+    /// protects trust-boundary integrity.
     #[test]
     fn test_relationship_priority() {
         let local = test_authority(1);

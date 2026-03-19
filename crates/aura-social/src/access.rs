@@ -345,6 +345,7 @@ mod tests {
         assert!(!service.can_traverse(&position, home_b, &["any_cap".to_string()]));
     }
 
+    /// Same-home member gets Full access — the highest trust level.
     #[test]
     fn test_determine_default_access_level_member() {
         let home_id = HomeId::from_bytes([1u8; 32]);
@@ -444,6 +445,8 @@ mod tests {
         assert_eq!(level, AccessLevel::Partial);
     }
 
+    /// Invalid override (Full→Limited for same-home member) is ignored —
+    /// prevents malicious downgrade of trust-boundary members.
     #[test]
     fn test_determine_access_level_ignores_invalid_override_transition() {
         let home_a = HomeId::from_bytes([1u8; 32]);

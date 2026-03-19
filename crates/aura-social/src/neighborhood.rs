@@ -281,6 +281,8 @@ mod tests {
         assert!(reachable_from_d.contains(&home_d));
     }
 
+    /// Same facts in different order produce the same neighborhood — needed
+    /// for consistent topology views across peers.
     #[test]
     fn test_from_facts_is_deterministic() {
         let neighborhood_id = NeighborhoodId::from_bytes([5u8; 32]);
@@ -309,6 +311,8 @@ mod tests {
         assert_eq!(view_a.adjacencies, view_b.adjacencies);
     }
 
+    /// Duplicate membership facts are deduplicated — prevents inflated
+    /// member counts and double-counting in replication.
     #[test]
     fn test_invariant_membership_unique() {
         let neighborhood_id = NeighborhoodId::from_bytes([6u8; 32]);

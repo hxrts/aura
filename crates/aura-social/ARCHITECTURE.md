@@ -73,6 +73,38 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines boundary isolation semantics.
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines relationship and neighborhood boundaries.
+## Testing
+
+### Strategy
+
+Boundary-scoped membership and access level computation are the primary
+concerns. Integration tests in `tests/topology/` verify access levels,
+role enforcement, and simulation scenarios. General integration tests stay
+top-level. Inline tests verify individual components (home, neighborhood,
+topology, access, storage).
+
+### Running tests
+
+```
+cargo test -p aura-social
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Access level computed wrong for hop distance | `src/access.rs` (14 inline), `tests/topology/role_access_e2e.rs` | Covered |
+| Invalid access override accepted | `src/access.rs` `test_determine_access_level_ignores_invalid_override_transition` | Covered |
+| Relationship downgrade violates trust boundary | `src/topology.rs` `test_relationship_priority` | Covered |
+| Neighborhood construction non-deterministic | `src/neighborhood.rs` `test_from_facts_is_deterministic` | Covered |
+| Duplicate membership inflates member count | `src/neighborhood.rs` `test_invariant_membership_unique` | Covered |
+| Home at capacity accepts new member | `src/home.rs` `test_validate_join`, `test_home_capacity` | Covered |
+| Discovery layer priority wrong | `tests/integration_tests.rs` (28 tests) | Covered |
+| Relay candidate selection wrong | `src/relay/candidates.rs` (4 inline), `tests/integration_tests.rs` | Covered |
+| Storage allocation exceeds budget | `src/storage.rs` (6 inline) | Covered |
+| Partition causes topology divergence | `tests/topology/simulation_tests.rs` (23 tests) | Covered |
+| Access level properties violated | `tests/topology/property_access_levels.rs` (4 proptests) | Covered |
+
 ## Boundaries
 - Chat message handling lives in aura-chat.
 - Transport coordination lives in aura-protocol.
