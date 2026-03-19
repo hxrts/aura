@@ -862,6 +862,7 @@ mod tests {
         assert!(result.unwrap().is_denied());
     }
 
+    /// Challenge request succeeds with required capability and budget.
     #[test]
     fn test_evaluate_challenge_request() {
         let snapshot = test_snapshot();
@@ -876,6 +877,8 @@ mod tests {
         assert!(!outcome.effects.is_empty());
     }
 
+    /// Session creation denied when requested duration exceeds maximum —
+    /// prevents unbounded session lifetimes.
     #[test]
     fn test_evaluate_session_creation_duration_exceeded() {
         let snapshot = test_snapshot();
@@ -890,6 +893,7 @@ mod tests {
         assert!(outcome.is_denied());
     }
 
+    /// Expired challenges are rejected — prevents replay of stale challenges.
     #[test]
     fn test_check_challenge_expiry() {
         let snapshot = test_snapshot();

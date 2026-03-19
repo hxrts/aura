@@ -76,6 +76,36 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines context-scoped semantics.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines consensus-gated agreement.
+## Testing
+
+### Strategy
+
+All tests are inline — appropriate for an authentication crate with no
+integration test surface beyond the service layer. Tests verify session
+lifecycle, guard evaluation, fact reduction, and DKD protocol correctness.
+
+### Running tests
+
+```
+cargo test -p aura-authentication
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Session lifecycle (create → active → revoke) | `src/view.rs` `test_session_lifecycle` | Covered |
+| Revoked session still active | `src/view.rs` `test_session_lifecycle` | Covered |
+| Expired session not detected | `src/view.rs` `test_expired_session_detection` | Covered |
+| Disjoint fact reduction non-commutative | `src/view.rs` `test_reduce_all_commutes_for_disjoint_sessions` | Covered |
+| Capability check bypassed | `src/guards.rs` `test_check_capability_failure`, `src/service.rs` `test_request_challenge_missing_capability` | Covered |
+| Excessive session duration allowed | `src/guards.rs` `test_evaluate_session_creation_duration_exceeded` | Covered |
+| Expired challenge accepted | `src/guards.rs` `test_check_challenge_expiry` | Covered |
+| Fact serialization roundtrip lossy | `src/facts.rs` `test_fact_serialization` | Covered |
+| Reducer non-idempotent | `src/facts.rs` `test_reducer_idempotence` | Covered |
+| DKD agreement mode wrong | `src/dkd.rs` `test_dkd_agreement_mode_requires_consensus` | Covered |
+| DKD contribution validation fails on mismatch | `src/dkd.rs` `test_contribution_validation` | Covered |
+
 ## Boundaries
 - Session ticket cryptography lives in aura-signature.
 - Biscuit token management lives in aura-authorization.

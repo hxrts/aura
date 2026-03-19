@@ -1064,6 +1064,8 @@ mod tests {
         assert_eq!(combined, combined2);
     }
 
+    /// DKD result uses CoordinatorSoftSafe agreement — must be superseded
+    /// by consensus for durable shared state.
     #[tokio::test]
     async fn test_dkd_agreement_mode_requires_consensus() {
         let participants = vec![device(9)];

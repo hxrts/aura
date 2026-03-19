@@ -736,6 +736,8 @@ mod tests {
         assert_eq!(fact.timestamp_ms(), deserialized.timestamp_ms());
     }
 
+    /// Reducer still produces a delta even with mismatched context — auth
+    /// facts carry their own context_id in the delta for downstream filtering.
     #[test]
     fn test_reducer_rejects_context_mismatch() {
         let reducer = AuthFactReducer::new();
@@ -773,6 +775,8 @@ mod tests {
         assert_eq!(key.data, b"req-123".to_vec());
     }
 
+    /// Reducing the same fact twice produces identical deltas — needed for
+    /// replay-safe journal reduction.
     #[test]
     fn test_reducer_idempotence() {
         let reducer = AuthFactReducer::new();

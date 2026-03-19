@@ -407,6 +407,8 @@ mod tests {
         assert!(view.pending_recoveries.is_empty());
     }
 
+    /// Session progresses from created → active → revoked. If revocation
+    /// doesn't propagate, revoked sessions remain usable.
     #[test]
     fn test_session_lifecycle() {
         let reducer = AuthViewReducer::new();
@@ -567,6 +569,8 @@ mod tests {
         );
     }
 
+    /// Expired sessions are detected at the given timestamp — prevents
+    /// stale sessions from being treated as active.
     #[test]
     fn test_expired_session_detection() {
         let view = AuthView {
@@ -678,6 +682,8 @@ mod tests {
         assert_eq!(view.active_sessions.len(), 2);
     }
 
+    /// Disjoint session facts commute under reduction — peers reducing
+    /// the same facts in different order get the same view.
     #[test]
     fn test_reduce_all_commutes_for_disjoint_sessions() {
         let reducer = AuthViewReducer::new();
