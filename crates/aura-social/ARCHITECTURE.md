@@ -96,10 +96,11 @@ cargo test -p aura-social
 | Access level computed wrong for hop distance | `src/access.rs` (14 inline), `tests/topology/role_access_e2e.rs` | Covered |
 | Invalid access override accepted | `src/access.rs` `test_determine_access_level_ignores_invalid_override_transition` | Covered |
 | Relationship downgrade violates trust boundary | `src/topology.rs` `test_relationship_priority` | Covered |
+| Moderator who isn't member gets capability | `src/home.rs` `test_moderator_designation_requires_member_membership` | Covered |
 | Neighborhood construction non-deterministic | `src/neighborhood.rs` `test_from_facts_is_deterministic` | Covered |
 | Duplicate membership inflates member count | `src/neighborhood.rs` `test_invariant_membership_unique` | Covered |
 | Home at capacity accepts new member | `src/home.rs` `test_validate_join`, `test_home_capacity` | Covered |
-| Discovery layer priority wrong | `tests/integration_tests.rs` (28 tests) | Covered |
+| Access computation non-deterministic | `tests/topology/role_access_e2e.rs` `test_access_computation_is_deterministic_for_identical_fact_sets` | Covered |
 | Relay candidate selection wrong | `src/relay/candidates.rs` (4 inline), `tests/integration_tests.rs` | Covered |
 | Storage allocation exceeds budget | `src/storage.rs` (6 inline) | Covered |
 | Partition causes topology divergence | `tests/topology/simulation_tests.rs` (23 tests) | Covered |
