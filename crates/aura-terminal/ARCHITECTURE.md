@@ -131,6 +131,7 @@ Changes to parity-critical TUI ownership boundaries should ship with:
 ### Verification Hooks
 
 - `cargo check -p aura-terminal`
+- `just lint-arch-syntax`
 - `cargo test -p aura-terminal harness_command_invite_actor_to_channel_emits_dispatch_followup -- --nocapture`
 - `cargo test -p aura-terminal authoritative_submitting_after_terminal_allocates_new_instance -- --nocapture`
 - `just ci-observed-layer-boundaries`
@@ -143,6 +144,8 @@ Architecture/tooling split:
 - `just check-arch` remains the right place for repo-wide frontend integration
   checks, docs traceability, and semantic/reactive heuristics that depend on
   workspace context
+- `just lint-arch-syntax` owns syntax-only frontend escape hatches such as raw
+  wall-clock usage and other Rust-native policy checks
 
 ### Detailed Specifications
 

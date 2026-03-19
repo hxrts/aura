@@ -83,6 +83,10 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
   effect placement, runtime-coupling, raw impure/time/random usage,
   concurrency escape hatches, crypto-boundary syntax, or syntax-owned
   serialization/style rules
+- **Retained `check-arch` scope**: dependency direction, `ARCHITECTURE.md`
+  invariants/docs governance, reactive and ceremony integration heuristics,
+  workflow docs traceability, canonical wire-format integration checks, repo
+  hygiene, and test-seed uniqueness remain shell-owned checks
 
 ### Conditional Compilation
 

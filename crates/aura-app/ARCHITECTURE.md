@@ -143,11 +143,18 @@ Failure mode:
 - Cross-layer assumptions drift and break composition safety.
 
 Verification hooks:
+- just lint-arch-syntax
 - just check-arch and just test-crate aura-app
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines dependency inversion.
 - [Effect System and Runtime](../../docs/103_effect_system.md) defines purity boundaries.
+
+Architecture/tooling split:
+- syntax-owned purity/runtime-coupling checks should fail through
+  `just lint-arch-syntax`
+- workflow docs traceability and other repo-wide workflow integration checks
+  remain in `just check-arch`
 
 ### InvariantSharedUiContractAuthority
 `aura-app` is the authoritative home for shared semantic UI identity,

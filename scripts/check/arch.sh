@@ -2,6 +2,15 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Aura Architectural Compliance Checker
 # ═══════════════════════════════════════════════════════════════════════════════
+#
+# Enforcement split:
+# - `just lint-arch-syntax` owns grep-heavy syntax/policy checks that can be
+#   enforced more precisely by repo-local Rust-native lints.
+# - visibility, constructors, proc macros, and compile-fail tests own
+#   API-boundary rules that should fail at compile time.
+# - this script keeps the checks that genuinely need workspace topology,
+#   docs/governance context, git diff context, or semantic/integration
+#   interpretation.
 
 set -euo pipefail
 
@@ -28,24 +37,32 @@ Aura Architectural Compliance Checker
 Usage: scripts/check/arch.sh [OPTIONS]
 
 Options (run all when none given):
-  --layers         Layer boundary and purity checks
+  --layers         Retained layer purity/topology checks; syntax allow-policy delegates to lint path
   --deps           Dependency direction checks
-  --effects        Effect placement and handler sanity
+  --effects        Retained effect integration/governance checks; syntax escape hatches delegate to lint path
   --invariants     ARCHITECTURE.md invariant section validation
   --todos          Incomplete code markers
-  --crypto         Crypto library usage boundaries
-  --concurrency    Concurrency hygiene (block_in_place, unbounded channels)
+  --crypto         Retained crypto lane with delegation note to Rust-native linting
+  --concurrency    Retained concurrency lane with delegation note to Rust-native linting
   --reactive       TUI reactive data model
   --ceremonies     Ceremony completion must commit facts
   --ui             UI boundary checks
   --workflows      aura-app workflow hygiene
-  --serialization  Serialization format enforcement
-  --style          Rust style guide rules
+  --serialization  Retained serialization/integration checks; syntax policy delegates to lint path
+  --style          Retained repo-hygiene/style checks; syntax policy delegates to lint path
   --test-seeds     Test seed uniqueness checks
   --layer N[,M...] Filter to specific layers (1-8)
   --quick          Skip slow checks (todos, placeholders)
   -v, --verbose    Show more detail
   -h, --help       Show this help
+
+Primary split:
+  - `just lint-arch-syntax`: syntax/policy rules that do not need repo-wide
+    integration context
+  - compile-fail/API enforcement: visibility, constructors, macros, sealed
+    traits, and trybuild boundaries
+  - `scripts/check/arch.sh`: topology, docs/governance, semantic integration,
+    workflow traceability, and repo-hygiene interpretation
 EOF
 }
 
@@ -1010,6 +1027,8 @@ check_todos() {
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Main Execution
+# Retained shell-owned checks run here. Lint-owned syntax policy is delegated
+# earlier via the per-lane informational messages above.
 # ═══════════════════════════════════════════════════════════════════════════════
 run_check "$RUN_LAYERS" check_layers
 run_check "$RUN_DEPS" check_deps
