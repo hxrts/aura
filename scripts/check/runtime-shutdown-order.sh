@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+# Runtime shutdown ordering is an integration-level invariant over the final
+# runtime owner graph in aura-agent. Keep this as a targeted runtime/orchestration
+# check; it is not a substitute for compile-time ownership enforcement.
+
 target="crates/aura-agent/src/runtime/system.rs"
 
 fail() {

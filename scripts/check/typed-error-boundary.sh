@@ -4,10 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# Temporary exemptions (owner: architecture, doc: work/ownership.md)
-allowlist=(
-)
-
 fail() {
   echo "typed-error-boundary: $*" >&2
   exit 1
@@ -18,23 +14,11 @@ fail() {
 # error constructors in the ownership-critical surfaces first.
 
 violations=()
-legacy_exemptions=0
 
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
 
-  allowed=0
-  for pattern in "${allowlist[@]}"; do
-    if [[ "$match" =~ $pattern ]]; then
-      allowed=1
-      legacy_exemptions=$((legacy_exemptions + 1))
-      break
-    fi
-  done
-
-  if (( allowed == 0 )); then
-    violations+=("$match")
-  fi
+  violations+=("$match")
 done < <(
   {
     rg -n \
@@ -55,4 +39,4 @@ if (( ${#violations[@]} > 0 )); then
   fail "parity-critical workflow/runtime paths still use stringly primary error construction"
 fi
 
-echo "typed error boundary: clean (${legacy_exemptions} temporary exemptions)"
+echo "typed error boundary: clean"

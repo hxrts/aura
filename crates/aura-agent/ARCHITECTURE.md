@@ -641,7 +641,8 @@ Failure mode:
 - Stale owner access after delegation.
 
 Verification hooks:
-- `just ci-async-delegation-ownership`
+- `just ci-async-concurrency-envelope`
+- `just ci-move-semantics`
 - `just test-crate aura-agent`
 
 Contract alignment:

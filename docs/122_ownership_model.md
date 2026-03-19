@@ -375,129 +375,75 @@ Layer 8 (testing) may simulate actors and capabilities. Parity-critical lanes mu
 
 ## Workspace Ownership Inventory
 
-This inventory covers every Rust crate under `crates/`. It is the workspace-level baseline. Detailed per-module inventories belong in crate `ARCHITECTURE.md` files.
+This inventory covers every Rust crate under `crates/`. It is the workspace-level
+baseline. Detailed per-module inventories belong in crate `ARCHITECTURE.md`
+files.
 
-### Layer 1
+### Layer Summary
 
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-core` | `Pure`, `MoveOwned` | none | operation handles, owner tokens, capability wrappers, time-budget records | capability issuance, lifecycle helpers, timeout-policy constructors | typed-error migration incomplete in cross-crate adapter traits |
+- Layer 1 (`aura-core`) is primarily `Pure` and defines the canonical
+  `ActorOwned`, `MoveOwned`, and capability-gated vocabulary. It does not own
+  long-lived mutable runtime state.
+- Layer 2 crates stay primarily `Pure`. They may expose `MoveOwned` records
+  when transfer semantics are part of the domain model, but they do not grow
+  runtime-style actor ownership.
+- Layer 3 crates stay `Pure` and infrastructural. They implement handlers and
+  composition without becoming semantic owners of parity-critical lifecycle.
+- Layer 4 crates commonly mix `ActorOwned` coordinators and `MoveOwned`
+  transport/protocol surfaces. Coordination publication and ingress remain
+  capability-gated.
+- Layer 5 crates mix `Pure`, `MoveOwned`, and narrow `ActorOwned` protocol
+  coordinators. Ceremony, invitation, recovery, sync, and rendezvous flows use
+  typed handles, typed terminal states, and coordinator-owned publication.
+- Layer 6 splits strictly:
+  - `aura-agent` is the production `ActorOwned` runtime and the only sanctioned
+    production structured-concurrency path
+  - `aura-app` is primarily `Pure` plus `MoveOwned` and owns authoritative
+    semantic lifecycle/readiness publication for shared semantic flows
+  - `aura-simulator` is `ActorOwned` for simulation coordination and `Observed`
+    for test-facing exports
+- Layer 7 crates are strict consumers:
+  - `aura-terminal` and `aura-web` are `Observed` with narrow ingress/bridge
+    ownership only
+  - `aura-ui` is `Observed`
+  - frontend-local parity-critical lifecycle ownership is not allowed outside
+    the sanctioned local-terminal/handoff boundary
+- Layer 8 crates are primarily `Observed`. Test-only actor helpers are allowed
+  where they mirror production owner boundaries rather than inventing a
+  separate semantic model.
 
-### Layer 2
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-journal` | `Pure` | none | append batches, reducer input records, fact-key wrappers | journal append and reduction entrypoints | stringly error boundary sites |
-| `aura-authorization` | `Pure`, `MoveOwned` | none | attenuation chains, capability frontier transfer records | biscuit validation and attenuation issuance | none currently tracked in the repo-wide ownership rollout |
-| `aura-signature` | `Pure` | none | signing session inputs, proof bundles | signature issuance and proof publication | typed-error cleanup pending |
-| `aura-store` | `Pure` | none | batch descriptors, keyspace transfer records | storage write admission | timeout-policy allowlist around store waits |
-| `aura-transport` | `Pure`, `MoveOwned` | none | connection descriptors, receipt ownership records | receipt issuance, transport send boundaries | none currently tracked in the repo-wide ownership rollout |
-| `aura-mpst` | `Pure`, `MoveOwned` | none | session endpoints, protocol continuations | endpoint progression | older ownership wrappers still in use |
-| `aura-macros` | `Pure` | none | macro-declared ownership metadata | compile-time ownership, capability, and lifecycle declaration surfaces | keep shell linting secondary to proc-macro enforcement |
-| `aura-maintenance` | `Pure` | none | maintenance command descriptors, rollout records | maintenance-plan issuance | timeout-policy rollout incomplete |
-
-### Layer 3
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-effects` | `Pure` | none | IO handles, adapter request records | effect entrypoints consuming capability commands | none currently tracked in the repo-wide ownership rollout |
-| `aura-composition` | `Pure` | none | runtime bundle assembly records | composition-time adapter assembly | none currently tracked in the repo-wide ownership rollout |
-
-### Layer 4
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-protocol` | `MoveOwned`, `ActorOwned` | protocol/session coordinators | session handles, continuation tokens | protocol progress publication | remaining session-handoff cleanup in `handlers/context/agent.rs` |
-| `aura-guards` | `Pure`, `MoveOwned` | none | charged budget records, guard result tokens | capability and budget charge publication | typed-error cleanup pending |
-| `aura-consensus` | `MoveOwned`, `ActorOwned` | round coordinators, vote collection | proposal tokens, quorum certificates | vote admission, round-finalization | actor-owned lifecycle inventory open |
-| `aura-amp` | `MoveOwned`, `ActorOwned` | channel/state coordinators | channel bindings, bootstrap tokens | channel bootstrap, membership progression | authority mismatches and timeout debt |
-| `aura-anti-entropy` | `MoveOwned`, `ActorOwned` | reconciliation supervisors | reconciliation handles, checkpoint cursors | reconciliation progress publication | actor/task lifecycle cleanup pending |
-
-#### Layer 4 audit findings
-
-The current Layer 4 ownership audit found the following concrete shared-state
-surfaces that need explicit classification and follow-up refactors:
-
-- `aura-protocol`
-  - `handlers/timeout_coordinator.rs` is still a thin wrapper today, but any
-    future global timeout/context registry must be introduced as an explicit
-    `ActorOwned` coordinator rather than as a shared lock registry.
-  - `handlers/transport_coordinator.rs` no longer spreads its connection
-    registry across clones via `Arc<RwLock<_>>`; the remaining follow-up is to
-    decide whether it should stay as a single-owner coordinator object or grow
-    into a dedicated owner task with command ingress.
-  - `handlers/context/agent.rs` clones and replaces session maps by hand. This
-    is a `MoveOwned` candidate: session ownership and handoff should be
-    expressed as consumed transfer values rather than ad hoc map rewrites.
-- `aura-consensus`
-  - `frost.rs`, `protocol/logic.rs`, and `witness.rs` no longer spread active
-    instances and witness state through `Arc<RwLock<HashMap<...>>>` clones; the
-    remaining work is to decide which of these coordinator-owned state holders
-    should stay as single-owner coordinator objects and which need explicit
-    actor ingress once cross-task ownership appears.
-  - `evidence.rs` keeps mutable evidence trackers in plain `HashMap`s. This is
-    acceptable only while single-owner and local; any async sharing should move
-    behind an actor boundary.
-- `aura-anti-entropy`
-  - `anti_entropy.rs` and `broadcast.rs` no longer spread oplogs, peer sets,
-    announcement queues, and rate limits across `Arc<RwLock<_>>` registries;
-    they now keep coordinator-owned state objects. `persistent.rs` and any
-    future background reconciliation services still need the same treatment if
-    they become long-lived async owners.
-- `aura-amp`
-  - the audit did not find direct owner-field rewrites, but AMP still carries
-    orchestration state in consensus/bootstrap helpers that should be reviewed
-    alongside the channel bootstrap and membership coordinator work.
-
-The audit did not find remaining direct move-owned field rewrites in Layer 4,
-but it did confirm that several orchestration crates still rely on shared
-mutable registries where a single-owner actor or a consumed handoff surface is
-the correct model.
-
-### Layer 5
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-authentication` | `MoveOwned`, `ActorOwned` | ceremony coordinators | challenge/response handles | authentication result publication | timeout-policy exemptions |
-| `aura-chat` | `Pure`, `MoveOwned` | none | send handles, receipt progression records | delivery-state publication | typed-error cleanup pending |
-| `aura-invitation` | `MoveOwned`, `ActorOwned` | invitation creation/acceptance coordinators | invitation records, accept/import handles | invitation lifecycle publication | accept/bootstrap authority debt |
-| `aura-recovery` | `MoveOwned`, `ActorOwned` | recovery ceremonies, guardian coordination | recovery grants, ceremony handles | recovery grant and ceremony publication | actor/task lifecycle inventory open |
-| `aura-relational` | `Pure`, `MoveOwned` | none | relational context grants | context mutation admission | typed-error exemptions |
-| `aura-rendezvous` | `MoveOwned`, `ActorOwned` | rendezvous sessions | rendezvous tickets, session handles | rendezvous match publication | actor/task lifecycle exemptions |
-| `aura-social` | `Pure`, `MoveOwned` | none | contact-link and neighborhood transfer records | social-link mutation admission | typed-error cleanup |
-| `aura-sync` | `MoveOwned`, `ActorOwned` | sync coordinators, backfill workers | sync handles, checkpoint cursors | sync progress publication | timeout/backoff rollout pending |
-
-### Layer 6
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-agent` | `ActorOwned`, `MoveOwned`, `Observed` | maintenance, invitation ingress, LAN discovery, journal/cache services | service commands, operation handles, runtime bridge tokens | journal/fact publication, capability-bearing runtime actions | legacy detached background work, timeout wrappers |
-| `aura-simulator` | `ActorOwned`, `Observed` | simulation coordinators | simulation handles | simulated fact/publication boundaries | none currently tracked in the repo-wide ownership rollout |
-| `aura-app` | `Pure`, `MoveOwned` | narrow background coordinators only | semantic operation handles, owner tokens, typed timeout budgets | authoritative lifecycle/readiness publication | semantic-operation coordinator cleanup still active |
-
-### Layer 7
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-terminal` | `Observed`, narrow `ActorOwned` ingress, narrow `MoveOwned` submission windows | TUI ingress loop only | `LocalTerminalOperationOwner`, `WorkflowHandoffOperationOwner`, harness command receipts, operation-instance records | none beyond capability-bearing handoff into `aura-app` | keep semantic submission on the sanctioned owner wrappers only |
-| `aura-ui` | `Observed` | none | none | none | none currently tracked in the repo-wide ownership rollout |
-| `aura-web` | `Observed`, narrow `ActorOwned` bridge | browser harness bridge and bounded bootstrap queue only | browser semantic command requests/receipts | none beyond sanctioned bridge/handoff points | keep browser bridge mechanics infrastructural only; semantic lifecycle remains upstream |
-
-### Layer 8
-
-| Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
-|-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-testkit` | `Observed`, test-only `ActorOwned` helpers | mock services and supervised test coordinators | mocked session/operation handles | mocked publication points mirror production | module-level inventory refinement remains |
-| `aura-quint` | `Pure`, `Observed` | none | none | none | none |
-| `aura-harness` | `Observed`, orchestration-local `ActorOwned` | backend supervisors, scenario executors | semantic command handles, wait tokens | none (harness-local diagnostics only) | legacy non-shared fixture cleanup remains |
-
-Each crate migration must refine its own `ARCHITECTURE.md` so that parity-critical modules are classified, actor-owned domains have explicit owners, move-owned surfaces identify consumed transfer APIs, and capability-gated points are named. Legacy violations should be removed rather than indefinitely allowlisted.
+Each crate `ARCHITECTURE.md` must classify its parity-critical modules,
+identify actor-owned domains, name consumed move-owned surfaces, and list the
+capability-gated mutation/publication points it exposes.
 
 ## Enforcement
 
 The ownership model is enforced in layers.
 
 Types and private constructors provide the first line of defense. Capability-gated mutation and publication APIs form the second layer. Canonical owner wrappers and macros provide the third layer. AST-backed checks, compile-fail tests, invariant tests, and then thin `scripts/check/*.sh` / `just ci-*` wrappers complete CI enforcement.
+
+Current enforcement split:
+
+- Types, private constructors, sealed traits, and consumed ownership wrappers
+  are the primary defense.
+- Ownership and lifecycle declaration macros in `aura-macros` force explicit
+  boundary classification.
+- `trybuild` compile-fail suites in `aura-core` and `aura-app` prove that
+  forbidden ownership/publication patterns do not compile.
+- Rust-native lint binaries in `aura-macros` provide syntax-level fences for:
+  - raw spawn / raw task-handle escape hatches
+  - frontend semantic handoff bypasses
+  - raw timeout/time-domain usage in protected modules
+- Thin shell wrappers under `scripts/check/` remain only as CI glue or where
+  the invariant is inherently integration-level rather than compile-time.
+- Governance-only checks stay clearly separate from code-correctness
+  enforcement:
+  - `scripts/check/ownership-category-declarations.sh`
+  - `scripts/check/harness-actor-vs-move-ownership.sh`
+  - `scripts/check/user-flow-guidance-sync.sh`
+- Runtime/integration checks remain appropriate for properties such as runtime
+  shutdown ordering and instrumentation schema discipline because those are
+  orchestration-level invariants, not just API-shape rules.
 
 Primary enforcement belongs in typed ownership primitives and proc-macro
 declarations. For the frontend/harness stack this means:

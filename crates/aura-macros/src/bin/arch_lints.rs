@@ -130,7 +130,7 @@ fn run() -> Result<(), String> {
         ));
     }
 
-    println!("{}: clean (0 temporary exemptions)", mode.display_name());
+    println!("{}: clean", mode.display_name());
     Ok(())
 }
 

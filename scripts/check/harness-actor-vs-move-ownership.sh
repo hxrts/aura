@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+# Governance-only check. This keeps the shared semantic ownership docs and the
+# composed harness ownership inventory aligned, but compile-time ownership
+# boundaries live in the typed APIs, macros, and compile-fail suites.
+
 fail() {
   echo "harness-actor-vs-move-ownership: $*" >&2
   exit 1

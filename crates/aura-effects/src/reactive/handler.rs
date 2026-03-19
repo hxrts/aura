@@ -22,6 +22,8 @@ use wasm_bindgen_futures::spawn_local;
 
 use super::graph::SignalGraph;
 
+const REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY: usize = 256;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Reactive Handler
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,7 +232,7 @@ impl ReactiveEffects for ReactiveHandler {
         // In practice, signals should be pre-registered before subscribing.
 
         // Create a channel for this subscription
-        let (tx, rx) = broadcast::channel::<T>(256);
+        let (tx, rx) = broadcast::channel::<T>(REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY);
 
         // Spawn a task to forward from the graph's subscription
         let graph = self.graph.clone();
@@ -490,6 +492,26 @@ mod tests {
 
         let result = handler.subscribe(&signal);
         assert!(matches!(result, Err(ReactiveError::SignalNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_subscription_lag_returns_newer_snapshot_after_drops() {
+        let handler = ReactiveHandler::new();
+        let signal: Signal<u32> = Signal::new("lagged");
+
+        handler.register(&signal, 0).await.unwrap();
+        let mut stream = handler.subscribe(&signal).unwrap();
+
+        for value in 1..=(REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY as u32 + 32) {
+            handler.emit(&signal, value).await.unwrap();
+        }
+
+        let received = stream.recv().await.unwrap();
+        assert!(received > 1);
+        assert_eq!(
+            handler.read(&signal).await.unwrap(),
+            REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY as u32 + 32
+        );
     }
 
     #[tokio::test]

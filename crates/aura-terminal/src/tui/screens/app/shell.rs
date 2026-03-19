@@ -1056,9 +1056,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut tui = tui.clone();
         let shutdown = bg_shutdown.read().clone();
         async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
             loop {
-                interval.tick().await;
+                effect_sleep(std::time::Duration::from_millis(100)).await;
                 if shutdown.load(std::sync::atomic::Ordering::Acquire) {
                     break;
                 }

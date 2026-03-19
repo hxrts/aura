@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+# Governance-only check. This validates that docs and crate inventories still
+# declare the final ownership categories, but it is not a primary code-
+# correctness enforcement mechanism.
+
 fail() {
   echo "ownership-category-declarations: $*" >&2
   exit 1

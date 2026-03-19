@@ -24,4 +24,4 @@ if [[ -n "$violations" ]]; then
   fail "frontend-facing modules are handling authoritative semantic facts outside approved boundaries"
 fi
 
-echo "harness authoritative fact boundary: clean (0 temporary exemptions)"
+echo "harness authoritative fact boundary: clean"

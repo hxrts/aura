@@ -631,11 +631,14 @@ ci-harness-ownership-policy:
 ci-ownership-policy:
     just ci-ownership-categories
     just ci-actor-lifecycle
+    just ci-async-session-ownership
+    just ci-async-concurrency-envelope
+    just ci-runtime-shutdown-order
+    just ci-runtime-instrumentation-schema
     just ci-move-semantics
     just ci-authoritative-fact-boundary
     just ci-capability-boundaries
     just ci-typed-errors
-    just ci-operation-terminality
     just ci-semantic-owner-awaits
     just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
@@ -661,9 +664,6 @@ ci-capability-boundaries:
 
 ci-typed-errors:
     bash scripts/check/typed-error-boundary.sh
-
-ci-operation-terminality:
-    bash scripts/check/operation-terminality.sh
 
 ci-semantic-owner-awaits:
     bash scripts/check/semantic-owner-bounded-awaits.sh

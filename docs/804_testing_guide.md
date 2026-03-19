@@ -189,15 +189,17 @@ For failure analysis:
 - prefer canonical action/event/state traces and structured timeout diagnostics
 - treat final text or screenshot inspection as supporting evidence, not the primary oracle
 
-For migration and cleanup discipline:
+For ownership cleanup discipline:
 
-- every shared UX or harness contract hardening change should remove obsolete compatibility code, stale allowlist entries, and transitional comments in the same milestone or the next explicit cleanup pass
+- every shared UX or harness contract hardening change should remove obsolete
+  compatibility code, stale allowlist entries, and transitional comments in the
+  same milestone or the next explicit cleanup pass
 - prefer extending typed governance in `cargo run -p aura-harness --bin aura-harness --quiet -- governance ...` over adding standalone shell policy logic
 
-### Ownership Migration Cleanup Tasks
+### Ownership Cleanup Tasks
 
-Each parity-critical ownership migration must include explicit cleanup work for
-the abstraction it replaces. Do not treat the new ownership model as additive.
+Each parity-critical ownership change must include explicit cleanup work for the
+abstraction it replaces. Do not treat the ownership model as additive.
 
 For every migrated flow, include these cleanup questions and complete the
 matching deletion work in the same migration or the next named cleanup task:
@@ -209,20 +211,19 @@ matching deletion work in the same migration or the next named cleanup task:
 - delete detached callback/task ownership for state that should instead live
   under one `ActorOwned` coordinator
 
-If a migration leaves one of those old abstractions in place, record it as
-explicit migration debt with the owning module and removal milestone. Do not
+If a change leaves one of those old abstractions in place, record it as
+explicit ownership cleanup debt with the owning module and removal milestone. Do not
 hide it behind "temporary" ambient lifecycle helpers, duplicate readiness
 emitters, or shell-local terminal state.
 
 The authoritative written update map for these surfaces lives in
 `scripts/check/user-flow-guidance-sync.sh` and is enforced by `just ci-user-flow-policy`.
-Ownership-model policy for the shared semantic lane is enforced by the existing
-policy structure as well:
+Ownership-model policy for the shared semantic lane is enforced through the
+final CI entrypoints:
 
-- individual thin wrappers under `scripts/check/`
-- the aggregate `just ci-harness-ownership-policy` lane
-- inclusion in `just ci-user-flow-policy`, which is already part of the local
-  and CI dry-run policy path
+- `just ci-ownership-policy` for the aggregate ownership/runtime boundary lane
+- `just ci-harness-ownership-policy` for the harness-specific ownership policy
+- `just ci-user-flow-policy` for shared UX governance and documentation sync
 
 The authoritative frontend matrix for converted shared scenarios comes from
 `scenarios/harness_inventory.toml` and is enforced by
@@ -237,9 +238,9 @@ reason code, scope, affected surface, and authoritative doc reference.
 
 ### Shared Semantic Ownership Inventory
 
-Use this as the authoritative ownership map for the migrated shared semantic
-stack. If code does not match this table, treat it as migration debt rather
-than as an acceptable alternate pattern.
+Use this as the authoritative ownership map for the shared semantic stack. If
+code does not match this table, treat it as ownership cleanup debt rather than
+as an acceptable alternate pattern.
 
 | Subsystem | Crate / locus | Ownership category | Authoritative owner | May mutate | May observe only |
 |-----------|----------------|--------------------|---------------------|------------|------------------|
@@ -256,6 +257,12 @@ than as an acceptable alternate pattern.
 The required split is:
 
 - actor-owned subsystems own long-lived mutable async state and lifecycle
+
+Reactive subscription policy for tests:
+- subscribing before registration must fail with `ReactiveError::SignalNotFound`
+- tests must not treat an empty stream as equivalent to "signal not registered"
+- lagging subscribers are allowed to miss intermediate updates; assertions
+  should target eventual newer snapshots, not lossless delivery
 - move-owned handles/tokens invalidate stale holders by construction
 - observed layers render and assert, but do not author semantic truth
 - TUI-local semantic submission is limited to the sanctioned

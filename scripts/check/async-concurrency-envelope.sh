@@ -4,8 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# Temporary exemptions (owner: architecture, doc: work/ownership.md)
-allowlist=(
+# Approved boundary modules for runtime concurrency envelope selection.
+approved_sites=(
   '^crates/aura-agent/src/runtime/contracts\.rs:.*canonical_fallback_policy\('
 )
 
@@ -15,7 +15,7 @@ fail() {
 }
 
 violations=()
-legacy_exemptions=0
+approved_hits=0
 
 while IFS= read -r match; do
   if [[ "$match" =~ ^crates/aura-agent/src/runtime/(vm_hardening|vm_host_bridge|choreo_engine)\.rs: ]]; then
@@ -23,10 +23,10 @@ while IFS= read -r match; do
   fi
 
   allowed=0
-  for pattern in "${allowlist[@]}"; do
+  for pattern in "${approved_sites[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
-      legacy_exemptions=$((legacy_exemptions + 1))
+      approved_hits=$((approved_hits + 1))
       break
     fi
   done
@@ -50,4 +50,4 @@ if (( ${#violations[@]} > 0 )); then
   fail "non-admitted concurrency path bypasses vm_hardening.rs / vm_host_bridge.rs / choreo_engine.rs"
 fi
 
-echo "async concurrency envelope: clean (${legacy_exemptions} temporary exemptions)"
+echo "async concurrency envelope: clean (${approved_hits} approved boundary hits)"

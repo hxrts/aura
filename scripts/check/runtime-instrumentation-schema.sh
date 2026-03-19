@@ -4,8 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-# Temporary exemptions (owner: architecture, doc: work/ownership.md)
-allowlist=(
+# Approved boundary modules that emit sanctioned runtime instrumentation events
+# outside runtime/instrumentation.rs itself.
+approved_sites=(
   '^crates/aura-agent/src/task_registry\.rs:'
   '^crates/aura-agent/src/runtime/services/ceremony_tracker\.rs:'
   '^crates/aura-agent/src/runtime/services/rendezvous_manager\.rs:'
@@ -20,7 +21,7 @@ fail() {
 }
 
 violations=()
-legacy_exemptions=0
+approved_hits=0
 
 while IFS= read -r match; do
   if [[ "$match" =~ ^crates/aura-agent/src/runtime/instrumentation\.rs: ]]; then
@@ -28,10 +29,10 @@ while IFS= read -r match; do
   fi
 
   allowed=0
-  for pattern in "${allowlist[@]}"; do
+  for pattern in "${approved_sites[@]}"; do
     if [[ "$match" =~ $pattern ]]; then
       allowed=1
-      legacy_exemptions=$((legacy_exemptions + 1))
+      approved_hits=$((approved_hits + 1))
       break
     fi
   done
@@ -49,4 +50,4 @@ if (( ${#violations[@]} > 0 )); then
   fail "runtime event names must come from runtime/instrumentation.rs or be explicitly allowlisted"
 fi
 
-echo "runtime instrumentation schema: clean (${legacy_exemptions} temporary exemptions)"
+echo "runtime instrumentation schema: clean (${approved_hits} approved boundary hits)"

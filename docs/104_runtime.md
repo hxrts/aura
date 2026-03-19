@@ -101,6 +101,17 @@ This actor layer is the runtime supervision layer. Use it for:
 
 Do not treat actor mailboxes as the ownership-transfer primitive for sessions or delegated endpoints.
 
+Runtime shutdown ordering remains an orchestration-level invariant, not a
+compile-time type property. Aura keeps a targeted integration check for the
+final shutdown sequence in `aura-agent::runtime::system`:
+1. stop the reactive pipeline
+2. cancel the runtime task tree
+3. tear down services
+4. shut down the lifecycle manager
+
+That check is governance for the final runtime owner graph, not a replacement
+for the compile-time ownership model.
+
 ### Async Primitives
 
 Preferred primitives:
@@ -548,6 +559,14 @@ This example shows `aura-chat` registering its fact type. Registered domains inc
 ### Scheduling Integration
 
 The reactive scheduler uses the registry to process domain facts. When facts arrive, the scheduler looks up the registered reducer. It applies the reducer to compute derived state and notifies reactive subscribers of state changes.
+
+Reactive subscription policy is explicit:
+- subscribing to an unregistered signal fails fast with `ReactiveError::SignalNotFound`
+- there is no implicit wait-for-registration or dead-stream fallback
+- subscriber delivery is eventually consistent rather than lossless
+- if a subscriber lags behind the bounded broadcast buffer, intermediate values
+  may be dropped and the subscriber resumes from a newer snapshot after a lag
+  warning is logged
 
 Production code obtains the registry via `effect_system.fact_registry()`. Tests may use `build_fact_registry()` for isolation. The registry assembly stays in Layer 6 rather than Layer 1.
 

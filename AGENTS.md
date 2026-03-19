@@ -35,6 +35,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 | Dev | `just watch` | Rebuild on changes |
 | Dev | `just clean` | Clean artifacts |
 | Arch | `just check-arch` | Verify architecture compliance |
+| Arch | `just ci-ownership-policy` | Run ownership/runtime boundary enforcement |
 | Arch | `just lint-arch-syntax` | Run Rust-native syntax/policy lints that replaced grep-heavy `arch.sh` checks |
 
 ## Architecture Overview
@@ -68,6 +69,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
+- **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
 - **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/user-flow-guidance-sync.sh`
 - **Shared user-flow contributor sync**: when shared UX policy scripts change, keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
@@ -89,6 +91,10 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
   invariants/docs governance, reactive and ceremony integration heuristics,
   workflow docs traceability, canonical wire-format integration checks, repo
   hygiene, and test-seed uniqueness remain shell-owned checks
+- **Ownership CI gate**: run `just ci-ownership-policy` when changing
+  parity-critical ownership/runtime boundaries; it is the default aggregate lane
+  for compile-fail ownership guards, Rust-native ownership lints, retained
+  runtime/integration checks, and governance wrappers
 
 ### Conditional Compilation
 

@@ -350,7 +350,12 @@ pub trait ReactiveEffects: Send + Sync {
     ///
     /// Returns `ReactiveError::SignalNotFound` if the signal has not been
     /// registered yet. Callers must handle this rather than assuming an empty
-    /// stream means "no updates".
+    /// stream means "no updates". There is no implicit registration wait.
+    ///
+    /// Subscription delivery is eventually consistent rather than lossless.
+    /// If a subscriber falls behind the bounded broadcast buffer under
+    /// sustained load, intermediate values may be dropped and the stream will
+    /// resume from a newer snapshot after logging the lag event.
     fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
     where
         T: Clone + Send + Sync + 'static;
