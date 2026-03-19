@@ -1,0 +1,11 @@
+error[E0603]: module `runtime` is private
+ --> tests/ui/sync_command_private.rs:1:17
+  |
+1 | use aura_agent::runtime::services::sync_manager::SyncCommand;
+  |                 ^^^^^^^ private module           ----------- enum `SyncCommand` is not publicly re-exported
+  |
+note: the module `runtime` is defined here
+ --> src/lib.rs
+  |
+  | mod runtime;
+  | ^^^^^^^^^^^
