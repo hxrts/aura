@@ -92,6 +92,8 @@ cfg-if = "1"
 [dev-dependencies]
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
+aura-composition = { path = "../aura-composition" }
+aura-macros = { path = "../aura-macros" }
 bincode = { workspace = true }
 tempfile = { workspace = true }
 

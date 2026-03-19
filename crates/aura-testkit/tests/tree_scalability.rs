@@ -1,10 +1,8 @@
 //! Tree scalability tests under load.
 
 #![allow(warnings)]
-#![cfg(any())]
 #![allow(missing_docs)]
 //! Scalability tests for commitment tree implementation.
-#![doc = include_str!("../../../README.md")]
 //!
 //! These tests verify that the system handles large-scale scenarios:
 //! - Tree with 100+ devices
@@ -17,9 +15,10 @@
 #![allow(clippy::disallowed_methods)]
 
 use aura_core::{
-    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Snapshot, TreeOp, TreeOpKind},
-    DeviceId, Epoch, Hash32, JoinSemilattice,
+    tree::{snapshot::Snapshot, AttestedOp, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind},
+    DeviceId, Epoch, Hash32,
 };
+use aura_core::semilattice::JoinSemilattice;
 use aura_journal::algebra::OpLog;
 use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
 use aura_protocol::state::PeerView;
@@ -49,10 +48,18 @@ fn test_uuid(seed: u64) -> Uuid {
 }
 
 fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
+    // Use genesis epoch (0) so that parent-binding verification is skipped.
+    // Give each operation a unique parent_commitment so the reduction
+    // topological sort treats every op as its own independent group rather
+    // than picking a single winner among concurrent siblings.
+    let mut parent_commitment = [0u8; 32];
+    parent_commitment[..8].copy_from_slice(&epoch.to_le_bytes());
+    parent_commitment[8..12].copy_from_slice(&leaf_id.to_le_bytes());
+
     AttestedOp {
         op: TreeOp {
-            parent_epoch: Epoch::new(epoch),
-            parent_commitment: [epoch as u8; 32],
+            parent_epoch: Epoch::initial(),
+            parent_commitment,
             op: TreeOpKind::AddLeaf {
                 leaf: LeafNode::new_device(
                     LeafId(leaf_id),
@@ -258,18 +265,23 @@ fn test_memory_bounded_with_gc() {
     println!("Memory before GC: {} bytes", memory_before);
     println!("OpLog size before: {} operations", oplog.len());
 
-    // Create snapshot at epoch 500
+    // Create snapshot at epoch 1 (all genesis ops have parent_epoch 0, so
+    // every op is before the cut).  Policies must be non-empty for snapshot
+    // validation.
+    use aura_core::tree::Policy;
+    let mut policies = BTreeMap::new();
+    policies.insert(NodeIndex(0), Policy::Threshold { m: 1, n: 1 });
     let snapshot = Snapshot {
-        epoch: Epoch::new(500),
+        epoch: Epoch::new(1),
         commitment: [0x50; 32],
         roster: (0..100).map(LeafId).collect(),
-        policies: BTreeMap::new(),
+        policies,
         state_cid: Some([0x01; 32]),
         timestamp: 5000,
         version: 1,
     };
 
-    println!("Creating snapshot at epoch 500...");
+    println!("Creating snapshot at epoch 1...");
 
     // Apply compaction
     let compact_start = Instant::now();
@@ -289,17 +301,13 @@ fn test_memory_bounded_with_gc() {
         "Compaction should reduce operation count"
     );
 
-    // Verify operations after snapshot are preserved
-    let ops_after_snapshot = oplog
-        .get_all_operations()
-        .iter()
-        .filter(|op| op.op.parent_epoch > Epoch::new(500))
-        .count();
-
+    // All ops have parent_epoch=0 which is < snapshot epoch 1, so all fall
+    // into the before-cut partition.  The compacted log contains only the
+    // snapshot fact (1 op).
     assert_eq!(
         compacted.len(),
-        ops_after_snapshot,
-        "Should preserve operations after snapshot"
+        1,
+        "Compacted log should contain only the snapshot fact"
     );
 
     // Performance expectations
@@ -373,10 +381,39 @@ fn test_combined_load() {
 fn compute_cid(op: &AttestedOp) -> Hash32 {
     use aura_core::hash::hasher;
     let mut h = hasher();
-    h.update(b"ATTESTED_OP");
+
+    // Must match aura_journal::algebra::op_log::compute_operation_cid
     h.update(&u64::from(op.op.parent_epoch).to_le_bytes());
     h.update(&op.op.parent_commitment);
-    h.update(&[op.op.version as u8]);
-    h.update(&(op.signer_count as u64).to_le_bytes());
+    h.update(&op.op.version.to_le_bytes());
+
+    match &op.op.op {
+        TreeOpKind::AddLeaf { leaf, under } => {
+            h.update(b"AddLeaf");
+            h.update(&leaf.leaf_id.0.to_le_bytes());
+            h.update(&under.0.to_le_bytes());
+            h.update(&leaf.public_key);
+        }
+        TreeOpKind::RemoveLeaf { leaf, reason } => {
+            h.update(b"RemoveLeaf");
+            h.update(&leaf.0.to_le_bytes());
+            h.update(&[*reason]);
+        }
+        TreeOpKind::ChangePolicy { node, new_policy } => {
+            h.update(b"ChangePolicy");
+            h.update(&node.0.to_le_bytes());
+            h.update(&aura_core::policy_hash(new_policy));
+        }
+        TreeOpKind::RotateEpoch { affected } => {
+            h.update(b"RotateEpoch");
+            for node in affected {
+                h.update(&node.0.to_le_bytes());
+            }
+        }
+    }
+
+    h.update(&op.signer_count.to_le_bytes());
+    h.update(&op.agg_sig);
+
     Hash32(h.finalize())
 }

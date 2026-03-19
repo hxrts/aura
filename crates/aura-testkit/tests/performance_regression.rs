@@ -1,7 +1,11 @@
 //! Performance regression tests.
 
-#![allow(warnings)]
+// DISABLED: Tests reference types that were never implemented
+// (AuraEffectSystem, CachingStorageHandler, CachingNetworkHandler,
+// allocations::{Arena, BufferPool, SmallVec, StringInterner}).
+// Remove the `cfg(any())` gate once these types land in aura-protocol.
 #![cfg(any())]
+#![allow(warnings)]
 #![allow(missing_docs)]
 //! Performance regression tests for the effect system
 //!

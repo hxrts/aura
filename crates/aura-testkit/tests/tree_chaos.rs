@@ -1,7 +1,10 @@
 //! Tree chaos and fault injection tests.
 
 #![allow(warnings)]
-#![cfg(any())] // TODO: Re-enable when chaos testing infrastructure is ready
+// DISABLED: Waiting on chaos testing infrastructure (fault injection, signature
+// verification hooks, anti-entropy protocol with digest exchange).  Remove the
+// `cfg(any())` gate once those primitives land.
+#![cfg(any())]
 #![allow(missing_docs)]
 #![doc = "Chaos engineering tests for tree protocols"]
 //! Chaos engineering tests for tree protocols.

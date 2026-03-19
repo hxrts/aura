@@ -110,12 +110,12 @@ cargo test -p aura-testkit
 | Lean differential fails | — | `tests/conformance/lean_differential.rs` | Covered |
 | Time control non-deterministic | MockContractFidelity | `tests/unified_time_integration.rs` | Covered |
 | Byzantine capability differential | — | `tests/byzantine_capability_differential.rs` | Covered |
-| Effect type has no testkit handler | MockContractFidelity | `tests/handler_coverage_tests.rs` | Disabled (`cfg(any())`) |
-| Handler creation fails | MockContractFidelity | `tests/handler_creation_test.rs` | Disabled (`cfg(any())`) |
-| Effects integration broken | MockContractFidelity | `tests/effects_test.rs` | Disabled (`cfg(any())`) |
-| Tree under chaos diverges | — | `tests/tree_chaos.rs` | Disabled (`cfg(any())`) |
-| Tree under load fails | — | `tests/tree_scalability.rs` | Disabled (`cfg(any())`) |
-| Performance regression detected | — | `tests/performance_regression.rs` | Disabled (`cfg(any())`) |
+| Effect type has no testkit handler | MockContractFidelity | `tests/handler_coverage_tests.rs` (9 tests) | Covered |
+| Handler creation in all modes | MockContractFidelity | `tests/handler_creation_test.rs` (4 tests) | Covered |
+| Effects integration broken | MockContractFidelity | `tests/effects_test.rs` (6 tests) | Covered |
+| Tree under load fails | — | `tests/tree_scalability.rs` (5 tests) | Covered |
+| Tree under chaos diverges | — | `tests/tree_chaos.rs` | Disabled (waiting on chaos infra) |
+| Performance regression detected | — | `tests/performance_regression.rs` | Disabled (waiting on types) |
 
 ## Boundaries
 - Foundation layers should create internal test utilities instead.
