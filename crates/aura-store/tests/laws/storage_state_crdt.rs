@@ -1,5 +1,6 @@
-//! Storage state property tests.
-#![allow(missing_docs)]
+//! StorageState CRDT laws — join must be commutative, associative, and
+//! idempotent. If any law fails, replicas with the same content entries
+//! derive different storage indices depending on merge order.
 
 use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, ContentId, JoinSemilattice};

@@ -71,6 +71,38 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines content-addressed deterministic state.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines convergence and replay requirements.
+## Testing
+
+### Strategy
+
+aura-store defines content-addressed storage. If content addressing is
+non-deterministic, chunk IDs differ across replicas and Merkle trees diverge.
+If CRDT merge laws fail, storage state is order-dependent.
+
+### Running tests
+
+```
+cargo test -p aura-store --test laws       # CRDT algebraic properties
+cargo test -p aura-store --test contracts  # storage invariants + encoding
+cargo test -p aura-store --lib             # inline unit tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| StorageState join not commutative | `tests/laws/storage_state_crdt.rs` | covered (proptest) |
+| StorageState join not associative | `tests/laws/storage_state_crdt.rs` | covered (proptest) |
+| StorageState join not idempotent | `tests/laws/storage_state_crdt.rs` | covered (proptest) |
+| Quota used exceeds quota limit | `tests/contracts/storage_invariants.rs` | covered |
+| Chunk layout metadata mismatch | `tests/contracts/storage_invariants.rs` | covered |
+| Content address non-deterministic | `tests/contracts/storage_invariants.rs` | covered |
+| ContentId hash unstable | `tests/contracts/storage_invariants.rs` | covered |
+| StorageFact encoding roundtrip breaks | `tests/contracts/storage_invariants.rs` | covered |
+| StorageFact encoding non-deterministic | `tests/contracts/storage_invariants.rs` | covered |
+| Overlapping ContentId merge loses data | `tests/contracts/storage_invariants.rs` | covered |
+| Overlapping ContentId merge non-commutative | `tests/contracts/storage_invariants.rs` | covered |
+
 ## Boundaries
 - No actual storage I/O (use StorageEffects).
 - Authorization is metadata only (use aura-authorization for Biscuit).
