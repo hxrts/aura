@@ -163,17 +163,17 @@ cargo test -p aura-journal --lib               # inline unit tests
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
 | Context reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered (proptest: shuffled insertion) |
-| Authority reducer non-deterministic | `src/reduction.rs` inline | **partial** — handcrafted only, no proptest shuffle |
+| Authority reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered (3 insertion orders) |
 | Tree reduction non-deterministic | `tests/convergence/tree_reduction_determinism.rs` | covered (proptest) |
 | Journal join not associative/commutative | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
 | Journal join not idempotent | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
-| Adding fact removes existing facts | — | **missing** — no monotonic growth test |
+| Adding fact removes existing facts | `tests/convergence/journal_join_laws.rs` | covered (add monotonicity + join preserves all) |
 | Convergence certificates not emitted | `tests/convergence/convergence_cert.rs` | covered |
 | Tree topology incoherent after mutation | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
 | Incremental update diverges from recompute | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
 | Merkle proofs invalid after mutation | `tests/contracts/authority_tree_integrity.rs` | covered |
 | Fact encoding changes between releases | `tests/contracts/fact_encoding_stability.rs` | covered (roundtrip) |
-| Fact encoding bytes drift silently | — | **missing** — no pinned byte vectors |
+| Fact encoding bytes drift silently | `tests/contracts/fact_encoding_stability.rs` | covered (determinism + differential + pinned hash) |
 | Fact deduplication via BTreeSet identity | `src/fact.rs` inline | covered |
 | Wrong namespace type accepted by reducer | `src/reduction.rs` inline | covered |
 | AMP epoch reduction order-dependent | `src/reduction.rs` inline | covered |
