@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
 use aura_app::ui::types::AppCore;
@@ -13,6 +13,12 @@ use aura_app::ui_contract::{
 use aura_core::SemanticOwnerProtocol;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrontendSemanticOwnershipMode {
+    LocalTerminalOnly,
+    HandoffRequired,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationOwner {
@@ -48,7 +54,7 @@ pub(crate) struct SemanticOperationTransfer {
 
 use super::updates::send_ui_update_required;
 
-fn send_ui_update_now_or_spawn(tasks: &Arc<UiTaskRegistry>, tx: &UiUpdateSender, update: UiUpdate) {
+fn send_ui_update_now_or_spawn(tasks: &Arc<UiTaskOwner>, tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_ok() {
         return;
     }
@@ -81,22 +87,28 @@ fn next_owned_operation_instance_id(operation_id: &OperationId) -> OperationInst
 
 pub(crate) struct SubmittedOperationOwner {
     _app_core: Arc<RwLock<AppCore>>,
-    tasks: Arc<UiTaskRegistry>,
+    tasks: Arc<UiTaskOwner>,
     tx: UiUpdateSender,
     operation_id: OperationId,
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
     owner: SemanticOperationOwner,
+    mode: FrontendSemanticOwnershipMode,
     settled: bool,
 }
 
+pub(crate) struct LocalTerminalOperationOwner(SubmittedOperationOwner);
+
+pub(crate) struct WorkflowHandoffOperationOwner(SubmittedOperationOwner);
+
 impl SubmittedOperationOwner {
-    pub(crate) fn submit_local_only(
+    fn submit(
         app_core: Arc<RwLock<AppCore>>,
-        tasks: Arc<UiTaskRegistry>,
+        tasks: Arc<UiTaskOwner>,
         tx: UiUpdateSender,
         operation_id: OperationId,
         kind: SemanticOperationKind,
+        mode: FrontendSemanticOwnershipMode,
     ) -> Self {
         let instance_id = next_owned_operation_instance_id(&operation_id);
         let status = SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched);
@@ -119,11 +131,51 @@ impl SubmittedOperationOwner {
             instance_id,
             kind,
             owner: SemanticOperationOwner::FrontendCallback,
+            mode,
             settled: false,
         }
     }
 
+    pub(crate) fn submit_local_terminal(
+        app_core: Arc<RwLock<AppCore>>,
+        tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        Self::submit(
+            app_core,
+            tasks,
+            tx,
+            operation_id,
+            kind,
+            FrontendSemanticOwnershipMode::LocalTerminalOnly,
+        )
+    }
+
+    pub(crate) fn submit_for_app_handoff(
+        app_core: Arc<RwLock<AppCore>>,
+        tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        Self::submit(
+            app_core,
+            tasks,
+            tx,
+            operation_id,
+            kind,
+            FrontendSemanticOwnershipMode::HandoffRequired,
+        )
+    }
+
     pub(crate) async fn succeed(mut self) {
+        debug_assert_eq!(
+            self.mode,
+            FrontendSemanticOwnershipMode::LocalTerminalOnly,
+            "frontend-local terminal success is only legal for sanctioned local-terminal owners"
+        );
         self.settled = true;
         let status = SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded);
         send_ui_update_required(
@@ -148,6 +200,11 @@ impl SubmittedOperationOwner {
     }
 
     pub(crate) async fn fail_with(mut self, error: SemanticOperationError) {
+        debug_assert_eq!(
+            self.mode,
+            FrontendSemanticOwnershipMode::LocalTerminalOnly,
+            "frontend-local terminal failure is only legal for sanctioned local-terminal owners"
+        );
         self.settled = true;
         let status = SemanticOperationStatus::failed(self.kind, error.clone());
         send_ui_update_required(
@@ -166,6 +223,11 @@ impl SubmittedOperationOwner {
         mut self,
         scope: SemanticOperationTransferScope,
     ) -> SemanticOperationTransfer {
+        debug_assert_eq!(
+            self.mode,
+            FrontendSemanticOwnershipMode::HandoffRequired,
+            "handoff is only legal for frontend owners created for app-workflow transfer"
+        );
         self.settled = true;
         SemanticOperationTransfer {
             prior_owner: self.owner,
@@ -180,10 +242,66 @@ impl SubmittedOperationOwner {
     }
 
     pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
-        HarnessUiOperationHandle {
-            operation_id: self.operation_id.clone(),
-            instance_id: self.instance_id.clone(),
-        }
+        HarnessUiOperationHandle::new(self.operation_id.clone(), self.instance_id.clone())
+    }
+}
+
+impl LocalTerminalOperationOwner {
+    pub(crate) fn submit(
+        app_core: Arc<RwLock<AppCore>>,
+        tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        Self(SubmittedOperationOwner::submit_local_terminal(
+            app_core,
+            tasks,
+            tx,
+            operation_id,
+            kind,
+        ))
+    }
+
+    pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
+        self.0.harness_handle()
+    }
+
+    pub(crate) async fn succeed(self) {
+        self.0.succeed().await;
+    }
+
+    pub(crate) async fn fail(self, detail: impl Into<String>) {
+        self.0.fail(detail).await;
+    }
+}
+
+impl WorkflowHandoffOperationOwner {
+    pub(crate) fn submit(
+        app_core: Arc<RwLock<AppCore>>,
+        tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        Self(SubmittedOperationOwner::submit_for_app_handoff(
+            app_core,
+            tasks,
+            tx,
+            operation_id,
+            kind,
+        ))
+    }
+
+    pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
+        self.0.harness_handle()
+    }
+
+    pub(crate) fn handoff_to_app_workflow(
+        self,
+        scope: SemanticOperationTransferScope,
+    ) -> SemanticOperationTransfer {
+        self.0.handoff_to_app_workflow(scope)
     }
 }
 
@@ -242,7 +360,24 @@ mod tests {
         kind: SemanticOperationKind,
     }
 
-    fn parity_critical_cases() -> [OperationInvariantCase; 4] {
+    fn local_terminal_cases() -> [OperationInvariantCase; 3] {
+        [
+            OperationInvariantCase {
+                operation_id: OperationId::account_create,
+                kind: SemanticOperationKind::CreateAccount,
+            },
+            OperationInvariantCase {
+                operation_id: OperationId::invitation_create,
+                kind: SemanticOperationKind::CreateContactInvitation,
+            },
+            OperationInvariantCase {
+                operation_id: || OperationId("create_channel".to_string()),
+                kind: SemanticOperationKind::CreateChannel,
+            },
+        ]
+    }
+
+    fn parity_critical_handoff_cases() -> [OperationInvariantCase; 4] {
         [
             OperationInvariantCase {
                 operation_id: OperationId::invitation_create,
@@ -263,11 +398,11 @@ mod tests {
         ]
     }
 
-    async fn new_owner(
+    async fn new_local_terminal_owner(
         case: OperationInvariantCase,
     ) -> (
         Arc<RwLock<AppCore>>,
-        Arc<UiTaskRegistry>,
+        Arc<UiTaskOwner>,
         mpsc::Receiver<UiUpdate>,
         SubmittedOperationOwner,
     ) {
@@ -277,9 +412,35 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
-        let tasks = Arc::new(UiTaskRegistry::new());
+        let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
-        let owner = SubmittedOperationOwner::submit_local_only(
+        let owner = SubmittedOperationOwner::submit_local_terminal(
+            app_core.clone(),
+            tasks.clone(),
+            tx,
+            (case.operation_id)(),
+            case.kind,
+        );
+        (app_core, tasks, rx, owner)
+    }
+
+    async fn new_handoff_owner(
+        case: OperationInvariantCase,
+    ) -> (
+        Arc<RwLock<AppCore>>,
+        Arc<UiTaskOwner>,
+        mpsc::Receiver<UiUpdate>,
+        SubmittedOperationOwner,
+    ) {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, rx) = mpsc::channel(8);
+        let owner = SubmittedOperationOwner::submit_for_app_handoff(
             app_core.clone(),
             tasks.clone(),
             tx,
@@ -290,7 +451,7 @@ mod tests {
     }
 
     async fn assert_drop_terminates(case: OperationInvariantCase) {
-        let (_app_core, tasks, mut rx, owner) = new_owner(case).await;
+        let (_app_core, tasks, mut rx, owner) = new_handoff_owner(case).await;
         drop(owner);
 
         let _submitted = rx
@@ -314,7 +475,7 @@ mod tests {
     }
 
     async fn assert_success_is_single_terminal(case: OperationInvariantCase) {
-        let (_app_core, tasks, mut rx, owner) = new_owner(case).await;
+        let (_app_core, tasks, mut rx, owner) = new_local_terminal_owner(case).await;
         owner.succeed().await;
 
         let _submitted = rx
@@ -342,7 +503,7 @@ mod tests {
     }
 
     async fn assert_handoff_preserves_exact_terminal_instance(case: OperationInvariantCase) {
-        let (_app_core, tasks, mut rx, owner) = new_owner(case).await;
+        let (_app_core, tasks, mut rx, owner) = new_handoff_owner(case).await;
         let transfer =
             owner.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
@@ -408,10 +569,10 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
-        let tasks = Arc::new(UiTaskRegistry::new());
+        let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        let owner = SubmittedOperationOwner::submit_local_only(
+        let owner = SubmittedOperationOwner::submit_for_app_handoff(
             app_core.clone(),
             tasks.clone(),
             tx,
@@ -457,9 +618,11 @@ mod tests {
 
     #[tokio::test]
     async fn parity_critical_owner_invariants_hold() {
-        for case in parity_critical_cases() {
-            assert_drop_terminates(case).await;
+        for case in local_terminal_cases() {
             assert_success_is_single_terminal(case).await;
+        }
+        for case in parity_critical_handoff_cases() {
+            assert_drop_terminates(case).await;
             assert_handoff_preserves_exact_terminal_instance(case).await;
         }
     }
@@ -472,10 +635,10 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
-        let tasks = Arc::new(UiTaskRegistry::new());
+        let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        let owner = SubmittedOperationOwner::submit_local_only(
+        let owner = SubmittedOperationOwner::submit_for_app_handoff(
             app_core,
             tasks.clone(),
             tx,
@@ -530,10 +693,10 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
-        let tasks = Arc::new(UiTaskRegistry::new());
+        let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        SubmittedOperationOwner::submit_local_only(
+        SubmittedOperationOwner::submit_local_terminal(
             app_core.clone(),
             tasks.clone(),
             tx,

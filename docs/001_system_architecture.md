@@ -473,7 +473,7 @@ flowchart TB
     L4[Layer 4: Orchestration<br/>aura-protocol, aura-guards, aura-consensus]
     L5[Layer 5: Feature<br/>aura-chat, aura-recovery, aura-social]
     L6[Layer 6: Runtime<br/>aura-agent, aura-app, aura-simulator]
-    L7[Layer 7: Interface<br/>aura-terminal]
+    L7[Layer 7: Interface<br/>aura-terminal, aura-ui, aura-web]
     L8[Layer 8: Testing<br/>aura-testkit, aura-harness]
 
     L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
@@ -496,7 +496,20 @@ This diagram shows dependency flow. Testing crates can depend on any layer for t
 
 **Layer 6, Runtime** — `aura-agent` for assembly, `aura-app` for portable logic, `aura-simulator` for deterministic simulation.
 
-**Layer 7, Interface** — `aura-terminal` for CLI and TUI entry points.
+**Layer 7, Interface** — `aura-terminal` for CLI/TUI shells, `aura-ui` for
+shared observed UI state and components, and `aura-web` for the browser shell.
+Layer 7 remains primarily `Observed`. The only sanctioned ownership inside this
+layer is:
+
+- narrow `MoveOwned` submission windows for frontend-local operations that
+  terminate locally
+- narrow `MoveOwned` handoff windows for operations that must transfer into
+  `aura-app` workflow ownership before awaited work begins
+- narrow `ActorOwned` ingress/bridge mechanics such as the TUI update loop and
+  browser harness bridge plumbing
+
+Layer 7 must not keep a second source of parity-critical semantic lifecycle or
+readiness truth after handoff.
 
 **Layer 8, Testing** — `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure.
 

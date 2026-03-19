@@ -31,11 +31,11 @@ use crate::tui::chat_scope::{
 };
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::semantic_lifecycle::authoritative_operation_status_update;
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
-fn publish_ui_update(tasks: &Arc<UiTaskRegistry>, tx: &UiUpdateSender, update: UiUpdate) {
+fn publish_ui_update(tasks: &Arc<UiTaskOwner>, tx: &UiUpdateSender, update: UiUpdate) {
     if tx.try_send(update.clone()).is_err() {
         let tx = tx.clone();
         tasks.spawn(async move {
@@ -45,7 +45,7 @@ fn publish_ui_update(tasks: &Arc<UiTaskRegistry>, tx: &UiUpdateSender, update: U
 }
 
 fn publish_ui_updates_ordered(
-    tasks: &Arc<UiTaskRegistry>,
+    tasks: &Arc<UiTaskOwner>,
     tx: &UiUpdateSender,
     ordered_gate: &Arc<Mutex<()>>,
     updates: Vec<UiUpdate>,
@@ -546,7 +546,7 @@ fn scoped_channel_snapshot(
 fn publish_scoped_channels(
     channels: &SharedChannels,
     selected_channel_id: Option<&str>,
-    tasks: &Arc<UiTaskRegistry>,
+    tasks: &Arc<UiTaskOwner>,
     update_tx: &Option<UiUpdateSender>,
     last_channel_count: &Arc<AtomicUsize>,
     last_message_count: &Arc<AtomicUsize>,
@@ -1211,7 +1211,7 @@ pub fn use_notifications_subscription(
     let last_total = Arc::new(AtomicUsize::new(usize::MAX));
     let tasks = app_ctx.tasks();
 
-    let send_total = |tasks: &Arc<UiTaskRegistry>,
+    let send_total = |tasks: &Arc<UiTaskOwner>,
                       tx: &Option<UiUpdateSender>,
                       invites: &Arc<AtomicUsize>,
                       recovery: &Arc<AtomicUsize>,

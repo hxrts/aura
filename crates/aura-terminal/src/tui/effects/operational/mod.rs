@@ -59,7 +59,7 @@ pub use types::{OpError, OpFailureCode, OpResponse, OpResult};
 
 use super::EffectCommand;
 use crate::error::TerminalError;
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 
 /// Handles operational commands that don't create journal facts.
 ///
@@ -70,12 +70,12 @@ use crate::tui::tasks::UiTaskRegistry;
 /// not through local state in this handler.
 pub struct OperationalHandler {
     app_core: Arc<RwLock<AppCore>>,
-    tasks: Arc<UiTaskRegistry>,
+    tasks: Arc<UiTaskOwner>,
 }
 
 impl OperationalHandler {
     /// Create a new operational handler
-    pub fn new(app_core: Arc<RwLock<AppCore>>, tasks: Arc<UiTaskRegistry>) -> Self {
+    pub fn new(app_core: Arc<RwLock<AppCore>>, tasks: Arc<UiTaskOwner>) -> Self {
         Self { app_core, tasks }
     }
 
@@ -305,7 +305,7 @@ mod tests {
     }
 
     fn test_handler(app_core: Arc<RwLock<AppCore>>) -> OperationalHandler {
-        OperationalHandler::new(app_core, Arc::new(crate::tui::tasks::UiTaskRegistry::new()))
+        OperationalHandler::new(app_core, Arc::new(crate::tui::tasks::UiTaskOwner::new()))
     }
 
     #[tokio::test]

@@ -122,7 +122,7 @@ impl InvitationsCallbacks {
                   invitation_type: String,
                   message: Option<String>,
                   ttl_secs: Option<u64>,
-                  operation: Option<SubmittedOperationOwner>| {
+                  operation: Option<LocalTerminalOperationOwner>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
@@ -180,7 +180,7 @@ impl InvitationsCallbacks {
     }
 
     fn make_import(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ImportInvitationOwnedCallback {
-        Arc::new(move |code: String, operation: SubmittedOperationOwner| {
+        Arc::new(move |code: String, operation: WorkflowHandoffOperationOwner| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {

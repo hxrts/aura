@@ -11,6 +11,7 @@ cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         mod error;
         mod harness_bridge;
+        mod task_owner;
         mod web_clipboard;
 
         use async_lock::RwLock;
@@ -45,6 +46,7 @@ cfg_if! {
         use std::cell::Cell;
         use std::rc::Rc;
         use std::sync::Arc;
+        use task_owner::shared_web_task_owner;
         use wasm_bindgen::JsValue;
         use wasm_bindgen_futures::future_to_promise;
         use web_clipboard::WebClipboardAdapter;
@@ -655,7 +657,7 @@ cfg_if! {
 
                 let ceremony_agent = agent.clone();
                 let ceremony_app_core = app_core.clone();
-                spawn(async move {
+                shared_web_task_owner().spawn_local_cancellable(async move {
                     loop {
                         if let Err(error) =
                             time_workflows::sleep_ms(&ceremony_app_core, 500).await
@@ -774,7 +776,7 @@ cfg_if! {
                         if let Err(error) = clear_storage_key(&legacy_device_key) {
                             log_web_error("warn", &error);
                         }
-                        spawn(async move {
+                        shared_web_task_owner().spawn_local(async move {
                             if let Err(error) = request_runtime_rebootstrap().await {
                                 log_web_error("error", &error);
                             }
@@ -932,7 +934,7 @@ cfg_if! {
             let committed_bootstrap = use_signal(|| Option::<BootstrapState>::None);
             let bootstrap_error = use_signal(|| Option::<WebUiError>::None);
             let rebootstrap_requests = use_hook(|| {
-                let (tx, rx) = mpsc::unbounded::<oneshot::Sender<Result<(), WebUiError>>>();
+                let (tx, rx) = mpsc::channel::<oneshot::Sender<Result<(), WebUiError>>>(4);
                 (
                     tx,
                     Rc::new(std::cell::RefCell::new(Some(rx))),
@@ -956,7 +958,7 @@ cfg_if! {
                     let mut bootstrap_epoch = bootstrap_epoch;
                     let mut committed_bootstrap = committed_bootstrap;
                     let mut bootstrap_error = bootstrap_error;
-                    spawn(async move {
+                    shared_web_task_owner().spawn_local_cancellable(async move {
                         while let Some(completion_tx) = rebootstrap_rx.next().await {
                             let epoch = bootstrap_epoch() + 1;
                             web_sys::console::log_1(
@@ -1009,7 +1011,11 @@ cfg_if! {
 
                     let (completion_tx, _completion_rx) =
                         oneshot::channel::<Result<(), WebUiError>>();
-                    let _ = rebootstrap_requests.0.unbounded_send(completion_tx);
+                    if rebootstrap_requests.0.clone().try_send(completion_tx).is_err() {
+                        web_sys::console::error_1(
+                            &"[web-bootstrap] failed to enqueue initial bootstrap request".into(),
+                        );
+                    }
                 }
 
                 let trigger: Arc<dyn Fn() -> js_sys::Promise> = Arc::new({
@@ -1017,9 +1023,9 @@ cfg_if! {
                     move || {
                         let (completion_tx, completion_rx) =
                             oneshot::channel::<Result<(), WebUiError>>();
-                        if rebootstrap_tx.unbounded_send(completion_tx).is_err() {
+                        if rebootstrap_tx.clone().try_send(completion_tx).is_err() {
                             return Promise::reject(&JsValue::from_str(
-                                "rebootstrap request channel is unavailable",
+                                "rebootstrap request queue is unavailable or full",
                             ));
                         }
 
@@ -1106,7 +1112,7 @@ cfg_if! {
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
                 let app_core = controller.app_core().clone();
-                spawn(async move {
+                shared_web_task_owner().spawn_local_cancellable(async move {
                     loop {
                         let runtime = { app_core.read().await.runtime().cloned() };
                         if let Some(runtime) = runtime {
@@ -1188,7 +1194,7 @@ cfg_if! {
                     import_error.set(None);
 
                     let controller = controller.clone();
-                    spawn(async move {
+                    shared_web_task_owner().spawn_local(async move {
                         let app_core = controller.app_core().clone();
                         let result = async {
                             let mut requires_rebootstrap = false;
@@ -1200,14 +1206,15 @@ cfg_if! {
                                 WebUiError::operation(
                                     WebUiOperation::ImportDeviceEnrollmentCode,
                                     "WEB_DEVICE_ENROLLMENT_IMPORT_DETAILS_FAILED",
-                                    error.to_string(),
-                                )
-                            })?;
+                                        error.to_string(),
+                                    )
+                                })?;
+                            let invitation_info = invitation.info().clone();
                             let InvitationBridgeType::DeviceEnrollment {
                                 subject_authority,
                                 device_id,
                                 ..
-                            } = invitation.invitation_type.clone()
+                            } = invitation_info.invitation_type.clone()
                             else {
                                 return Err(WebUiError::input(
                                     WebUiOperation::ImportDeviceEnrollmentCode,
@@ -1328,7 +1335,7 @@ cfg_if! {
 
                             invitation_workflows::accept_device_enrollment_invitation(
                                 &app_core,
-                                &invitation,
+                                &invitation_info,
                             )
                             .await
                             .map_err(|error| {
@@ -1464,7 +1471,7 @@ cfg_if! {
                     controller.set_account_setup_state(false, nickname.clone(), None);
 
                     let controller = controller.clone();
-                    spawn(async move {
+                    shared_web_task_owner().spawn_local(async move {
                         let has_runtime = {
                             let core = controller.app_core().read().await;
                             core.runtime().is_some()

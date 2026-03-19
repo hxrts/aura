@@ -124,8 +124,28 @@ pub enum HarnessUiCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnessUiOperationHandle {
-    pub operation_id: OperationId,
-    pub instance_id: OperationInstanceId,
+    operation_id: OperationId,
+    instance_id: OperationInstanceId,
+}
+
+impl HarnessUiOperationHandle {
+    #[must_use]
+    pub const fn new(operation_id: OperationId, instance_id: OperationInstanceId) -> Self {
+        Self {
+            operation_id,
+            instance_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn operation_id(&self) -> &OperationId {
+        &self.operation_id
+    }
+
+    #[must_use]
+    pub const fn instance_id(&self) -> &OperationInstanceId {
+        &self.instance_id
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

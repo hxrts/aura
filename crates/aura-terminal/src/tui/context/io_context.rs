@@ -51,7 +51,7 @@ use crate::tui::context::{
     AccountFilesHelper, DispatchHelper, InitializedAppCore, SnapshotHelper, ToastHelper,
 };
 use crate::tui::effects::{EffectCommand, OpFailureCode, OpResponse, OperationalHandler};
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::ChannelMode;
 
 use crate::tui::hooks::{
@@ -218,7 +218,7 @@ impl IoContextBuilder {
         // maintain the API contract.
         let _mode = self.mode.ok_or(ContextBuildError::MissingField("mode"))?;
 
-        let tasks = Arc::new(UiTaskRegistry::new());
+        let tasks = Arc::new(UiTaskOwner::new());
         let operational = Arc::new(OperationalHandler::new(
             app_core.raw().clone(),
             tasks.clone(),
@@ -306,7 +306,7 @@ pub struct IoContext {
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
     ceremony_kinds: Arc<RwLock<HashMap<String, CeremonyKind>>>,
-    tasks: Arc<UiTaskRegistry>,
+    tasks: Arc<UiTaskOwner>,
     pending_runtime_bootstrap: bool,
     requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
 }
@@ -342,7 +342,7 @@ impl IoContext {
     }
 
     #[must_use]
-    pub fn tasks(&self) -> Arc<UiTaskRegistry> {
+    pub fn tasks(&self) -> Arc<UiTaskOwner> {
         self.tasks.clone()
     }
 
@@ -1231,7 +1231,7 @@ impl IoContext {
             .await
             .get(ceremony_id)
             .copied()
-            .ok_or_else(|| TerminalError::Operation(format!("Unknown ceremony handle for {ceremony_id}")))?;
+            .ok_or_else(|| TerminalError::NotFound(format!("Unknown ceremony handle for {ceremony_id}")))?;
         Ok(CeremonyHandle::legacy_from_id(
             CeremonyId::new(ceremony_id.to_string()),
             kind,

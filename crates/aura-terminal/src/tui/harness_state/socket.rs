@@ -1,6 +1,6 @@
 //! Socket infrastructure for harness command ingress.
 
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{
     HarnessCommandReceiptHandle, HarnessCommandSender, HarnessCommandSubmission,
 };
@@ -26,7 +26,7 @@ static COMMAND_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static ACTIVE_HARNESS_COMMAND_SENDER: OnceLock<Mutex<Option<HarnessCommandSender>>> =
     OnceLock::new();
 static HARNESS_COMMAND_LISTENER_STARTED: OnceLock<()> = OnceLock::new();
-static HARNESS_COMMAND_LISTENER_TASKS: OnceLock<UiTaskRegistry> = OnceLock::new();
+static HARNESS_COMMAND_LISTENER_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
 
 struct HarnessSocketGuard {
     path: PathBuf,
@@ -67,8 +67,8 @@ fn active_harness_command_sender() -> &'static Mutex<Option<HarnessCommandSender
     ACTIVE_HARNESS_COMMAND_SENDER.get_or_init(|| Mutex::new(None))
 }
 
-fn harness_command_listener_tasks() -> &'static UiTaskRegistry {
-    HARNESS_COMMAND_LISTENER_TASKS.get_or_init(UiTaskRegistry::new)
+fn harness_command_listener_tasks() -> &'static UiTaskOwner {
+    HARNESS_COMMAND_LISTENER_TASKS.get_or_init(UiTaskOwner::new)
 }
 
 pub(crate) fn ensure_harness_command_listener() -> io::Result<()> {

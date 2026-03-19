@@ -37,7 +37,7 @@ use serde::Serialize;
 
 use crate::error::TerminalResult;
 use crate::ids;
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 
 #[derive(Debug, Clone, Serialize)]
 struct GuardianAcceptance {
@@ -85,7 +85,7 @@ pub struct DemoSimulator {
     carol: Arc<AuraAgent>,
     mobile: Arc<AuraAgent>,
     social_peers: Vec<NamedDemoPeer>,
-    event_loop_tasks: Arc<UiTaskRegistry>,
+    event_loop_tasks: Arc<UiTaskOwner>,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
@@ -154,7 +154,7 @@ impl DemoSimulator {
             carol,
             mobile,
             social_peers: Vec::new(),
-            event_loop_tasks: Arc::new(UiTaskRegistry::new()),
+            event_loop_tasks: Arc::new(UiTaskOwner::new()),
             shutdown_tx: None,
         })
     }
@@ -1055,8 +1055,8 @@ pub fn spawn_amp_inbox_listener(
     effects: Arc<AuraEffectSystem>,
     bob_authority: AuthorityId,
     peers: Vec<EchoPeer>,
-) -> Arc<UiTaskRegistry> {
-    let tasks = Arc::new(UiTaskRegistry::new());
+) -> Arc<UiTaskOwner> {
+    let tasks = Arc::new(UiTaskOwner::new());
     tasks.spawn(async move {
         let mut seen_payloads: HashSet<(aura_core::Hash32, AuthorityId)> = HashSet::new();
         let mut tick = interval(Duration::from_millis(50));

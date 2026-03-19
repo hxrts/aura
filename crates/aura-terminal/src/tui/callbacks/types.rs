@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use crate::tui::semantic_lifecycle::SubmittedOperationOwner;
+use crate::tui::semantic_lifecycle::{
+    LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
+};
 use crate::tui::state::DeviceId;
 use aura_core::AuthorityId;
 
@@ -14,19 +16,19 @@ use aura_core::AuthorityId;
 
 /// Callback that takes no arguments.
 pub type NoArgCallback = Arc<dyn Fn() + Send + Sync>;
-pub(crate) type NoArgOwnedCallback = Arc<dyn Fn(SubmittedOperationOwner) + Send + Sync>;
+pub(crate) type NoArgOwnedCallback = Arc<dyn Fn(WorkflowHandoffOperationOwner) + Send + Sync>;
 
 /// Callback that takes a single string ID.
 pub type IdCallback = Arc<dyn Fn(String) + Send + Sync>;
 pub(crate) type IdOwnedCallback =
-    Arc<dyn Fn(String, Option<SubmittedOperationOwner>) + Send + Sync>;
+    Arc<dyn Fn(String, Option<WorkflowHandoffOperationOwner>) + Send + Sync>;
 
 /// Callback that takes two string arguments.
 pub type TwoStringCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 pub(crate) type TwoStringOwnedCallback =
-    Arc<dyn Fn(String, String, Option<SubmittedOperationOwner>) + Send + Sync>;
+    Arc<dyn Fn(String, String, Option<WorkflowHandoffOperationOwner>) + Send + Sync>;
 pub(crate) type TwoStringContextOwnedCallback =
-    Arc<dyn Fn(String, String, Option<String>, Option<SubmittedOperationOwner>) + Send + Sync>;
+    Arc<dyn Fn(String, String, Option<String>, Option<WorkflowHandoffOperationOwner>) + Send + Sync>;
 
 /// Callback that takes three string arguments.
 pub type ThreeStringCallback = Arc<dyn Fn(String, String, String) + Send + Sync>;
@@ -36,7 +38,7 @@ pub type StringOptStringCallback = Arc<dyn Fn(String, Option<String>) + Send + S
 
 /// Callback that takes a string, optional string, and a list of strings.
 pub(crate) type StringOptStringVecU8Callback = Arc<
-    dyn Fn(String, Option<String>, Vec<String>, u8, Option<SubmittedOperationOwner>) + Send + Sync,
+    dyn Fn(String, Option<String>, Vec<String>, u8, Option<LocalTerminalOperationOwner>) + Send + Sync,
 >;
 
 /// Callback that takes two u8 values.
@@ -50,7 +52,7 @@ pub type ThresholdCallback = Arc<dyn Fn(u8, u8) + Send + Sync>;
 /// - optional message
 /// - optional TTL (seconds)
 pub(crate) type CreateInvitationCallbackType = Arc<
-    dyn Fn(AuthorityId, String, Option<String>, Option<u64>, Option<SubmittedOperationOwner>)
+    dyn Fn(AuthorityId, String, Option<String>, Option<u64>, Option<LocalTerminalOperationOwner>)
         + Send
         + Sync,
 >;
@@ -90,7 +92,7 @@ pub type InvitationCallback = IdCallback;
 pub(crate) type CreateInvitationCallback = CreateInvitationCallbackType;
 pub type ExportInvitationCallback = IdCallback;
 pub(crate) type ImportInvitationOwnedCallback =
-    Arc<dyn Fn(String, SubmittedOperationOwner) + Send + Sync>;
+    Arc<dyn Fn(String, WorkflowHandoffOperationOwner) + Send + Sync>;
 
 // --- Neighborhood Screen ---
 pub type GoHomeCallback = NoArgCallback;
@@ -104,5 +106,6 @@ pub type NeighborhoodHomeCallback = IdCallback;
 pub type SetModeratorCallback = Arc<dyn Fn(Option<String>, String, bool) + Send + Sync>;
 
 // --- App Screen ---
-pub(crate) type CreateAccountCallback = Arc<dyn Fn(String, SubmittedOperationOwner) + Send + Sync>;
+pub(crate) type CreateAccountCallback =
+    Arc<dyn Fn(String, LocalTerminalOperationOwner) + Send + Sync>;
 pub type GuardianSelectCallback = IdCallback;

@@ -49,7 +49,7 @@ impl ChatCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let app_core = ctx.app_core_raw().clone();
-            let operation_instance_id = operation.harness_handle().instance_id;
+            let operation_instance_id = operation.harness_handle().instance_id().clone();
             spawn_ctx(ctx, async move {
                 let _ = operation.handoff_to_app_workflow(
                     SemanticOperationTransferScope::AcceptPendingChannelInvitation,
@@ -109,7 +109,7 @@ impl ChatCallbacks {
 
             spawn_ctx(ctx.clone(), async move {
                 let operation_instance_id = operation.map(|operation| {
-                    let operation_instance_id = operation.harness_handle().instance_id;
+                    let operation_instance_id = operation.harness_handle().instance_id().clone();
                     let _ = operation.handoff_to_app_workflow(
                         SemanticOperationTransferScope::SendChatMessage,
                     );
@@ -485,14 +485,14 @@ impl ChatCallbacks {
     }
 
     fn make_join_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> JoinChannelCallback {
-        Arc::new(move |channel_name: String, operation: Option<SubmittedOperationOwner>| {
+        Arc::new(move |channel_name: String, operation: Option<WorkflowHandoffOperationOwner>| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let app_core = ctx.app_core_raw().clone();
             spawn_ctx(ctx.clone(), async move {
                 let operation_instance_id = operation
                     .as_ref()
-                    .map(|operation| operation.harness_handle().instance_id);
+                    .map(|operation| operation.harness_handle().instance_id().clone());
                 if let Some(operation) = operation {
                     let _ = operation.handoff_to_app_workflow(SemanticOperationTransferScope::JoinChannel);
                 }
@@ -562,7 +562,7 @@ impl ChatCallbacks {
                   topic: Option<String>,
                   members: Vec<String>,
                   threshold_k: u8,
-                  operation: Option<SubmittedOperationOwner>| {
+                  operation: Option<LocalTerminalOperationOwner>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let channel_name = name.clone();

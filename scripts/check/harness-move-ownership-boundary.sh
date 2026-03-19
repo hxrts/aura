@@ -10,6 +10,7 @@ approved_sites=(
   '^crates/aura-app/src/scenario_contract\.rs:'
   '^crates/aura-app/src/workflows/harness_determinism\.rs:'
   '^crates/aura-app/tests/ui/ui_operation_handle_private_fields\.rs:'
+  '^crates/aura-app/tests/ui/harness_ui_operation_handle_private_fields\.rs:'
   '^crates/aura-harness/src/backend/local_pty\.rs:'
   '^crates/aura-harness/src/backend/mod\.rs:'
   '^crates/aura-harness/src/executor\.rs:'
@@ -25,7 +26,8 @@ fail() {
 }
 
 # Shared semantic move ownership is currently expressed through:
-# - UiOperationHandle fabrication and recording
+# - sanctioned UiOperationHandle / HarnessUiOperationHandle construction
+# - handle recording
 # - HarnessUiCommandReceipt acceptance / rejection
 # - sanctioned instance-id capture helpers
 #
@@ -52,7 +54,8 @@ while IFS= read -r match; do
 done < <(
   {
     rg -n \
-      -e 'UiOperationHandle \{' \
+      -e 'UiOperationHandle::new\(' \
+      -e 'HarnessUiOperationHandle::new\(' \
       -e 'record_submission_handle\(' \
       -e 'HarnessUiCommandReceipt::Accepted' \
       -e 'instance_id\s*=\s*Some\(' \

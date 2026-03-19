@@ -179,7 +179,9 @@ use crate::tui::props::{
     extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
     extract_notifications_view_props, extract_settings_view_props,
 };
-use crate::tui::semantic_lifecycle::SubmittedOperationOwner;
+use crate::tui::semantic_lifecycle::{
+    LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
+};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
     harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiOperation,
@@ -316,7 +318,7 @@ fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = LocalTerminalOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -347,7 +349,7 @@ fn execute_harness_followup_command(
                 return Err("UI update sender is unavailable".to_string());
             };
             state.router.go_to(Screen::Chat);
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = LocalTerminalOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -406,7 +408,7 @@ fn execute_harness_followup_command(
                 InvitationKind::Guardian => SemanticOperationKind::CreateContactInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = LocalTerminalOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -431,7 +433,7 @@ fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = WorkflowHandoffOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -449,7 +451,7 @@ fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = WorkflowHandoffOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -468,7 +470,7 @@ fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = WorkflowHandoffOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -492,7 +494,7 @@ fn execute_harness_followup_command(
                 let Some(update_tx) = update_tx.clone() else {
                     return Err("UI update sender is unavailable".to_string());
                 };
-                Some(SubmittedOperationOwner::submit_local_only(
+                Some(WorkflowHandoffOperationOwner::submit(
                     app_ctx.app_core.raw().clone(),
                     app_ctx.tasks(),
                     update_tx,
@@ -515,7 +517,7 @@ fn execute_harness_followup_command(
                 .or_else(|| resolve_committed_selected_channel_id(state, &channels))
                 .or(visible_message_channel_id)
             {
-                let handle = operation.as_ref().map(SubmittedOperationOwner::harness_handle);
+                let handle = operation.as_ref().map(WorkflowHandoffOperationOwner::harness_handle);
                 (cb.chat.on_send)(channel_id, content, operation);
                 Ok(handle)
             } else {
@@ -596,7 +598,7 @@ fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = SubmittedOperationOwner::submit_local_only(
+            let operation = WorkflowHandoffOperationOwner::submit(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -2502,7 +2504,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             );
                                             continue;
                                         };
-                                        let operation = SubmittedOperationOwner::submit_local_only(
+                                        let operation = LocalTerminalOperationOwner::submit(
                                             app_core_for_events.clone(),
                                             tasks_for_events.clone(),
                                             update_tx,
@@ -2555,7 +2557,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             continue;
                                         };
                                         let operation =
-                                            SubmittedOperationOwner::submit_local_only(
+                                            WorkflowHandoffOperationOwner::submit(
                                                 app_core_for_events.clone(),
                                                 tasks_for_events.clone(),
                                                 update_tx,
@@ -2576,7 +2578,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 );
                                                 continue;
                                             };
-                                            Some(SubmittedOperationOwner::submit_local_only(
+                                            Some(WorkflowHandoffOperationOwner::submit(
                                                 app_core_for_events.clone(),
                                                 tasks_for_events.clone(),
                                                 update_tx,
@@ -2852,7 +2854,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             continue;
                                         };
                                         let operation =
-                                            SubmittedOperationOwner::submit_local_only(
+                                            LocalTerminalOperationOwner::submit(
                                                 app_core_for_events.clone(),
                                                 tasks_for_events.clone(),
                                                 update_tx,
@@ -3139,7 +3141,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             continue;
                                         };
                                         let operation =
-                                            SubmittedOperationOwner::submit_local_only(
+                                            WorkflowHandoffOperationOwner::submit(
                                                 app_core_for_events.clone(),
                                                 tasks_for_events.clone(),
                                                 update_tx,

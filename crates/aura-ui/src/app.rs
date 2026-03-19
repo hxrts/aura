@@ -1290,7 +1290,8 @@ fn submit_runtime_modal_action(
                 harness_log("accept_invitation import_details start");
                 match invitation_workflows::import_invitation_details(&app_core, &code).await {
                     Ok(invitation) => {
-                        let invitation_kind = match invitation.invitation_type {
+                        let invitation_info = invitation.info().clone();
+                        let invitation_kind = match &invitation_info.invitation_type {
                             InvitationBridgeType::DeviceEnrollment { .. } => "device_enrollment",
                             InvitationBridgeType::Contact { .. } => "contact",
                             InvitationBridgeType::Guardian { .. } => "guardian",
@@ -1298,27 +1299,22 @@ fn submit_runtime_modal_action(
                         };
                         let import_ok_log = format!(
                             "accept_invitation import_details ok invitation_id={} kind={}",
-                            invitation.invitation_id, invitation_kind
+                            invitation.invitation_id(),
+                            invitation_kind
                         );
                         controller_for_import.push_log(&import_ok_log);
                         harness_log(&import_ok_log);
                         controller_for_import.push_log("accept_invitation runtime_accept start");
                         harness_log("accept_invitation runtime_accept start");
-                        let accepted = match invitation.invitation_type {
+                        let accepted = match &invitation_info.invitation_type {
                             InvitationBridgeType::DeviceEnrollment { .. } => {
                                 invitation_workflows::accept_device_enrollment_invitation(
                                     &app_core,
-                                    &invitation,
+                                    &invitation_info,
                                 )
                                 .await
                             }
-                            _ => {
-                                invitation_workflows::accept_invitation(
-                                    &app_core,
-                                    &invitation.invitation_id,
-                                )
-                                .await
-                            }
+                            _ => invitation_workflows::accept_invitation(&app_core, invitation).await,
                         };
 
                         match accepted {
@@ -1333,7 +1329,7 @@ fn submit_runtime_modal_action(
                                     },
                                 );
                                 if matches!(
-                                    invitation.invitation_type,
+                                    &invitation_info.invitation_type,
                                     InvitationBridgeType::DeviceEnrollment { .. }
                                 ) {
                                     controller_for_import
@@ -1354,15 +1350,15 @@ fn submit_runtime_modal_action(
                                     harness_log("accept_invitation complete device_enrollment");
                                 } else {
                                     if let InvitationBridgeType::Contact { nickname } =
-                                        &invitation.invitation_type
+                                        &invitation_info.invitation_type
                                     {
                                         let display_name = nickname
                                             .clone()
                                             .filter(|value| !value.trim().is_empty())
-                                            .unwrap_or_else(|| invitation.sender_id.to_string());
+                                            .unwrap_or_else(|| invitation_info.sender_id.to_string());
                                         controller_for_import
                                             .complete_runtime_contact_invitation_acceptance(
-                                                invitation.sender_id,
+                                                invitation_info.sender_id,
                                                 display_name,
                                             );
                                         controller_for_import
@@ -1370,7 +1366,7 @@ fn submit_runtime_modal_action(
                                         harness_log("accept_invitation complete generic");
                                         return;
                                     }
-                                    match &invitation.invitation_type {
+                                    match &invitation_info.invitation_type {
                                         InvitationBridgeType::Guardian { .. } => {
                                             controller_for_import.push_log(
                                                 "accept_invitation refresh_contacts start",
@@ -1444,8 +1440,9 @@ fn submit_runtime_modal_action(
             spawn(async move {
                 match invitation_workflows::import_invitation_details(&app_core, &code).await {
                     Ok(invitation) => {
+                        let invitation_info = invitation.info().clone();
                         if !matches!(
-                            invitation.invitation_type,
+                            &invitation_info.invitation_type,
                             InvitationBridgeType::DeviceEnrollment { .. }
                         ) {
                             controller
@@ -1472,7 +1469,7 @@ fn submit_runtime_modal_action(
 
                         match invitation_workflows::accept_device_enrollment_invitation(
                             &app_core,
-                            &invitation,
+                            &invitation_info,
                         )
                         .await
                         {
@@ -1523,11 +1520,11 @@ fn submit_runtime_modal_action(
                 .await
                 {
                     Ok(invitation) => {
-                        tracing::info!(invitation_id = %invitation.invitation_id, "create_invitation create_contact_invitation ok");
-                        tracing::info!(invitation_id = %invitation.invitation_id, "create_invitation export_invitation start");
+                        tracing::info!(invitation_id = %invitation.invitation_id(), "create_invitation create_contact_invitation ok");
+                        tracing::info!(invitation_id = %invitation.invitation_id(), "create_invitation export_invitation start");
                         match invitation_workflows::export_invitation(
                             &app_core,
-                            &invitation.invitation_id,
+                            invitation.invitation_id(),
                         )
                         .await
                         {
@@ -2916,7 +2913,9 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                         .await
                         .unwrap_or_default()
                 };
-                for (operation_id, _instance_id, status) in bridged_operation_statuses(&facts) {
+                for (operation_id, _instance_id, _causality, status) in
+                    bridged_operation_statuses(&facts)
+                {
                     controller_for_authoritative_operations
                         .apply_authoritative_operation_status(operation_id, status);
                 }
@@ -4579,7 +4578,7 @@ fn ContactsScreen(
                                                     Ok(invitation) => {
                                                         match invitation_workflows::export_invitation(
                                                             &app_core,
-                                                            &invitation.invitation_id,
+                                                            invitation.invitation_id(),
                                                         )
                                                         .await
                                                         {

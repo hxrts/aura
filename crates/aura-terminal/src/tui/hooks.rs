@@ -72,7 +72,7 @@ use aura_effects::time::PhysicalTimeHandler;
 
 use crate::error::TerminalResult;
 use crate::tui::context::{InitializedAppCore, IoContext};
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 
 // =============================================================================
 // AppCore Context for iocraft
@@ -208,7 +208,7 @@ impl AppCoreContext {
     }
 
     #[must_use]
-    pub fn tasks(&self) -> Arc<UiTaskRegistry> {
+    pub fn tasks(&self) -> Arc<UiTaskOwner> {
         self.io_context.tasks()
     }
 }

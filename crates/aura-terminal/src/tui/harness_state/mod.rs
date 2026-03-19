@@ -24,7 +24,7 @@ mod tests {
     use crate::tui::state::views::{AccountSetupModalState, DeviceEnrollmentCeremonyModalState};
     use crate::tui::state::DispatchCommand;
     use crate::tui::state::InvitationKind;
-    use crate::tui::tasks::UiTaskRegistry;
+    use crate::tui::tasks::UiTaskOwner;
     use crate::tui::types::{Channel as TuiChannel, Device as TuiDevice, SettingsSection};
     use crate::tui::updates::{harness_command_channel, HarnessCommandSubmission};
     use crate::tui::{TuiCommand, TuiState};
@@ -672,7 +672,7 @@ mod tests {
 
         let (command_tx, mut command_rx) = harness_command_channel();
         register_harness_command_sender(command_tx);
-        let bridge_tasks = UiTaskRegistry::new();
+        let bridge_tasks = UiTaskOwner::new();
         bridge_tasks.spawn(async move {
             forward_harness_commands_from_listener(listener).await;
         });

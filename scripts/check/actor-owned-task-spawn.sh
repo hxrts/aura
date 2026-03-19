@@ -36,6 +36,7 @@ approved_patterns=(
   '^crates/aura-ui/src/app\.rs:'
   '^crates/aura-web/src/harness_bridge\.rs:.*spawn_local'
   '^crates/aura-web/src/main\.rs:'
+  '^crates/aura-web/src/task_owner\.rs:'
   '^crates/aura-web/src/web_clipboard\.rs:.*spawn_local'
 )
 

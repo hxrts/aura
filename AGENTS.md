@@ -65,13 +65,14 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Shared UX contract ownership**: parity-critical UI ids, focus semantics, action contracts, and parity metadata come from `aura-app::ui_contract`
 - **Harness mode discipline**: `AURA_HARNESS_MODE` may change instrumentation or rendering stability, but must not change parity-critical business-flow semantics
 - **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata in `scripts/check/user-flow-policy-guardrails.sh`
-- **Browser bridge compatibility**: changes to browser harness bridge or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`
+- **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
 - **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `scripts/check/user-flow-guidance-sync.sh`
 - **Shared user-flow contributor sync**: when shared UX policy scripts change, keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
+- **Frontend ownership discipline**: parity-critical frontend submission uses only the sanctioned `LocalTerminalOperationOwner` / `WorkflowHandoffOperationOwner` path; browser/TUI task ownership uses only `WebTaskOwner` / `UiTaskOwner`; readiness refresh remains private to `aura-app::workflows`
 - **Shared semantic lifecycle ownership**: `aura-app::workflows` owns authoritative parity-critical semantic lifecycle publication after handoff; `aura-terminal`, `aura-web`, and `aura-harness` submit and observe but do not keep parallel terminal publication paths
 - **Frontend/app facade boundary**: frontend parity-critical imports go through `aura_app::ui` and `aura_app::ui::workflows`; do not reach into crate-root `aura_app::workflows` or private semantic helper modules
 - **Runtime-private ownership boundaries**: raw VM admission helpers, VM fragment ownership registry mutation, and `ReconfigurationController` stay internal to `aura-agent`; use the sanctioned ingress and manager surfaces instead
@@ -162,7 +163,7 @@ Is this a Layer 2 domain crate?
 | L4 (Orchestration) | Multi-party coordination, guard chain, consensus runtime, cross-handler decisions | Effect definitions, single-party handlers, runtime assembly |
 | L5 (Features) | End-to-end protocols, OPERATION_CATEGORIES, domain facts | Runtime caches (those go in L6), UI concerns |
 | L6 (Runtime) | Lifecycle management, effect system assembly, runtime-owned caches | Handler implementations, protocol coordination |
-| L7 (`aura-terminal`, `aura-ui`, `aura-web`) | Terminal shell, shared UI core, browser shell | Business logic (keep semantic ownership in `aura-app`; shells observe/submit rather than co-own) |
+| L7 (`aura-terminal`, `aura-ui`, `aura-web`) | Terminal/browser shells, shared observed UI core, bounded ingress/bridge mechanics | Business logic, parity-critical semantic lifecycle ownership, readiness publication (keep those in `aura-app`) |
 | L8 (Testing) | Mock handlers, test fixtures, stateful test handlers | Production code |
 
 ### Crate Selection by Implementation

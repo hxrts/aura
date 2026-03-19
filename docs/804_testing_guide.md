@@ -258,6 +258,12 @@ The required split is:
 - actor-owned subsystems own long-lived mutable async state and lifecycle
 - move-owned handles/tokens invalidate stale holders by construction
 - observed layers render and assert, but do not author semantic truth
+- TUI-local semantic submission is limited to the sanctioned
+  `LocalTerminalOperationOwner` and `WorkflowHandoffOperationOwner` wrappers
+- browser bridge concurrency is limited to `WebTaskOwner`; it does not own
+  parity-critical lifecycle
+- authoritative readiness refresh remains private to `aura-app::workflows` and
+  is compile-fail tested in both default and `signals` configurations
 
 ### Required Ownership Invariants
 

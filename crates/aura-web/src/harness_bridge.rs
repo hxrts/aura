@@ -25,7 +25,9 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::{spawn_local, JsFuture};
+use wasm_bindgen_futures::JsFuture;
+
+use crate::task_owner::shared_web_task_owner;
 
 struct PendingUiPublish {
     value: JsValue,
@@ -76,7 +78,7 @@ fn harness_storage_prefix(window: &web_sys::Window) -> String {
 }
 
 fn submit_create_account_in_background(controller: Arc<UiController>, nickname: String) {
-    spawn_local(async move {
+    shared_web_task_owner().spawn_local(async move {
         web_sys::console::log_1(
             &format!("[web-harness] create_account start nickname={nickname}").into(),
         );
@@ -276,7 +278,7 @@ async fn submit_semantic_command(
                 );
                 update_semantic_debug("create_account_rebootstrap_start", Some(&account_name));
                 let account_name_for_rebootstrap = account_name.clone();
-                spawn_local(async move {
+                shared_web_task_owner().spawn_local(async move {
                     match request_rebootstrap().await {
                         Ok(()) => update_semantic_debug(
                             "create_account_rebootstrap_done",
@@ -349,7 +351,8 @@ async fn submit_semantic_command(
             let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation)
+            let invitation_info = invitation.info().clone();
+            invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation_info)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             Ok(SemanticCommandResponse::accepted_without_value())
@@ -415,10 +418,9 @@ async fn submit_semantic_command(
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let code =
-                invitation_workflows::export_invitation(&app_core, &invitation.invitation_id)
-                    .await
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let code = invitation_workflows::export_invitation(&app_core, invitation.invitation_id())
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
             controller.write_clipboard(&code);
             controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
                 receiver_authority_id: Some(authority_id.to_string()),
@@ -434,7 +436,7 @@ async fn submit_semantic_command(
             let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            invitation_workflows::accept_imported_invitation(&app_core, &invitation)
+            invitation_workflows::accept_imported_invitation(&app_core, invitation)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             Ok(SemanticCommandResponse::accepted_without_value())
@@ -903,7 +905,7 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
                 let resolve = resolve.clone();
                 let reject = reject.clone();
                 let request_json = request_json.clone();
-                spawn_local(async move {
+                shared_web_task_owner().spawn_local(async move {
                     update_semantic_debug("raw_entry", None);
                     web_sys::console::log_1(
                         &"[web-harness] submit_semantic_command entry".into(),

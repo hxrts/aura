@@ -1239,7 +1239,7 @@ async fn ensure_channel_invitation_context_and_bootstrap(
 }
 
 /// Refresh authoritative invitation readiness facts from the current invitation state.
-pub async fn refresh_authoritative_invitation_readiness(
+pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let invitations = read_signal_or_default(app_core, &*INVITATIONS_SIGNAL).await;
@@ -1268,7 +1268,7 @@ pub async fn refresh_authoritative_invitation_readiness(
 }
 
 /// Refresh authoritative contact-link readiness facts from the current contacts state.
-pub async fn refresh_authoritative_contact_link_readiness(
+pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let contacts = read_signal_or_default(app_core, &*CONTACTS_SIGNAL).await;

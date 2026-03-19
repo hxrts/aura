@@ -34,7 +34,7 @@ use aura_core::Hash32;
 use tokio::sync::mpsc;
 
 use super::{AgentEvent, AgentResponse, SimulatedBridge};
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 
 /// Coordinates demo mode using signals instead of events
 pub struct DemoSignalCoordinator {
@@ -57,7 +57,7 @@ pub struct DemoSignalCoordinator {
     last_recovery_state: Arc<tokio::sync::Mutex<Option<String>>>,
 
     /// Owned background task boundary for the coordinator loops.
-    tasks: Arc<UiTaskRegistry>,
+    tasks: Arc<UiTaskOwner>,
 }
 
 impl DemoSignalCoordinator {
@@ -75,7 +75,7 @@ impl DemoSignalCoordinator {
             response_rx: Arc::new(tokio::sync::Mutex::new(response_rx)),
             last_message_count: Arc::new(tokio::sync::Mutex::new(0)),
             last_recovery_state: Arc::new(tokio::sync::Mutex::new(None)),
-            tasks: Arc::new(UiTaskRegistry::new()),
+            tasks: Arc::new(UiTaskOwner::new()),
         }
     }
 

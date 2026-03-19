@@ -187,10 +187,6 @@ impl OperationTracker {
         self.set_state(operation_id, state);
     }
 
-    fn clear(&mut self, operation_id: &OperationId) {
-        self.entries.remove(operation_id);
-    }
-
     fn state(&self, operation_id: &OperationId) -> Option<OperationState> {
         self.entries.get(operation_id).map(|entry| entry.state)
     }
@@ -401,11 +397,7 @@ impl TuiState {
             .enqueue(QueuedModal::AccountSetup(AccountSetupModalState::default()));
     }
 
-    pub fn set_operation_state(&mut self, operation_id: OperationId, state: OperationState) {
-        self.operation_states.set_state(operation_id, state);
-    }
-
-    pub fn set_authoritative_operation_state(
+    pub(crate) fn set_authoritative_operation_state(
         &mut self,
         operation_id: OperationId,
         instance_id: Option<OperationInstanceId>,
@@ -414,10 +406,6 @@ impl TuiState {
     ) {
         self.operation_states
             .set_authoritative_state(operation_id, instance_id, causality, state);
-    }
-
-    pub fn clear_operation_state(&mut self, operation_id: &OperationId) {
-        self.operation_states.clear(operation_id);
     }
 
     #[must_use]
@@ -646,11 +634,15 @@ mod tests {
 
     fn assert_local_terminal_regression_allocates_new_instance(operation_id: OperationId) {
         let mut state = TuiState::new();
-        state.set_operation_state(operation_id.clone(), OperationState::Succeeded);
+        state
+            .operation_states
+            .set_state(operation_id.clone(), OperationState::Succeeded);
         let first = state.exported_operation_snapshots();
         let first_instance = first[0].instance_id.clone();
 
-        state.set_operation_state(operation_id, OperationState::Failed);
+        state
+            .operation_states
+            .set_state(operation_id, OperationState::Failed);
 
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Failed);
@@ -706,17 +698,23 @@ mod tests {
         let mut state = TuiState::new();
         let operation_id = OperationId::invitation_create();
 
-        state.set_operation_state(operation_id.clone(), OperationState::Submitting);
+        state
+            .operation_states
+            .set_state(operation_id.clone(), OperationState::Submitting);
         let first = state.exported_operation_snapshots();
         assert_eq!(first.len(), 1);
         let first_instance = first[0].instance_id.clone();
 
-        state.set_operation_state(operation_id.clone(), OperationState::Succeeded);
+        state
+            .operation_states
+            .set_state(operation_id.clone(), OperationState::Succeeded);
         let second = state.exported_operation_snapshots();
         assert_eq!(second[0].instance_id, first_instance);
         assert_eq!(second[0].state, OperationState::Succeeded);
 
-        state.set_operation_state(operation_id, OperationState::Submitting);
+        state
+            .operation_states
+            .set_state(operation_id, OperationState::Submitting);
         let third = state.exported_operation_snapshots();
         assert_eq!(third[0].state, OperationState::Submitting);
         assert_ne!(third[0].instance_id, first_instance);
@@ -784,11 +782,15 @@ mod tests {
     fn local_terminal_regression_allocates_new_instance() {
         let mut state = TuiState::new();
         let operation_id = OperationId::invitation_create();
-        state.set_operation_state(operation_id.clone(), OperationState::Succeeded);
+        state
+            .operation_states
+            .set_state(operation_id.clone(), OperationState::Succeeded);
         let first = state.exported_operation_snapshots();
         let first_instance = first[0].instance_id.clone();
 
-        state.set_operation_state(operation_id, OperationState::Failed);
+        state
+            .operation_states
+            .set_state(operation_id, OperationState::Failed);
 
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Failed);

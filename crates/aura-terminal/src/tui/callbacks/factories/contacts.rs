@@ -88,12 +88,12 @@ impl ContactsCallbacks {
             move |contact_id: String,
                   channel: String,
                   context_id: Option<String>,
-                  operation: Option<SubmittedOperationOwner>| {
+                  operation: Option<WorkflowHandoffOperationOwner>| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let operation_instance_id = operation
                     .as_ref()
-                    .map(|operation| operation.harness_handle().instance_id);
+                    .map(|operation| operation.harness_handle().instance_id().clone());
                 let app_core = ctx.app_core_raw().clone();
                 spawn_ctx(ctx, async move {
                     if let Some(operation) = operation {

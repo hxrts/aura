@@ -1458,7 +1458,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
             account_name: account_name.to_string(),
         })?;
         let handle = match receipt_handle {
-            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            Some(handle) => UiOperationHandle::new(
+                handle.operation_id().clone(),
+                handle.instance_id().clone(),
+            ),
             None => wait_for_operation_submission(
                 self,
                 OperationId::account_create(),
@@ -1557,7 +1560,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
             })
             .context("submit_create_channel: create_channel_command")?;
         let handle = match receipt_handle {
-            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            Some(handle) => UiOperationHandle::new(
+                handle.operation_id().clone(),
+                handle.instance_id().clone(),
+            ),
             None => wait_for_operation_submission(
                 self,
                 OperationId::create_channel(),
@@ -1599,7 +1605,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 receiver_authority_id: receiver_authority_id.to_string(),
             })?;
         let handle = match receipt_handle {
-            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            Some(handle) => UiOperationHandle::new(
+                handle.operation_id().clone(),
+                handle.instance_id().clone(),
+            ),
             None => wait_for_operation_submission(
                 self,
                 OperationId::invitation_create(),
@@ -1684,7 +1693,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 channel_id,
             })?;
         let handle = match receipt_handle {
-            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            Some(handle) => UiOperationHandle::new(
+                handle.operation_id().clone(),
+                handle.instance_id().clone(),
+            ),
             None => wait_for_operation_submission(
                 self,
                 OperationId::invitation_create(),
@@ -1701,7 +1713,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let receipt_handle =
             self.send_harness_command(&HarnessUiCommand::AcceptPendingChannelInvitation)?;
         let handle = match receipt_handle {
-            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            Some(handle) => UiOperationHandle::new(
+                handle.operation_id().clone(),
+                handle.instance_id().clone(),
+            ),
             None => wait_for_operation_submission(
                 self,
                 OperationId::invitation_accept(),
@@ -1750,7 +1765,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
             channel_name: channel_name.to_string(),
         })?;
         let handle = match receipt_handle {
-            Some(handle) => UiOperationHandle::new(handle.operation_id, handle.instance_id),
+            Some(handle) => UiOperationHandle::new(
+                handle.operation_id().clone(),
+                handle.instance_id().clone(),
+            ),
             None => wait_for_operation_submission(
                 self,
                 OperationId::join_channel(),

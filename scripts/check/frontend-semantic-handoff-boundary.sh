@@ -28,13 +28,28 @@ check_allowed_sites() {
   fi
 }
 
+internal_owner_allow='^crates/aura-terminal/src/tui/semantic_lifecycle.rs:'
 submit_allow='^(crates/aura-terminal/src/tui/screens/app/shell.rs|crates/aura-terminal/src/tui/semantic_lifecycle.rs):'
 handoff_allow='^(crates/aura-terminal/src/tui/callbacks/factories/chat.rs|crates/aura-terminal/src/tui/callbacks/factories/contacts.rs|crates/aura-terminal/src/tui/callbacks/factories/mod.rs|crates/aura-terminal/src/tui/semantic_lifecycle.rs):'
 authoritative_state_allow='^(crates/aura-terminal/src/tui/screens/app/shell.rs|crates/aura-terminal/src/tui/state/mod.rs|crates/aura-terminal/src/tui/harness_state/mod.rs):'
 
 check_allowed_sites \
-  'SubmittedOperationOwner::submit_local_only' \
+  'SubmittedOperationOwner::' \
+  'internal submitted-owner access' \
+  "$internal_owner_allow" \
+  crates/aura-terminal \
+  crates/aura-web
+
+check_allowed_sites \
+  'LocalTerminalOperationOwner::submit\(' \
   'local semantic owner allocation' \
+  "$submit_allow" \
+  crates/aura-terminal \
+  crates/aura-web
+
+check_allowed_sites \
+  'WorkflowHandoffOperationOwner::submit\(' \
+  'handoff semantic owner allocation' \
   "$submit_allow" \
   crates/aura-terminal \
   crates/aura-web

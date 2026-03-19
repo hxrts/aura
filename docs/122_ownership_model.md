@@ -479,9 +479,9 @@ the correct model.
 
 | Crate | Categories | Actor-owned domains | Move-owned surfaces | Capability-gated points | Known debt |
 |-------|-----------|---------------------|---------------------|------------------------|------------|
-| `aura-terminal` | `Observed`, narrow `ActorOwned` ingress | TUI ingress loop only | harness command receipts, operation-instance records | none beyond capability-bearing handoff into `aura-app` | actor-lifecycle and typed-boundary drift must be removed rather than papered over with local semantic ownership |
+| `aura-terminal` | `Observed`, narrow `ActorOwned` ingress, narrow `MoveOwned` submission windows | TUI ingress loop only | `LocalTerminalOperationOwner`, `WorkflowHandoffOperationOwner`, harness command receipts, operation-instance records | none beyond capability-bearing handoff into `aura-app` | keep semantic submission on the sanctioned owner wrappers only |
 | `aura-ui` | `Observed` | none | none | none | none currently tracked in the repo-wide ownership rollout |
-| `aura-web` | `Observed`, narrow `ActorOwned` bridge | browser harness bridge only | browser semantic command requests/receipts | none beyond sanctioned bridge/handoff points | browser bridge capability/typed-error audit still active |
+| `aura-web` | `Observed`, narrow `ActorOwned` bridge | browser harness bridge and bounded bootstrap queue only | browser semantic command requests/receipts | none beyond sanctioned bridge/handoff points | keep browser bridge mechanics infrastructural only; semantic lifecycle remains upstream |
 
 ### Layer 8
 
@@ -500,9 +500,19 @@ The ownership model is enforced in layers.
 Types and private constructors provide the first line of defense. Capability-gated mutation and publication APIs form the second layer. Canonical owner wrappers and macros provide the third layer. AST-backed checks, compile-fail tests, invariant tests, and then thin `scripts/check/*.sh` / `just ci-*` wrappers complete CI enforcement.
 
 Primary enforcement belongs in typed ownership primitives and proc-macro
-declarations. Shell checks such as semantic-owner bounded-await and
-operation-terminality wrappers are secondary fences for narrow escape hatches,
-not the source of truth for semantic correctness.
+declarations. For the frontend/harness stack this means:
+
+- `HarnessUiOperationHandle` and `UiOperationHandle` are constructor/accessor
+  surfaces, not public-field records
+- readiness refresh helpers stay private to `aura-app::workflows`
+- `LocalTerminalOperationOwner` and `WorkflowHandoffOperationOwner` are the
+  sanctioned frontend submission windows
+- `UiTaskOwner` and `WebTaskOwner` are the only sanctioned frontend
+  task-ownership surfaces
+
+Shell checks such as semantic-owner bounded-await and frontend/harness boundary
+wrappers are secondary fences for narrow escape hatches, not the source of
+truth for semantic correctness.
 
 Scripts alone are not sufficient. The API must make the wrong pattern hard or impossible first.
 

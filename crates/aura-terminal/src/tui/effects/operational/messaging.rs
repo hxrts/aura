@@ -19,7 +19,7 @@ use tracing::error;
 
 use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
-use crate::tui::tasks::UiTaskRegistry;
+use crate::tui::tasks::UiTaskOwner;
 
 // Re-export workflow functions for convenience
 // Note: Primary functions accept typed ChannelId directly (typesafe API)
@@ -66,7 +66,7 @@ async fn resolve_channel_id(
 pub async fn handle_messaging(
     command: &EffectCommand,
     app_core: &Arc<RwLock<AppCore>>,
-    tasks: &Arc<UiTaskRegistry>,
+    tasks: &Arc<UiTaskOwner>,
 ) -> Option<OpResult> {
     match command {
         EffectCommand::CreateChannel {

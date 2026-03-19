@@ -813,7 +813,7 @@ fn bootstrap_required_for_recipients(recipient_count: usize) -> bool {
 }
 
 /// Refresh authoritative channel-membership readiness facts from the current channel coordinator.
-pub async fn refresh_authoritative_channel_membership_readiness(
+pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let coordinator = ChannelReadinessCoordinator::load(app_core).await;
@@ -845,7 +845,7 @@ pub async fn refresh_authoritative_channel_membership_readiness(
     .await
 }
 
-pub(crate) async fn refresh_authoritative_recipient_resolution_readiness(
+pub(in crate::workflows) async fn refresh_authoritative_recipient_resolution_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let coordinator = ChannelReadinessCoordinator::load(app_core).await;

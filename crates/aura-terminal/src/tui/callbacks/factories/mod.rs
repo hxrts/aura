@@ -24,7 +24,8 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::{EffectCommand, OpResponse};
 use crate::tui::semantic_lifecycle::{
-    authoritative_operation_status_update, SemanticOperationTransferScope, SubmittedOperationOwner,
+    authoritative_operation_status_update, SemanticOperationTransferScope,
+    WorkflowHandoffOperationOwner, LocalTerminalOperationOwner,
 };
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
@@ -64,9 +65,9 @@ fn enqueue_ui_update_required(ctx: Arc<IoContext>, tx: UiUpdateSender, update: U
 }
 
 fn invitation_import_runtime_fact_update(
-    invitation: Option<&aura_app::ui::workflows::invitation::InvitationHandle>,
+    invitation: Option<&aura_app::ui::types::InvitationInfo>,
 ) -> Option<UiUpdate> {
-    let invitation = invitation?.info();
+    let invitation = invitation?;
     if matches!(
         invitation.invitation_type,
         InvitationBridgeType::Contact { .. }
@@ -86,7 +87,7 @@ fn invitation_import_runtime_fact_update(
 
 fn invitation_import_success_updates(
     code: &str,
-    invitation: Option<&aura_app::ui::workflows::invitation::InvitationHandle>,
+    invitation: Option<&aura_app::ui::types::InvitationInfo>,
 ) -> Vec<UiUpdate> {
     let mut updates = vec![UiUpdate::InvitationImported {
         invitation_code: code.to_string(),
@@ -101,7 +102,7 @@ async fn run_invitation_import_flow(
     ctx: Arc<IoContext>,
     tx: UiUpdateSender,
     code: String,
-    operation: SubmittedOperationOwner,
+    operation: WorkflowHandoffOperationOwner,
 ) {
     let transfer = operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
@@ -112,7 +113,10 @@ async fn run_invitation_import_flow(
         .await
     {
         Ok(_) => {
-            for update in invitation_import_success_updates(&code, invitation.as_ref()) {
+            for update in invitation_import_success_updates(
+                &code,
+                invitation.as_ref().map(|handle| handle.info()),
+            ) {
                 send_ui_update_required(&tx, update).await;
             }
         }
@@ -379,7 +383,7 @@ impl AppCallbacks {
 
     fn make_create_account(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateAccountCallback {
         Arc::new(
-            move |nickname_suggestion: String, operation: SubmittedOperationOwner| {
+            move |nickname_suggestion: String, operation: LocalTerminalOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {

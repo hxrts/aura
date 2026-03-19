@@ -54,7 +54,7 @@ use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
     context::{InitializedAppCore, IoContext},
     screens::run_app_with_context,
-    tasks::UiTaskRegistry,
+    tasks::UiTaskOwner,
 };
 
 /// Whether the TUI is running in demo or production mode
@@ -88,10 +88,10 @@ pub use aura_app::ui::types::{
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
 const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json";
-static TUI_TRACING_TASKS: OnceLock<UiTaskRegistry> = OnceLock::new();
+static TUI_TRACING_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
 
-fn tui_tracing_tasks() -> &'static UiTaskRegistry {
-    TUI_TRACING_TASKS.get_or_init(UiTaskRegistry::new)
+fn tui_tracing_tasks() -> &'static UiTaskOwner {
+    TUI_TRACING_TASKS.get_or_init(UiTaskOwner::new)
 }
 
 fn open_bootstrap_storage(base_path: &Path) -> BootstrapStorage {
@@ -854,7 +854,7 @@ async fn handle_tui_launch(
         #[cfg(feature = "development")]
         let mut runtime_agent: Option<Arc<aura_agent::AuraAgent>> = None;
         let mut pending_runtime_bootstrap = false;
-        let startup_tasks = Arc::new(UiTaskRegistry::new());
+        let startup_tasks = Arc::new(UiTaskOwner::new());
 
         let app_core = match loaded_account {
             AccountLoadResult::Loaded { authority, context } => {
