@@ -467,6 +467,8 @@ mod tests {
         assert_eq!(restored.unwrap(), fact);
     }
 
+    /// Reducer returns None when context doesn't match — prevents messages
+    /// from one channel leaking into another channel's view.
     #[test]
     fn reducer_rejects_context_mismatch() {
         let reducer = ChatFactReducer;
@@ -580,6 +582,8 @@ mod tests {
         }
     }
 
+    /// Reducing the same fact twice produces identical bindings — needed
+    /// for replay-safe journal reduction.
     #[test]
     fn test_reducer_idempotence() {
         let reducer = ChatFactReducer;

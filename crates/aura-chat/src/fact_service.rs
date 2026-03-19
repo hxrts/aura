@@ -106,6 +106,8 @@ mod tests {
     use aura_core::types::identifiers::{AuthorityId, ContextId};
     use aura_core::FlowCost;
 
+    /// Channel creation denied without required capability — chat operations
+    /// are capability-gated.
     #[test]
     fn denied_when_missing_capability() {
         let service = ChatFactService::new();
@@ -130,6 +132,8 @@ mod tests {
         ));
     }
 
+    /// Budget charge precedes journal append in the effect list — enforces
+    /// charge-before-send ordering.
     #[test]
     fn approved_orders_budget_before_journal_append() {
         let service = ChatFactService::new();

@@ -544,6 +544,8 @@ mod tests {
         assert!(deltas.is_empty());
     }
 
+    /// Delta compaction merges ChannelAdded + ChannelUpdated into one delta
+    /// with the latest name/topic/member_count.
     #[test]
     fn test_compact_deltas_merges_channel_updates() {
         let deltas = vec![

@@ -69,6 +69,33 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines context isolation and deterministic reduction.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines consistency expectations.
+## Testing
+
+### Strategy
+
+All tests are inline — appropriate for a messaging domain crate whose tests
+verify fact reduction, guard evaluation, and view derivation. No integration
+test surface is needed.
+
+### Running tests
+
+```
+cargo test -p aura-chat
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Message reduces in wrong context | `src/facts.rs` `reducer_rejects_context_mismatch` | Covered |
+| Fact serialization roundtrip lossy | `src/facts.rs` `test_chat_fact_serialization` | Covered |
+| Reducer non-idempotent | `src/facts.rs` `test_reducer_idempotence` | Covered |
+| Type ID inconsistent across variants | `src/facts.rs` `test_type_id_consistency` | Covered |
+| Capability check bypassed | `src/fact_service.rs` `denied_when_missing_capability` | Covered |
+| Budget not charged before journal append | `src/fact_service.rs` `approved_orders_budget_before_journal_append` | Covered |
+| Channel view delta compaction wrong | `src/view.rs` `test_compact_deltas_merges_channel_updates` | Covered |
+| Group membership check incorrect | `src/group.rs` `test_group_membership` | Covered |
+
 ## Boundaries
 - Encryption/decryption lives in aura-effects (crypto handlers).
 - Transport coordination lives in aura-protocol.
