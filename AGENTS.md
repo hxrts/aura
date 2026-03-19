@@ -246,6 +246,29 @@ Key generation and agreement are orthogonal:
 
 Fast paths (A1/A2) must be superseded by A3 for durable shared state.
 
+## Ownership Model
+
+- `Pure` → reducers, validators, typed contracts
+- `MoveOwned` → handles, owner tokens, transfer/handoff records,
+  `OperationContext`, consumed `TerminalPublisher`
+- `ActorOwned` → long-lived mutable async state, supervisors, coordinators,
+  `OwnedTaskSpawner`, `OwnedShutdownToken`, bounded ingress
+- `Observed` → projections, rendering, harness reads
+
+Rules:
+- parity-critical mutation/publication must be capability-gated
+- long-lived async flows need a single owner
+- terminal lifecycle belongs to owner modules, not UI/harness layers
+- parity-critical operations must end in typed success, failure, or
+  cancellation
+- frontend-local submission ownership must hand off before the first awaited
+  app/runtime workflow step if the frontend is not the terminal owner
+- best-effort work must not block primary terminal publication
+- semantic owners may only use approved bounded-await / retry helpers
+- canonical ownership/runtime primitives for parity-critical code come from
+  `aura-core::ownership` through the explicit `actor_owned`, `move_owned`, and
+  `capability_gated` surfaces
+
 ### Time System
 
 Four domains via effect traits (no direct `SystemTime::now()` or chrono):

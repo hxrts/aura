@@ -1,10 +1,14 @@
 use crate::{
+    effects::task::{CancellationToken, NeverCancel, TaskSpawner},
     effects::{CapabilityKey, CapabilityTokenRequest},
     AuraError, ProtocolErrorCode,
+    TimeoutBudget,
 };
+use futures::future::{BoxFuture, LocalBoxFuture};
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Repo-wide ownership taxonomy for parity-critical surfaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -294,24 +298,307 @@ where
     CapabilityTokenRequest::standard(&subject, &permissions)
 }
 
-/// Capability-gated lifecycle publication artifact.
-///
-/// Higher layers should require this wrapper, or an equivalent owner-scoped
-/// capability check, before authoring parity-critical lifecycle facts.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthorizedLifecyclePublication<Phase, Output, Error> {
-    capability: LifecyclePublicationCapability,
-    lifecycle: OperationLifecycle<Phase, Output, Error>,
+/// Typed owner epoch for move-owned operation boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OwnerEpoch(u64);
+
+impl OwnerEpoch {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
 }
 
-impl<Phase, Output, Error> AuthorizedLifecyclePublication<Phase, Output, Error> {
-    pub fn authorize(
+/// Typed publication sequence for exact-owner publication ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PublicationSequence(u64);
+
+impl PublicationSequence {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+
+    pub const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
+    }
+}
+
+/// Typed trace/span context for ownership-bearing operation boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct TraceContext {
+    trace_id: Option<String>,
+    span_id: Option<String>,
+}
+
+impl TraceContext {
+    pub fn new(trace_id: Option<String>, span_id: Option<String>) -> Self {
+        Self { trace_id, span_id }
+    }
+
+    pub const fn detached() -> Self {
+        Self {
+            trace_id: None,
+            span_id: None,
+        }
+    }
+
+    pub fn trace_id(&self) -> Option<&str> {
+        self.trace_id.as_deref()
+    }
+
+    pub fn span_id(&self) -> Option<&str> {
+        self.span_id.as_deref()
+    }
+}
+
+/// Typed timeout budget surface for operation ownership contexts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperationTimeoutBudget {
+    Configured(TimeoutBudget),
+    DeferredLocalPolicy,
+}
+
+impl OperationTimeoutBudget {
+    pub fn configured(timeout_budget: TimeoutBudget) -> Self {
+        Self::Configured(timeout_budget)
+    }
+
+    pub const fn deferred_local_policy() -> Self {
+        Self::DeferredLocalPolicy
+    }
+
+    pub fn configured_budget(&self) -> Option<&TimeoutBudget> {
+        match self {
+            Self::Configured(timeout_budget) => Some(timeout_budget),
+            Self::DeferredLocalPolicy => None,
+        }
+    }
+}
+
+/// Owned shutdown/cancellation token wrapper for parity-critical boundaries.
+#[derive(Clone)]
+pub struct OwnedShutdownToken {
+    inner: Option<Arc<dyn CancellationToken>>,
+}
+
+impl std::fmt::Debug for OwnedShutdownToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedShutdownToken")
+            .field("attached", &self.inner.is_some())
+            .finish()
+    }
+}
+
+impl OwnedShutdownToken {
+    pub fn attached(token: Arc<dyn CancellationToken>) -> Self {
+        Self { inner: Some(token) }
+    }
+
+    pub const fn detached() -> Self {
+        Self { inner: None }
+    }
+
+    pub async fn cancelled(&self) {
+        match &self.inner {
+            Some(token) => token.cancelled().await,
+            None => NeverCancel.cancelled().await,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.inner
+            .as_ref()
+            .is_some_and(|token| token.is_cancelled())
+    }
+
+    pub fn raw(&self) -> Option<&Arc<dyn CancellationToken>> {
+        self.inner.as_ref()
+    }
+}
+
+/// Owned task spawner wrapper for actor-owned or move-owned owners that may
+/// create sanctioned background work.
+#[derive(Clone)]
+pub struct OwnedTaskSpawner {
+    inner: Arc<dyn TaskSpawner>,
+    shutdown: OwnedShutdownToken,
+}
+
+impl std::fmt::Debug for OwnedTaskSpawner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedTaskSpawner").finish_non_exhaustive()
+    }
+}
+
+impl OwnedTaskSpawner {
+    pub fn new(inner: Arc<dyn TaskSpawner>, shutdown: OwnedShutdownToken) -> Self {
+        Self { inner, shutdown }
+    }
+
+    pub fn shutdown_token(&self) -> &OwnedShutdownToken {
+        &self.shutdown
+    }
+
+    pub fn spawn(&self, fut: BoxFuture<'static, ()>) {
+        self.inner.spawn(fut);
+    }
+
+    pub fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>) {
+        let token = self
+            .shutdown
+            .raw()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NeverCancel));
+        self.inner.spawn_cancellable(fut, token);
+    }
+
+    pub fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
+        self.inner.spawn_local(fut);
+    }
+
+    pub fn spawn_local_cancellable(&self, fut: LocalBoxFuture<'static, ()>) {
+        let token = self
+            .shutdown
+            .raw()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NeverCancel));
+        self.inner.spawn_local_cancellable(fut, token);
+    }
+}
+
+/// Opaque owned task handle metadata for parity-critical bookkeeping.
+#[derive(Debug, Clone)]
+pub struct OwnedTaskHandle<HandleId> {
+    handle_id: HandleId,
+    shutdown: OwnedShutdownToken,
+}
+
+impl<HandleId> OwnedTaskHandle<HandleId> {
+    pub fn new(handle_id: HandleId, shutdown: OwnedShutdownToken) -> Self {
+        Self {
+            handle_id,
+            shutdown,
+        }
+    }
+
+    pub fn handle_id(&self) -> &HandleId {
+        &self.handle_id
+    }
+
+    pub fn shutdown_token(&self) -> &OwnedShutdownToken {
+        &self.shutdown
+    }
+}
+
+/// Typed bounded actor-ingress/mailbox declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundedActorIngress<Domain, Message> {
+    owner_name: &'static str,
+    capacity: u32,
+    _domain: PhantomData<fn() -> Domain>,
+    _message: PhantomData<fn() -> Message>,
+}
+
+impl<Domain, Message> BoundedActorIngress<Domain, Message> {
+    pub fn new(owner_name: &'static str, capacity: u32) -> Self {
+        Self {
+            owner_name,
+            capacity,
+            _domain: PhantomData,
+            _message: PhantomData,
+        }
+    }
+
+    pub fn owner_name(&self) -> &'static str {
+        self.owner_name
+    }
+
+    pub fn capacity(&self) -> u32 {
+        self.capacity
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublicationMetadata<OperationId, InstanceId, Trace = TraceContext> {
+    operation_id: OperationId,
+    instance_id: InstanceId,
+    owner_epoch: OwnerEpoch,
+    publication_sequence: PublicationSequence,
+    trace_context: Trace,
+}
+
+impl<OperationId, InstanceId, Trace> PublicationMetadata<OperationId, InstanceId, Trace> {
+    fn new(
+        operation_id: OperationId,
+        instance_id: InstanceId,
+        owner_epoch: OwnerEpoch,
+        publication_sequence: PublicationSequence,
+        trace_context: Trace,
+    ) -> Self {
+        Self {
+            operation_id,
+            instance_id,
+            owner_epoch,
+            publication_sequence,
+            trace_context,
+        }
+    }
+}
+
+/// Non-terminal progress states for exact owner publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum OperationProgress<Phase> {
+    Submitted,
+    Progress { phase: Phase },
+}
+
+impl<Phase> OperationProgress<Phase> {
+    pub const fn submitted() -> Self {
+        Self::Submitted
+    }
+
+    pub fn progress(phase: Phase) -> Self {
+        Self::Progress { phase }
+    }
+}
+
+/// Terminal outcome for consumed terminal publication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TerminalOutcome<Output, Error> {
+    Succeeded { output: Output },
+    Failed { error: Error },
+    Cancelled,
+}
+
+/// Capability-gated progress publication artifact.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase> {
+    capability: LifecyclePublicationCapability,
+    metadata: PublicationMetadata<OperationId, InstanceId, Trace>,
+    progress: OperationProgress<Phase>,
+}
+
+impl<OperationId, InstanceId, Trace, Phase>
+    AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+{
+    fn authorize(
         capability: &LifecyclePublicationCapability,
-        lifecycle: OperationLifecycle<Phase, Output, Error>,
+        metadata: PublicationMetadata<OperationId, InstanceId, Trace>,
+        progress: OperationProgress<Phase>,
     ) -> Self {
         Self {
             capability: capability.clone(),
-            lifecycle,
+            metadata,
+            progress,
         }
     }
 
@@ -319,17 +606,408 @@ impl<Phase, Output, Error> AuthorizedLifecyclePublication<Phase, Output, Error> 
         self.capability.as_key()
     }
 
-    pub fn lifecycle(&self) -> &OperationLifecycle<Phase, Output, Error> {
-        &self.lifecycle
+    pub fn operation_id(&self) -> &OperationId {
+        &self.metadata.operation_id
+    }
+
+    pub fn instance_id(&self) -> &InstanceId {
+        &self.metadata.instance_id
+    }
+
+    pub fn owner_epoch(&self) -> OwnerEpoch {
+        self.metadata.owner_epoch
+    }
+
+    pub fn publication_sequence(&self) -> PublicationSequence {
+        self.metadata.publication_sequence
+    }
+
+    pub fn trace_context(&self) -> &Trace {
+        &self.metadata.trace_context
+    }
+
+    pub fn progress(&self) -> &OperationProgress<Phase> {
+        &self.progress
     }
 
     pub fn into_parts(
         self,
     ) -> (
         LifecyclePublicationCapability,
-        OperationLifecycle<Phase, Output, Error>,
+        OperationId,
+        InstanceId,
+        OwnerEpoch,
+        PublicationSequence,
+        Trace,
+        OperationProgress<Phase>,
     ) {
-        (self.capability, self.lifecycle)
+        (
+            self.capability,
+            self.metadata.operation_id,
+            self.metadata.instance_id,
+            self.metadata.owner_epoch,
+            self.metadata.publication_sequence,
+            self.metadata.trace_context,
+            self.progress,
+        )
+    }
+}
+
+/// Consumed single-use terminal publisher.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TerminalPublisher<OperationId, InstanceId, Trace, Output, Error> {
+    capability: LifecyclePublicationCapability,
+    metadata: PublicationMetadata<OperationId, InstanceId, Trace>,
+    _output: PhantomData<fn() -> Output>,
+    _error: PhantomData<fn() -> Error>,
+}
+
+impl<OperationId, InstanceId, Trace, Output, Error>
+    TerminalPublisher<OperationId, InstanceId, Trace, Output, Error>
+{
+    fn new(
+        capability: &LifecyclePublicationCapability,
+        metadata: PublicationMetadata<OperationId, InstanceId, Trace>,
+    ) -> Self {
+        Self {
+            capability: capability.clone(),
+            metadata,
+            _output: PhantomData,
+            _error: PhantomData,
+        }
+    }
+
+    pub fn succeed(
+        self,
+        output: Output,
+    ) -> AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error> {
+        AuthorizedTerminalPublication {
+            capability: self.capability,
+            metadata: self.metadata,
+            outcome: TerminalOutcome::Succeeded { output },
+        }
+    }
+
+    pub fn fail(
+        self,
+        error: Error,
+    ) -> AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error> {
+        AuthorizedTerminalPublication {
+            capability: self.capability,
+            metadata: self.metadata,
+            outcome: TerminalOutcome::Failed { error },
+        }
+    }
+
+    pub fn cancel(
+        self,
+    ) -> AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error> {
+        AuthorizedTerminalPublication {
+            capability: self.capability,
+            metadata: self.metadata,
+            outcome: TerminalOutcome::Cancelled,
+        }
+    }
+}
+
+/// Capability-gated consumed terminal publication artifact.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error> {
+    capability: LifecyclePublicationCapability,
+    metadata: PublicationMetadata<OperationId, InstanceId, Trace>,
+    outcome: TerminalOutcome<Output, Error>,
+}
+
+impl<OperationId, InstanceId, Trace, Output, Error>
+    AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+{
+    pub fn capability(&self) -> &CapabilityKey {
+        self.capability.as_key()
+    }
+
+    pub fn operation_id(&self) -> &OperationId {
+        &self.metadata.operation_id
+    }
+
+    pub fn instance_id(&self) -> &InstanceId {
+        &self.metadata.instance_id
+    }
+
+    pub fn owner_epoch(&self) -> OwnerEpoch {
+        self.metadata.owner_epoch
+    }
+
+    pub fn publication_sequence(&self) -> PublicationSequence {
+        self.metadata.publication_sequence
+    }
+
+    pub fn trace_context(&self) -> &Trace {
+        &self.metadata.trace_context
+    }
+
+    pub fn outcome(&self) -> &TerminalOutcome<Output, Error> {
+        &self.outcome
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        LifecyclePublicationCapability,
+        OperationId,
+        InstanceId,
+        OwnerEpoch,
+        PublicationSequence,
+        Trace,
+        TerminalOutcome<Output, Error>,
+    ) {
+        (
+            self.capability,
+            self.metadata.operation_id,
+            self.metadata.instance_id,
+            self.metadata.owner_epoch,
+            self.metadata.publication_sequence,
+            self.metadata.trace_context,
+            self.outcome,
+        )
+    }
+}
+
+/// Opaque move-owned workflow context.
+#[derive(Debug)]
+pub struct OperationContext<OperationId, InstanceId, Trace = TraceContext> {
+    operation_id: OperationId,
+    instance_id: InstanceId,
+    owner_epoch: OwnerEpoch,
+    publication_sequence: PublicationSequence,
+    timeout_budget: OperationTimeoutBudget,
+    shutdown_token: OwnedShutdownToken,
+    trace_context: Trace,
+}
+
+impl<OperationId, InstanceId, Trace> OperationContext<OperationId, InstanceId, Trace> {
+    fn metadata(&self) -> PublicationMetadata<OperationId, InstanceId, Trace>
+    where
+        OperationId: Clone,
+        InstanceId: Clone,
+        Trace: Clone,
+    {
+        PublicationMetadata::new(
+            self.operation_id.clone(),
+            self.instance_id.clone(),
+            self.owner_epoch,
+            self.publication_sequence,
+            self.trace_context.clone(),
+        )
+    }
+
+    pub fn operation_id(&self) -> &OperationId {
+        &self.operation_id
+    }
+
+    pub fn instance_id(&self) -> &InstanceId {
+        &self.instance_id
+    }
+
+    pub fn owner_epoch(&self) -> OwnerEpoch {
+        self.owner_epoch
+    }
+
+    pub fn publication_sequence(&self) -> PublicationSequence {
+        self.publication_sequence
+    }
+
+    pub fn timeout_budget(&self) -> &OperationTimeoutBudget {
+        &self.timeout_budget
+    }
+
+    pub fn shutdown_token(&self) -> &OwnedShutdownToken {
+        &self.shutdown_token
+    }
+
+    pub fn trace_context(&self) -> &Trace {
+        &self.trace_context
+    }
+
+    pub fn publish_update<Phase>(
+        &mut self,
+        capability: &LifecyclePublicationCapability,
+        progress: OperationProgress<Phase>,
+    ) -> AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+    where
+        OperationId: Clone,
+        InstanceId: Clone,
+        Trace: Clone,
+    {
+        let publication = AuthorizedProgressPublication::authorize(
+            capability,
+            self.metadata(),
+            progress,
+        );
+        self.publication_sequence = self.publication_sequence.next();
+        publication
+    }
+
+    pub fn publish_submitted(
+        &mut self,
+        capability: &LifecyclePublicationCapability,
+    ) -> AuthorizedProgressPublication<OperationId, InstanceId, Trace, ()>
+    where
+        OperationId: Clone,
+        InstanceId: Clone,
+        Trace: Clone,
+    {
+        self.publish_update(capability, OperationProgress::submitted())
+    }
+
+    pub fn publish_progress<Phase>(
+        &mut self,
+        capability: &LifecyclePublicationCapability,
+        phase: Phase,
+    ) -> AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+    where
+        OperationId: Clone,
+        InstanceId: Clone,
+        Trace: Clone,
+    {
+        self.publish_update(capability, OperationProgress::progress(phase))
+    }
+
+    pub fn begin_terminal<Output, Error>(
+        self,
+        capability: &LifecyclePublicationCapability,
+    ) -> TerminalPublisher<OperationId, InstanceId, Trace, Output, Error> {
+        TerminalPublisher::new(
+            capability,
+            PublicationMetadata::new(
+                self.operation_id,
+                self.instance_id,
+                self.owner_epoch,
+                self.publication_sequence,
+                self.trace_context,
+            ),
+        )
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Sealed trait for owner-controlled await/cancellation surfaces.
+pub trait OwnerAwait: sealed::Sealed {
+    fn owned_shutdown_token(&self) -> &OwnedShutdownToken;
+}
+
+/// Sealed trait for owner-controlled publication surfaces.
+pub trait OwnerPublication: sealed::Sealed {
+    type OperationId;
+    type InstanceId;
+    type Trace;
+
+    fn operation_id(&self) -> &Self::OperationId;
+    fn instance_id(&self) -> &Self::InstanceId;
+    fn owner_epoch(&self) -> OwnerEpoch;
+    fn publication_sequence(&self) -> PublicationSequence;
+    fn trace_context(&self) -> &Self::Trace;
+}
+
+impl<OperationId, InstanceId, Trace> sealed::Sealed for OperationContext<OperationId, InstanceId, Trace> {}
+impl<OperationId, InstanceId, Trace> OwnerAwait for OperationContext<OperationId, InstanceId, Trace> {
+    fn owned_shutdown_token(&self) -> &OwnedShutdownToken {
+        self.shutdown_token()
+    }
+}
+
+impl<OperationId, InstanceId, Trace, Phase> sealed::Sealed
+    for AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+{
+}
+
+impl<OperationId, InstanceId, Trace, Phase> OwnerPublication
+    for AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+{
+    type OperationId = OperationId;
+    type InstanceId = InstanceId;
+    type Trace = Trace;
+
+    fn operation_id(&self) -> &Self::OperationId {
+        self.operation_id()
+    }
+
+    fn instance_id(&self) -> &Self::InstanceId {
+        self.instance_id()
+    }
+
+    fn owner_epoch(&self) -> OwnerEpoch {
+        self.owner_epoch()
+    }
+
+    fn publication_sequence(&self) -> PublicationSequence {
+        self.publication_sequence()
+    }
+
+    fn trace_context(&self) -> &Self::Trace {
+        self.trace_context()
+    }
+}
+
+/// Explicit actor-owned ownership surface.
+pub mod actor_owned {
+    pub use super::{BoundedActorIngress, OwnedShutdownToken, OwnedTaskHandle, OwnedTaskSpawner};
+}
+
+/// Explicit move-owned ownership surface.
+pub mod move_owned {
+    pub use super::{
+        issue_operation_handle, issue_owner_token, OpaqueOperationHandle, OperationContext,
+        OperationProgress, OperationTimeoutBudget, OwnerAwait, OwnerEpoch, OwnerPublication,
+        OwnerToken, OwnershipTransfer, PublicationSequence, TerminalOutcome, TerminalPublisher,
+        Terminality, TraceContext,
+    };
+}
+
+/// Explicit capability-gated minting/publication surface.
+pub mod capability_gated {
+    pub use super::{
+        issue_operation_context, ownership_capability_token_request_for,
+        ActorIngressMutationCapability, AuthorizedActorIngressMutation,
+        AuthorizedProgressPublication, AuthorizedReadinessPublication,
+        AuthorizedTerminalPublication, LifecyclePublicationCapability,
+        OperationContextCapability, OwnershipCapability, OwnershipTransferCapability,
+        ReadinessPublicationCapability,
+    };
+}
+
+impl<OperationId, InstanceId, Trace, Output, Error> sealed::Sealed
+    for AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+{
+}
+
+impl<OperationId, InstanceId, Trace, Output, Error> OwnerPublication
+    for AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+{
+    type OperationId = OperationId;
+    type InstanceId = InstanceId;
+    type Trace = Trace;
+
+    fn operation_id(&self) -> &Self::OperationId {
+        self.operation_id()
+    }
+
+    fn instance_id(&self) -> &Self::InstanceId {
+        self.instance_id()
+    }
+
+    fn owner_epoch(&self) -> OwnerEpoch {
+        self.owner_epoch()
+    }
+
+    fn publication_sequence(&self) -> PublicationSequence {
+        self.publication_sequence()
+    }
+
+    fn trace_context(&self) -> &Self::Trace {
+        self.trace_context()
     }
 }
 
@@ -446,6 +1124,10 @@ ownership_capability_wrapper!(
     LifecyclePublicationCapability
 );
 ownership_capability_wrapper!(
+    /// Capability required to mint opaque operation contexts.
+    OperationContextCapability
+);
+ownership_capability_wrapper!(
     /// Capability required to publish authoritative readiness updates.
     ReadinessPublicationCapability
 );
@@ -469,6 +1151,29 @@ pub fn issue_operation_handle<Kind, HandleId, InstanceId>(
         handle_id,
         instance_id,
         _kind: PhantomData,
+    }
+}
+
+/// Issue an opaque move-owned operation context through the sanctioned context
+/// capability path.
+pub fn issue_operation_context<OperationId, InstanceId, Trace>(
+    _capability: &OperationContextCapability,
+    operation_id: OperationId,
+    instance_id: InstanceId,
+    owner_epoch: OwnerEpoch,
+    publication_sequence: PublicationSequence,
+    timeout_budget: OperationTimeoutBudget,
+    shutdown_token: OwnedShutdownToken,
+    trace_context: Trace,
+) -> OperationContext<OperationId, InstanceId, Trace> {
+    OperationContext {
+        operation_id,
+        instance_id,
+        owner_epoch,
+        publication_sequence,
+        timeout_budget,
+        shutdown_token,
+        trace_context,
     }
 }
 
@@ -584,60 +1289,6 @@ impl<Scope, TokenId, Recipient> OwnershipTransfer<Scope, TokenId, Recipient> {
     }
 }
 
-/// Generic typed lifecycle for long-running parity-critical operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum OperationLifecycle<Phase, Output, Error> {
-    Submitted,
-    Progress { phase: Phase },
-    Succeeded { output: Output },
-    Failed { error: Error },
-    Cancelled,
-}
-
-impl<Phase, Output, Error> OperationLifecycle<Phase, Output, Error> {
-    pub fn submitted() -> Self {
-        Self::Submitted
-    }
-
-    pub fn progress(phase: Phase) -> Self {
-        Self::Progress { phase }
-    }
-
-    pub fn succeeded(output: Output) -> Self {
-        Self::Succeeded { output }
-    }
-
-    pub fn failed(error: Error) -> Self {
-        Self::Failed { error }
-    }
-
-    pub fn cancelled() -> Self {
-        Self::Cancelled
-    }
-
-    pub fn phase(&self) -> Option<&Phase> {
-        match self {
-            Self::Progress { phase } => Some(phase),
-            _ => None,
-        }
-    }
-
-    pub fn output(&self) -> Option<&Output> {
-        match self {
-            Self::Succeeded { output } => Some(output),
-            _ => None,
-        }
-    }
-
-    pub fn error(&self) -> Option<&Error> {
-        match self {
-            Self::Failed { error } => Some(error),
-            _ => None,
-        }
-    }
-}
-
 /// Terminality helper trait for lifecycle-like state machines.
 pub trait Terminality {
     fn is_terminal(&self) -> bool;
@@ -648,12 +1299,9 @@ pub trait Terminality {
     fn is_cancelled(&self) -> bool;
 }
 
-impl<Phase, Output, Error> Terminality for OperationLifecycle<Phase, Output, Error> {
+impl<Phase> Terminality for OperationProgress<Phase> {
     fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Succeeded { .. } | Self::Failed { .. } | Self::Cancelled
-        )
+        false
     }
 
     fn is_submitted(&self) -> bool {
@@ -662,6 +1310,32 @@ impl<Phase, Output, Error> Terminality for OperationLifecycle<Phase, Output, Err
 
     fn is_in_progress(&self) -> bool {
         matches!(self, Self::Progress { .. })
+    }
+
+    fn is_succeeded(&self) -> bool {
+        false
+    }
+
+    fn is_failed(&self) -> bool {
+        false
+    }
+
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+}
+
+impl<Output, Error> Terminality for TerminalOutcome<Output, Error> {
+    fn is_terminal(&self) -> bool {
+        true
+    }
+
+    fn is_submitted(&self) -> bool {
+        false
+    }
+
+    fn is_in_progress(&self) -> bool {
+        false
     }
 
     fn is_succeeded(&self) -> bool {
@@ -681,12 +1355,13 @@ impl<Phase, Output, Error> Terminality for OperationLifecycle<Phase, Output, Err
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        issue_operation_handle, issue_owner_token, ActorIngressMutationCapability,
-        AuthorizedActorIngressMutation, AuthorizedLifecyclePublication,
-        AuthorizedReadinessPublication, LifecyclePublicationCapability, OperationLifecycle,
-        OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain,
-        OwnershipTransfer, OwnershipTransferCapability, ReadinessPublicationCapability,
-        Terminality,
+        issue_operation_context, issue_operation_handle, issue_owner_token,
+        ActorIngressMutationCapability, AuthorizedActorIngressMutation,
+        AuthorizedReadinessPublication, LifecyclePublicationCapability, OperationContextCapability,
+        OperationProgress, OperationTimeoutBudget, OwnedShutdownToken, OwnershipCapability,
+        OwnershipCategory, OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
+        OwnershipTransferCapability, OwnerEpoch, PublicationSequence, ReadinessPublicationCapability,
+        TerminalOutcome, Terminality, TraceContext,
     };
     use crate::{effects::CapabilityKey, AuraError, ProtocolErrorCode};
 
@@ -722,28 +1397,24 @@ mod tests {
     }
 
     #[test]
-    fn operation_lifecycle_reports_terminality() {
-        let submitted = OperationLifecycle::<&'static str, (), &'static str>::submitted();
+    fn progress_and_terminal_outcome_report_terminality() {
+        let submitted = OperationProgress::<&'static str>::submitted();
         assert!(submitted.is_submitted());
         assert!(!submitted.is_terminal());
 
-        let progress = OperationLifecycle::<&'static str, (), &'static str>::progress("waiting");
+        let progress = OperationProgress::<&'static str>::progress("waiting");
         assert!(progress.is_in_progress());
-        assert_eq!(progress.phase(), Some(&"waiting"));
         assert!(!progress.is_terminal());
 
-        let success =
-            OperationLifecycle::<&'static str, &'static str, &'static str>::succeeded("done");
+        let success = TerminalOutcome::<&'static str, &'static str>::Succeeded { output: "done" };
         assert!(success.is_succeeded());
         assert!(success.is_terminal());
-        assert_eq!(success.output(), Some(&"done"));
 
-        let failed = OperationLifecycle::<&'static str, (), &'static str>::failed("timeout");
+        let failed = TerminalOutcome::<(), &'static str>::Failed { error: "timeout" };
         assert!(failed.is_failed());
         assert!(failed.is_terminal());
-        assert_eq!(failed.error(), Some(&"timeout"));
 
-        let cancelled = OperationLifecycle::<&'static str, (), &'static str>::cancelled();
+        let cancelled = TerminalOutcome::<(), &'static str>::Cancelled;
         assert!(cancelled.is_cancelled());
         assert!(cancelled.is_terminal());
     }
@@ -803,14 +1474,31 @@ mod tests {
     #[test]
     fn lifecycle_publication_requires_capability_wrapper() {
         let capability = LifecyclePublicationCapability::new("semantic:lifecycle");
-        let publication =
-            AuthorizedLifecyclePublication::<&'static str, (), &'static str>::authorize(
-                &capability,
-                OperationLifecycle::submitted(),
-            );
+        let context_capability = OperationContextCapability::new("operation:context");
+        let mut context = issue_operation_context(
+            &context_capability,
+            "invitation_accept",
+            7u64,
+            OwnerEpoch::new(3),
+            PublicationSequence::new(9),
+            OperationTimeoutBudget::deferred_local_policy(),
+            OwnedShutdownToken::detached(),
+            TraceContext::detached(),
+        );
 
-        assert_eq!(publication.capability().as_str(), "semantic:lifecycle");
-        assert!(publication.lifecycle().is_submitted());
+        let progress = context.publish_update(&capability, OperationProgress::<()>::submitted());
+        assert_eq!(progress.capability().as_str(), "semantic:lifecycle");
+        assert_eq!(progress.operation_id(), &"invitation_accept");
+        assert_eq!(progress.instance_id(), &7u64);
+        assert_eq!(progress.owner_epoch().value(), 3);
+        assert_eq!(progress.publication_sequence().value(), 9);
+        assert!(matches!(progress.progress(), OperationProgress::Submitted));
+
+        let terminal = context
+            .begin_terminal::<(), &'static str>(&capability)
+            .succeed(());
+        assert_eq!(terminal.capability().as_str(), "semantic:lifecycle");
+        assert!(matches!(terminal.outcome(), TerminalOutcome::Succeeded { .. }));
     }
 
     #[test]

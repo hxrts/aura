@@ -100,6 +100,9 @@ transferred, and how failure terminates, the architecture is incomplete.
   higher layers
 - does not own long-lived mutable runtime state
 - provides capability-gated boundaries rather than bypassing them
+- the canonical ownership/runtime API lives in `aura-core::ownership` and is
+  explicitly split into `actor_owned::*`, `move_owned::*`, and
+  `capability_gated::*`
 
 **Exceptions**:
 

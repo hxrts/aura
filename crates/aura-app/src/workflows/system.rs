@@ -23,8 +23,7 @@ use crate::workflows::runtime::workflow_best_effort;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::task::TaskSpawner;
-use aura_core::AuraError;
+use aura_core::{AuraError, OwnedTaskSpawner};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -296,7 +295,7 @@ async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+fn spawn_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -304,7 +303,7 @@ where
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+fn spawn_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
     F: Future<Output = ()> + 'static,
 {
@@ -312,19 +311,19 @@ where
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_cancellable_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+fn spawn_cancellable_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    spawner.spawn_cancellable(Box::pin(fut), spawner.cancellation_token());
+    spawner.spawn_cancellable(Box::pin(fut));
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_cancellable_runtime_refresh_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+fn spawn_cancellable_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
     F: Future<Output = ()> + 'static,
 {
-    spawner.spawn_local_cancellable(Box::pin(fut), spawner.cancellation_token());
+    spawner.spawn_local_cancellable(Box::pin(fut));
 }
 
 /// Refresh connection + network status derived from CONTACTS_SIGNAL.

@@ -1,9 +1,19 @@
-error[E0451]: fields `capability` and `lifecycle` of struct `AuthorizedLifecyclePublication` are private
-  --> tests/ui/authorized_lifecycle_private_fields.rs:10:9
+error[E0451]: fields `operation_id`, `instance_id`, `owner_epoch`, `publication_sequence`, `timeout_budget`, `shutdown_token` and `trace_context` of struct `OperationContext` are private
+  --> tests/ui/authorized_lifecycle_private_fields.rs:6:9
    |
- 9 |     let _publication = AuthorizedLifecyclePublication {
-   |                        ------------------------------ in this type
-10 |         capability,
-   |         ^^^^^^^^^^ private field
-11 |         lifecycle,
-   |         ^^^^^^^^^ private field
+ 5 |     let _context = OperationContext {
+   |                    ---------------- in this type
+ 6 |         operation_id: "invitation_accept",
+   |         ^^^^^^^^^^^^ private field
+ 7 |         instance_id: 1u64,
+   |         ^^^^^^^^^^^ private field
+ 8 |         owner_epoch: OwnerEpoch::new(0),
+   |         ^^^^^^^^^^^ private field
+ 9 |         publication_sequence: PublicationSequence::new(0),
+   |         ^^^^^^^^^^^^^^^^^^^^ private field
+10 |         timeout_budget: OperationTimeoutBudget::deferred_local_policy(),
+   |         ^^^^^^^^^^^^^^ private field
+11 |         shutdown_token: OwnedShutdownToken::detached(),
+   |         ^^^^^^^^^^^^^^ private field
+12 |         trace_context: TraceContext::detached(),
+   |         ^^^^^^^^^^^^^ private field

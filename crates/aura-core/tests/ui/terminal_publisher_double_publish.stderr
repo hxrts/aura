@@ -1,0 +1,15 @@
+error[E0382]: use of moved value: `publisher`
+  --> tests/ui/terminal_publisher_double_publish.rs:21:13
+   |
+19 |     let publisher = context.begin_terminal::<(), &'static str>(&capability);
+   |         --------- move occurs because `publisher` has type `TerminalPublisher<&str, u64, TraceContext, (), &str>`, which does not implement the `Copy` trait
+20 |     let _ = publisher.cancel();
+   |                       -------- `publisher` moved due to this method call
+21 |     let _ = publisher.succeed(());
+   |             ^^^^^^^^^ value used here after move
+   |
+note: `TerminalPublisher::<OperationId, InstanceId, Trace, Output, Error>::cancel` takes ownership of the receiver `self`, which moves `publisher`
+  --> src/ownership.rs
+   |
+   |         self,
+   |         ^^^^

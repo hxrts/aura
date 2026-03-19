@@ -41,14 +41,13 @@ use aura_core::effects::amp::{
     AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
-use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::threshold::{
     AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::types::{Epoch, FrostThreshold};
-use aura_core::DeviceId;
+use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner};
 use aura_journal::fact::{FactOptions, RelationalFact};
 use std::sync::Arc;
 
@@ -385,14 +384,14 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// Runtime implementations can provide a portable task spawner so
     /// `aura-app` can schedule background work without binding to tokio.
-    fn task_spawner(&self) -> Option<Arc<dyn TaskSpawner>> {
+    fn task_spawner(&self) -> Option<OwnedTaskSpawner> {
         None
     }
 
     /// Optional runtime cancellation token for background work.
-    fn cancellation_token(&self) -> Option<Arc<dyn CancellationToken>> {
+    fn cancellation_token(&self) -> Option<OwnedShutdownToken> {
         self.task_spawner()
-            .map(|spawner| spawner.cancellation_token())
+            .map(|spawner| spawner.shutdown_token().clone())
     }
 
     // =========================================================================

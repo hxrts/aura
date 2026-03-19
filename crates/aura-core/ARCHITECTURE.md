@@ -28,13 +28,17 @@ foundational algebraic types with zero dependencies on other Aura crates.
 ## Ownership Model
 
 - `aura-core` is primarily `Pure`.
+- It defines the canonical ownership split through:
+  - `actor_owned::*` for long-lived task/mailbox ownership
+  - `move_owned::*` for consumed workflow, handoff, and terminal-publication
+    surfaces
+  - `capability_gated::*` for minting and publication authority
 - It defines shared `MoveOwned` vocabulary for higher layers such as opaque
-  handles, owner tokens, and transfer records.
-- It defines capability-gated authority wrappers for lifecycle publication,
-  readiness publication, actor-ingress mutation, and ownership-token issuance.
-- `ownership_capability_token_request_for(...)` is the sanctioned ownership
-  token-request entrypoint; Layer 1 should not keep parallel raw ownership-key
-  request helpers once typed capability families exist.
+  handles, owner tokens, transfer records, `OperationContext`, consumed
+  `TerminalPublisher`, `OwnerEpoch`, and `PublicationSequence`.
+- It defines capability-gated authority wrappers for progress publication,
+  terminal publication, readiness publication, actor-ingress mutation, and
+  operation-context issuance.
 - It must not own `ActorOwned` runtime state.
 - Capability-gated boundaries should be expressible in core types and traits,
   not bypassed by helper conventions in higher layers.
@@ -45,8 +49,8 @@ foundational algebraic types with zero dependencies on other Aura crates.
 
 | Surface | Category | Notes |
 |---------|----------|-------|
-| `src/ownership.rs` | `MoveOwned` | Canonical owner tokens, opaque handles, handoff records, capability-gated publication wrappers. No parallel raw ownership-token request helper remains. |
-| `src/time/timeout.rs` | `MoveOwned` | Typed timeout budgets, attempt budgets, and retry/backoff policy. These are consumed local-owner policy objects, not distributed semantic clocks. |
+| `src/ownership.rs` | `MoveOwned` + capability-gated + actor-owned vocabulary | Canonical `OperationContext`, consumed `TerminalPublisher`, exact progress/terminal publication wrappers, owner tokens, handoff records, owned spawner/shutdown wrappers, and explicit `actor_owned` / `move_owned` / `capability_gated` module layout. |
+| `src/time/timeout.rs` | `MoveOwned` | Typed timeout budgets, attempt budgets, and retry/backoff policy. These are consumed local-owner policy objects, not distributed semantic clocks. `OperationTimeoutBudget` is the workflow-facing wrapper. |
 | `src/effects/` | `Pure` | Effect traits and trait-level helper surfaces only. No long-lived owner state or runtime mutation. |
 | `src/domain/`, `src/types/`, `src/query.rs`, `src/messages/`, `src/tree/`, `src/crypto/` | `Pure` | Value-level domain/state/query/message/crypto contracts. |
 | Actor-owned runtime state | none | `aura-core` must not grow long-lived async owner state. |
@@ -54,7 +58,9 @@ foundational algebraic types with zero dependencies on other Aura crates.
 
 ### Capability-Gated Points
 
-- lifecycle publication wrappers in `src/ownership.rs`
+- operation-context issuance in `src/ownership.rs`
+- progress publication wrappers in `src/ownership.rs`
+- terminal publication wrappers in `src/ownership.rs`
 - readiness publication wrappers in `src/ownership.rs`
 - actor-ingress mutation wrappers in `src/ownership.rs`
 - ownership token issuance requests in `src/ownership.rs`

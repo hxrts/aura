@@ -245,6 +245,12 @@ pub struct EffectContext {
 
 Context propagation ensures that all operations within a call chain share the same scope. Guards access context to make authorization decisions. Handlers access context to route operations to the correct namespace.
 
+For parity-critical workflow ownership, Aura also uses a separate move-owned
+`OperationContext` from `aura-core::ownership`. `EffectContext` answers
+"where is this effect executing?"; `OperationContext` answers "who currently
+owns semantic lifecycle, timeout budget, and terminal publication for this
+workflow instance?" The two must not be conflated.
+
 ### 4.4 Impure function control
 
 Application code must not call system time, randomness, or IO directly. These operations must flow through effect traits. This constraint enables deterministic testing and simulation.

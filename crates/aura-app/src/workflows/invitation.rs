@@ -166,9 +166,10 @@ use crate::workflows::signals::read_signal_or_default;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::effects::task::TaskSpawner;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
-use aura_core::{AuraError, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError};
+use aura_core::{
+    AuraError, OwnedTaskSpawner, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError,
+};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -884,7 +885,7 @@ async fn best_effort_reconcile_channel_invitation_acceptance(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn_channel_invitation_reconcile_task<F>(
-    spawner: &Arc<dyn TaskSpawner>,
+    spawner: &OwnedTaskSpawner,
     future: F,
 ) where
     F: Future<Output = ()> + Send + 'static,
@@ -894,7 +895,7 @@ fn spawn_channel_invitation_reconcile_task<F>(
 
 #[cfg(target_arch = "wasm32")]
 fn spawn_channel_invitation_reconcile_task<F>(
-    spawner: &Arc<dyn TaskSpawner>,
+    spawner: &OwnedTaskSpawner,
     future: F,
 ) where
     F: Future<Output = ()> + 'static,

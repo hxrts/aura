@@ -29,7 +29,6 @@ use aura_core::effects::{
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
-    task::TaskSpawner,
     time::PhysicalTimeEffects,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
     ThresholdSigningEffects, TransportEffects, TransportEnvelope,
@@ -38,6 +37,7 @@ use aura_core::hash::hash;
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::OwnedTaskSpawner;
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_core::EffectContext;
@@ -530,7 +530,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         self.agent.runtime().effects().reactive_handler()
     }
 
-    fn task_spawner(&self) -> Option<Arc<dyn TaskSpawner>> {
+    fn task_spawner(&self) -> Option<OwnedTaskSpawner> {
         Some(self.agent.runtime().task_spawner())
     }
 

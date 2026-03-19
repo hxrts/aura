@@ -165,6 +165,9 @@ In practice this means:
 - timeout policy belongs to owner/coordinator code, not UI observation layers
 - reducing timeout duration in tests or harness mode is acceptable; changing
   what timeout means is not
+- runtime-facing workflow/task boundaries should carry `OperationTimeoutBudget`,
+  `OwnedShutdownToken`, and `OwnedTaskSpawner` rather than raw `Duration`,
+  raw cancellation traits, or ad hoc spawn helpers
 
 ## Guard Chain Execution
 

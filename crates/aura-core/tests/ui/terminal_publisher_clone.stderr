@@ -1,0 +1,5 @@
+error[E0599]: no method named `clone` found for struct `TerminalPublisher<OperationId, InstanceId, Trace, Output, Error>` in the current scope
+  --> tests/ui/terminal_publisher_clone.rs:20:28
+   |
+20 |     let _clone = publisher.clone();
+   |                            ^^^^^ method not found in `TerminalPublisher<&str, u64, TraceContext, (), &str>`

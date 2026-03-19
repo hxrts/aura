@@ -56,9 +56,9 @@ use aura_core::{
         ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
         ChannelSendParams,
     },
-    effects::task::TaskSpawner,
     types::{AuthorityId, ChannelId, ContextId},
-    AuraError, InvitationId, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError,
+    AuraError, InvitationId, OwnedTaskSpawner, RetryRunError, TimeoutBudget, TimeoutBudgetError,
+    TimeoutRunError,
 };
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
@@ -653,19 +653,19 @@ async fn send_chat_fact_with_retry(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_message_delivery_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+fn spawn_message_delivery_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    spawner.spawn_cancellable(Box::pin(fut), spawner.cancellation_token());
+    spawner.spawn_cancellable(Box::pin(fut));
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_message_delivery_task<F>(spawner: &Arc<dyn TaskSpawner>, fut: F)
+fn spawn_message_delivery_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
     F: Future<Output = ()> + 'static,
 {
-    spawner.spawn_local_cancellable(Box::pin(fut), spawner.cancellation_token());
+    spawner.spawn_local_cancellable(Box::pin(fut));
 }
 
 async fn mark_message_delivery_failed(

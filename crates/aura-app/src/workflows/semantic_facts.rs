@@ -2,9 +2,10 @@ use std::sync::{Arc, LazyLock};
 
 use async_lock::{Mutex, RwLock};
 use aura_core::{
-    AuraError, AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
-    LifecyclePublicationCapability, OperationLifecycle,
-    ReadinessPublicationCapability,
+    issue_operation_context, AuraError, AuthorizedProgressPublication,
+    AuthorizedReadinessPublication, AuthorizedTerminalPublication, LifecyclePublicationCapability,
+    OperationContextCapability, OperationProgress, OperationTimeoutBudget, OwnedShutdownToken,
+    OwnerEpoch, PublicationSequence, ReadinessPublicationCapability, TerminalOutcome, TraceContext,
 };
 
 use crate::signal_defs::{
@@ -37,6 +38,8 @@ static AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE: LazyLock<AuthoritativeSemanticF
     LazyLock::new(AuthoritativeSemanticFactsUpdateGate::new);
 static SEMANTIC_LIFECYCLE_PUBLICATION_CAPABILITY: LazyLock<LifecyclePublicationCapability> =
     LazyLock::new(|| LifecyclePublicationCapability::new("aura-app:semantic-lifecycle"));
+static SEMANTIC_OPERATION_CONTEXT_CAPABILITY: LazyLock<OperationContextCapability> =
+    LazyLock::new(|| OperationContextCapability::new("aura-app:semantic-operation-context"));
 static SEMANTIC_READINESS_PUBLICATION_CAPABILITY: LazyLock<ReadinessPublicationCapability> =
     LazyLock::new(|| ReadinessPublicationCapability::new("aura-app:semantic-readiness"));
 
@@ -57,12 +60,33 @@ fn authorize_readiness_publication(
     AuthorizedReadinessPublication::authorize(semantic_readiness_publication_capability(), fact)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ExactOperationLifecyclePublication {
     operation_id: OperationId,
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
-    publication: AuthorizedLifecyclePublication<SemanticOperationPhase, (), SemanticOperationError>,
+    publication: ExactLifecyclePublication,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExactLifecyclePublication {
+    Progress(
+        AuthorizedProgressPublication<
+            OperationId,
+            OperationInstanceId,
+            TraceContext,
+            SemanticOperationPhase,
+        >,
+    ),
+    Terminal(
+        AuthorizedTerminalPublication<
+            OperationId,
+            OperationInstanceId,
+            TraceContext,
+            (),
+            SemanticOperationError,
+        >,
+    ),
 }
 
 #[derive(Clone)]
@@ -152,17 +176,35 @@ impl ExactOperationLifecyclePublication {
             SemanticOperationPhase::Failed,
             "failed terminal publication requires explicit failure payload"
         );
-        let lifecycle = match phase {
-            SemanticOperationPhase::Submitted => OperationLifecycle::submitted(),
-            SemanticOperationPhase::Cancelled => OperationLifecycle::cancelled(),
-            SemanticOperationPhase::Succeeded => OperationLifecycle::succeeded(()),
-            phase => OperationLifecycle::progress(phase),
+        let mut context = issue_operation_context(
+            &SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
+            operation_id.clone(),
+            instance_id.clone(),
+            OwnerEpoch::new(0),
+            PublicationSequence::new(0),
+            OperationTimeoutBudget::deferred_local_policy(),
+            OwnedShutdownToken::detached(),
+            TraceContext::detached(),
+        );
+        let publication = match phase {
+            SemanticOperationPhase::Submitted => ExactLifecyclePublication::Progress(
+                context.publish_update(capability, OperationProgress::submitted()),
+            ),
+            SemanticOperationPhase::Cancelled => ExactLifecyclePublication::Terminal(
+                context.begin_terminal::<(), SemanticOperationError>(capability).cancel(),
+            ),
+            SemanticOperationPhase::Succeeded => ExactLifecyclePublication::Terminal(
+                context
+                    .begin_terminal::<(), SemanticOperationError>(capability)
+                    .succeed(()),
+            ),
+            phase => ExactLifecyclePublication::Progress(context.publish_progress(capability, phase)),
         };
         Self {
             operation_id,
             instance_id,
             kind,
-            publication: AuthorizedLifecyclePublication::authorize(capability, lifecycle),
+            publication,
         }
     }
 
@@ -173,30 +215,56 @@ impl ExactOperationLifecyclePublication {
         kind: SemanticOperationKind,
         error: SemanticOperationError,
     ) -> Self {
+        let context = issue_operation_context(
+            &SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
+            operation_id.clone(),
+            instance_id.clone(),
+            OwnerEpoch::new(0),
+            PublicationSequence::new(0),
+            OperationTimeoutBudget::deferred_local_policy(),
+            OwnedShutdownToken::detached(),
+            TraceContext::detached(),
+        );
         Self {
             operation_id,
             instance_id,
             kind,
-            publication: AuthorizedLifecyclePublication::authorize(
-                capability,
-                OperationLifecycle::failed(error),
+            publication: ExactLifecyclePublication::Terminal(
+                context
+                    .begin_terminal::<(), SemanticOperationError>(capability)
+                    .fail(error),
             ),
         }
     }
 
     pub(crate) fn into_fact(self) -> AuthoritativeSemanticFact {
-        let (_capability, lifecycle) = self.publication.into_parts();
-        let status = match lifecycle {
-            OperationLifecycle::Submitted => {
-                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Submitted)
+        let status = match self.publication {
+            ExactLifecyclePublication::Progress(publication) => {
+                let (_capability, _operation_id, _instance_id, _owner_epoch, _publication_sequence, _trace_context, progress) =
+                    publication.into_parts();
+                match progress {
+                    OperationProgress::Submitted => {
+                        SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Submitted)
+                    }
+                    OperationProgress::Progress { phase } => {
+                        SemanticOperationStatus::new(self.kind, phase)
+                    }
+                }
             }
-            OperationLifecycle::Progress { phase } => SemanticOperationStatus::new(self.kind, phase),
-            OperationLifecycle::Succeeded { .. } => {
-                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded)
-            }
-            OperationLifecycle::Failed { error } => SemanticOperationStatus::failed(self.kind, error),
-            OperationLifecycle::Cancelled => {
-                SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Cancelled)
+            ExactLifecyclePublication::Terminal(publication) => {
+                let (_capability, _operation_id, _instance_id, _owner_epoch, _publication_sequence, _trace_context, outcome) =
+                    publication.into_parts();
+                match outcome {
+                    TerminalOutcome::Succeeded { .. } => {
+                        SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded)
+                    }
+                    TerminalOutcome::Failed { error } => {
+                        SemanticOperationStatus::failed(self.kind, error)
+                    }
+                    TerminalOutcome::Cancelled => {
+                        SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Cancelled)
+                    }
+                }
             }
         };
 

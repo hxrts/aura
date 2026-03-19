@@ -1,0 +1,103 @@
+error[E0277]: the trait bound `FakePublication: ownership::sealed::Sealed` is not satisfied
+  --> tests/ui/sealed_owner_publication_impl.rs:10:5
+   |
+10 |     fn operation_id(&self) -> &Self::OperationId {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublication`
+  --> tests/ui/sealed_owner_publication_impl.rs:3:1
+   |
+ 3 | struct FakePublication;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `ownership::sealed::Sealed`:
+             AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+             AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+             OperationContext<OperationId, InstanceId, Trace>
+note: required by a bound in `OwnerPublication`
+  --> src/ownership.rs
+   |
+   | pub trait OwnerPublication: sealed::Sealed {
+   |                             ^^^^^^^^^^^^^^ required by this bound in `OwnerPublication`
+   = note: `OwnerPublication` is a "sealed trait", because to implement it you also need to implement `aura_core::ownership::sealed::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             aura_core::OperationContext<OperationId, InstanceId, Trace>
+             aura_core::AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+             aura_core::AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+
+error[E0277]: the trait bound `FakePublication: ownership::sealed::Sealed` is not satisfied
+  --> tests/ui/sealed_owner_publication_impl.rs:14:5
+   |
+14 |     fn instance_id(&self) -> &Self::InstanceId {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublication`
+  --> tests/ui/sealed_owner_publication_impl.rs:3:1
+   |
+ 3 | struct FakePublication;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `ownership::sealed::Sealed`:
+             AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+             AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+             OperationContext<OperationId, InstanceId, Trace>
+note: required by a bound in `OwnerPublication`
+  --> src/ownership.rs
+   |
+   | pub trait OwnerPublication: sealed::Sealed {
+   |                             ^^^^^^^^^^^^^^ required by this bound in `OwnerPublication`
+   = note: `OwnerPublication` is a "sealed trait", because to implement it you also need to implement `aura_core::ownership::sealed::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             aura_core::OperationContext<OperationId, InstanceId, Trace>
+             aura_core::AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+             aura_core::AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+
+error[E0277]: the trait bound `FakePublication: ownership::sealed::Sealed` is not satisfied
+  --> tests/ui/sealed_owner_publication_impl.rs:26:5
+   |
+26 |     fn trace_context(&self) -> &Self::Trace {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublication`
+  --> tests/ui/sealed_owner_publication_impl.rs:3:1
+   |
+ 3 | struct FakePublication;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `ownership::sealed::Sealed`:
+             AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+             AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+             OperationContext<OperationId, InstanceId, Trace>
+note: required by a bound in `OwnerPublication`
+  --> src/ownership.rs
+   |
+   | pub trait OwnerPublication: sealed::Sealed {
+   |                             ^^^^^^^^^^^^^^ required by this bound in `OwnerPublication`
+   = note: `OwnerPublication` is a "sealed trait", because to implement it you also need to implement `aura_core::ownership::sealed::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             aura_core::OperationContext<OperationId, InstanceId, Trace>
+             aura_core::AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+             aura_core::AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+
+error[E0277]: the trait bound `FakePublication: ownership::sealed::Sealed` is not satisfied
+ --> tests/ui/sealed_owner_publication_impl.rs:5:27
+  |
+5 | impl OwnerPublication for FakePublication {
+  |                           ^^^^^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublication`
+ --> tests/ui/sealed_owner_publication_impl.rs:3:1
+  |
+3 | struct FakePublication;
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  = help: the following other types implement trait `ownership::sealed::Sealed`:
+            AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+            AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+            OperationContext<OperationId, InstanceId, Trace>
+note: required by a bound in `OwnerPublication`
+ --> src/ownership.rs
+  |
+  | pub trait OwnerPublication: sealed::Sealed {
+  |                             ^^^^^^^^^^^^^^ required by this bound in `OwnerPublication`
+  = note: `OwnerPublication` is a "sealed trait", because to implement it you also need to implement `aura_core::ownership::sealed::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+  = help: the following types implement the trait:
+            aura_core::OperationContext<OperationId, InstanceId, Trace>
+            aura_core::AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+            aura_core::AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>

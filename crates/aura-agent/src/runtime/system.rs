@@ -19,7 +19,6 @@ use crate::handlers::RendezvousHandler;
 use crate::task_registry::TaskSupervisionError;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-use aura_core::effects::task::TaskSpawner;
 use aura_core::effects::time::PhysicalTimeEffects;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::transport::TransportEnvelope;
@@ -29,7 +28,10 @@ use aura_core::types::identifiers::AuthorityId;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::util::serialization::from_slice;
 use aura_core::DeviceId;
-use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_core::{
+    execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskSpawner, TimeoutBudget,
+    TimeoutRunError,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_guards::GuardContextProvider;
 #[cfg(not(target_arch = "wasm32"))]
@@ -503,9 +505,12 @@ impl RuntimeSystem {
         self.diagnostics.clone()
     }
 
-    /// Get the runtime task spawner as a trait object.
-    pub fn task_spawner(&self) -> Arc<dyn TaskSpawner> {
-        self.runtime_tasks.clone()
+    /// Get the runtime task spawner through the sanctioned owned wrapper.
+    pub fn task_spawner(&self) -> OwnedTaskSpawner {
+        OwnedTaskSpawner::new(
+            self.runtime_tasks.clone(),
+            OwnedShutdownToken::attached(self.runtime_tasks.cancellation_token()),
+        )
     }
 
     /// Get the authority ID

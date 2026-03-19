@@ -41,6 +41,13 @@ Practical implications:
   convenience helpers
 - ensure long-running effect-driven flows report typed terminal outcomes rather
   than implicit success or silent hangs
+- prefer the canonical `aura-core` ownership vocabulary at effect-facing
+  boundaries:
+  - `OperationContext` for move-owned workflow ownership
+  - exact progress/terminal publication wrappers plus consumed
+    `TerminalPublisher` for lifecycle
+  - `OwnedTaskSpawner`, `OwnedShutdownToken`, and `BoundedActorIngress` for
+    actor-owned task and ingress boundaries
 
 ## Effect Traits
 
@@ -109,6 +116,8 @@ Rules:
 
 The shared timeout/backoff vocabulary lives in `aura-core::time::timeout` and
 should be preferred over duplicated timeout arithmetic or raw sleep loops.
+Parity-critical workflow APIs should take `OperationTimeoutBudget` or narrower
+budget/policy types rather than raw `Duration`.
 
 ## Threshold Signing
 
@@ -198,7 +207,7 @@ pub trait ReactiveEffects: Send + Sync {
     async fn emit<T>(&self, signal: &Signal<T>, value: T) -> Result<(), ReactiveError>
     where T: Clone + Send + Sync + 'static;
 
-    fn subscribe<T>(&self, signal: &Signal<T>) -> SignalStream<T>
+    fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
     where T: Clone + Send + Sync + 'static;
 
     async fn register<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
@@ -206,7 +215,7 @@ pub trait ReactiveEffects: Send + Sync {
 }
 ```
 
-The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](104_runtime.md) for reactive scheduling implementation.
+The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](104_runtime.md) for reactive scheduling implementation. Subscribing an unregistered signal fails fast; Aura no longer permits "dead stream" subscription success for missing registrations.
 
 ## QueryEffects Trait
 

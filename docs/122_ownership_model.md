@@ -88,19 +88,36 @@ Use capability wrappers whenever parity-critical code needs authority to author 
 
 ```rust
 use aura_core::{
-    AuthorizedLifecyclePublication, AuthorizedReadinessPublication,
-    LifecyclePublicationCapability, OperationLifecycle,
-    ReadinessPublicationCapability,
+    issue_operation_context, AuthorizedProgressPublication,
+    AuthorizedReadinessPublication, LifecyclePublicationCapability,
+    OperationContextCapability, OperationTimeoutBudget, OwnedShutdownToken,
+    OwnerEpoch, PublicationSequence, ReadinessPublicationCapability,
+    TraceContext,
 };
 
-let capability = LifecyclePublicationCapability::new("semantic:lifecycle");
-let update = AuthorizedLifecyclePublication::authorize(
-    &capability,
-    OperationLifecycle::<&'static str, (), &'static str>::progress("waiting"),
+let context_capability = OperationContextCapability::new("semantic:context");
+let lifecycle_capability = LifecyclePublicationCapability::new("semantic:lifecycle");
+
+let mut ctx = issue_operation_context(
+    &context_capability,
+    "send_message",
+    "send_message-7",
+    OwnerEpoch::new(0),
+    PublicationSequence::new(0),
+    OperationTimeoutBudget::deferred_local_policy(),
+    OwnedShutdownToken::detached(),
+    TraceContext::detached(),
 );
+
+let update: AuthorizedProgressPublication<_, _, _, _> =
+    ctx.publish_progress(&lifecycle_capability, "waiting");
+let terminal = ctx
+    .begin_terminal::<(), &'static str>(&lifecycle_capability)
+    .fail("timeout");
 ```
 
-Publication requires a capability-shaped input. Random helper code cannot publish lifecycle by accident.
+Context minting and publication both require capability-shaped inputs. Random
+helper code cannot fabricate owner context or publish lifecycle by accident.
 
 The same rule applies to readiness and actor-ingress mutation. Higher layers
 should prefer `AuthorizedReadinessPublication<T>` and

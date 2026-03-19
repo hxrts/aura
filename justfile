@@ -642,13 +642,13 @@ ci-actor-lifecycle:
     bash scripts/check/actor-owned-task-spawn.sh
 
 ci-move-semantics:
-    bash scripts/check/move-owned-transfer-only.sh
+    cargo test -p aura-core --test compile_fail -- --nocapture
 
 ci-authoritative-fact-boundary:
     bash scripts/check/authoritative-fact-authorship.sh
 
 ci-capability-boundaries:
-    bash scripts/check/capability-gated-mutation.sh
+    cargo test -p aura-core --test compile_fail -- --nocapture
 
 ci-typed-errors:
     bash scripts/check/typed-error-boundary.sh
