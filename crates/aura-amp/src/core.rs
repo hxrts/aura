@@ -27,6 +27,7 @@ mod tests {
     use aura_journal::reduction::PendingBump;
     use aura_journal::ChannelEpochState;
 
+    /// Ratchet state preserves epoch, checkpoint gen, skip window, and pending bump.
     #[test]
     fn ratchet_from_epoch_state_preserves_fields() {
         let state = ChannelEpochState {
@@ -50,6 +51,7 @@ mod tests {
         assert_eq!(ratchet.pending_epoch, Some(4));
     }
 
+    /// Same header produces the same nonce — required for decryption.
     #[test]
     fn nonce_from_header_is_deterministic() {
         let header = aura_transport::amp::AmpHeader {

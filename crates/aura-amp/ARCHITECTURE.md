@@ -69,6 +69,30 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone transition laws.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines epoch validity expectations.
+## Testing
+
+### Strategy
+
+Wire format stability and epoch monotonicity are the primary concerns.
+Integration tests in `tests/wire/` validate serialization roundtrips with
+property-based testing. Inline tests verify pure helper determinism.
+
+### Running tests
+
+```
+cargo test -p aura-amp
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Status |
+|---------------------|-----------|--------|
+| AMP epoch not monotonic | InvariantAmpEpochMonotonic | Covered (inline) |
+| AMP message serialization breaks | — | Covered (`tests/wire/amp_wire.rs`) |
+| Serialization non-deterministic | — | Covered (proptest in `tests/wire/`) |
+| Nonce derivation non-deterministic | — | Covered (`src/core.rs` inline) |
+| Ratchet state conversion lossy | — | Covered (`src/core.rs` inline) |
+
 ## Boundaries
 - No direct StorageEffects for channel facts (journal only).
 - Evidence storage is isolated behind AmpEvidenceEffects.
