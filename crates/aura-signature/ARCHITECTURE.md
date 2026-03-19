@@ -92,6 +92,12 @@ each test is tightly coupled to a specific verification function. The
 critical concern is lifecycle monotonicity — a revoked authority must
 never be reactivated.
 
+### Running tests
+
+```
+cargo test -p aura-signature --lib  # all inline unit tests
+```
+
 ### Coverage matrix
 
 | What breaks if wrong | Test location | Status |
