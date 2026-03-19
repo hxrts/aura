@@ -70,6 +70,35 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines context-bound relational state.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines operation-scoped agreement.
+## Testing
+
+### Strategy
+
+All tests are inline — appropriate for a relational domain crate with no
+integration test surface. Tests verify fact reduction, guardian binding,
+and context scoping. Mutual agreement enforcement is consensus-gated
+(Category C) and tested at the consensus layer.
+
+### Running tests
+
+```
+cargo test -p aura-relational
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Contact fact reduces under wrong context | `src/facts.rs` `test_contact_reducer_rejects_context_mismatch` | Covered |
+| Contact fact serialization lossy | `src/facts.rs` `test_contact_fact_serialization` | Covered |
+| Reducer non-idempotent | `src/facts.rs` `test_contact_reducer_idempotence` | Covered |
+| Type ID inconsistent across variants | `src/facts.rs` `test_type_id_consistency` | Covered |
+| Guardian binding details roundtrip lossy | `src/facts.rs` `guardian_binding_details_roundtrip` | Covered |
+| Guardian binding builder wrong | `src/guardian.rs` `test_guardian_binding_builder` | Covered |
+| Emergency op not distinguished | `src/guardian.rs` `test_recovery_op_emergency` | Covered |
+| Guardian request reducer non-idempotent | `src/guardian_request.rs` `test_guardian_request_reducer_idempotence` | Covered |
+| Mutual agreement bypassed | Consensus-gated (Category C, tested at L4) | Cross-crate |
+
 ## Boundaries
 - Recovery protocol logic lives in aura-recovery.
 - Consensus coordination lives in aura-consensus.

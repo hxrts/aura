@@ -193,6 +193,7 @@ impl Default for GuardianBindingBuilder {
 mod tests {
     use super::*;
 
+    /// Builder produces binding with correct commitments and parameters.
     #[test]
     fn test_guardian_binding_builder() {
         let account = Hash32::default();
@@ -212,6 +213,7 @@ mod tests {
         assert!(!binding.parameters.notification_required);
     }
 
+    /// Emergency ops are distinguished from normal ops — affects escalation path.
     #[test]
     fn test_recovery_op_emergency() {
         let replace = RecoveryOp::ReplaceTree {

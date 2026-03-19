@@ -451,6 +451,7 @@ impl RelationalContext {
 mod tests {
     use super::*;
 
+    /// Context with two participants: both are discoverable via has_participant.
     #[test]
     fn test_relational_context_creation() {
         let auth1 = AuthorityId::new_from_entropy([60u8; 32]);
@@ -463,6 +464,7 @@ mod tests {
         assert!(context.has_participant(&auth2));
     }
 
+    /// Guardian binding is stored and retrievable after add.
     #[test]
     fn test_add_guardian_binding() {
         let auth1 = AuthorityId::new_from_entropy([62u8; 32]);

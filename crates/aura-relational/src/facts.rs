@@ -445,6 +445,7 @@ mod tests {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
+    /// ContactFact survives to_bytes/from_bytes roundtrip without loss.
     #[test]
     fn test_contact_fact_serialization() {
         let fact = ContactFact::added_with_timestamp_ms(
@@ -482,6 +483,8 @@ mod tests {
         }
     }
 
+    /// Reducing the same fact twice produces identical bindings — needed
+    /// for replay-safe journal reduction.
     #[test]
     fn test_contact_reducer_idempotence() {
         let reducer = ContactFactReducer;
@@ -592,6 +595,31 @@ mod tests {
         }
     }
 
+    /// Reducer rejects contact facts whose context_id doesn't match the
+    /// reduction context. If broken, contact changes from one relationship
+    /// affect another.
+    #[test]
+    fn test_contact_reducer_rejects_context_mismatch() {
+        let reducer = ContactFactReducer;
+        let fact = ContactFact::added_with_timestamp_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "Alice".to_string(),
+            0,
+        );
+
+        let other_context = ContextId::new_from_entropy([99u8; 32]);
+        let envelope = fact.to_envelope();
+        let binding = reducer.reduce_envelope(other_context, &envelope);
+        assert!(
+            binding.is_none(),
+            "Contact fact with mismatched context must be rejected"
+        );
+    }
+
+    /// GuardianBindingDetailsFact survives serialization roundtrip with all
+    /// fields preserved — account, guardian, and binding parameters.
     #[test]
     fn guardian_binding_details_roundtrip() {
         let ctx = test_context_id();

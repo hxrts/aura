@@ -152,6 +152,8 @@ mod tests {
         }
     }
 
+    /// Guardian request reducer is idempotent — same fact produces identical
+    /// binding on repeated calls.
     #[test]
     fn test_guardian_request_reducer_idempotence() {
         let reducer = GuardianRequestFactReducer;
