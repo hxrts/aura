@@ -1,3 +1,8 @@
+//! Production manifest admission validation.
+//!
+//! Verifies that all production choreography manifests pass admission
+//! requirements — capability validation, termination artifacts, etc.
+
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 

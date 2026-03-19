@@ -717,6 +717,46 @@ Rules:
 
 This is enforced by architectural policy gates.
 
+## Testing
+
+### Strategy
+
+Structured concurrency, ownership boundaries, and runtime composition are
+the primary concerns. Compile-fail tests in `tests/ui/` enforce type-level
+boundaries. Integration tests verify service lifecycle, session management,
+protocol choreography, and reactive scheduling. The test suite is large
+(500+ tests) and already well-organized — no restructuring needed.
+
+### Running tests
+
+```
+cargo test -p aura-agent
+cargo test -p aura-agent --test compile_fail   # compile-fail boundary tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Runtime missing required effect handler | InvariantRuntimeCompositionBoundary | `tests/ui/missing_*.rs` (6 compile-fail) | Covered |
+| Private runtime internals accessible | InvariantCanonicalIngress | `tests/ui/*_private.rs` (4 compile-fail) | Covered |
+| VM fragment registry leaked | InvariantSessionOwnership | `tests/ui/vm_fragment_registry_private.rs` | Covered |
+| Service actor handle leaked | InvariantStructuredConcurrency | `tests/ui/service_actor_handle_private.rs` | Covered |
+| VM concurrent contract violated | InvariantStructuredConcurrency | `tests/telltale_vm_concurrent_contracts.rs` | Covered |
+| VM parity diverges across profiles | InvariantBridgeOwnershipAgent | `tests/telltale_vm_parity.rs` | Covered |
+| VM scenario contract fails | InvariantBridgeOwnershipAgent | `tests/telltale_vm_scenario_contracts.rs` | Covered |
+| Production manifest fails admission | InvariantRuntimeCompositionBoundary | `tests/production_manifest_admission.rs` | Covered |
+| FRP scheduler glitches | — | `tests/frp_glitch_freedom_test.rs` | Covered |
+| Journal integration roundtrip | — | `tests/journal_integration_test.rs` | Covered |
+| Session service lifecycle wrong | InvariantSessionOwnership | `tests/session_service_test.rs` | Covered |
+| Auth service flow broken | — | `tests/auth_service_test.rs` | Covered |
+| Recovery service flow broken | — | `tests/recovery_service_test.rs` | Covered |
+| Threshold signing E2E fails | — | `tests/threshold_signing_e2e.rs` | Covered |
+| Runtime bridge channel resolution wrong | InvariantBridgeOwnershipAgent | `tests/runtime_bridge_channel_resolution.rs` | Covered |
+| Bootstrap preconditions not enforced | InvariantRuntimeCompositionBoundary | `tests/bootstrap_required.rs` | Covered |
+| Reactive scheduler signals wrong | — | `tests/reactive_scheduler_signals_e2e.rs` | Covered |
+| Reconfiguration integration broken | InvariantSessionOwnership | `tests/reconfiguration_integration.rs` | Covered |
+
 ## Boundaries
 
 - Stateless handlers live in aura-effects.

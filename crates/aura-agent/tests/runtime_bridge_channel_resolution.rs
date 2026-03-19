@@ -1,3 +1,8 @@
+//! Runtime bridge channel resolution tests.
+//!
+//! Verifies that channels created through the runtime bridge are
+//! correctly resolved and accessible from the app core.
+
 #![allow(missing_docs)]
 
 use std::sync::Arc;
