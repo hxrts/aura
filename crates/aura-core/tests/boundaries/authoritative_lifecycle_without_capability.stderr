@@ -1,5 +1,5 @@
 error[E0308]: mismatched types
-  --> tests/ui/authoritative_lifecycle_without_capability.rs:10:9
+  --> tests/boundaries/authoritative_lifecycle_without_capability.rs:10:9
    |
  9 |     let mut context = issue_operation_context(
    |                       ----------------------- arguments to this function are incorrect

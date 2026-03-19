@@ -1,5 +1,5 @@
 error[E0451]: fields `token_id` and `scope` of struct `OwnerToken` are private
- --> tests/ui/owner_token_private_constructor.rs:5:9
+ --> tests/boundaries/owner_token_private_constructor.rs:5:9
   |
 4 |     let _token = OwnerToken {
   |                  ---------- in this type

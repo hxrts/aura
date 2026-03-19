@@ -1,5 +1,5 @@
 error[E0451]: fields `operation_id`, `instance_id`, `owner_epoch`, `publication_sequence`, `timeout_budget`, `shutdown_token` and `trace_context` of struct `OperationContext` are private
-  --> tests/ui/authorized_lifecycle_private_fields.rs:6:9
+  --> tests/boundaries/authorized_lifecycle_private_fields.rs:6:9
    |
  5 |     let _context = OperationContext {
    |                    ---------------- in this type

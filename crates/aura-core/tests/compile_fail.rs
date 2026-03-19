@@ -41,5 +41,5 @@ fn acquire_trybuild_lock() -> TrybuildLock {
 fn ownership_compile_fail_guards() {
     let _lock = acquire_trybuild_lock();
     let t = trybuild::TestCases::new();
-    t.compile_fail("tests/ui/*.rs");
+    t.compile_fail("tests/boundaries/*.rs");
 }

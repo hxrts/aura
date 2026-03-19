@@ -1,5 +1,5 @@
 error[E0308]: mismatched types
- --> tests/ui/issue_owner_token_wrong_capability.rs:5:31
+ --> tests/boundaries/issue_owner_token_wrong_capability.rs:5:31
   |
 5 |     let _ = issue_owner_token(&capability, "token-1", "session");
   |             ----------------- ^^^^^^^^^^^ expected `&OwnershipTransferCapability`, found `&ActorIngressMutationCapability`

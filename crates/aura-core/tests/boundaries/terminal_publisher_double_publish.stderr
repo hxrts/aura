@@ -1,5 +1,5 @@
 error[E0382]: use of moved value: `publisher`
-  --> tests/ui/terminal_publisher_double_publish.rs:21:13
+  --> tests/boundaries/terminal_publisher_double_publish.rs:21:13
    |
 19 |     let publisher = context.begin_terminal::<(), &'static str>(&capability);
    |         --------- move occurs because `publisher` has type `TerminalPublisher<&str, u64, TraceContext, (), &str>`, which does not implement the `Copy` trait

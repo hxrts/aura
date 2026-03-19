@@ -1,5 +1,5 @@
 error[E0382]: borrow of moved value: `token`
- --> tests/ui/stale_owner_token_after_handoff.rs:7:13
+ --> tests/boundaries/stale_owner_token_after_handoff.rs:7:13
   |
 5 |     let token = issue_owner_token(&capability, "token-1", "session");
   |         ----- move occurs because `token` has type `OwnerToken<&str, &str>`, which does not implement the `Copy` trait
