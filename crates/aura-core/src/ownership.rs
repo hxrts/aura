@@ -1359,19 +1359,14 @@ mod tests {
         ActorIngressMutationCapability, AuthorizedActorIngressMutation,
         AuthorizedReadinessPublication, LifecyclePublicationCapability, OperationContextCapability,
         OperationProgress, OperationTimeoutBudget, OwnedShutdownToken, OwnershipCapability,
-        OwnershipCategory, OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
+        OwnershipError, OwnershipErrorDomain, OwnershipTransfer,
         OwnershipTransferCapability, OwnerEpoch, PublicationSequence, ReadinessPublicationCapability,
         TerminalOutcome, Terminality, TraceContext,
     };
     use crate::{effects::CapabilityKey, AuraError, ProtocolErrorCode};
 
-    #[test]
-    fn ownership_category_round_trips_through_json() {
-        let json = serde_json::to_string(&OwnershipCategory::ActorOwned).expect("serialize");
-        assert_eq!(json, "\"actor_owned\"");
-        let round_trip: OwnershipCategory = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(round_trip, OwnershipCategory::ActorOwned);
-    }
+    // OwnershipCategory serialization roundtrip is in
+    // tests/contracts/serialization_roundtrip.rs.
 
     #[test]
     fn opaque_operation_handle_preserves_ids() {

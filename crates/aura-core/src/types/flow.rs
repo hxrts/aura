@@ -419,26 +419,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn merge_prefers_more_restrictive_limit_and_higher_spent() {
-        let epoch = Epoch::new(3);
-        let other_epoch = Epoch::new(5);
-        let a = FlowBudget {
-            limit: 100,
-            spent: 60,
-            epoch,
-        };
-        let b = FlowBudget {
-            limit: 80,
-            spent: 50,
-            epoch: other_epoch,
-        };
-
-        let merged = a.merge(&b);
-        assert_eq!(merged.limit, 80);
-        assert_eq!(merged.spent, 60);
-        assert_eq!(merged.epoch, other_epoch);
-    }
+    // CRDT merge law tests (join convergence, idempotency, commutativity,
+    // associativity) are in tests/laws/flow_budget_crdt.rs.
 
     #[test]
     fn record_charge_enforces_limit() {

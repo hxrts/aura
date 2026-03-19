@@ -281,71 +281,9 @@ mod tests {
         assert_eq!(format!("{}", Policy::All), "All");
     }
 
-    #[test]
-    fn test_meet_idempotency() {
-        // a ⊓ a = a
-        let policies = vec![Policy::Any, Policy::Threshold { m: 2, n: 3 }, Policy::All];
-
-        for p in policies {
-            assert_eq!(p.meet(&p), p, "Idempotency failed for {p:?}");
-        }
-    }
-
-    #[test]
-    fn test_meet_commutativity() {
-        // a ⊓ b = b ⊓ a
-        let test_cases = vec![
-            (Policy::Any, Policy::Threshold { m: 2, n: 3 }),
-            (Policy::Any, Policy::All),
-            (Policy::Threshold { m: 2, n: 3 }, Policy::All),
-            (
-                Policy::Threshold { m: 2, n: 3 },
-                Policy::Threshold { m: 3, n: 3 },
-            ),
-        ];
-
-        for (a, b) in test_cases {
-            assert_eq!(
-                a.meet(&b),
-                b.meet(&a),
-                "Commutativity failed for {a:?} and {b:?}",
-            );
-        }
-    }
-
-    #[test]
-    fn test_meet_associativity() {
-        // (a ⊓ b) ⊓ c = a ⊓ (b ⊓ c)
-        let test_cases = vec![
-            (Policy::Any, Policy::Threshold { m: 2, n: 3 }, Policy::All),
-            (
-                Policy::Threshold { m: 1, n: 3 },
-                Policy::Threshold { m: 2, n: 3 },
-                Policy::Threshold { m: 3, n: 3 },
-            ),
-        ];
-
-        for (a, b, c) in test_cases {
-            let left = a.meet(&b).meet(&c);
-            let right = a.meet(&b.meet(&c));
-            assert_eq!(left, right, "Associativity failed for {a:?}, {b:?}, {c:?}",);
-        }
-    }
-
-    #[test]
-    fn test_meet_selects_stricter() {
-        assert_eq!(
-            Policy::Any.meet(&Policy::Threshold { m: 2, n: 3 }),
-            Policy::Threshold { m: 2, n: 3 }
-        );
-
-        assert_eq!(Policy::Any.meet(&Policy::All), Policy::All);
-
-        assert_eq!(
-            Policy::Threshold { m: 2, n: 3 }.meet(&Policy::All),
-            Policy::All
-        );
-    }
+    // Algebraic law tests (idempotency, commutativity, associativity,
+    // stricter-selection) are in tests/laws/tree_policy_meet.rs using
+    // proptest for exhaustive coverage.
 
     #[test]
     fn test_threshold_meet_same_n() {

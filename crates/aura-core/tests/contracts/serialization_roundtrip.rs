@@ -1,6 +1,7 @@
 //! Serialization round-trip tests for core newtypes and envelopes.
 
 use aura_core::messages::{MessageSequence, MessageTimestamp, WireEnvelope};
+use aura_core::ownership::OwnershipCategory;
 use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
@@ -76,4 +77,12 @@ fn fact_envelope_roundtrip_json() {
     let bytes = to_vec(&envelope).unwrap();
     let decoded: FactEnvelope = from_slice(&bytes).unwrap();
     assert_eq!(decoded, envelope);
+}
+
+#[test]
+fn ownership_category_roundtrip_json() {
+    let json = serde_json::to_string(&OwnershipCategory::ActorOwned).expect("serialize");
+    assert_eq!(json, "\"actor_owned\"");
+    let round_trip: OwnershipCategory = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(round_trip, OwnershipCategory::ActorOwned);
 }
