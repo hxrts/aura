@@ -278,9 +278,10 @@ fn can_charge_predicate_matches_record_charge() {
 mod convergence_tests {
     use super::*;
 
+    /// Three peers with different budget states must converge to the same
+    /// result regardless of merge order — the core CRDT consistency guarantee.
     #[test]
-    fn test_distributed_budget_convergence() {
-        // Simulate distributed updates converging to consistent state
+    fn distributed_budget_convergence() {
         let budget_a = FlowBudget {
             limit: 100,
             spent: 30,
@@ -316,8 +317,11 @@ mod convergence_tests {
         assert_eq!(converged_abc.epoch.value(), 6); // Latest epoch
     }
 
+    /// Epoch rotation resets spent counter — this is how the system
+    /// reclaims budget capacity without breaking the CRDT monotonicity
+    /// invariant (epoch advances, spent resets to 0 in the new epoch).
     #[test]
-    fn test_epoch_rotation_resets_spent() {
+    fn epoch_rotation_resets_spent() {
         let mut budget = FlowBudget {
             limit: 100,
             spent: 90,
@@ -340,8 +344,10 @@ mod convergence_tests {
         assert_eq!(budget.epoch.value(), 2);
     }
 
+    /// Rotating to an earlier or equal epoch must be a no-op — prevents
+    /// an attacker from replaying old epoch rotations to reset spend.
     #[test]
-    fn test_epoch_rotation_no_regression() {
+    fn epoch_rotation_no_regression() {
         let mut budget = FlowBudget {
             limit: 100,
             spent: 30,
@@ -361,10 +367,11 @@ mod convergence_tests {
         assert_eq!(budget.epoch.value(), 5); // Unchanged
     }
 
+    /// Charge-before-send: failed charges must not change spent counter.
+    /// This ensures that observable actions (receipt generation, message
+    /// send) can only happen after a successful budget charge.
     #[test]
-    fn test_no_observable_without_charge_principle() {
-        // This test verifies the principle that all observable actions
-        // (like generating receipts) must come from successful budget charges
+    fn no_observable_without_successful_charge() {
 
         let mut budget = FlowBudget::new(50, Epoch::initial());
 

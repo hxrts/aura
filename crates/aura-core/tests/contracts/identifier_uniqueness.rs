@@ -35,7 +35,8 @@ fn guardian(seed: u8) -> GuardianId {
     GuardianId::new_from_entropy([seed; 32])
 }
 
-/// Test basic identifier creation and uniqueness
+/// Different entropy produces different IDs across all identifier types —
+/// collision means unrelated entities share identity.
 #[test]
 fn test_identifier_creation() {
     // Test AccountId
@@ -64,7 +65,7 @@ fn test_identifier_creation() {
     assert_ne!(guardian1, guardian2, "GuardianIds should be unique");
 }
 
-/// Test entropy constructor aliases are consistent
+/// `new_from_entropy` and `from_entropy` must produce identical results.
 #[test]
 fn test_entropy_constructor_aliases() {
     use aura_core::{AuthorityId, ContextId};
@@ -82,7 +83,8 @@ fn test_entropy_constructor_aliases() {
     assert_eq!(device_a, device_b);
 }
 
-/// Test string representations
+/// String representations must be stable — they appear in logs, debug
+/// output, and some serialization paths.
 #[test]
 fn test_identifier_string_representations() {
     let account = account(11);
@@ -112,7 +114,8 @@ fn test_identifier_string_representations() {
     assert!(!guardian_str.is_empty()); // GuardianId displays raw UUID
 }
 
-/// Test EventNonce operations
+/// EventNonce increment and ordering — nonces must be monotonic for
+/// journal event deduplication.
 #[test]
 fn test_event_nonce() {
     let nonce1 = EventNonce::new(100);
@@ -133,6 +136,8 @@ fn test_event_nonce() {
     assert_eq!(nonce2.value(), 200);
 }
 
+/// EventNonce overflow produces an error — silent wraparound would break
+/// journal ordering.
 #[test]
 fn test_event_nonce_overflow() {
     let nonce = EventNonce::new(u64::MAX);
@@ -140,7 +145,8 @@ fn test_event_nonce_overflow() {
     assert!(err.to_string().contains("EventNonce overflow"));
 }
 
-/// Test string-based identifier types
+/// String-based identifiers (MemberId, IndividualId, etc.) preserve
+/// exact input — no normalization that could break lookups.
 #[test]
 fn test_string_identifiers() {
     // Test MemberId
@@ -176,7 +182,8 @@ fn test_string_identifiers() {
     );
 }
 
-/// Test identifier serialization/deserialization
+/// DAG-CBOR roundtrip for all identifier types — identifiers are embedded
+/// in facts, messages, and tree operations that cross the wire.
 #[test]
 fn test_identifier_serialization() {
     let account = account(17);
@@ -230,7 +237,8 @@ fn test_identifier_serialization() {
     assert_eq!(nonce, nonce_restored);
 }
 
-/// Test UUID conversions for UUID-based identifiers
+/// UUID-based identifiers roundtrip through UUID — needed for database
+/// storage and cross-language FFI.
 #[test]
 fn test_uuid_conversions() {
     let account = account(23);
@@ -263,7 +271,7 @@ fn test_uuid_conversions() {
     assert_eq!(operation, operation_from_uuid);
 }
 
-/// Test string conversions for string-based identifiers
+/// String-based identifiers roundtrip through From/Into.
 #[test]
 fn test_string_conversions() {
     // Test From<String> implementations for string-based types
@@ -285,7 +293,8 @@ fn test_string_conversions() {
     assert_eq!(data_from_str.as_str(), "test_data2");
 }
 
-/// Test identifier equality and ordering
+/// Eq and Ord are consistent — needed for BTreeMap/BTreeSet storage
+/// of identifiers in journal indices.
 #[test]
 fn test_identifier_equality_and_ordering() {
     // Test EventNonce ordering
@@ -319,7 +328,8 @@ fn test_identifier_equality_and_ordering() {
     assert_eq!(sorted_members[2].as_str(), "carol");
 }
 
-/// Test identifier determinism with known inputs
+/// Same UUID input produces the same identifier — deterministic
+/// construction is required for content addressing.
 #[test]
 fn test_identifier_determinism() {
     // Create identifiers from known UUIDs

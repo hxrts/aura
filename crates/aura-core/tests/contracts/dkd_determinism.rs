@@ -1,7 +1,9 @@
-//! Basic DKD Integration Test
+//! Deterministic Key Derivation (DKD) contract tests.
 //!
-//! Tests basic Deterministic Key Derivation concepts using only aura-core
-//! and standard Rust libraries.
+//! DKD derives context-scoped keys from account/device/session identifiers.
+//! If derivation is non-deterministic, devices derive different keys for the
+//! same context and cannot communicate. If contexts don't separate, keys
+//! leak across relationship boundaries.
 
 use aura_core::crypto::hash::hasher;
 use aura_core::{AccountId, DeviceId, SessionId};
@@ -19,7 +21,8 @@ fn session(seed: u8) -> SessionId {
     SessionId::from_uuid(Uuid::from_bytes([seed; 16]))
 }
 
-/// Test basic DKD key derivation simulation
+/// DKD with the same inputs produces the same derived key — devices
+/// sharing account/session must derive identical context keys.
 #[test]
 fn test_basic_dkd_derivation() {
     // Create test identifiers
@@ -50,7 +53,8 @@ fn test_basic_dkd_derivation() {
     println!("  Derived key: {}", hex::encode(&derived_key));
 }
 
-/// Test that DKD is deterministic
+/// Repeated derivation with identical inputs is byte-identical — if this
+/// fails, devices will derive different keys and channels won't open.
 #[test]
 fn test_dkd_determinism() {
     let account_id = account(6);
@@ -66,7 +70,8 @@ fn test_dkd_determinism() {
     println!("✓ Determinism test passed");
 }
 
-/// Test that different contexts produce different keys
+/// Different contexts produce different keys — prevents cross-context
+/// key reuse which would break context isolation.
 #[test]
 fn test_dkd_context_separation() {
     let account_id = account(10);
@@ -84,7 +89,8 @@ fn test_dkd_context_separation() {
     println!("✓ Context separation test passed");
 }
 
-/// Test that different applications produce different keys
+/// Different application labels produce different keys — domain separation
+/// prevents a key derived for chat from being valid for recovery.
 #[test]
 fn test_dkd_app_separation() {
     let account_id = account(14);
@@ -102,7 +108,8 @@ fn test_dkd_app_separation() {
     println!("✓ Application separation test passed");
 }
 
-/// Test that participant set affects derivation
+/// Participant set affects the derived key — a channel with {A, B} must
+/// use a different key than {A, C}, even in the same context.
 #[test]
 fn test_dkd_participant_dependence() {
     let account_id = account(18);
@@ -126,7 +133,8 @@ fn test_dkd_participant_dependence() {
     println!("✓ Participant dependence test passed");
 }
 
-/// Test threshold-like behavior simulation
+/// Threshold simulation: different device subsets produce different derived
+/// keys, modeling the 2-of-3 share combination property.
 #[test]
 fn test_threshold_simulation() {
     let account_id = account(23);
@@ -171,14 +179,16 @@ fn test_threshold_simulation() {
     );
 
     // In a real threshold scheme, these might be the same or different depending on the protocol
-    // For our simulation, they'll be different but that's expected
+    // For our simulation, they'll be different, which is expected
     println!("✓ Threshold simulation test completed");
     println!("  Combo 1 key: {}", hex::encode(&threshold_key1));
     println!("  Combo 2 key: {}", hex::encode(&threshold_key2));
     println!("  Combo 3 key: {}", hex::encode(&threshold_key3));
 }
 
-/// Test identifier creation and uniqueness
+/// Identifiers used in DKD (AccountId, DeviceId, SessionId) must be
+/// unique from different seeds — collision means different entities
+/// share derived keys.
 #[test]
 fn test_identifier_uniqueness() {
     // Test that different IDs are unique

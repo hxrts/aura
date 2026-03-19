@@ -13,24 +13,28 @@ use aura_core::{
     DeviceId, FlowCost, FlowNonce, NetworkAddress, ReceiptSig, SessionId, StoragePath,
 };
 
+/// StoragePath roundtrip — storage paths are persisted in journal facts.
 #[test]
-fn storage_path_roundtrip_json() {
+fn storage_path_roundtrip() {
     let path = StoragePath::parse("namespace/personal/*").unwrap();
     let bytes = to_vec(&path).unwrap();
     let decoded: StoragePath = from_slice(&bytes).unwrap();
     assert_eq!(decoded, path);
 }
 
+/// NetworkAddress roundtrip — peer addresses are exchanged in rendezvous.
 #[test]
-fn network_address_roundtrip_json() {
+fn network_address_roundtrip() {
     let addr = NetworkAddress::parse("example.com:443").unwrap();
     let bytes = to_vec(&addr).unwrap();
     let decoded: NetworkAddress = from_slice(&bytes).unwrap();
     assert_eq!(decoded, addr);
 }
 
+/// Flow budget newtypes roundtrip — these are embedded in receipts that
+/// relays verify for hop-by-hop accountability.
 #[test]
-fn flow_newtypes_roundtrip_bincode() {
+fn flow_newtypes_roundtrip() {
     let cost = FlowCost::new(42);
     let nonce = FlowNonce::new(7);
     let sig = ReceiptSig::new(vec![9u8; 64]).unwrap();
@@ -48,8 +52,10 @@ fn flow_newtypes_roundtrip_bincode() {
     assert_eq!(decoded_sig, sig);
 }
 
+/// WireEnvelope roundtrip — this is the outer transport frame for all
+/// peer-to-peer messages. Breakage here means no communication.
 #[test]
-fn wire_envelope_roundtrip_bincode() {
+fn wire_envelope_roundtrip() {
     let sender = DeviceId::new_from_entropy([5u8; 32]);
     let session = SessionId::from_entropy([6u8; 32]);
     let envelope = WireEnvelope::new(
@@ -70,8 +76,10 @@ fn wire_envelope_roundtrip_bincode() {
     assert_eq!(decoded.payload, "payload");
 }
 
+/// FactEnvelope roundtrip — facts are the unit of journal replication.
+/// A broken roundtrip means replicated facts are unreadable.
 #[test]
-fn fact_envelope_roundtrip_json() {
+fn fact_envelope_roundtrip() {
     let envelope = FactEnvelope {
         type_id: FactTypeId::from("demo"),
         schema_version: 1,
@@ -84,8 +92,10 @@ fn fact_envelope_roundtrip_json() {
     assert_eq!(decoded, envelope);
 }
 
+/// OwnershipCategory roundtrip — persisted in ARCHITECTURE.md inventory
+/// and used by CI governance checks.
 #[test]
-fn ownership_category_roundtrip_json() {
+fn ownership_category_roundtrip() {
     let json = serde_json::to_string(&OwnershipCategory::ActorOwned).expect("serialize");
     assert_eq!(json, "\"actor_owned\"");
     let round_trip: OwnershipCategory = serde_json::from_str(&json).expect("deserialize");
@@ -99,6 +109,7 @@ fn ownership_category_roundtrip_json() {
 // journal facts. A broken roundtrip means peers disagree on temporal ordering.
 // ============================================================================
 
+/// PhysicalClock roundtrip — wall-clock timestamps in sync messages.
 #[test]
 fn timestamp_physical_clock_roundtrip() {
     let ts = TimeStamp::PhysicalClock(PhysicalTime {
@@ -110,6 +121,7 @@ fn timestamp_physical_clock_roundtrip() {
     assert_eq!(decoded, ts);
 }
 
+/// LogicalClock roundtrip — vector + Lamport clocks for causal ordering.
 #[test]
 fn timestamp_logical_clock_roundtrip() {
     let logical = LogicalTime {

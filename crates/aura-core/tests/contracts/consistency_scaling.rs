@@ -435,9 +435,10 @@ fn test_gc_performance_under_load() {
 // Standard tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Sanity check that types work correctly at small scale.
+/// Basic correctness at small scale — ensures Acknowledgment, Consistency,
+/// and ConsistencyMap APIs work before running the ignored scaling tests.
 #[test]
-fn test_consistency_types_sanity() {
+fn consistency_types_sanity() {
     let peer1 = test_authority(1);
     let peer2 = test_authority(2);
 
