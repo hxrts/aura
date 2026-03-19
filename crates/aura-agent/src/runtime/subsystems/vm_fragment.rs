@@ -56,7 +56,7 @@ pub enum VmFragmentOwnershipError {
 
 /// Local ownership registry for admitted VM fragments.
 #[derive(Debug, Default)]
-pub struct VmFragmentRegistry {
+pub(in crate::runtime) struct VmFragmentRegistry {
     owners: BTreeMap<VmFragmentId, VmFragmentOwnerRecord>,
 }
 
@@ -68,7 +68,7 @@ impl VmFragmentRegistry {
     }
 
     /// Claim every fragment described by one admitted choreography manifest.
-    pub fn claim_manifest(
+    pub(in crate::runtime) fn claim_manifest(
         &mut self,
         session_id: RuntimeChoreographySessionId,
         owner_label: impl Into<String>,
@@ -109,7 +109,7 @@ impl VmFragmentRegistry {
     }
 
     /// Transfer all fragments for one session from one local owner to another.
-    pub fn transfer_session(
+    pub(in crate::runtime) fn transfer_session(
         &mut self,
         session_id: RuntimeChoreographySessionId,
         from_owner: &str,
@@ -155,7 +155,7 @@ impl VmFragmentRegistry {
     /// Returns the number of transferred fragments. Sessions without locally
     /// owned fragments are not treated as an error because some runtime-owned
     /// choreography sessions never admit linked VM fragments.
-    pub fn transfer_session_if_present(
+    pub(in crate::runtime) fn transfer_session_if_present(
         &mut self,
         session_id: RuntimeChoreographySessionId,
         from_owner: &str,
@@ -175,7 +175,7 @@ impl VmFragmentRegistry {
     }
 
     /// Release all fragments bound to one runtime session.
-    pub fn release_session(
+    pub(in crate::runtime) fn release_session(
         &mut self,
         session_id: RuntimeChoreographySessionId,
     ) -> Vec<VmFragmentId> {

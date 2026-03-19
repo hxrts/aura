@@ -1,0 +1,11 @@
+error[E0603]: module `runtime` is private
+ --> tests/ui/runtime_vm_host_bridge_private.rs:2:25
+  |
+2 |     let _ = aura_agent::runtime::vm_host_bridge::open_manifest_vm_session_admitted;
+  |                         ^^^^^^^ private module   --------------------------------- function `open_manifest_vm_session_admitted` is not publicly re-exported
+  |
+note: the module `runtime` is defined here
+ --> src/lib.rs
+  |
+  | mod runtime;
+  | ^^^^^^^^^^^

@@ -208,6 +208,15 @@ The only legal path from external async input to session mutation:
 
 This canonical ingress rule is an architectural invariant.
 
+Enforcement notes:
+
+- raw VM admission helpers such as `open_manifest_vm_session_admitted` stay
+  inside the runtime boundary; higher layers use owned ingress/session wrappers
+- VM fragment ownership mutation stays inside runtime-owned effect/system
+  surfaces rather than leaking a public fragment-registry API
+- link/delegate orchestration uses `ReconfigurationManager`; the mutable
+  `ReconfigurationController` remains an internal runtime primitive
+
 This boundary also defines the split in responsibility:
 
 - host runtime structure is actor-supervised

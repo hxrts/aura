@@ -54,7 +54,7 @@ pub enum SessionFootprintClass {
 
 /// Mutable runtime controller for link/delegate operations.
 #[derive(Debug, Clone, Default)]
-pub struct ReconfigurationController {
+pub(crate) struct ReconfigurationController {
     bundles: HashMap<String, ComposedBundle>,
     footprints: HashMap<AuthorityId, SessionFootprint>,
     delegation_log: Vec<DelegationReceipt>,
@@ -63,12 +63,15 @@ pub struct ReconfigurationController {
 impl ReconfigurationController {
     /// Create an empty controller.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Register an existing bundle before link/delegate operations.
-    pub fn register_bundle(&mut self, bundle: ComposedBundle) -> Result<(), ReconfigurationError> {
+    pub(crate) fn register_bundle(
+        &mut self,
+        bundle: ComposedBundle,
+    ) -> Result<(), ReconfigurationError> {
         if self.bundles.contains_key(&bundle.bundle_id) {
             return Err(ReconfigurationError::DuplicateBundle {
                 bundle_id: bundle.bundle_id,
@@ -80,23 +83,23 @@ impl ReconfigurationController {
 
     /// Snapshot a registered bundle by id.
     #[must_use]
-    pub fn bundle(&self, bundle_id: &str) -> Option<&ComposedBundle> {
+    pub(crate) fn bundle(&self, bundle_id: &str) -> Option<&ComposedBundle> {
         self.bundles.get(bundle_id)
     }
 
     /// Snapshot per-authority session footprint.
     #[must_use]
-    pub fn footprint(&self, authority: &AuthorityId) -> Option<&SessionFootprint> {
+    pub(crate) fn footprint(&self, authority: &AuthorityId) -> Option<&SessionFootprint> {
         self.footprints.get(authority)
     }
 
     /// Append/replace one authority footprint.
-    pub fn set_footprint(&mut self, authority: AuthorityId, footprint: SessionFootprint) {
+    pub(crate) fn set_footprint(&mut self, authority: AuthorityId, footprint: SessionFootprint) {
         self.footprints.insert(authority, footprint);
     }
 
     /// Extend an authority footprint with one session classification.
-    pub fn footprint_extend(
+    pub(crate) fn footprint_extend(
         &mut self,
         authority: AuthorityId,
         session_id: SessionId,
@@ -111,7 +114,7 @@ impl ReconfigurationController {
     }
 
     /// Remove a session from all ownership classes for one authority.
-    pub fn footprint_remove(&mut self, authority: AuthorityId, session_id: SessionId) {
+    pub(crate) fn footprint_remove(&mut self, authority: AuthorityId, session_id: SessionId) {
         if let Some(footprint) = self.footprints.get_mut(&authority) {
             footprint.remove(session_id);
         }
@@ -119,12 +122,12 @@ impl ReconfigurationController {
 
     /// Read delegation receipts in insertion order.
     #[must_use]
-    pub fn delegation_log(&self) -> &[DelegationReceipt] {
+    pub(crate) fn delegation_log(&self) -> &[DelegationReceipt] {
         &self.delegation_log
     }
 
     /// Statically compose two bundles into one linked bundle.
-    pub fn link(
+    pub(crate) fn link(
         &mut self,
         bundle_a: &str,
         bundle_b: &str,
@@ -192,7 +195,7 @@ impl ReconfigurationController {
     }
 
     /// Dynamically delegate one session endpoint from `from_authority` to `to_authority`.
-    pub fn delegate(
+    pub(crate) fn delegate(
         &mut self,
         session_id: SessionId,
         from_authority: AuthorityId,
@@ -285,7 +288,7 @@ impl ReconfigurationController {
 
     /// Verify global reconfiguration coherence across all tracked footprints.
     #[must_use]
-    pub fn verify_coherence(&self) -> CoherenceStatus {
+    pub(crate) fn verify_coherence(&self) -> CoherenceStatus {
         verify_coherence_map(&self.footprints)
     }
 

@@ -28,6 +28,11 @@ For shared semantic operations, the split is stricter still:
 No runtime, frontend, or harness path should keep a parallel terminal
 publication helper once the shared workflow owner has taken over.
 
+The same visibility rule applies to runtime-owned mutation helpers. Raw VM
+admission helpers, fragment ownership registry mutation, and the mutable
+reconfiguration controller stay inside `aura-agent` runtime internals. Shared
+consumers go through sanctioned ingress, session-owner, or manager surfaces.
+
 ## Ownership Categories In The Runtime
 
 The runtime is the main place where Aura's ownership categories become concrete:

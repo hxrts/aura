@@ -1,0 +1,19 @@
+error[E0603]: module `runtime` is private
+ --> tests/ui/vm_fragment_registry_private.rs:2:25
+  |
+2 |     let _ = aura_agent::runtime::subsystems::VmFragmentRegistry::new();
+  |                         ^^^^^^^              ------------------ struct `VmFragmentRegistry` is not publicly re-exported
+  |                         |
+  |                         private module
+  |
+note: the module `runtime` is defined here
+ --> src/lib.rs
+  |
+  | mod runtime;
+  | ^^^^^^^^^^^
+
+error[E0599]: no function or associated item named `new` found for struct `aura_agent::runtime::subsystems::vm_fragment::VmFragmentRegistry` in the current scope
+ --> tests/ui/vm_fragment_registry_private.rs:2:66
+  |
+2 |     let _ = aura_agent::runtime::subsystems::VmFragmentRegistry::new();
+  |                                                                  ^^^ function or associated item not found in `aura_agent::runtime::subsystems::vm_fragment::VmFragmentRegistry`

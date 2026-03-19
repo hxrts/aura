@@ -395,7 +395,7 @@ fn open_role_scoped_vm_session(
     Ok((engine, handler, sid))
 }
 
-pub async fn open_role_scoped_vm_session_admitted(
+pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     role_names: &[&str],
     active_role: &str,
     global_type: &GlobalType,
@@ -470,7 +470,7 @@ pub async fn open_role_scoped_vm_session_admitted(
     Ok((engine, handler, sid))
 }
 
-pub async fn open_manifest_vm_session_admitted(
+pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
     effects: &AuraEffectSystem,
     manifest: &CompositionManifest,
     active_role: &str,

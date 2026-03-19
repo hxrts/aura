@@ -104,7 +104,7 @@ mod task_registry;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub mod handlers;
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub mod reconfiguration;
+mod reconfiguration;
 
 // Runtime-owned indexed journal utilities (stateful)
 #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -231,7 +231,7 @@ pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerSta
 // Threshold signing service types
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use reconfiguration::{
-    CoherenceStatus, ReconfigurationController, ReconfigurationError, SessionFootprintClass,
+    CoherenceStatus, ReconfigurationError, SessionFootprintClass,
 };
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::services::ThresholdSigningService;

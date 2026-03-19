@@ -31,6 +31,6 @@ pub use journal::JournalSubsystem;
 pub use transport::TransportSubsystem;
 pub use vm_bridge::VmBridgeState;
 #[allow(unused_imports)] // Re-exported for runtime-facing ownership helpers and tests.
-pub use vm_fragment::{
+pub(in crate::runtime) use vm_fragment::{
     VmFragmentId, VmFragmentOwnerRecord, VmFragmentOwnershipError, VmFragmentRegistry,
 };

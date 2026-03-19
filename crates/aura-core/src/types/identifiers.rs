@@ -381,6 +381,12 @@ uuid_id!(
     ///
     /// Used to uniquely identify sessions across all protocol types (DKD, resharing,
     /// recovery, locking, etc.) and ensure session-specific operations are isolated.
+    ///
+    /// ```compile_fail
+    /// use aura_core::types::identifiers::SessionId;
+    ///
+    /// let _ = SessionId::new();
+    /// ```
     SessionId,
     label: b"session-id",
     prefix: "session-"

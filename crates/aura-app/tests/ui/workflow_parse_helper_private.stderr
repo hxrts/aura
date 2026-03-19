@@ -1,0 +1,5 @@
+error[E0433]: failed to resolve: could not find `parse` in `workflows`
+ --> tests/ui/workflow_parse_helper_private.rs:2:38
+  |
+2 |     let _ = aura_app::ui::workflows::parse::parse_authority_id;
+  |                                      ^^^^^ could not find `parse` in `workflows`

@@ -1,0 +1,15 @@
+error[E0603]: module `workflows` is private
+ --> tests/ui/root_workflows_private.rs:2:23
+  |
+2 |     let _ = aura_app::workflows::invitation::accept_invitation;
+  |                       ^^^^^^^^^ private module
+  |
+note: the module `workflows` is defined here
+ --> src/lib.rs
+  |
+  | pub(crate) mod workflows;
+  | ^^^^^^^^^^^^^^^^^^^^^^^^
+help: consider importing this function instead
+  |
+2 |     let _ = aura_app::ui::workflows::invitation::accept_invitation;
+  |                       ++++

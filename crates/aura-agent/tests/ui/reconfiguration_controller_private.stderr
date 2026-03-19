@@ -1,0 +1,8 @@
+error[E0433]: failed to resolve: could not find `ReconfigurationController` in `aura_agent`
+ --> tests/ui/reconfiguration_controller_private.rs:2:25
+  |
+2 |     let _ = aura_agent::ReconfigurationController::new();
+  |                         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |                         |
+  |                         could not find `ReconfigurationController` in `aura_agent`
+  |                         help: an enum with a similar name exists: `ReconfigurationError`
