@@ -1,6 +1,8 @@
-//! Tests for fact envelope encoding and decoding.
-
-#![allow(clippy::expect_used, missing_docs)]
+//! Fact envelope encoding stability — encode/decode roundtrips must be exact.
+//!
+//! If fact encoding changes between releases, existing journals become
+//! unreadable and replicated facts fail to deserialize on peers running
+//! different versions.
 
 use aura_core::types::facts::{try_decode_fact, try_encode_fact, FactError, FactTypeId};
 use serde::{Deserialize, Serialize};

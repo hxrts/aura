@@ -1,5 +1,9 @@
-//! Comprehensive correctness tests for authority-internal incremental tree updates.
-#![allow(clippy::expect_used, clippy::uninlined_format_args)]
+//! Authority tree integrity — incremental updates must preserve topology
+//! coherence, commitment parity with full recompute, and Merkle proof validity.
+//!
+//! If incremental tree updates diverge from full recompute, replicas with
+//! different update histories derive different root commitments from the same
+//! logical tree state.
 
 use aura_journal::commitment_integration::TreeStateConversion;
 use aura_journal::commitment_tree::authority_state::AuthorityTreeState;

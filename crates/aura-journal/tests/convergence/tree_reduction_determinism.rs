@@ -1,20 +1,10 @@
-//! Property-Based Tests for Tree Reduction
+//! Tree reduction determinism and confluence.
 //!
-//! This module verifies that TreeState reduction from OpLog is deterministic
-//! and confluent using property-based testing.
+//! If TreeState reduction from OpLog is non-deterministic or non-confluent,
+//! replicas derive different commitment trees from the same operations —
+//! Merkle proofs diverge and threshold signing breaks.
 //!
-//! ## Properties Verified
-//!
-//! 1. **Determinism**: Same OpLog always produces same TreeState
-//! 2. **Confluence**: Different merge orders produce same TreeState
-//! 3. **Tie-breaker consistency**: H(op) ordering is stable
-//! 4. **Commutativity**: OpLog join order doesn't affect final state
-//!
-//! ## Reference
-//!
-//! See docs/123_commitment_tree.md - Deterministic Reduction section
-
-#![allow(clippy::expect_used)]
+//! Properties: determinism, confluence, tie-breaker stability, commutativity.
 
 use aura_core::{Epoch, TreeOp, TreeOpKind};
 use aura_journal::algebra::{JoinSemilattice, OpLog};

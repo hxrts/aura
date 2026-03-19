@@ -950,6 +950,7 @@ mod tests {
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::Hash32;
 
+    /// Empty authority journal reduces to default state.
     #[test]
     fn test_reduce_empty_authority_journal() {
         let auth_id = AuthorityId::new_from_entropy([13u8; 32]);
@@ -959,6 +960,7 @@ mod tests {
         assert_eq!(state.facts.len(), 0);
     }
 
+    /// Context reduction produces relational bindings from protocol facts.
     #[test]
     fn test_reduce_context_with_bindings() {
         let ctx_id = ContextId::new_from_entropy([14u8; 32]);
@@ -987,6 +989,8 @@ mod tests {
         );
     }
 
+    /// Routine AMP epoch bumps must respect the minimum spacing rule —
+    /// prevents rapid epoch cycling that would exhaust ratchet windows.
     #[test]
     fn amp_routine_bump_respects_spacing_rule() {
         let ctx_id = ContextId::new_from_entropy([17u8; 32]);
@@ -1038,6 +1042,8 @@ mod tests {
         assert_eq!(ch_state.skip_window, 1024);
     }
 
+    /// Emergency AMP bumps bypass spacing — allows immediate epoch rotation
+    /// when security requires it (compromised key, etc.).
     #[test]
     fn amp_emergency_bump_bypasses_spacing_rule() {
         let ctx_id = ContextId::new_from_entropy([18u8; 32]);
@@ -1089,6 +1095,8 @@ mod tests {
         assert_eq!(pending.reason, ChannelBumpReason::SuspiciousActivity);
     }
 
+    /// Reducing an authority journal through the context reducer (or vice versa)
+    /// must return an error — namespace type mismatch.
     #[test]
     fn test_reduce_wrong_namespace_type() {
         let ctx_id = ContextId::new_from_entropy([19u8; 32]);
@@ -1100,6 +1108,8 @@ mod tests {
         );
     }
 
+    /// Multiple AddLeaf ops with the same OrderTime are resolved deterministically
+    /// via hash tie-breaking — prevents nondeterminism from timestamp collisions.
     #[test]
     fn test_reduce_authority_multiple_add_leafs_with_same_order() {
         let auth_id = AuthorityId::new_from_entropy([21u8; 32]);
@@ -1143,6 +1153,8 @@ mod tests {
         assert_eq!(state.tree_state.device_count(), 2);
     }
 
+    /// AMP epoch reduction is order-independent — different insertion orders
+    /// of checkpoint/bump/policy facts produce the same reduced channel state.
     #[test]
     fn amp_reduction_order_independent() {
         let ctx = ContextId::new_from_entropy([20u8; 32]);
@@ -1197,6 +1209,8 @@ mod tests {
         );
     }
 
+    /// Checkpoint pruning respects the retention window — checkpoints inside
+    /// the window are kept, those outside are eligible for GC.
     #[test]
     fn test_checkpoint_pruning_boundary() {
         // With default window (1024) and max_gen = 5000
@@ -1215,6 +1229,7 @@ mod tests {
         assert_eq!(boundary, 0);
     }
 
+    /// Checkpoint pruning eligibility check.
     #[test]
     fn test_can_prune_checkpoint() {
         // Checkpoint at gen 1000, max at 5000, default window
@@ -1231,6 +1246,7 @@ mod tests {
         assert!(can_prune_checkpoint(2439, 5000, None));
     }
 
+    /// Proposed bumps superseded by a committed bump are prunable.
     #[test]
     fn test_can_prune_proposed_bump() {
         let committed = vec![(0, 1), (1, 2), (3, 4)];

@@ -137,6 +137,44 @@ Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) requires deterministic state transitions.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) requires safety under replay and anti-entropy.
 
+## Testing
+
+### Strategy
+
+aura-journal is the CRDT convergence layer — if reduction diverges, every
+replica disagrees on state irrecoverably. Testing priorities:
+
+1. **Reducer determinism**: same facts → same state regardless of order
+2. **CRDT convergence laws**: join associativity, commutativity, idempotence
+3. **Nonce uniqueness**: replay prevention within namespaces
+4. **Tree state machine integrity**: incremental updates match full recompute
+5. **Fact encoding stability**: serialization doesn't drift between releases
+
+### Running tests
+
+```
+cargo test -p aura-journal --test convergence  # CRDT convergence + determinism
+cargo test -p aura-journal --test contracts    # tree integrity + encoding stability
+cargo test -p aura-journal --lib               # inline unit tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Reducer non-deterministic for same facts | `tests/convergence/tree_reduction_determinism.rs` | covered (proptest) |
+| Journal join not associative/commutative | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
+| Journal join not idempotent | `tests/convergence/journal_join_laws.rs` | covered |
+| Convergence certificates not emitted | `tests/convergence/convergence_cert.rs` | covered |
+| Tree topology incoherent after mutation | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
+| Incremental update diverges from recompute | `tests/contracts/authority_tree_integrity.rs` | covered |
+| Merkle proofs invalid after mutation | `tests/contracts/authority_tree_integrity.rs` | covered |
+| Fact encoding changes between releases | `tests/contracts/fact_encoding_stability.rs` | covered |
+| Nonce collision accepted | `src/fact.rs` inline | covered |
+| Namespace cross-contamination | `src/fact.rs` inline | covered |
+| AMP epoch reduction order-dependent | `src/reduction.rs` inline | covered |
+| Recovery AMP reconstruction fails | `tests/contracts/recovery_amp_reconstruction.rs` | covered |
+
 ## Boundaries
 - No storage implementations (use `StorageEffects`).
 - No multi-party coordination (use `aura-protocol`).

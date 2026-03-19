@@ -1422,6 +1422,7 @@ pub struct SnapshotFact {
 mod tests {
     use super::*;
 
+    /// Journal starts empty in its namespace.
     #[test]
     fn test_journal_creation() {
         let auth_id = AuthorityId::new_from_entropy([9u8; 32]);
@@ -1432,6 +1433,7 @@ mod tests {
         assert_eq!(journal.size(), 0);
     }
 
+    /// Journal join produces the union of both fact sets — core CRDT merge.
     #[test]
     fn test_journal_merge() {
         let auth_id = AuthorityId::new_from_entropy([10u8; 32]);
@@ -1472,6 +1474,8 @@ mod tests {
         assert!(merged.contains_timestamp(&fact2.timestamp));
     }
 
+    /// Cross-namespace merge must panic — namespace isolation prevents
+    /// authority facts from contaminating context journals.
     #[test]
     #[should_panic(expected = "Cannot merge journals from different namespaces")]
     fn test_journal_merge_different_namespaces() {
@@ -1489,6 +1493,7 @@ mod tests {
     // Fact Metadata Tests
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// New facts start with provisional agreement and local propagation.
     #[test]
     fn test_fact_default_metadata() {
         let fact = Fact::new(
@@ -1509,6 +1514,7 @@ mod tests {
         assert!(!fact.is_propagated());
     }
 
+    /// Ack-tracked facts participate in delivery receipt accounting.
     #[test]
     fn test_fact_with_ack_tracking() {
         let fact = Fact::new_with_ack_tracking(
@@ -1524,6 +1530,7 @@ mod tests {
         assert!(fact.ack_tracked);
     }
 
+    /// Builder chain produces a fact with the specified agreement/propagation state.
     #[test]
     fn test_fact_builder_pattern() {
         use aura_core::query::ConsensusId;
@@ -1547,6 +1554,8 @@ mod tests {
         assert!(fact.ack_tracked);
     }
 
+    /// Fact equality is identity-based (nonce), not metadata-based — two facts
+    /// with the same content but different agreement/propagation are the same fact.
     #[test]
     fn test_fact_equality_ignores_metadata() {
         use aura_core::query::ConsensusId;
@@ -1579,6 +1588,8 @@ mod tests {
         assert_eq!(fact1, fact2);
     }
 
+    /// Fact ordering is identity-based — metadata differences don't affect
+    /// sort order, ensuring deterministic BTreeSet iteration.
     #[test]
     fn test_fact_ordering_ignores_metadata() {
         // Create facts with same order but different metadata
@@ -1607,6 +1618,8 @@ mod tests {
         assert!(fact1 < fact2);
     }
 
+    /// Facts with the same nonce but different content are still distinct —
+    /// content is part of fact identity, not just the nonce.
     #[test]
     fn test_same_order_different_content_are_distinct() {
         let namespace = JournalNamespace::Authority(AuthorityId::new_from_entropy([24u8; 32]));
@@ -1643,6 +1656,7 @@ mod tests {
     // Garbage Collection Tests
     // ─────────────────────────────────────────────────────────────────────────
 
+    /// Ack-tracked facts are GC-eligible only when all expected peers have acked.
     #[test]
     fn test_gc_ack_tracking_basic() {
         use aura_core::query::ConsensusId;
@@ -1694,6 +1708,7 @@ mod tests {
         assert_eq!(journal.ack_tracked_facts().count(), 0);
     }
 
+    /// Partial acks don't make facts GC-eligible — all peers must ack.
     #[test]
     fn test_gc_ack_tracking_partial() {
         use aura_core::query::ConsensusId;

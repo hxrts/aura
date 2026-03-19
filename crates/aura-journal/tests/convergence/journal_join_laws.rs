@@ -1,6 +1,8 @@
-//! Property tests for journal semantics.
-
-#![allow(clippy::expect_used, missing_docs)]
+//! Journal CRDT join-law property tests.
+//!
+//! If journal join is not associative, commutative, or idempotent, replicas
+//! that merge facts in different orders will diverge — the fundamental CRDT
+//! convergence guarantee breaks.
 
 use aura_core::{
     time::{OrderTime, TimeStamp},
