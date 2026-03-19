@@ -77,6 +77,31 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic reduction.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines agreement constraints for high-risk operations.
+## Testing
+
+### Strategy
+
+aura-maintenance defines upgrade, snapshot, and admin replacement facts.
+The critical concern is reducer determinism — if replicas disagree on
+maintenance state, some may run different software versions (split-brain).
+
+### Running tests
+
+```
+cargo test -p aura-maintenance --test determinism  # reducer determinism
+cargo test -p aura-maintenance --lib               # inline unit tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Reducer non-deterministic / order-dependent | `tests/determinism/` | covered |
+| Fact encoding roundtrip breaks | `tests/determinism/` | covered |
+| Snapshot proposal+completion lifecycle | `tests/determinism/` | covered |
+| Cache invalidation additive accounting | `tests/determinism/` | covered |
+| Upgrade activations independently counted | `tests/determinism/` | covered |
+
 ## Boundaries
 - No storage operations (use `StorageEffects`).
 - No coordination logic (use `aura-protocol`).
