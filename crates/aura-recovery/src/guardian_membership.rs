@@ -644,6 +644,7 @@ mod tests {
         assert_eq!(new_set.len(), 1);
     }
 
+    /// Cannot remove the last guardian — would leave the account unrecoverable.
     #[test]
     fn test_apply_remove_last_guardian_fails() {
         let effects = Arc::new(MockEffects::deterministic());
@@ -664,6 +665,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Cannot add a duplicate guardian — would inflate the quorum.
     #[test]
     fn test_apply_add_duplicate_guardian_fails() {
         let effects = Arc::new(MockEffects::deterministic());

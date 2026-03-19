@@ -537,6 +537,7 @@ mod tests {
         }
     }
 
+    /// Setup state derives correctly from initiation + acceptance facts.
     #[test]
     fn test_setup_state_derivation() {
         let ctx = test_context_id();
@@ -570,6 +571,7 @@ mod tests {
         assert!(setup.accepted.contains(&guardian1));
     }
 
+    /// Setup reaches ThresholdMet when exactly threshold guardians accept.
     #[test]
     fn test_setup_threshold_met() {
         let ctx = test_context_id();
@@ -607,6 +609,7 @@ mod tests {
         assert_eq!(setup.status, SetupStatus::ThresholdMet);
     }
 
+    /// Setup fails when a guardian declines, dropping below threshold.
     #[test]
     fn test_setup_failed() {
         let ctx = test_context_id();
@@ -641,6 +644,7 @@ mod tests {
         );
     }
 
+    /// Membership proposal state tracks votes for and against.
     #[test]
     fn test_membership_proposal() {
         let ctx = test_context_id();
@@ -683,6 +687,7 @@ mod tests {
         assert_eq!(proposal.status, ProposalStatus::Pending);
     }
 
+    /// Rejection reason survives fact reduction — needed for UX display.
     #[test]
     fn test_membership_rejection_preserves_reason() {
         let ctx = test_context_id();
@@ -717,6 +722,7 @@ mod tests {
         );
     }
 
+    /// Recovery operation tracks submitted shares and stays in AwaitingShares.
     #[test]
     fn test_recovery_operation() {
         let ctx = test_context_id();
@@ -748,6 +754,7 @@ mod tests {
         assert!(recovery.shares_submitted.contains(&guardian1));
     }
 
+    /// Recovery transitions to Approved after an approval fact.
     #[test]
     fn test_recovery_approved() {
         let ctx = test_context_id();

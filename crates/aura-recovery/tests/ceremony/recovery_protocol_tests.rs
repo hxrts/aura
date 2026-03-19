@@ -18,7 +18,7 @@ use aura_recovery::{
 
 #[test]
 fn recovery_protocol_choreography_is_coherent_and_orphan_free() {
-    let source = include_str!("../src/recovery_protocol.choreo");
+    let source = include_str!("../../src/recovery_protocol.choreo");
     aura_testkit::assert_protocol_coherent(source);
     let orphan_free = aura_testkit::orphan_free_status_for_all_roles(source);
     assert!(

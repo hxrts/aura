@@ -952,6 +952,7 @@ mod tests {
         }
     }
 
+    /// RecoveryFact survives to_bytes/from_bytes roundtrip without loss.
     #[test]
     fn test_recovery_fact_serialization() {
         let fact = RecoveryFact::GuardianSetupInitiated {
@@ -1016,6 +1017,8 @@ mod tests {
         ));
     }
 
+    /// Reducer rejects facts whose context_id doesn't match the reduction
+    /// context. If broken, guardian facts from one identity affect another.
     #[test]
     fn test_reducer_rejects_context_mismatch() {
         let reducer = RecoveryFactReducer;
@@ -1048,6 +1051,8 @@ mod tests {
         assert_eq!(key.data, test_hash(2).0.to_vec());
     }
 
+    /// Reducing the same fact twice produces identical bindings — needed
+    /// for replay-safe journal reduction.
     #[test]
     fn test_reducer_idempotence() {
         let reducer = RecoveryFactReducer;
@@ -1138,6 +1143,8 @@ mod tests {
         }
     }
 
+    /// All fact sub-types are unique — prevents key collisions in the
+    /// journal binding namespace.
     #[test]
     fn test_sub_type_uniqueness() {
         let ctx = test_context_id();

@@ -76,6 +76,38 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone state transitions.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines threshold safety expectations.
+## Testing
+
+### Strategy
+
+Guardian threshold enforcement and ceremony safety are the primary concerns.
+Integration tests in `tests/ceremony/` verify protocol choreography, ceremony
+types, and invariant properties. Inline tests verify fact reduction, state
+derivation, and membership change safety.
+
+### Running tests
+
+```
+cargo test -p aura-recovery
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Recovery with < threshold guardians succeeds | `src/state.rs` `test_setup_threshold_met`, `test_setup_state_derivation` | Covered |
+| Setup fails when guardian declines below threshold | `src/state.rs` `test_setup_failed` | Covered |
+| Fact reduces under wrong context | `src/facts.rs` `test_reducer_rejects_context_mismatch` | Covered |
+| Remove last guardian leaves account unrecoverable | `src/guardian_membership.rs` `test_apply_remove_last_guardian_fails` | Covered |
+| Duplicate guardian inflates quorum | `src/guardian_membership.rs` `test_apply_add_duplicate_guardian_fails` | Covered |
+| Fact sub-type collision in journal | `src/facts.rs` `test_sub_type_uniqueness` | Covered |
+| Ceremony ID collision across instances | `tests/ceremony/` `ceremony_id_collision_resistance` | Covered |
+| Reduction non-idempotent | `src/facts.rs` `test_reducer_idempotence` | Covered |
+| Independent fact reduction non-commutative | `src/view.rs` `test_reduction_commutes_for_independent_facts` | Covered |
+| Threshold must be positive and ≤ guardian count | `tests/ceremony/` `threshold_must_be_positive` | Covered |
+| Guardian set contains duplicates | `tests/ceremony/` `recovery_requires_unique_guardians` | Covered |
+| Protocol choreography incoherent | `tests/ceremony/` `recovery_protocol_choreography_is_coherent_and_orphan_free` | Covered |
+
 ## Boundaries
 - Threshold cryptography lives in aura-core (FROST primitives).
 - Consensus coordination lives in aura-consensus.
