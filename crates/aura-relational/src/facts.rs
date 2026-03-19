@@ -618,6 +618,31 @@ mod tests {
         );
     }
 
+    /// Guardian binding reducer rejects facts with mismatched context — prevents
+    /// guardian bindings from one relationship leaking into another.
+    #[test]
+    fn test_guardian_binding_reducer_rejects_context_mismatch() {
+        let reducer = GuardianBindingDetailsFactReducer;
+        let ctx = test_context_id();
+        let account = test_authority_id(1);
+        let guardian = test_authority_id(2);
+        let binding = GuardianBinding::new(
+            Hash32::from_bytes(&hash::hash(&account.to_bytes())),
+            Hash32::from_bytes(&hash::hash(&guardian.to_bytes())),
+            aura_core::relational::GuardianParameters::default(),
+        );
+
+        let fact = GuardianBindingDetailsFact::new(ctx, account, guardian, binding);
+        let envelope = fact.to_envelope();
+
+        let other_context = ContextId::new_from_entropy([99u8; 32]);
+        let result = reducer.reduce_envelope(other_context, &envelope);
+        assert!(
+            result.is_none(),
+            "Guardian binding fact with mismatched context must be rejected"
+        );
+    }
+
     /// GuardianBindingDetailsFact survives serialization roundtrip with all
     /// fields preserved — account, guardian, and binding parameters.
     #[test]

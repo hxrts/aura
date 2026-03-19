@@ -90,13 +90,12 @@ cargo test -p aura-relational
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
 | Contact fact reduces under wrong context | `src/facts.rs` `test_contact_reducer_rejects_context_mismatch` | Covered |
+| Guardian binding reduces under wrong context | `src/facts.rs` `test_guardian_binding_reducer_rejects_context_mismatch` | Covered |
 | Contact fact serialization lossy | `src/facts.rs` `test_contact_fact_serialization` | Covered |
 | Reducer non-idempotent | `src/facts.rs` `test_contact_reducer_idempotence` | Covered |
-| Type ID inconsistent across variants | `src/facts.rs` `test_type_id_consistency` | Covered |
 | Guardian binding details roundtrip lossy | `src/facts.rs` `guardian_binding_details_roundtrip` | Covered |
 | Guardian binding builder wrong | `src/guardian.rs` `test_guardian_binding_builder` | Covered |
 | Emergency op not distinguished | `src/guardian.rs` `test_recovery_op_emergency` | Covered |
-| Guardian request reducer non-idempotent | `src/guardian_request.rs` `test_guardian_request_reducer_idempotence` | Covered |
 | Mutual agreement bypassed | Consensus-gated (Category C, tested at L4) | Cross-crate |
 
 ## Boundaries
