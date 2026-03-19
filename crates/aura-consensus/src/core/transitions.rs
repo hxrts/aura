@@ -602,4 +602,37 @@ mod tests {
         let result = fail_consensus(&state);
         assert!(!result.is_ok());
     }
+
+    /// Once a consensus instance reaches Committed, additional shares must
+    /// be rejected. This is a direct Rust-level check of
+    /// InvariantUniqueCommitPerInstance: if a late share could alter the
+    /// commit fact, two callers could observe different commits.
+    #[test]
+    fn test_apply_share_after_commit_rejected() {
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+
+        let mut state = ConsensusState::new(
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
+            witnesses,
+            test_authority(1),
+            PathSelection::FastPath,
+        );
+
+        // Reach threshold and commit
+        let result = apply_share(&state, make_share(test_authority(1), test_hash(9)));
+        state = result.state().unwrap();
+        let result = apply_share(&state, make_share(test_authority(2), test_hash(9)));
+        state = result.state().unwrap();
+        assert_eq!(state.phase, ConsensusPhase::Committed);
+
+        // Late share from w3 must be rejected
+        let result = apply_share(&state, make_share(test_authority(3), test_hash(9)));
+        assert!(
+            !result.is_ok(),
+            "Share after Committed must be rejected to preserve InvariantUniqueCommitPerInstance"
+        );
+    }
 }

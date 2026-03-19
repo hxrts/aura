@@ -139,14 +139,14 @@ cargo test -p aura-consensus
 
 | What breaks if wrong | Invariant | Status |
 |---------------------|-----------|--------|
-| Two commits for same prestate | InvariantUniqueCommitPerInstance | Covered (inline + Quint) |
-| Commit without threshold attestation | InvariantCommitRequiresThreshold | Covered (inline + Quint) |
-| Equivocating witness admitted | InvariantEquivocatorsExcluded | Covered (`tests/safety/`) |
+| Two commits for same prestate | InvariantUniqueCommitPerInstance | Covered (`test_apply_share_after_commit_rejected` + Quint) |
+| Commit without threshold attestation | InvariantCommitRequiresThreshold | Covered (`test_check_invariants_insufficient_witnesses` + Quint) |
+| Late share alters commit | InvariantUniqueCommitPerInstance | Covered (`test_apply_share_after_commit_rejected`) |
+| Equivocating witness admitted | InvariantEquivocatorsExcluded | Covered (`tests/safety/equivocation_detection.rs`) |
 | Wire format breaks between versions | — | Covered (`tests/contracts/wire_compatibility.rs`) |
 | DKG produces invalid threshold keys | — | Covered (`tests/contracts/dkg_transcript.rs`) |
 | Guard enforcement bypassed | — | Covered (`tests/safety/guard_enforcement.rs`) |
 | Orphan protocol messages accepted | — | Covered (`tests/safety/protocol_orphan_free.rs`) |
-| Quint mapping roundtrip drift | — | Covered (`src/core/verification/quint_mapping.rs`) |
 
 ## Boundaries
 - Pure core (`core/`) has no effects; orchestration (`protocol/`) has effects.
