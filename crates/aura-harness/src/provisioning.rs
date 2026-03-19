@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{anyhow, bail, Result};
 
@@ -9,12 +11,20 @@ use crate::workspace_root;
 
 const DETERMINISTIC_PORT_MIN: u16 = 41_000;
 const DETERMINISTIC_PORT_SPAN: u16 = 20_000;
+const ISOLATED_PORT_MIN: u16 = 20_000;
+const ISOLATED_PORT_SPAN: u16 = 40_000;
+static RUN_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Result<RunConfig> {
     let root = run_root(&config);
     config.run.artifact_dir = Some(root.clone());
 
     let seed_bundle = build_seed_bundle(&config);
+    let run_token = run_token();
+    let port_namespace = run_token
+        .as_deref()
+        .map(namespaced_port_offset)
+        .unwrap_or_default();
     let mut used_ports = HashSet::new();
 
     for instance in &mut config.instances {
@@ -32,6 +42,9 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
                 &seed_bundle.scenario_seed.to_string(),
             );
             ensure_env_value(&mut instance.env, "AURA_HARNESS_INSTANCE_ID", &instance.id);
+            if let Some(run_token) = run_token.as_deref() {
+                ensure_env_value(&mut instance.env, "AURA_HARNESS_RUN_TOKEN", run_token);
+            }
         }
 
         if matches!(instance.mode, InstanceMode::Browser) {
@@ -49,8 +62,13 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
                 .get(&instance.id)
                 .copied()
                 .unwrap_or(DEFAULT_HARNESS_SEED),
+            port_namespace,
             &mut used_ports,
         )?;
+
+        if let Some(lan_discovery) = instance.lan_discovery.as_mut() {
+            lan_discovery.port = namespace_port(lan_discovery.port, port_namespace);
+        }
     }
 
     Ok(config)
@@ -62,11 +80,13 @@ fn run_root(config: &RunConfig) -> PathBuf {
         .artifact_dir
         .clone()
         .unwrap_or_else(|| default_run_root(config));
-    if explicit.is_absolute() {
+    let explicit = if explicit.is_absolute() {
         explicit
     } else {
         workspace_root().join(explicit)
-    }
+    };
+
+    isolate_run_root(explicit, run_token().as_deref())
 }
 
 fn default_run_root(config: &RunConfig) -> PathBuf {
@@ -99,6 +119,46 @@ fn sanitize_segment(value: &str) -> String {
     }
 }
 
+pub(crate) fn run_token() -> Option<String> {
+    if let Some(token) = std::env::var("AURA_HARNESS_RUN_TOKEN")
+        .ok()
+        .map(|value| sanitize_segment(&value))
+        .filter(|value| !value.is_empty())
+    {
+        return Some(token);
+    }
+
+    let pid = std::process::id();
+    let counter = RUN_TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    Some(format!("pid{pid}-run{counter}"))
+}
+
+fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {
+    match token {
+        Some(token) if !token.is_empty() => base.join("runs").join(token),
+        _ => base,
+    }
+}
+
+fn namespaced_port_offset(token: &str) -> u16 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut hasher);
+    (hasher.finish() % u64::from(ISOLATED_PORT_SPAN)) as u16
+}
+
+fn namespace_port(port: u16, offset: u16) -> u16 {
+    if offset == 0 {
+        return port;
+    }
+
+    let normalized = if port >= ISOLATED_PORT_MIN {
+        port - ISOLATED_PORT_MIN
+    } else {
+        port % ISOLATED_PORT_SPAN
+    };
+    ISOLATED_PORT_MIN + ((normalized + offset) % ISOLATED_PORT_SPAN)
+}
+
 fn ensure_env_path(env: &mut Vec<String>, key: &str, value: PathBuf) {
     if env.iter().any(|entry| {
         entry
@@ -124,12 +184,19 @@ fn ensure_env_value(env: &mut Vec<String>, key: &str, value: &str) {
 fn materialize_bind_address(
     bind_address: &str,
     instance_seed: u64,
+    port_namespace: u16,
     used_ports: &mut HashSet<u16>,
 ) -> Result<String> {
     let (host, port) = split_host_port(bind_address)?;
     if port != 0 {
-        used_ports.insert(port);
-        return Ok(bind_address.to_string());
+        let mut candidate = namespace_port(port, port_namespace);
+        for _ in 0..ISOLATED_PORT_SPAN {
+            if used_ports.insert(candidate) {
+                return Ok(format!("{host}:{candidate}"));
+            }
+            candidate = ISOLATED_PORT_MIN + ((candidate + 1 - ISOLATED_PORT_MIN) % ISOLATED_PORT_SPAN);
+        }
+        bail!("unable to allocate isolated port for {bind_address}");
     }
 
     let base = DETERMINISTIC_PORT_MIN as u64 + (instance_seed % u64::from(DETERMINISTIC_PORT_SPAN));
@@ -174,6 +241,7 @@ mod tests {
             .unwrap_or_else(|| panic!("artifact_dir should be assigned"));
         assert!(run_root.is_absolute());
         assert!(run_root.to_string_lossy().contains(".tmp/harness/runs"));
+        assert!(run_root.to_string_lossy().contains("/runs/"));
 
         let browser = materialized
             .instances
@@ -207,6 +275,23 @@ mod tests {
         let second_port = second.instances[0].bind_address.clone();
         assert_eq!(first_port, second_port);
         assert_ne!(first_port, "127.0.0.1:0");
+    }
+
+    #[test]
+    fn isolate_run_root_appends_token_segment() {
+        let root = super::isolate_run_root(PathBuf::from("/tmp/aura"), Some("scenario13-tui"));
+        assert_eq!(root, PathBuf::from("/tmp/aura/runs/scenario13-tui"));
+    }
+
+    #[test]
+    fn namespace_port_offsets_explicit_ports() {
+        let offset = super::namespaced_port_offset("scenario13-tui");
+        let port = super::namespace_port(41_001, offset);
+        assert_ne!(port, 41_001);
+        assert!(
+            (super::ISOLATED_PORT_MIN..super::ISOLATED_PORT_MIN + super::ISOLATED_PORT_SPAN)
+                .contains(&port)
+        );
     }
 
     fn sample_run_config() -> RunConfig {

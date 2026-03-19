@@ -474,6 +474,13 @@ pub trait RuntimeBridge: Send + Sync {
         channel: ChannelId,
     ) -> Result<bool, IntentError>;
 
+    /// Return the authoritative current participant set for an AMP channel.
+    async fn amp_list_channel_participants(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<Vec<AuthorityId>, IntentError>;
+
     /// Resolve the authoritative checkpoint context for a channel from runtime-owned facts.
     async fn resolve_amp_channel_context(
         &self,
@@ -1101,6 +1108,14 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _context: ContextId,
         _channel: ChannelId,
     ) -> Result<bool, IntentError> {
+        Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_list_channel_participants(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<Vec<AuthorityId>, IntentError> {
         Err(IntentError::no_agent("AMP not available in offline mode"))
     }
 

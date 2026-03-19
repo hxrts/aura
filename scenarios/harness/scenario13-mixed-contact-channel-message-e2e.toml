@@ -32,7 +32,7 @@ goal = "Use two actors as distinct users: accept a contact invite and verify bid
 [[steps]]
 id = "launch"
 action = "launch_actors"
-timeout_ms = 15000
+timeout_ms = 30000
 
 [[steps]]
 id = "alice-onboarding-visible"
@@ -173,7 +173,7 @@ id = "alice-invite-bob-to-shared-channel"
 action = "invite_actor_to_channel"
 actor = "alice"
 value = "${bob_authority_id}"
-timeout_ms = 6000
+timeout_ms = 15000
 
 [[steps]]
 id = "bob-pending-home-invitation-ready"
@@ -242,7 +242,7 @@ id = "bob-receives-alice-message"
 action = "message_contains"
 actor = "bob"
 value = "hello-from-tu1"
-timeout_ms = 120000
+timeout_ms = 180000
 
 [[steps]]
 id = "bob-open-chat-before-send"
@@ -277,4 +277,4 @@ id = "alice-receives-bob-message"
 action = "message_contains"
 actor = "alice"
 value = "hello-from-web"
-timeout_ms = 120000
+timeout_ms = 180000

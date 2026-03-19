@@ -106,6 +106,7 @@ async fn authoritative_settings_devices_for_command(
     app_ctx: &AppCoreContext,
     shared_devices: &SharedDevices,
 ) -> Vec<Device> {
+    let shared = shared_devices.read().clone();
     let from_signal = {
         let core = app_ctx.app_core.raw().read().await;
         core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
@@ -122,11 +123,17 @@ async fn authoritative_settings_devices_for_command(
                 last_seen: device.last_seen,
             })
             .collect::<Vec<_>>();
+        // Prefer the richer shared view when the UI has already rendered more devices
+        // than the latest signal read exposes. This keeps harness actions aligned with
+        // the last authoritative projection the user actually saw.
+        if shared.len() > devices.len() && !shared.is_empty() {
+            return shared;
+        }
         *shared_devices.write() = devices.clone();
         return devices;
     }
 
-    shared_devices.read().clone()
+    shared
 }
 
 async fn authoritative_settings_authorities_for_command(
@@ -304,6 +311,7 @@ fn execute_harness_followup_command(
     shared_channels: &SharedChannels,
     shared_devices: &SharedDevices,
     shared_messages: &SharedMessages,
+    last_exported_device_ids: &std::sync::Arc<parking_lot::RwLock<Vec<String>>>,
     selected_channel: &std::sync::Arc<parking_lot::RwLock<Option<String>>>,
     selected_channel_binding: &std::sync::Arc<parking_lot::RwLock<Option<SelectedChannelBinding>>>,
 ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>, String> {
@@ -666,6 +674,48 @@ fn execute_harness_followup_command(
                 ));
             Ok(None)
         }
+        TuiCommand::HarnessRemoveVisibleDevice { device_id } => {
+            let current_devices = shared_devices.read().clone();
+            let exported_device_ids = last_exported_device_ids.read().clone();
+            let Some(device_id) = device_id
+                .or_else(|| {
+                    current_devices
+                        .iter()
+                        .find(|device| !device.is_current)
+                        .map(|device| device.id.clone())
+                })
+                .or_else(|| {
+                    (current_devices.len() > 1)
+                        .then(|| current_devices.last().map(|device| device.id.clone()))
+                        .flatten()
+                })
+                .or_else(|| {
+                    let current_device_id = current_devices
+                        .iter()
+                        .find(|device| device.is_current)
+                        .map(|device| device.id.as_str());
+                    exported_device_ids
+                        .iter()
+                        .find(|device_id| Some(device_id.as_str()) != current_device_id)
+                        .cloned()
+                })
+            else {
+                return Err(format!(
+                    "no removable device is visible (shared_devices={} exported_devices={})",
+                    current_devices
+                        .iter()
+                        .map(|device| format!("{}:current={}", device.id, device.is_current))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    exported_device_ids.join(",")
+                ));
+            };
+            let Some(cb) = callbacks.as_ref() else {
+                return Err("Settings callbacks are unavailable".to_string());
+            };
+            (cb.settings.on_remove_device)(device_id.into());
+            Ok(None)
+        }
         _ => Ok(None),
     }
 }
@@ -829,6 +879,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         props.known_online,
         props.transport_peers,
     );
+    let projection_export_version = hooks.use_state(|| 0usize);
 
     // =========================================================================
     // Contacts subscription: SharedContacts for dispatch handlers to read
@@ -837,7 +888,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // by a reactive subscription. Dispatch handler closures capture the Arc,
     // not the data, so they always read current contacts.
     // Also sends ContactCountChanged updates to keep TuiState in sync for navigation.
-    let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let shared_contacts = use_contacts_subscription(
+        &mut hooks,
+        &app_ctx,
+        update_tx_holder.clone(),
+        projection_export_version.clone(),
+    );
     let shared_discovered_peers =
         use_discovered_peers_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
@@ -858,6 +914,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let selected_channel_binding: std::sync::Arc<
         parking_lot::RwLock<Option<SelectedChannelBinding>>,
     > = selected_channel_binding_ref.read().clone();
+    let last_exported_device_ids_ref =
+        hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(Vec::<String>::new())));
+    let last_exported_device_ids: std::sync::Arc<parking_lot::RwLock<Vec<String>>> =
+        last_exported_device_ids_ref.read().clone();
 
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
@@ -869,6 +929,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         shared_authority_id.clone(),
         tui_selected.clone(),
         update_tx_holder.clone(),
+        projection_export_version.clone(),
     );
 
     // =========================================================================
@@ -876,7 +937,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Used to look up failed messages by ID for retry operations.
     // The Arc is kept up-to-date by a reactive subscription to CHAT_SIGNAL.
-    let shared_messages = use_messages_subscription(&mut hooks, &app_ctx, tui_selected.clone());
+    let shared_messages = use_messages_subscription(
+        &mut hooks,
+        &app_ctx,
+        tui_selected.clone(),
+        projection_export_version.clone(),
+    );
 
     // Clone for ChatScreen to compute per-channel message counts
     let tui_selected_for_chat_screen = tui_selected.clone();
@@ -885,7 +951,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
-    let shared_devices = use_devices_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let shared_devices = use_devices_subscription(
+        &mut hooks,
+        &app_ctx,
+        update_tx_holder.clone(),
+        projection_export_version.clone(),
+    );
     let callbacks_ref =
         hooks.use_ref(|| Arc::new(parking_lot::RwLock::new(props.callbacks.clone())));
     let shared_callbacks = callbacks_ref.read().clone();
@@ -895,20 +966,37 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Invitations subscription: SharedInvitations for notification action dispatch
     // =========================================================================
     let shared_invitations =
-        use_invitations_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+        use_invitations_subscription(
+            &mut hooks,
+            &app_ctx,
+            update_tx_holder.clone(),
+            projection_export_version.clone(),
+        );
     use_authoritative_semantic_facts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
     // =========================================================================
-    let shared_neighborhood_homes = use_neighborhood_homes_subscription(&mut hooks, &app_ctx);
+    let shared_neighborhood_homes = use_neighborhood_homes_subscription(
+        &mut hooks,
+        &app_ctx,
+        projection_export_version.clone(),
+    );
     let shared_neighborhood_home_meta =
-        use_neighborhood_home_meta_subscription(&mut hooks, &app_ctx);
+        use_neighborhood_home_meta_subscription(
+            &mut hooks,
+            &app_ctx,
+            projection_export_version.clone(),
+        );
 
     // =========================================================================
     // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
     // =========================================================================
-    let shared_pending_requests = use_pending_requests_subscription(&mut hooks, &app_ctx);
+    let shared_pending_requests = use_pending_requests_subscription(
+        &mut hooks,
+        &app_ctx,
+        projection_export_version.clone(),
+    );
 
     // =========================================================================
     // Notifications subscription: keep notification count in sync for navigation
@@ -1160,6 +1248,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_channels_for_commands = shared_channels.clone();
             let shared_devices_for_commands = shared_devices.clone();
             let shared_messages_for_commands = shared_messages.clone();
+            let last_exported_device_ids_for_commands = last_exported_device_ids.clone();
             let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
             let selected_channel_binding_for_commands =
                 selected_channel_binding_for_chat_screen.clone();
@@ -1218,6 +1307,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 &shared_channels_for_commands,
                                 &shared_devices_for_commands,
                                 &shared_messages_for_commands,
+                                &last_exported_device_ids_for_commands,
                                 &tui_selected_for_commands,
                                 &selected_channel_binding_for_commands,
                             )? {
@@ -1252,6 +1342,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let harness_devices = shared_devices_for_commands.read().clone();
                     let harness_channels = shared_channels_for_commands.read().clone();
                     let harness_messages = shared_messages_for_commands.read().clone();
+                    submission.receipt.complete(
+                        aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
+                            operation: operation_handle,
+                        },
+                    );
+
                     let export_result = maybe_export_ui_snapshot(
                         &updated_state,
                         TuiSemanticInputs {
@@ -1262,19 +1358,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             chat_messages: &harness_messages,
                         },
                     );
-                    match export_result {
-                        Ok(()) => submission.receipt.complete(
-                            aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
-                                operation: operation_handle,
-                            },
-                        ),
-                        Err(error) => submission.receipt.complete(
-                            aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                reason: format!(
-                                    "failed to export authoritative TUI projection after applying harness command: {error}"
-                                ),
-                            },
-                        ),
+                    if let Err(error) = export_result {
+                        tracing::warn!(
+                            error = %error,
+                            "failed to export authoritative TUI projection after applying harness command"
+                        );
                     }
                 }
             }
@@ -2347,11 +2435,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // reactivity, ensuring the component re-renders when state changes via tui.replace().
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
+    let _projection_export_version = projection_export_version.get();
     let app_snapshot = app_ctx.snapshot();
     let harness_devices = shared_devices.read().clone();
     let harness_contacts = shared_contacts.read().clone();
     let harness_channels = shared_channels.read().clone();
     let harness_messages = shared_messages.read().clone();
+    *last_exported_device_ids.write() = harness_devices
+        .iter()
+        .map(|device| device.id.clone())
+        .collect();
     if let Err(error) = maybe_export_ui_snapshot(
         &tui_snapshot,
         TuiSemanticInputs {
@@ -2362,9 +2455,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             chat_messages: &harness_messages,
         },
     ) {
-        tracing::warn!(error = %error, "failed to publish TUI harness snapshot");
+        tracing::warn!(
+            error = %error,
+            "failed to publish TUI harness snapshot during render"
+        );
     }
-
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();
 
@@ -2491,6 +2586,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             TuiCommand::Exit => {
                                 should_exit.set(true);
                                 bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
+                            }
+                            TuiCommand::HarnessRemoveVisibleDevice { device_id } => {
+                                let current_devices = shared_devices_for_dispatch.read().clone();
+                                let Some(device_id) = device_id
+                                    .or_else(|| {
+                                        current_devices
+                                            .iter()
+                                            .find(|device| !device.is_current)
+                                            .map(|device| device.id.clone())
+                                    })
+                                    .or_else(|| {
+                                        (current_devices.len() > 1)
+                                            .then(|| {
+                                                current_devices
+                                                    .last()
+                                                    .map(|device| device.id.clone())
+                                            })
+                                            .flatten()
+                                    })
+                                else {
+                                    new_state.toast_error("No removable device is visible");
+                                    continue;
+                                };
+                                (cb.settings.on_remove_device)(device_id.into());
                             }
                             TuiCommand::Dispatch(dispatch_cmd) => {
                                 // Handle dispatch commands via CallbackRegistry

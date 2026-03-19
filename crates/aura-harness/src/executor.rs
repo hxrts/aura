@@ -111,6 +111,7 @@ struct ScenarioContext {
     current_channel_name: BTreeMap<String, String>,
     current_channel_id: BTreeMap<String, String>,
     channel_name_by_id: BTreeMap<String, String>,
+    removable_device_id: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
     shared_flow_state: BTreeMap<String, SharedFlowState>,
@@ -1365,7 +1366,7 @@ fn semantic_binding_for_intent(intent: &IntentAction) -> SharedSemanticBinding {
         IntentAction::OpenSettingsSection(_) => {
             unreachable!("OpenSettingsSection handled directly")
         }
-        IntentAction::RemoveSelectedDevice => SharedSemanticBinding::RemoveSelectedDevice,
+        IntentAction::RemoveSelectedDevice { .. } => SharedSemanticBinding::RemoveSelectedDevice,
         IntentAction::SwitchAuthority { .. } => SharedSemanticBinding::SwitchAuthority,
         IntentAction::CreateContactInvitation { .. } => {
             SharedSemanticBinding::CreateContactInvitation
@@ -1484,13 +1485,57 @@ fn execute_semantic_intent(
             record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
-        IntentAction::RemoveSelectedDevice => {
+        IntentAction::RemoveSelectedDevice { .. } => {
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let resolution_deadline =
+                Instant::now() + Duration::from_millis(timeout_ms.min(10_000));
+            let mut snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+            remember_snapshot_bindings(context, &instance_id, &snapshot);
+            let device_id = match resolve_authoritative_removable_device_id(
+                context,
+                &instance_id,
+                &snapshot,
+            ) {
+                Ok(device_id) => device_id,
+                Err(_) => {
+                    let mut wait_step = semantic_wait_step(&metadata_step);
+                    wait_step.list_id = Some(ListId::Devices);
+                    wait_step.count = Some(2);
+                    wait_for_semantic_state(
+                        &wait_step,
+                        tool_api,
+                        context,
+                        &instance_id,
+                        timeout_ms.min(10_000),
+                    )?;
+
+                    loop {
+                        snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+                        remember_snapshot_bindings(context, &instance_id, &snapshot);
+                        match resolve_authoritative_removable_device_id(
+                            context,
+                            &instance_id,
+                            &snapshot,
+                        ) {
+                            Ok(device_id) => break device_id,
+                            Err(error) => {
+                                if Instant::now() >= resolution_deadline {
+                                    return Err(error);
+                                }
+                                blocking_sleep(Duration::from_millis(100));
+                            }
+                        }
+                    }
+                }
+            };
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
                 context,
                 &instance_id,
-                intent.clone(),
+                IntentAction::RemoveSelectedDevice {
+                    device_id: Some(device_id),
+                },
             )?;
             record_submission_handle(
                 context,
@@ -1611,8 +1656,12 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
-            if let Some(channel_id) =
-                capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?
+            if let Some(channel_id) = capture_authoritative_channel_id(
+                tool_api,
+                &instance_id,
+                channel_name,
+            )?
+            .or_else(|| capture_unique_shared_channel_id(tool_api, &instance_id).ok().flatten())
             {
                 context
                     .channel_name_by_id
@@ -1705,6 +1754,17 @@ fn execute_semantic_intent(
                     OperationState::Succeeded,
                 ),
             )?;
+            if let Some(channel_id) = capture_unique_shared_channel_id(tool_api, &instance_id)? {
+                if let Some(channel_name) = context.current_channel_name.get(&instance_id).cloned()
+                {
+                    context
+                        .channel_name_by_id
+                        .insert(channel_id.clone(), channel_name);
+                }
+                context
+                    .current_channel_id
+                    .insert(instance_id.clone(), channel_id);
+            }
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
@@ -1815,7 +1875,12 @@ fn resolve_intent_templates(
             }
         }
         IntentAction::OpenSettingsSection(section) => IntentAction::OpenSettingsSection(*section),
-        IntentAction::RemoveSelectedDevice => IntentAction::RemoveSelectedDevice,
+        IntentAction::RemoveSelectedDevice { device_id } => IntentAction::RemoveSelectedDevice {
+            device_id: device_id
+                .clone()
+                .map(|device_id| resolve_template(&device_id, context))
+                .transpose()?,
+        },
         IntentAction::SwitchAuthority { authority_id } => IntentAction::SwitchAuthority {
             authority_id: resolve_template(authority_id, context)?,
         },
@@ -2119,7 +2184,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             IntentAction::StartDeviceEnrollment { .. } => "start_device_enrollment",
             IntentAction::ImportDeviceEnrollmentCode { .. } => "import_device_enrollment_code",
             IntentAction::OpenSettingsSection(_) => "open_settings_section",
-            IntentAction::RemoveSelectedDevice => "remove_selected_device",
+            IntentAction::RemoveSelectedDevice { .. } => "remove_selected_device",
             IntentAction::CreateContactInvitation { .. } => "create_contact_invitation",
             IntentAction::AcceptContactInvitation { .. } => "accept_contact_invitation",
             IntentAction::AcceptPendingChannelInvitation => "accept_pending_channel_invitation",
@@ -2891,6 +2956,109 @@ fn fetch_ui_snapshot(tool_api: &mut ToolApi, instance_id: &str) -> Result<UiSnap
     fetch_ui_snapshot_in_lane(tool_api, ExecutionLane::FrontendConformance, instance_id)
 }
 
+fn remember_snapshot_bindings(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    snapshot: &UiSnapshot,
+) {
+    let Some(devices) = snapshot.lists.iter().find(|list| list.id == ListId::Devices) else {
+        return;
+    };
+    if let Some(device_id) = devices
+        .items
+        .iter()
+        .find(|item| !item.is_current)
+        .map(|item| item.id.clone())
+        .or_else(|| {
+            (devices.items.len() > 1)
+                .then(|| devices.items.last().map(|item| item.id.clone()))
+                .flatten()
+        })
+    {
+        context
+            .removable_device_id
+            .insert(instance_id.to_string(), device_id);
+    }
+}
+
+fn capture_semantic_wait_success_bindings(
+    step: &CompatibilityStep,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    snapshot: &UiSnapshot,
+) {
+    if step.list_id != Some(ListId::Devices) {
+        return;
+    }
+    if !step.count.is_some_and(|count| count > 1) {
+        return;
+    }
+    let Some(devices) = snapshot.lists.iter().find(|list| list.id == ListId::Devices) else {
+        return;
+    };
+    if let Some(device_id) = devices
+        .items
+        .iter()
+        .find(|item| !item.is_current)
+        .map(|item| item.id.clone())
+        .or_else(|| {
+            (devices.items.len() > 1)
+                .then(|| devices.items.last().map(|item| item.id.clone()))
+                .flatten()
+        })
+    {
+        context
+            .removable_device_id
+            .insert(instance_id.to_string(), device_id);
+    }
+}
+
+fn resolve_authoritative_removable_device_id(
+    context: &ScenarioContext,
+    instance_id: &str,
+    snapshot: &UiSnapshot,
+) -> Result<String> {
+    if let Some(device_id) = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Devices)
+        .and_then(|list| {
+            list.items
+                .iter()
+                .find(|item| !item.is_current)
+                .map(|item| item.id.clone())
+                .or_else(|| {
+                    (list.items.len() > 1)
+                        .then(|| list.items.last().map(|item| item.id.clone()))
+                        .flatten()
+                })
+        })
+    {
+        return Ok(device_id);
+    }
+    if let Some(device_id) = context.removable_device_id.get(instance_id).cloned() {
+        return Ok(device_id);
+    }
+    let current_devices = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Devices)
+        .map(|list| {
+            list.items
+                .iter()
+                .map(|item| format!("{}:current={}", item.id, item.is_current))
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    Err(anyhow!(
+        "no authoritative removable device binding is available (instance={} devices={} remembered={:?})",
+        instance_id,
+        current_devices,
+        context.removable_device_id.get(instance_id)
+    ))
+}
+
 fn fetch_ui_snapshot_in_lane(
     tool_api: &mut ToolApi,
     lane: ExecutionLane,
@@ -2923,6 +3091,34 @@ fn resolve_channel_id_for_shared_name(snapshot: &UiSnapshot, channel_name: &str)
         })
 }
 
+fn unique_authoritative_shared_channel_id(snapshot: &UiSnapshot) -> Option<String> {
+    let mut channel_ids = snapshot
+        .runtime_events
+        .iter()
+        .filter_map(|event| match &event.fact {
+            RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(member_count),
+            } if *member_count > 1
+                && channel
+                    .name
+                    .as_deref()
+                    .map(|name| !name.eq_ignore_ascii_case("note to self"))
+                    .unwrap_or(true) =>
+            {
+                channel.id.clone()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    channel_ids.sort();
+    channel_ids.dedup();
+    match channel_ids.as_slice() {
+        [channel_id] => Some(channel_id.clone()),
+        _ => None,
+    }
+}
+
 fn capture_authoritative_channel_id(
     tool_api: &mut ToolApi,
     instance_id: &str,
@@ -2930,6 +3126,14 @@ fn capture_authoritative_channel_id(
 ) -> Result<Option<String>> {
     let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
     Ok(resolve_channel_id_for_shared_name(&snapshot, channel_name))
+}
+
+fn capture_unique_shared_channel_id(
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+) -> Result<Option<String>> {
+    let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    Ok(unique_authoritative_shared_channel_id(&snapshot))
 }
 
 fn fetch_screen_text(
@@ -3116,7 +3320,15 @@ fn semantic_wait_matches_for_instance(
                         semantic_wait_matches(&candidate_step, snapshot)
                     });
                     if !matched {
-                        return false;
+                        if let Some(channel_id) = unique_authoritative_shared_channel_id(snapshot) {
+                            let mut candidate_step = non_operation_step.clone();
+                            candidate_step.contains = Some(channel_id);
+                            if !semantic_wait_matches(&candidate_step, snapshot) {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
                     }
                 } else if !semantic_wait_matches(&non_operation_step, snapshot) {
                     return false;
@@ -3233,6 +3445,7 @@ fn submit_shared_intent(
     intent: IntentAction,
 ) -> Result<SemanticCommandResponse> {
     if let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) {
+        remember_snapshot_bindings(context, instance_id, &snapshot);
         context
             .pending_projection_baseline
             .insert(instance_id.to_string(), snapshot.revision);
@@ -3507,10 +3720,12 @@ fn wait_for_semantic_state(
         .get(instance_id)
         .copied();
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    remember_snapshot_bindings(context, instance_id, &last_snapshot);
     let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
     if baseline_satisfied(required_newer_than, &last_snapshot)
         && semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id)
     {
+        capture_semantic_wait_success_bindings(step, context, instance_id, &last_snapshot);
         context.pending_projection_baseline.remove(instance_id);
         return Ok(());
     }
@@ -3555,15 +3770,15 @@ fn wait_for_semantic_state(
             blocking_sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
+        remember_snapshot_bindings(context, instance_id, &snapshot);
         if baseline_satisfied(required_newer_than, &snapshot)
             && semantic_wait_matches_for_instance(step, &snapshot, context, instance_id)
         {
+            capture_semantic_wait_success_bindings(step, context, instance_id, &snapshot);
             context.pending_projection_baseline.remove(instance_id);
             return Ok(());
         }
-        if baseline_satisfied(required_newer_than, &snapshot)
-            && message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)?
-        {
+        if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
             context.pending_projection_baseline.remove(instance_id);
             return Ok(());
         }
@@ -3571,6 +3786,14 @@ fn wait_for_semantic_state(
         last_snapshot = snapshot;
     }
     let diagnostic_screen = fetch_screen_text(tool_api, instance_id, ScreenSource::Default).ok();
+    if matches!(step.action, CompatibilityAction::MessageContains)
+        && diagnostic_screen
+            .as_deref()
+            .is_some_and(|screen| message_contains_screen_text(step, screen))
+    {
+        context.pending_projection_baseline.remove(instance_id);
+        return Ok(());
+    }
     bail!(
         "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?} diagnostic_screen={:?}",
         step.id,
@@ -3623,6 +3846,14 @@ fn message_contains_authoritative_screen(
         return Ok(false);
     };
     diagnostic_screen_contains(tool_api, instance_id, expected_contains)
+}
+
+fn message_contains_screen_text(step: &CompatibilityStep, screen: &str) -> bool {
+    matches!(step.action, CompatibilityAction::MessageContains)
+        && step
+            .value
+            .as_deref()
+            .is_some_and(|expected_contains| screen.contains(expected_contains))
 }
 
 fn is_browser_ui_snapshot_transient(error: &anyhow::Error) -> bool {
@@ -4214,12 +4445,15 @@ mod tests {
     fn action_precondition_wait_step_tracks_all_declared_preconditions() {
         let step = SemanticStep {
             id: "wait-before-remove-device".to_string(),
-            action: ScenarioAction::Intent(IntentAction::RemoveSelectedDevice),
+            action: ScenarioAction::Intent(IntentAction::RemoveSelectedDevice { device_id: None }),
             actor: Some(ActorId("bob".to_string())),
             timeout_ms: Some(4000),
         };
         let wait_step =
-            action_precondition_wait_step(&step, &IntentAction::RemoveSelectedDevice.contract());
+            action_precondition_wait_step(
+                &step,
+                &IntentAction::RemoveSelectedDevice { device_id: None }.contract(),
+            );
 
         assert!(matches!(wait_step.action, CompatibilityAction::WaitFor));
         assert_eq!(wait_step.screen_id, Some(ScreenId::Settings));
@@ -4270,6 +4504,7 @@ mod tests {
                     id: "authority-1".to_string(),
                     selected: true,
                     confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
                 }],
             }],
             messages: Vec::new(),
@@ -4308,6 +4543,7 @@ mod tests {
                     id: "authority-1".to_string(),
                     selected: true,
                     confirmation: ConfirmationState::PendingLocal,
+                    is_current: false,
                 }],
             }],
             messages: Vec::new(),
@@ -5393,6 +5629,7 @@ mod tests {
                 id: "contact-1".to_string(),
                 selected: false,
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             }],
         }];
 

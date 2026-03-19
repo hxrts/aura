@@ -1493,6 +1493,7 @@ pub async fn create_channel_invitation(
         external_stage_tracker,
         message,
         ttl_ms,
+        true,
     )
     .await
     .map(InvitationHandle::new)
@@ -1510,6 +1511,7 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
     external_stage_tracker: Option<ChannelInvitationStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
+    publish_terminal: bool,
 ) -> Result<InvitationInfo, AuraError> {
     let stage_tracker = external_stage_tracker
         .or_else(|| Some(new_channel_invitation_stage_tracker("require_runtime")));
@@ -1653,28 +1655,34 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
                 .unwrap_or("operation");
             let channel_id =
                 fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32])));
-            return fail_channel_invitation(
-                owner,
-                deadline,
-                ChannelInvitationBootstrapError::BootstrapTransport {
-                    channel_id,
-                    detail: format!(
-                        "create_channel_invitation timed out in stage {detail} after {}ms",
-                        operation_budget.timeout_ms()
-                    ),
-                },
-            )
-            .await;
+            let error = ChannelInvitationBootstrapError::BootstrapTransport {
+                channel_id,
+                detail: format!(
+                    "create_channel_invitation timed out in stage {detail} after {}ms",
+                    operation_budget.timeout_ms()
+                ),
+            };
+            return if publish_terminal {
+                fail_channel_invitation(owner, deadline, error).await
+            } else {
+                Err(error.into())
+            };
         }
         Err(TimeoutRunError::Operation(error)) => {
-            return fail_channel_invitation(owner, deadline, error).await;
+            return if publish_terminal {
+                fail_channel_invitation(owner, deadline, error).await
+            } else {
+                Err(error.into())
+            };
         }
     };
-    owner
-        .publish_success_with(issue_invitation_created_proof(
-            invitation.invitation_id.clone(),
-        ))
-        .await?;
+    if publish_terminal {
+        owner
+            .publish_success_with(issue_invitation_created_proof(
+                invitation.invitation_id.clone(),
+            ))
+            .await?;
+    }
     Ok(invitation)
 }
 

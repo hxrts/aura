@@ -255,7 +255,7 @@ mod tests {
         ];
         let followup = apply_harness_command(
             &mut state,
-            HarnessUiCommand::RemoveSelectedDevice,
+            HarnessUiCommand::RemoveSelectedDevice { device_id: None },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
                 contacts: &[],
@@ -270,8 +270,33 @@ mod tests {
         assert_eq!(state.settings.section, SettingsSection::Devices);
         assert!(matches!(
             followup.as_slice(),
-            [TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id })]
-                if device_id == "device:removable"
+            [TuiCommand::HarnessRemoveVisibleDevice { device_id: None }]
+        ));
+    }
+
+    #[test]
+    fn harness_command_remove_device_falls_back_to_last_visible_device_when_flags_drift() {
+        let mut state = TuiState::new();
+        let devices = vec![
+            TuiDevice::new("device:current", "Current").current(),
+            TuiDevice::new("device:removable", "Backup").current(),
+        ];
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::RemoveSelectedDevice { device_id: None },
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &devices,
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("remove device fallback should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::HarnessRemoveVisibleDevice { device_id: None }]
         ));
     }
 

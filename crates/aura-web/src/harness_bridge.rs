@@ -360,7 +360,7 @@ async fn submit_semantic_command(
             .await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
-        IntentAction::RemoveSelectedDevice => {
+        IntentAction::RemoveSelectedDevice { device_id } => {
             let controller_for_screen = controller.clone();
             schedule_browser_ui_mutation(move || {
                 controller_for_screen.set_screen(ScreenId::Settings);
@@ -368,7 +368,10 @@ async fn submit_semantic_command(
                     .set_settings_section(browser_settings_section(SettingsSection::Devices));
             })
             .await?;
-            let device_id = selected_device_id(&controller)?;
+            let device_id = match device_id {
+                Some(device_id) => device_id,
+                None => selected_device_id(&controller)?,
+            };
             ceremony_workflows::start_device_removal_ceremony(&controller.app_core(), device_id)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;

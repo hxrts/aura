@@ -1083,6 +1083,16 @@ impl InvitationHandler {
                     }
                 }
                 InvitationType::Channel { .. } => {
+                    if let Err(error) = self
+                        .notify_channel_invitation_acceptance(effects.as_ref(), invitation_id)
+                        .await
+                    {
+                        tracing::warn!(
+                            invitation_id = %invitation_id,
+                            error = %error,
+                            "Channel invitation acceptance envelope send failed; continuing with local convergence path"
+                        );
+                    }
                     tracing::debug!(
                         invitation_id = %invitation_id,
                         "Skipping synchronous invitation exchange receiver for accepted channel invitation"
@@ -1106,6 +1116,16 @@ impl InvitationHandler {
     ) -> AgentResult<()> {
         InvitationContactHandler::new(self)
             .notify_contact_invitation_acceptance(effects, invitation_id)
+            .await
+    }
+
+    pub(crate) async fn notify_channel_invitation_acceptance(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<()> {
+        InvitationChannelHandler::new(self)
+            .notify_channel_invitation_acceptance(effects, invitation_id)
             .await
     }
 

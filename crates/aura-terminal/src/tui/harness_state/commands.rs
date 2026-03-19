@@ -16,6 +16,7 @@ use aura_app::ui::contract::{
 };
 use aura_app::ui::types::StateSnapshot;
 
+#[derive(Clone, Copy)]
 pub struct TuiSemanticInputs<'a> {
     pub app_snapshot: &'a StateSnapshot,
     pub contacts: &'a [TuiContact],
@@ -343,17 +344,10 @@ pub(crate) fn apply_harness_command(
         HarnessUiCommand::ImportDeviceEnrollmentCode { code } => Ok(vec![TuiCommand::Dispatch(
             DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code },
         )]),
-        HarnessUiCommand::RemoveSelectedDevice => {
+        HarnessUiCommand::RemoveSelectedDevice { device_id } => {
             select_settings_section(state, SettingsSection::Devices);
-            let device_id = semantic_inputs
-                .settings_devices
-                .iter()
-                .find(|device| !device.is_current)
-                .map(|device| device.id.clone())
-                .ok_or_else(|| "no removable device is visible".to_string())?;
-            Ok(vec![TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
-                device_id: device_id.into(),
-            })])
+            let _ = semantic_inputs;
+            Ok(vec![TuiCommand::HarnessRemoveVisibleDevice { device_id }])
         }
         HarnessUiCommand::SwitchAuthority { authority_id } => {
             state.router.go_to(Screen::Settings);

@@ -43,8 +43,7 @@ use crate::{
             Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
             NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC,
         },
-        contacts::ContactsState,
-        home::{HomeMember, HomeRole, HomeState, HomesState},
+        home::{HomeMember, HomeRole, HomeState},
     },
     AppCore,
 };
@@ -57,8 +56,8 @@ use aura_core::{
         ChannelSendParams,
     },
     types::{AuthorityId, ChannelId, ContextId},
-    AuraError, InvitationId, OperationContext, OwnedTaskSpawner, RetryRunError, TimeoutBudget,
-    TimeoutBudgetError, TimeoutRunError, TraceContext,
+    AuraError, InvitationId, OperationContext, RetryRunError, TimeoutBudget, TimeoutBudgetError,
+    TimeoutRunError, TraceContext,
 };
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
@@ -79,8 +78,8 @@ const CHANNEL_CONTEXT_RETRY_ATTEMPTS: usize = 12;
 const CHANNEL_CONTEXT_RETRY_BACKOFF_MS: u64 = 100;
 const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
 const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
-const INVITE_USER_STAGE_TIMEOUT_MS: u64 = 5_000;
-const INVITE_USER_OPERATION_TIMEOUT_MS: u64 = 5_000;
+const INVITE_USER_STAGE_TIMEOUT_MS: u64 = 20_000;
+const INVITE_USER_OPERATION_TIMEOUT_MS: u64 = 15_000;
 
 mod routing;
 mod validation;
@@ -239,55 +238,24 @@ struct ChannelReadinessCoordinator {
 impl ChannelReadinessCoordinator {
     async fn load(app_core: &Arc<RwLock<AppCore>>) -> Self {
         let chat = chat_snapshot(app_core).await;
-        let contacts = contacts_snapshot(app_core).await;
-        let (homes, runtime, self_authority) = {
+        let (runtime, self_authority) = {
             let core = app_core.read().await;
-            (
-                core.views().get_homes(),
-                core.runtime().cloned(),
-                core.authority().copied(),
-            )
+            (core.runtime().cloned(), core.authority().copied())
         };
         let self_authority =
             self_authority.or_else(|| runtime.as_ref().map(|runtime| runtime.authority_id()));
-        let discovered = if let Some(runtime) = runtime {
-            let authority_id = self_authority.unwrap_or_else(|| runtime.authority_id());
-            match runtime.try_get_discovered_peers().await {
-                Ok(peers) => peers
-                    .into_iter()
-                    .filter(|peer| *peer != authority_id)
-                    .collect::<Vec<_>>(),
-                Err(_error) => {
-                    #[cfg(feature = "instrumented")]
-                    tracing::debug!(
-                        error = %_error,
-                        "channel readiness skipped discovered peers because runtime read failed"
-                    );
-                    Vec::new()
+        let mut states = Vec::new();
+        for channel in chat.all_channels().cloned() {
+            let recipients = match (&runtime, self_authority) {
+                (Some(runtime), Some(authority_id)) => {
+                    authoritative_recipient_peers_for_channel(runtime, &channel, authority_id)
+                        .await
+                        .unwrap_or_default()
                 }
-            }
-        } else {
-            Vec::new()
-        };
-
-        let states = chat
-            .all_channels()
-            .cloned()
-            .map(|channel| {
-                let recipients = self_authority
-                    .map(|authority_id| {
-                        resolved_recipient_peers_for_channel_view(
-                            &channel,
-                            &homes,
-                            &contacts,
-                            &discovered,
-                            authority_id,
-                        )
-                    })
-                    .unwrap_or_default();
-                ChannelReadinessState::new(channel, recipients)
-            })
-            .collect();
+                _ => Vec::new(),
+            };
+            states.push(ChannelReadinessState::new(channel, recipients));
+        }
 
         Self { states }
     }
@@ -588,22 +556,6 @@ async fn send_chat_fact_with_retry(
     .into())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_message_delivery_task<F>(spawner: &OwnedTaskSpawner, fut: F)
-where
-    F: Future<Output = ()> + Send + 'static,
-{
-    spawner.spawn_cancellable(Box::pin(fut));
-}
-
-#[cfg(target_arch = "wasm32")]
-fn spawn_message_delivery_task<F>(spawner: &OwnedTaskSpawner, fut: F)
-where
-    F: Future<Output = ()> + 'static,
-{
-    spawner.spawn_local_cancellable(Box::pin(fut));
-}
-
 async fn mark_message_delivery_failed(
     app_core: &Arc<RwLock<AppCore>>,
     message_id: &str,
@@ -632,7 +584,9 @@ async fn deliver_message_fact_remotely(
     fact: &RelationalFact,
 ) -> Result<(), AuraError> {
     let mut delivered_remote = false;
-    let mut recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+    let mut recipients =
+        authoritative_recipient_peers_for_channel_id(app_core, runtime, channel_id, sender_id)
+            .await?;
     let mut failed_fanout = Vec::new();
     let mut attempted_fanout_total = 0usize;
     let mut last_connectivity_error: Option<String> = None;
@@ -650,7 +604,13 @@ async fn deliver_message_fact_remotely(
                 runtime
                     .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
                     .await;
-                recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+                recipients = authoritative_recipient_peers_for_channel_id(
+                    app_core,
+                    runtime,
+                    channel_id,
+                    sender_id,
+                )
+                .await?;
                 continue;
             }
             break;
@@ -692,7 +652,13 @@ async fn deliver_message_fact_remotely(
             runtime
                 .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
                 .await;
-            recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+            recipients = authoritative_recipient_peers_for_channel_id(
+                app_core,
+                runtime,
+                channel_id,
+                sender_id,
+            )
+            .await?;
         } else {
             break;
         }
@@ -1718,49 +1684,53 @@ async fn ensure_home_state_for_channel(
 
     Ok(())
 }
-async fn recipient_peers_for_channel(
+async fn authoritative_recipient_peers_for_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
     self_authority: AuthorityId,
-) -> Vec<AuthorityId> {
+) -> Result<Vec<AuthorityId>, AuraError> {
     let chat = chat_snapshot(app_core).await;
     let Some(channel) = chat.channel(&channel_id).cloned() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let contacts = contacts_snapshot(app_core).await;
-    let homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime().cloned()
-    };
-    let discovered = if let Some(runtime) = runtime {
-        match runtime.try_get_discovered_peers().await {
-            Ok(peers) => peers
-                .into_iter()
-                .filter(|peer| *peer != self_authority)
-                .collect::<Vec<_>>(),
-            Err(_error) => {
-                #[cfg(feature = "instrumented")]
-                tracing::debug!(
-                    error = %_error,
-                    "resolved recipient peer lookup skipped discovered peers because runtime read failed"
-                );
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
-    resolved_recipient_peers_for_channel_view(
-        &channel,
-        &homes,
-        &contacts,
-        &discovered,
-        self_authority,
-    )
+    authoritative_recipient_peers_for_channel(runtime, &channel, self_authority).await
+}
+
+async fn authoritative_recipient_peers_for_channel(
+    runtime: &Arc<dyn RuntimeBridge>,
+    channel: &Channel,
+    self_authority: AuthorityId,
+) -> Result<Vec<AuthorityId>, AuraError> {
+    let context_id = runtime
+        .resolve_amp_channel_context(channel.id)
+        .await
+        .map_err(|error| {
+            AuraError::agent(format!(
+                "failed to resolve authoritative context for channel {}: {error}",
+                channel.id
+            ))
+        })?
+        .ok_or_else(|| {
+            AuraError::agent(format!(
+                "missing authoritative context for channel {}",
+                channel.id
+            ))
+        })?;
+
+    let mut participants = runtime
+        .amp_list_channel_participants(context_id, channel.id)
+        .await
+        .map_err(|error| {
+            AuraError::agent(format!(
+                "failed to resolve authoritative participants for channel {} in context {}: {error}",
+                channel.id, context_id
+            ))
+        })?;
+    participants.retain(|authority| *authority != self_authority);
+    participants.sort_unstable();
+    participants.dedup();
+    Ok(participants)
 }
 
 /// Best-effort channel connectivity warming.
@@ -1781,8 +1751,13 @@ async fn warm_channel_connectivity(
             Err(_) => return false,
         };
     let result = execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
-        let recipients =
-            recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+        let recipients = authoritative_recipient_peers_for_channel_id(
+            app_core,
+            runtime,
+            channel_id,
+            runtime.authority_id(),
+        )
+        .await?;
         let mut any_peer_ready = recipients.is_empty();
         for peer in recipients {
             if runtime.ensure_peer_channel(context_id, peer).await.is_ok() {
@@ -1818,77 +1793,6 @@ async fn warm_channel_connectivity(
         );
     }
     warmed
-}
-
-/// Resolve recipient peers for a channel view from known channel, home, contact, and discovery state.
-pub fn resolved_recipient_peers_for_channel_view(
-    channel: &Channel,
-    homes: &HomesState,
-    contacts: &ContactsState,
-    discovered: &[AuthorityId],
-    self_authority: AuthorityId,
-) -> Vec<AuthorityId> {
-    let channel_context = channel.context_id;
-    let mut recipients = BTreeSet::new();
-
-    for member in &channel.member_ids {
-        if *member != self_authority {
-            recipients.insert(*member);
-        }
-    }
-
-    if recipients.is_empty() {
-        if let Some(home) = homes.home_state(&channel.id) {
-            for member in home.members.iter().map(|member| member.id) {
-                if member != self_authority {
-                    recipients.insert(member);
-                }
-            }
-        }
-
-        if recipients.is_empty() {
-            if let Some(context_id) = channel_context {
-                for (_, home) in homes.iter() {
-                    if home.context_id == Some(context_id) {
-                        for member in home.members.iter().map(|member| member.id) {
-                            if member != self_authority {
-                                recipients.insert(member);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if recipients.is_empty() {
-            if let Some(home) = homes.current_home() {
-                if channel_context.is_none() || home.context_id == channel_context {
-                    for member in home.members.iter().map(|member| member.id) {
-                        if member != self_authority {
-                            recipients.insert(member);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if recipients.is_empty() && (channel.is_dm || discovered.len() == 1) {
-        recipients.extend(discovered.iter().copied());
-    }
-
-    if recipients.is_empty() {
-        for contact_id in contacts.contact_ids() {
-            if *contact_id != self_authority {
-                recipients.insert(*contact_id);
-            }
-        }
-        if !channel.is_dm && recipients.len() > 1 {
-            recipients.clear();
-        }
-    }
-
-    recipients.into_iter().collect()
 }
 
 /// Send a direct message to a contact
@@ -2986,50 +2890,38 @@ async fn send_message_ref_owned(
                     .await
                     .map_err(|e| super::error::runtime_call("persist message", e))?;
 
-                if let Some(spawner) = runtime.task_spawner() {
-                    let background_app_core = Arc::clone(app_core);
-                    let background_runtime = Arc::clone(&runtime);
-                    let background_fact = fact.clone();
-                    let background_message_id = message_id.clone();
-                    spawn_message_delivery_task(&spawner, async move {
-                        if let Err(_error) = deliver_message_fact_remotely(
-                            &background_app_core,
-                            &background_runtime,
-                            context_id,
+                if let Err(error) = deliver_message_fact_remotely(
+                    app_core, &runtime, context_id, channel_id, sender_id, &fact,
+                )
+                .await
+                {
+                    #[cfg(feature = "instrumented")]
+                    tracing::warn!(
+                        error = %error,
+                        channel_id = %channel_id,
+                        message_id = %message_id,
+                        "remote message delivery failed before terminal send success"
+                    );
+                    if let Err(_mark_error) = mark_message_delivery_failed(app_core, &message_id).await
+                    {
+                        #[cfg(feature = "instrumented")]
+                        tracing::error!(
+                            delivery_error = %error,
+                            mark_error = %_mark_error,
+                            message_id = %message_id,
+                            "message delivery failed and mark-failed also failed"
+                        );
+                    }
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::Transport {
                             channel_id,
-                            sender_id,
-                            &background_fact,
-                        )
-                        .await
-                        {
-                            #[cfg(feature = "instrumented")]
-                            tracing::warn!(
-                                error = %_error,
-                                channel_id = %channel_id,
-                                message_id = %background_message_id,
-                                "background remote message delivery failed"
-                            );
-                            if let Err(_mark_err) = mark_message_delivery_failed(
-                                &background_app_core,
-                                &background_message_id,
-                            )
-                            .await
-                            {
-                                #[cfg(feature = "instrumented")]
-                                tracing::error!(
-                                    delivery_error = %_error,
-                                    mark_error = %_mark_err,
-                                    message_id = %background_message_id,
-                                    "double failure: delivery failed and mark-failed also failed — message stuck in Sending state"
-                                );
-                            }
-                        }
-                    });
-                } else {
-                    deliver_message_fact_remotely(
-                        app_core, &runtime, context_id, channel_id, sender_id, &fact,
+                            detail: format!(
+                                "context_id={context_id}; remote delivery failed after local commit: {error}"
+                            ),
+                        },
                     )
-                    .await?;
+                    .await;
                 }
             } else {
                 return fail_send_message(
@@ -3561,62 +3453,30 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         stage_tracker.clone(),
         message,
         ttl_ms,
+        false,
     )
     .await?;
-    if let Some(spawner) = runtime.task_spawner() {
-        let background_app_core = Arc::clone(app_core);
-        let background_runtime = Arc::clone(&runtime);
-        spawn_message_delivery_task(&spawner, async move {
-            if let Err(_error) = project_channel_peer_membership_with_context(
-                &background_app_core,
+    update_invite_stage(&stage_tracker, "local_projection");
+    timeout_workflow_stage_with_deadline(
+        &runtime,
+        "invite_authority_to_channel",
+        "local_projection",
+        None,
+        async {
+            project_channel_peer_membership_with_context(
+                app_core,
                 channel_id,
                 Some(context_id),
                 receiver,
                 None,
             )
-            .await
-            {
-                #[cfg(feature = "instrumented")]
-                tracing::warn!(
-                    error = %_error,
-                    channel_id = %channel_id,
-                    receiver = %receiver,
-                    "background channel invitation projection failed"
-                );
-                return;
-            }
-            warm_channel_connectivity(
-                &background_app_core,
-                &background_runtime,
-                channel_id,
-                context_id,
-            )
-            .await;
-            converge_runtime(&background_runtime).await;
-        });
-    } else {
-        update_invite_stage(&stage_tracker, "local_projection");
-        timeout_workflow_stage_with_deadline(
-            &runtime,
-            "invite_authority_to_channel",
-            "local_projection",
-            deadline,
-            async {
-                project_channel_peer_membership_with_context(
-                    app_core,
-                    channel_id,
-                    Some(context_id),
-                    receiver,
-                    None,
-                )
-                .await?;
-                warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
-                converge_runtime(&runtime).await;
-                Ok(())
-            },
-        )
-        .await?;
-    }
+            .await?;
+            warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
+            converge_runtime(&runtime).await;
+            Ok(())
+        },
+    )
+    .await?;
 
     Ok(invitation.invitation_id)
 }

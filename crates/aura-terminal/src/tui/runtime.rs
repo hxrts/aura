@@ -163,6 +163,9 @@ impl<T: TerminalEffects> TuiRuntime<T> {
                     callback(&dispatch_cmd);
                 }
             }
+            TuiCommand::HarnessRemoveVisibleDevice { .. } => {
+                // Harness-only follow-up; the shell-owned harness bridge resolves it.
+            }
             TuiCommand::Render => {
                 // In headless mode, we could render to a frame buffer
                 // For now, this is a no-op unless we have frame capture

@@ -9,12 +9,13 @@
 use aura_core::effects::{JournalEffects, OrderClockEffects};
 use aura_core::hash::hash;
 use aura_core::time::{OrderTime, TimeStamp};
-use aura_core::types::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::{AuraError, FactValue, Journal, Result};
 use aura_journal::{
     fact::{Fact, FactContent, JournalNamespace, RelationalFact},
-    reduce_context, ChannelEpochState, FactJournal, ProtocolRelationalFact,
+    reduce_context, ChannelEpochState, DomainFact, FactJournal, ProtocolRelationalFact,
 };
+use crate::{ChannelMembershipFact, ChannelParticipantEvent};
 
 // ============================================================================
 // AmpJournalEffects Trait
@@ -136,6 +137,39 @@ pub async fn get_channel_state<A: AmpJournalEffects>(
         .get(&channel)
         .cloned()
         .ok_or_else(|| AuraError::not_found("channel state not found"))
+}
+
+/// Reduce the current AMP channel participants for a `(context, channel)` pair.
+pub async fn list_channel_participants<A: AmpJournalEffects>(
+    effects: &A,
+    context: ContextId,
+    channel: ChannelId,
+) -> Result<Vec<AuthorityId>> {
+    let journal = effects.fetch_context_journal(context).await?;
+    let mut participants = std::collections::BTreeSet::new();
+
+    for fact in journal.iter_facts() {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+        else {
+            continue;
+        };
+        let Some(membership) = ChannelMembershipFact::from_envelope(envelope) else {
+            continue;
+        };
+        if membership.context() != context || membership.channel() != channel {
+            continue;
+        }
+        match membership.event() {
+            ChannelParticipantEvent::Joined => {
+                participants.insert(membership.participant());
+            }
+            ChannelParticipantEvent::Left => {
+                participants.remove(&membership.participant());
+            }
+        }
+    }
+
+    Ok(participants.into_iter().collect())
 }
 
 // ============================================================================

@@ -185,7 +185,7 @@ fn materialized_channel_binding(
 }
 
 struct RunningSession {
-    child: Box<dyn Child + Send>,
+    child: std::sync::Mutex<Box<dyn Child + Send>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: Arc<Mutex<vt100::Parser>>,
     parse_generation: Arc<AtomicU64>,
@@ -241,7 +241,16 @@ impl LocalPtyBackend {
     }
 
     fn child_process_alive(session: &RunningSession) -> bool {
-        let Some(pid) = session.child.process_id() else {
+        let mut child = session
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match child.try_wait() {
+            Ok(Some(_)) => return false,
+            Ok(None) => {}
+            Err(_) => {}
+        }
+        let Some(pid) = child.process_id() else {
             return true;
         };
         match signal::kill(Pid::from_raw(pid as i32), None) {
@@ -267,6 +276,10 @@ impl LocalPtyBackend {
             .join(".tmp")
             .join("harness-ui")
             .join(format!("{:016x}.sock", hasher.finish()))
+    }
+
+    fn ui_state_file_path(&self) -> PathBuf {
+        Self::absolutize_path(self.config.data_dir.join(".harness-ui-state.json"))
     }
 
     fn command_socket_path(&self) -> PathBuf {
@@ -660,6 +673,13 @@ impl InstanceBackend for LocalPtyBackend {
                 ui_state_socket.to_string_lossy().to_string(),
             );
         }
+        if Self::env_value("AURA_TUI_UI_STATE_FILE", &self.config.env).is_none() {
+            let ui_state_file = self.ui_state_file_path();
+            command.env(
+                "AURA_TUI_UI_STATE_FILE",
+                ui_state_file.to_string_lossy().to_string(),
+            );
+        }
         if Self::env_value("AURA_TUI_COMMAND_SOCKET", &self.config.env).is_none() {
             let command_socket = Self::absolutize_path(self.command_socket_path());
             command.env(
@@ -751,7 +771,7 @@ impl InstanceBackend for LocalPtyBackend {
         });
 
         self.session = Some(RunningSession {
-            child,
+            child: std::sync::Mutex::new(child),
             writer: Arc::new(Mutex::new(writer)),
             parser,
             parse_generation,
@@ -775,8 +795,14 @@ impl InstanceBackend for LocalPtyBackend {
             if let Ok(mut stream) = UnixStream::connect(&session.ui_snapshot_socket_path) {
                 let _ = stream.write_all(b"__AURA_UI_STATE_SHUTDOWN__");
             }
-            let _ = session.child.kill();
-            let _ = session.child.wait();
+            {
+                let mut child = session
+                    .child
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let _ = child.kill();
+                let _ = child.wait();
+            }
             drop(session.writer);
             if let Some(handle) = session.reader_thread.take() {
                 let _ = handle.join();
@@ -878,13 +904,17 @@ impl InstanceBackend for LocalPtyBackend {
                     return Some(Ok(UiSnapshotEvent { snapshot, version }));
                 }
             }
-            if !Self::reader_thread_alive(session) {
-                return Some(Err(anyhow::anyhow!(
-                    "local PTY instance {} exited before publishing a newer UI snapshot event; after_version={:?}",
-                    self.config.id,
-                    after_version
-                )));
+            drop(guard);
+            if let Err(error) =
+                self.ensure_session_alive(session, "publishing a newer UI snapshot event")
+            {
+                return Some(Err(error));
             }
+            guard = session
+                .ui_snapshot_feed
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let now = Instant::now();
             if now >= deadline {
                 return Some(Err(anyhow::anyhow!(
@@ -893,10 +923,13 @@ impl InstanceBackend for LocalPtyBackend {
                     after_version
                 )));
             }
+            let poll_timeout = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(250));
             let timeout_result = session
                 .ui_snapshot_feed
                 .ready
-                .wait_timeout(guard, deadline.saturating_duration_since(now))
+                .wait_timeout(guard, poll_timeout)
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             guard = timeout_result.0;
         }
@@ -1391,8 +1424,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     value: SemanticCommandValue::None,
                 })
             }
-            IntentAction::RemoveSelectedDevice => {
-                self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice)?;
+            IntentAction::RemoveSelectedDevice { device_id } => {
+                self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice { device_id })?;
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
             IntentAction::SwitchAuthority { authority_id } => {
@@ -1913,6 +1946,7 @@ mod tests {
                         id: (*id).to_string(),
                         selected: *selected,
                         confirmation: aura_app::ui_contract::ConfirmationState::PendingLocal,
+                        is_current: false,
                     })
                     .collect(),
             }],
@@ -2053,7 +2087,9 @@ mod tests {
         assert!(source
             .contains("self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {"));
         assert!(
-            source.contains("self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice)?;")
+            source.contains(
+                "self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice { device_id })?;"
+            )
         );
         assert!(source.contains(
             "self.send_harness_command(&HarnessUiCommand::SwitchAuthority { authority_id })?;"
@@ -2228,8 +2264,7 @@ mod tests {
         );
         assert!(
             !ui_snapshot_body.contains("SNAPSHOT_WAIT_ATTEMPTS")
-                && !ui_snapshot_body.contains("fs::read_to_string(&path)")
-                && !production_source.contains("AURA_TUI_UI_STATE_FILE"),
+                && !ui_snapshot_body.contains("fs::read_to_string(&path)"),
             "local PTY UI snapshot path may not poll the filesystem"
         );
     }

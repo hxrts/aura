@@ -354,6 +354,14 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(*self.amp_channel_state_exists.read().await)
     }
 
+    async fn amp_list_channel_participants(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+    ) -> Result<Vec<AuthorityId>, IntentError> {
+        Ok(vec![])
+    }
+
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,

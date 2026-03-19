@@ -11,7 +11,7 @@ use aura_app::ui::contract::{
     ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot, ScreenId, ToastId,
     ToastSnapshot, UiReadiness, UiSnapshot,
 };
-use aura_app::ui_contract::{next_projection_revision, QuiescenceSnapshot};
+use aura_app::ui_contract::{next_projection_revision, ProjectionRevision, QuiescenceSnapshot};
 use parking_lot::Mutex;
 use std::fs;
 use std::io;
@@ -27,7 +27,7 @@ const UI_STATE_SOCKET_ENV: &str = "AURA_TUI_UI_STATE_SOCKET";
 
 static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static UI_STATE_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
-static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<Vec<u8>>>> = OnceLock::new();
 
 fn configured_ui_state_file() -> Option<&'static PathBuf> {
     UI_STATE_FILE
@@ -41,7 +41,7 @@ fn configured_ui_state_socket() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
-fn last_written_snapshot() -> &'static Mutex<Option<String>> {
+fn last_written_snapshot() -> &'static Mutex<Option<Vec<u8>>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
 }
 
@@ -55,9 +55,10 @@ fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn try_authoritative_ui_snapshot(
+fn build_authoritative_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,
+    revision: ProjectionRevision,
 ) -> Result<UiSnapshot, String> {
     let app_snapshot = semantic_inputs.app_snapshot;
     let onboarding_active = matches!(
@@ -99,6 +100,7 @@ pub fn try_authoritative_ui_snapshot(
                 id: screen_item_id(id),
                 selected: *candidate == state.screen(),
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             }
         })
         .collect::<Vec<_>>();
@@ -122,6 +124,7 @@ pub fn try_authoritative_ui_snapshot(
             id: channel.id.clone(),
             selected: selected_channel_id.as_ref() == Some(&channel.id),
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -140,6 +143,7 @@ pub fn try_authoritative_ui_snapshot(
             id: contact.id.clone(),
             selected: idx == state.contacts.selected_index,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     let selected_contact_id = contact_items
@@ -169,6 +173,7 @@ pub fn try_authoritative_ui_snapshot(
             id: id.clone(),
             selected: idx == state.notifications.selected_index,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -192,6 +197,7 @@ pub fn try_authoritative_ui_snapshot(
                 id: id.clone(),
                 selected: idx == modal_state.type_index,
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             })
             .collect::<Vec<_>>();
         push_list(
@@ -223,6 +229,7 @@ pub fn try_authoritative_ui_snapshot(
             id: id.clone(),
             selected: idx == state.neighborhood.selected_home,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -250,6 +257,7 @@ pub fn try_authoritative_ui_snapshot(
             id: id.clone(),
             selected: idx == state.neighborhood.selected_member,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -273,6 +281,7 @@ pub fn try_authoritative_ui_snapshot(
             id: authority.id.clone(),
             selected: idx == state.current_authority_index,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -295,6 +304,7 @@ pub fn try_authoritative_ui_snapshot(
             id: aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string(),
             selected: *section == state.settings.section,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     push_list(
@@ -315,6 +325,7 @@ pub fn try_authoritative_ui_snapshot(
                 id: device.id.clone(),
                 selected: false,
                 confirmation: ConfirmationState::Confirmed,
+                is_current: device.is_current,
             })
             .collect::<Vec<_>>();
         push_list(
@@ -383,7 +394,7 @@ pub fn try_authoritative_ui_snapshot(
         focused_control,
         open_modal,
         readiness,
-        revision: next_projection_revision(None),
+        revision,
         quiescence: QuiescenceSnapshot::derive(readiness, open_modal, &operations),
         selections,
         lists,
@@ -394,6 +405,13 @@ pub fn try_authoritative_ui_snapshot(
     };
     snapshot.validate_invariants()?;
     Ok(snapshot)
+}
+
+pub fn try_authoritative_ui_snapshot(
+    state: &TuiState,
+    semantic_inputs: TuiSemanticInputs<'_>,
+) -> Result<UiSnapshot, String> {
+    build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -415,27 +433,49 @@ pub fn maybe_export_ui_snapshot(
         return Ok(());
     }
 
-    let snapshot = try_authoritative_ui_snapshot(state, semantic_inputs)?;
-    let snapshot_json = serde_json::to_string_pretty(&snapshot)
-        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
+    // Build a canonical snapshot with a stable placeholder revision so identical
+    // semantic state deduplicates cleanly instead of generating a fresh revision
+    // and flooding the harness bridge on every render.
+    let canonical_snapshot = build_authoritative_ui_snapshot(
+        state,
+        semantic_inputs,
+        ProjectionRevision {
+            semantic_seq: 0,
+            render_seq: None,
+        },
+    )?;
+    let canonical_json = serde_json::to_vec(&canonical_snapshot)
+        .map_err(|error| format!("failed to encode canonical TUI semantic snapshot: {error}"))?;
 
     let mut last_written = last_written_snapshot().lock();
-    if last_written.as_deref() == Some(snapshot_json.as_str()) {
+    if last_written.as_deref() == Some(canonical_json.as_slice()) {
         return Ok(());
     }
 
-    let write_result = socket_path
-        .map(|path| {
-            StdUnixStream::connect(path)
-                .and_then(|mut stream| stream.write_all(snapshot_json.as_bytes()))
-        })
-        .or_else(|| file_path.map(|path| write_snapshot_file(path, &snapshot_json)));
-    if matches!(write_result, Some(Ok(()))) {
-        *last_written = Some(snapshot_json);
+    let snapshot =
+        build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
+    let snapshot_json = serde_json::to_vec(&snapshot)
+        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
+
+    let socket_write_result = socket_path.map(|path| {
+        StdUnixStream::connect(path).and_then(|mut stream| stream.write_all(&snapshot_json))
+    });
+    let file_write_result = file_path.map(|path| {
+        let text = std::str::from_utf8(&snapshot_json)
+            .map_err(|error| io::Error::other(format!("invalid UTF-8 snapshot: {error}")))?;
+        write_snapshot_file(path, text)
+    });
+    if matches!(socket_write_result, Some(Ok(()))) || matches!(file_write_result, Some(Ok(()))) {
+        *last_written = Some(canonical_json);
         return Ok(());
     }
-    if let Some(Err(error)) = write_result {
+    if let Some(Err(error)) = socket_write_result {
         return Err(format!("failed to publish TUI semantic snapshot: {error}"));
+    }
+    if let Some(Err(error)) = file_write_result {
+        return Err(format!(
+            "failed to publish TUI semantic snapshot mirror file: {error}"
+        ));
     }
     Ok(())
 }

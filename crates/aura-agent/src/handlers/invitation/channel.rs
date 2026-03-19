@@ -1,4 +1,5 @@
 use super::*;
+use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 
 const INVITATION_CHANNEL_JOIN_TIMEOUT_MS: u64 = 2_000;
 const INVITATION_VIEW_UPDATE_TIMEOUT_MS: u64 = 500;
@@ -10,6 +11,75 @@ pub(super) struct InvitationChannelHandler<'a> {
 impl<'a> InvitationChannelHandler<'a> {
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
         Self { handler }
+    }
+
+    pub(super) async fn notify_channel_invitation_acceptance(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<()> {
+        if effects.is_test_mode() {
+            return Ok(());
+        }
+
+        let Some(invitation) = self
+            .handler
+            .load_invitation_for_choreography(effects, invitation_id)
+            .await
+        else {
+            return Ok(());
+        };
+
+        let InvitationType::Channel { home_id, .. } = invitation.invitation_type else {
+            return Ok(());
+        };
+
+        let acceptor_id = self.handler.context.authority.authority_id();
+        if invitation.sender_id == acceptor_id {
+            return Ok(());
+        }
+
+        let timestamp = ChannelMembershipFact::random_timestamp(effects).await;
+        let membership = ChannelMembershipFact::new(
+            invitation.context_id,
+            home_id,
+            acceptor_id,
+            ChannelParticipantEvent::Joined,
+            timestamp,
+        )
+        .to_generic();
+
+        let payload =
+            aura_core::util::serialization::to_vec(&membership).map_err(|e| AgentError::internal(e.to_string()))?;
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
+        metadata.insert(
+            "invitation-id".to_string(),
+            invitation.invitation_id.to_string(),
+        );
+        metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
+        metadata.insert("channel-id".to_string(), home_id.to_string());
+
+        let envelope = TransportEnvelope {
+            destination: invitation.sender_id,
+            source: acceptor_id,
+            context: invitation.context_id,
+            payload,
+            metadata,
+            receipt: None,
+        };
+
+        attempt_network_send_envelope(
+            effects,
+            "channel invitation acceptance membership envelope send failed",
+            envelope,
+        )
+        .await
+        .map_err(|error| AgentError::effects(error.to_string()))
     }
 
     async fn best_effort_await_view_update(

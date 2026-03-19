@@ -107,6 +107,33 @@ run_scenario() {
   fi
 }
 
+clean_config_state() {
+  local config="$1"
+  local path=""
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    rm -rf "$repo_root/$path"
+  done < <(
+    awk '
+      /^artifact_dir = / || /^data_dir = / {
+        gsub(/^[^=]+ = |"/, "", $0)
+        print $0
+      }
+    ' "$config"
+  )
+}
+
+run_token_for_scenario() {
+  local selected_lane="$1"
+  local scenario_id="$2"
+  printf '%s-%s-%s-%s' \
+    "$selected_lane" \
+    "$scenario_id" \
+    "$$" \
+    "$(date +%s)"
+}
+
 run_lane() {
   local selected_lane="$1"
   local scenario_id=""
@@ -128,8 +155,11 @@ run_lane() {
 
     echo "[harness-matrix] lane=$selected_lane suite=$suite scenario=$scenario_id class=$scenario_class config=$config"
     if [[ $dry_run -eq 0 ]]; then
+      local run_token=""
+      run_token="$(run_token_for_scenario "$selected_lane" "$scenario_id")"
       (
         cd "$repo_root"
+        export AURA_HARNESS_RUN_TOKEN="$run_token"
         run_scenario "$config" "$scenario_path"
       )
     fi

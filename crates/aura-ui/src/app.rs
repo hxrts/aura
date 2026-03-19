@@ -5643,6 +5643,7 @@ fn runtime_semantic_snapshot(
             id: home.id.clone(),
             selected: model.selected_home_id() == Some(home.id.as_str()),
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     let selected_home_id = model.selected_home_id().map(str::to_string).or_else(|| {
@@ -5663,6 +5664,7 @@ fn runtime_semantic_snapshot(
                 id: member_key.0.clone(),
                 selected: model.selected_neighborhood_member_key.as_ref() == Some(&member_key),
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             }
         })
         .collect::<Vec<_>>();
@@ -5687,6 +5689,7 @@ fn runtime_semantic_snapshot(
                     .name
                     .eq_ignore_ascii_case(&chat_runtime.active_channel),
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             })
             .collect::<Vec<_>>()
     } else {
@@ -5721,6 +5724,7 @@ fn runtime_semantic_snapshot(
                 id: contact.authority_id.to_string(),
                 selected: model.selected_contact_authority_id() == Some(contact.authority_id),
                 confirmation: contact.confirmation,
+                is_current: false,
             })
             .collect::<Vec<_>>()
     } else {
@@ -5744,6 +5748,7 @@ fn runtime_semantic_snapshot(
             id: device.id.clone(),
             selected: device.is_current,
             confirmation: ConfirmationState::Confirmed,
+            is_current: device.is_current,
         })
         .collect::<Vec<_>>();
     upsert_snapshot_list(&mut snapshot, ListId::Devices, devices, None);
@@ -5755,6 +5760,7 @@ fn runtime_semantic_snapshot(
             id: authority.id.to_string(),
             selected: model.selected_authority_id == Some(authority.id),
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     if !authorities.is_empty() {
@@ -5773,6 +5779,7 @@ fn runtime_semantic_snapshot(
             id: item.id.clone(),
             selected: model.selected_notification_id.as_ref().map(|id| &id.0) == Some(&item.id),
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
     if !notifications.is_empty() {

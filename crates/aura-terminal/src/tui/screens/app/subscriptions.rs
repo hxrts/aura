@@ -66,6 +66,10 @@ fn publish_ui_updates_ordered(
     });
 }
 
+fn bump_projection_version(version: &mut State<usize>) {
+    version.set(version.get().wrapping_add(1));
+}
+
 fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
     vec![
         RuntimeEventKind::ContactLinkReady,
@@ -340,6 +344,7 @@ pub fn use_contacts_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     update_tx: Option<UiUpdateSender>,
+    projection_version: State<usize>,
 ) -> SharedContacts {
     // Create the shared contacts holder - use_ref ensures it persists across renders.
     let shared_contacts_ref = hooks.use_ref(SharedContacts::new);
@@ -352,6 +357,7 @@ pub fn use_contacts_subscription(
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
         let tasks = tasks;
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
@@ -359,6 +365,7 @@ pub fn use_contacts_subscription(
                 let new_count = contact_list.len();
 
                 *contacts.write() = contact_list;
+                bump_projection_version(&mut projection_version);
 
                 // Send contact count update for keyboard navigation
                 if let Some(ref tx) = update_tx {
@@ -394,11 +401,23 @@ impl SharedDevices {
     }
 }
 
+fn merge_transient_devices(incoming: Vec<Device>, previous: &[Device]) -> Vec<Device> {
+    if incoming.len() == 1
+        && incoming.first().is_some_and(|device| device.is_current)
+        && previous.len() > 1
+        && previous.iter().any(|device| !device.is_current)
+    {
+        return previous.to_vec();
+    }
+    incoming
+}
+
 /// Create a shared devices holder and subscribe it to SETTINGS_SIGNAL.
 pub fn use_devices_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     update_tx: Option<UiUpdateSender>,
+    projection_version: State<usize>,
 ) -> SharedDevices {
     let shared_devices_ref = hooks.use_ref(SharedDevices::new);
     let shared_devices: SharedDevices = shared_devices_ref.read().clone();
@@ -409,6 +428,7 @@ pub fn use_devices_subscription(
         let devices = shared_devices.clone();
         let update_tx = update_tx;
         let tasks = tasks;
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let list: Vec<Device> = settings_state
@@ -421,8 +441,11 @@ pub fn use_devices_subscription(
                         last_seen: d.last_seen,
                     })
                     .collect();
-                *devices.write() = list;
-                if settings_state.devices.len() >= 2 {
+                let previous = devices.read().clone();
+                let merged = merge_transient_devices(list, &previous);
+                *devices.write() = merged.clone();
+                bump_projection_version(&mut projection_version);
+                if merged.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
                         publish_ui_update(&tasks, tx, UiUpdate::RuntimeBootstrapFinalized);
                     }
@@ -453,6 +476,7 @@ pub fn use_messages_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     selected_channel_id: Arc<RwLock<Option<String>>>,
+    projection_version: State<usize>,
 ) -> SharedMessages {
     // Create the shared messages holder - use_ref ensures it persists across renders.
     let shared_messages_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
@@ -461,6 +485,7 @@ pub fn use_messages_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let messages = shared_messages.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let channel_id = selected_channel_id.read().clone();
@@ -485,6 +510,7 @@ pub fn use_messages_subscription(
                 };
 
                 *messages.write() = message_list;
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -625,6 +651,7 @@ pub fn use_channels_subscription(
     shared_authority_id: SharedAuthorityId,
     selected_channel_id: Arc<RwLock<Option<String>>>,
     update_tx: Option<UiUpdateSender>,
+    projection_version: State<usize>,
 ) -> SharedChannels {
     let shared_channels_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_channels: SharedChannels = shared_channels_ref.read().clone();
@@ -666,6 +693,7 @@ pub fn use_channels_subscription(
         let latest_discovered_peers = latest_discovered_peers.clone();
         let selected_channel_id = selected_channel_id.clone();
         let tasks = tasks.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let mut stabilized = {
@@ -721,6 +749,7 @@ pub fn use_channels_subscription(
                     &stabilized,
                     scope.as_deref(),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -742,6 +771,7 @@ pub fn use_channels_subscription(
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
         let tasks = tasks.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
@@ -776,6 +806,7 @@ pub fn use_channels_subscription(
                     &chat_state,
                     scope.as_deref(),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -797,6 +828,7 @@ pub fn use_channels_subscription(
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
         let tasks = tasks.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -825,6 +857,7 @@ pub fn use_channels_subscription(
                     &chat_state,
                     Some(scope.as_str()),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -846,6 +879,7 @@ pub fn use_channels_subscription(
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
         let tasks = tasks.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 *latest_contacts_state.write() = contacts_state.clone();
@@ -872,6 +906,7 @@ pub fn use_channels_subscription(
                     &chat_state,
                     scope.as_deref(),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -893,6 +928,7 @@ pub fn use_channels_subscription(
         let shared_authority_id_handle = shared_authority_id.clone();
         let selected_channel_id_handle = selected_channel_id.clone();
         let tasks = tasks.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
                 *latest_homes_state_handle.write() = homes_state.clone();
@@ -920,6 +956,7 @@ pub fn use_channels_subscription(
                     &chat_state,
                     scope.as_deref(),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -941,6 +978,7 @@ pub fn use_channels_subscription(
         let shared_authority_id = shared_authority_id.clone();
         let selected_channel_id = selected_channel_id.clone();
         let tasks = tasks.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
                 latest_transport_peer_count.store(count, Ordering::Relaxed);
@@ -967,6 +1005,7 @@ pub fn use_channels_subscription(
                     &chat_state,
                     scope.as_deref(),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -975,6 +1014,7 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let discovered_peer_ids = peers_state
@@ -1007,6 +1047,7 @@ pub fn use_channels_subscription(
                     &chat_state,
                     scope.as_deref(),
                 );
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -1025,6 +1066,7 @@ pub fn use_invitations_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     _update_tx: Option<UiUpdateSender>,
+    projection_version: State<usize>,
 ) -> SharedInvitations {
     let shared_invitations_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_invitations: SharedInvitations = shared_invitations_ref.read().clone();
@@ -1032,6 +1074,7 @@ pub fn use_invitations_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let invitations = shared_invitations.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |inv_state| {
                 let all: Vec<Invitation> = inv_state
@@ -1043,6 +1086,7 @@ pub fn use_invitations_subscription(
                     .collect();
 
                 *invitations.write() = all;
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -1105,6 +1149,7 @@ pub type SharedNeighborhoodHomes = Arc<RwLock<Vec<String>>>;
 pub fn use_neighborhood_homes_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    projection_version: State<usize>,
 ) -> SharedNeighborhoodHomes {
     let shared_homes_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_homes: SharedNeighborhoodHomes = shared_homes_ref.read().clone();
@@ -1112,6 +1157,7 @@ pub fn use_neighborhood_homes_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let homes = shared_homes.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let mut ids: Vec<String> = Vec::with_capacity(n.neighbor_count() + 1);
@@ -1122,6 +1168,7 @@ pub fn use_neighborhood_homes_subscription(
                         .map(|b| b.id.to_string()),
                 );
                 *homes.write() = ids;
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -1143,6 +1190,7 @@ pub type SharedNeighborhoodHomeMeta = Arc<RwLock<NeighborhoodHomeMeta>>;
 pub fn use_neighborhood_home_meta_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    projection_version: State<usize>,
 ) -> SharedNeighborhoodHomeMeta {
     let shared_meta_ref = hooks.use_ref(|| Arc::new(RwLock::new(NeighborhoodHomeMeta::default())));
     let shared_meta: SharedNeighborhoodHomeMeta = shared_meta_ref.read().clone();
@@ -1150,6 +1198,7 @@ pub fn use_neighborhood_home_meta_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let meta = shared_meta.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
                 let snapshot = homes_state
@@ -1160,6 +1209,7 @@ pub fn use_neighborhood_home_meta_subscription(
                     })
                     .unwrap_or_default();
                 *meta.write() = snapshot;
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -1177,6 +1227,7 @@ pub type SharedPendingRequests = Arc<RwLock<Vec<PendingRequest>>>;
 pub fn use_pending_requests_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    projection_version: State<usize>,
 ) -> SharedPendingRequests {
     let shared_requests_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_requests: SharedPendingRequests = shared_requests_ref.read().clone();
@@ -1184,6 +1235,7 @@ pub fn use_pending_requests_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let requests = shared_requests.clone();
+        let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |r| {
                 let pending: Vec<PendingRequest> = r
@@ -1192,6 +1244,7 @@ pub fn use_pending_requests_subscription(
                     .map(PendingRequest::from)
                     .collect();
                 *requests.write() = pending;
+                bump_projection_version(&mut projection_version);
             })
             .await;
         }
@@ -1304,6 +1357,7 @@ mod tests {
     };
     use aura_core::crypto::hash::hash;
     use aura_core::types::identifiers::{AuthorityId, ChannelId};
+    use crate::tui::types::Device;
     use std::path::Path;
 
     fn test_channel_id(seed: &str) -> ChannelId {
@@ -1456,6 +1510,20 @@ mod tests {
 
         assert_eq!(merged.channel_count(), 1);
         assert!(merged.has_channel(&previous_channel.id));
+    }
+
+    #[test]
+    fn merge_transient_devices_preserves_previous_noncurrent_device() {
+        let previous = vec![
+            Device::new("device:current", "Current").current(),
+            Device::new("device:backup", "Backup"),
+        ];
+        let incoming = vec![Device::new("device:current", "Current").current()];
+
+        let merged = super::merge_transient_devices(incoming, &previous);
+
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|device| !device.is_current));
     }
 
     #[test]

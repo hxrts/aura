@@ -588,83 +588,37 @@ impl RuntimeBridge for AgentRuntimeBridge {
         metadata.insert("target-authority-id".to_string(), peer.to_string());
 
         let effects = self.agent.runtime().effects();
-        let reachable_devices = if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+        let reachable_device_count = if let Some(rendezvous) = self.agent.runtime().rendezvous() {
             rendezvous
                 .list_reachable_peer_devices_for_authority(peer)
                 .await
+                .len()
         } else {
-            Vec::new()
+            0
         };
 
-        if reachable_devices.is_empty() {
-            let envelope = TransportEnvelope {
-                destination: peer,
-                source: self.agent.authority_id(),
-                context,
-                payload,
-                metadata,
-                receipt: None,
-            };
+        let envelope = TransportEnvelope {
+            destination: peer,
+            source: self.agent.authority_id(),
+            context,
+            payload,
+            metadata,
+            receipt: None,
+        };
 
-            tracing::debug!(
-                source = %self.agent.authority_id(),
-                destination = %peer,
-                context = %context,
-                mode = "authority_fallback",
-                "send-chat-fact"
-            );
+        tracing::debug!(
+            source = %self.agent.authority_id(),
+            destination = %peer,
+            context = %context,
+            reachable_device_count,
+            mode = "authority_route",
+            "send-chat-fact"
+        );
 
-            return effects
-                .send_envelope(envelope)
-                .await
-                .map_err(|e| IntentError::network_error(format!("Failed to send chat fact: {e}")));
-        }
-
-        let mut last_error = None;
-        let mut sent = 0usize;
-        for device_id in reachable_devices {
-            let mut device_metadata = metadata.clone();
-            device_metadata.insert(
-                "aura-destination-device-id".to_string(),
-                device_id.to_string(),
-            );
-            let envelope = TransportEnvelope {
-                destination: peer,
-                source: self.agent.authority_id(),
-                context,
-                payload: payload.clone(),
-                metadata: device_metadata,
-                receipt: None,
-            };
-
-            tracing::debug!(
-                source = %self.agent.authority_id(),
-                destination = %envelope.destination,
-                context = %context,
-                target_authority = %peer,
-                device_id = %device_id,
-                mode = "device_route",
-                "send-chat-fact"
-            );
-
-            match effects.send_envelope(envelope).await {
-                Ok(()) => {
-                    sent = sent.saturating_add(1);
-                }
-                Err(error) => {
-                    last_error = Some(error.to_string());
-                }
-            }
-        }
-
-        if sent > 0 {
-            Ok(())
-        } else {
-            Err(IntentError::network_error(format!(
-                "Failed to send chat fact to any reachable device for {peer}: {}",
-                last_error.unwrap_or_else(|| "no reachable device route succeeded".to_string())
-            )))
-        }
+        effects
+            .send_envelope(envelope)
+            .await
+            .map_err(|e| IntentError::network_error(format!("Failed to send chat fact: {e}")))
     }
 
     // =========================================================================
@@ -797,6 +751,45 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(inspect_channel_context_facts(&effects, context, channel)
             .await?
             .checkpoint_exists)
+    }
+
+    async fn amp_list_channel_participants(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<Vec<AuthorityId>, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let mut participants: BTreeSet<AuthorityId> =
+            aura_protocol::amp::list_channel_participants(&effects, context, channel)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!(
+                    "failed to list authoritative AMP participants for channel {channel} in context {context}: {error}"
+                ))
+            })?
+            .into_iter()
+            .collect();
+
+        if let Ok(invitation_service) = self.agent.invitations() {
+            let local_authority = self.agent.authority_id();
+            for invitation in invitation_service.list_pending().await {
+                if invitation.sender_id != local_authority
+                    || invitation.status != aura_invitation::InvitationStatus::Accepted
+                {
+                    continue;
+                }
+                let aura_invitation::InvitationType::Channel { home_id, .. } =
+                    invitation.invitation_type
+                else {
+                    continue;
+                };
+                if invitation.context_id == context && home_id == channel {
+                    participants.insert(invitation.receiver_id);
+                }
+            }
+        }
+
+        Ok(participants.into_iter().collect())
     }
 
     async fn resolve_amp_channel_context(

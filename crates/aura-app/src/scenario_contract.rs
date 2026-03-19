@@ -641,7 +641,10 @@ pub enum IntentAction {
         code: String,
     },
     OpenSettingsSection(SettingsSection),
-    RemoveSelectedDevice,
+    RemoveSelectedDevice {
+        #[serde(default)]
+        device_id: Option<String>,
+    },
     SwitchAuthority {
         authority_id: String,
     },
@@ -677,7 +680,7 @@ impl IntentAction {
             Self::StartDeviceEnrollment { .. } => IntentKind::StartDeviceEnrollment,
             Self::ImportDeviceEnrollmentCode { .. } => IntentKind::ImportDeviceEnrollmentCode,
             Self::OpenSettingsSection(_) => IntentKind::OpenSettingsSection,
-            Self::RemoveSelectedDevice => IntentKind::RemoveSelectedDevice,
+            Self::RemoveSelectedDevice { .. } => IntentKind::RemoveSelectedDevice,
             Self::SwitchAuthority { .. } => IntentKind::SwitchAuthority,
             Self::CreateContactInvitation { .. } => IntentKind::CreateContactInvitation,
             Self::AcceptContactInvitation { .. } => IntentKind::AcceptContactInvitation,
@@ -939,20 +942,23 @@ impl IntentAction {
                     "settings_section_navigation_timeout".to_string(),
                 ],
             },
-            Self::RemoveSelectedDevice => SharedActionContract {
+            Self::RemoveSelectedDevice { .. } => SharedActionContract {
                 intent: IntentKind::RemoveSelectedDevice,
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
+                    ActionPrecondition::Quiescence(QuiescenceState::Settled),
                 ],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![
                         BarrierDeclaration::Screen(ScreenId::Settings),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
+                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                     before_next_intent: vec![
                         BarrierDeclaration::Screen(ScreenId::Settings),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
+                        BarrierDeclaration::Quiescence(QuiescenceState::Settled),
                     ],
                 },
                 post_operation_convergence: None,
@@ -1549,7 +1555,7 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 )?))
             }
             SemanticActionKind::RemoveSelectedDevice => {
-                ScenarioAction::Intent(IntentAction::RemoveSelectedDevice)
+                ScenarioAction::Intent(IntentAction::RemoveSelectedDevice { device_id: None })
             }
             SemanticActionKind::SwitchAuthority => {
                 ScenarioAction::Intent(IntentAction::SwitchAuthority {

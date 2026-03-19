@@ -1434,6 +1434,7 @@ impl UiModel {
             id: screen.help_label().to_ascii_lowercase(),
             selected: self.screen == screen,
             confirmation: ConfirmationState::Confirmed,
+            is_current: false,
         })
         .collect::<Vec<_>>();
         lists.push(ListSnapshot {
@@ -1452,6 +1453,7 @@ impl UiModel {
                 id: channel.name.clone(),
                 selected: channel.selected,
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             })
             .collect::<Vec<_>>();
         if !channel_items.is_empty() {
@@ -1474,6 +1476,7 @@ impl UiModel {
                 id: contact.authority_id.to_string(),
                 selected: contact.selected,
                 confirmation: contact.confirmation,
+                is_current: false,
             })
             .collect::<Vec<_>>();
         if !contact_items.is_empty() {
@@ -1496,6 +1499,7 @@ impl UiModel {
                 id: authority.id.to_string(),
                 selected: authority.selected,
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             })
             .collect::<Vec<_>>();
         if !authority_items.is_empty() {
@@ -1518,6 +1522,7 @@ impl UiModel {
                 id: notification.0.clone(),
                 selected: self.selected_notification_id.as_ref() == Some(notification),
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             })
             .collect::<Vec<_>>();
         if !notification_items.is_empty() {
@@ -1539,6 +1544,7 @@ impl UiModel {
                 id: section.dom_id().to_string(),
                 selected: self.settings_section == section,
                 confirmation: ConfirmationState::Confirmed,
+                is_current: false,
             })
             .collect::<Vec<_>>();
         lists.push(ListSnapshot {

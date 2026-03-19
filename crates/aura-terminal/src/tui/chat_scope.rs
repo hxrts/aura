@@ -49,16 +49,6 @@ pub fn effective_home_scope_id(
             return Some(channel.id.to_string());
         }
 
-        if let Some(context_id) = channel.context_id {
-            if let Some(home_channel) = chat_state.all_channels().find(|candidate| {
-                candidate.channel_type == ChannelType::Home
-                    && !is_pinned_channel(candidate)
-                    && candidate.context_id == Some(context_id)
-            }) {
-                return Some(home_channel.id.to_string());
-            }
-        }
-
         return Some(channel.id.to_string());
     }
 
@@ -205,6 +195,53 @@ mod tests {
         let scoped = scoped_channels(&state, Some(scope.as_str()));
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].id, home_id);
+    }
+
+    #[test]
+    fn effective_scope_preserves_explicit_shared_channel_selection() {
+        let home_id = test_channel_id("home");
+        let shared_id = test_channel_id("shared");
+        let context_id = aura_core::types::identifiers::ContextId::new_from_entropy(hash(b"ctx"));
+        let state = ChatState::from_channels([
+            AppChannel {
+                id: home_id,
+                context_id: Some(context_id),
+                name: "home".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            },
+            AppChannel {
+                id: shared_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            },
+        ]);
+
+        let scope = effective_home_scope_id(
+            &state,
+            Some(home_id.to_string().as_str()),
+            Some(shared_id.to_string().as_str()),
+        );
+
+        assert_eq!(scope.as_deref(), Some(shared_id.to_string().as_str()));
     }
 
     fn test_channel(id: ChannelId, name: &str) -> AppChannel {

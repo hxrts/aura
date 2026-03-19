@@ -96,7 +96,10 @@ pub enum HarnessUiCommand {
     ImportDeviceEnrollmentCode {
         code: String,
     },
-    RemoveSelectedDevice,
+    RemoveSelectedDevice {
+        #[serde(default)]
+        device_id: Option<String>,
+    },
     SwitchAuthority {
         authority_id: String,
     },
@@ -1185,6 +1188,8 @@ pub struct ListItemSnapshot {
     pub id: String,
     pub selected: bool,
     pub confirmation: ConfirmationState,
+    #[serde(default)]
+    pub is_current: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

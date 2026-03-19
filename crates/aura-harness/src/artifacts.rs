@@ -18,7 +18,9 @@ pub struct ArtifactBundle {
 impl ArtifactBundle {
     pub fn create(base_dir: &Path, run_name: &str) -> Result<Self> {
         let root = base_dir.join("harness");
-        let run_dir = root.join(run_name);
+        let run_dir = run_token()
+            .map(|token| root.join(run_name).join(token))
+            .unwrap_or_else(|| root.join(run_name));
         fs::create_dir_all(&run_dir).with_context(|| {
             format!("failed to create artifact directory {}", run_dir.display())
         })?;
@@ -33,4 +35,25 @@ impl ArtifactBundle {
             .with_context(|| format!("failed to write artifact {}", out_path.display()))?;
         Ok(out_path)
     }
+}
+
+fn run_token() -> Option<String> {
+    std::env::var("AURA_HARNESS_RUN_TOKEN")
+        .ok()
+        .map(|value| {
+            value
+                .chars()
+                .filter_map(|ch| {
+                    if ch.is_ascii_alphanumeric() {
+                        Some(ch.to_ascii_lowercase())
+                    } else if matches!(ch, '-' | '_' | ' ') {
+                        Some('-')
+                    } else {
+                        None
+                    }
+                })
+                .collect::<String>()
+        })
+        .filter(|value| !value.trim_matches('-').is_empty())
+        .map(|value| value.trim_matches('-').to_string())
 }

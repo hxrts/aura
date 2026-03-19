@@ -49,7 +49,7 @@ pub mod wire;
 // Re-exports: Journal
 // ============================================================================
 
-pub use journal::{get_channel_state, AmpContextStore, AmpJournalEffects};
+pub use journal::{get_channel_state, list_channel_participants, AmpContextStore, AmpJournalEffects};
 
 // ============================================================================
 // Re-exports: Evidence
