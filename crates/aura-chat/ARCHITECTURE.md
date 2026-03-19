@@ -94,7 +94,9 @@ cargo test -p aura-chat
 | Capability check bypassed | `src/fact_service.rs` `denied_when_missing_capability` | Covered |
 | Budget not charged before journal append | `src/fact_service.rs` `approved_orders_budget_before_journal_append` | Covered |
 | Channel view delta compaction wrong | `src/view.rs` `test_compact_deltas_merges_channel_updates` | Covered |
+| Sealed message leaks plaintext in view | `src/view.rs` `test_message_sent_reduction` (verifies `<sealed message>` placeholder) | Covered |
 | Group membership check incorrect | `src/group.rs` `test_group_membership` | Covered |
+| Message lifecycle timestamps wrong | `src/facts.rs` `test_message_lifecycle_facts` | Covered |
 
 ## Boundaries
 - Encryption/decryption lives in aura-effects (crypto handlers).
