@@ -208,6 +208,27 @@ impl AuthorityRegistry {
             .get_mut(&authority_id)
             .ok_or_else(|| AuraError::not_found("Unknown authority"))?;
 
+        // Enforce monotonic lifecycle: Active → Suspended → Revoked.
+        // Backward transitions are rejected to prevent reactivation of
+        // revoked or suspended authorities.
+        let current = &authority_info.status;
+        let valid = match (current, &status) {
+            // Forward transitions
+            (AuthorityStatus::Active, AuthorityStatus::Suspended) => true,
+            (AuthorityStatus::Active, AuthorityStatus::Revoked) => true,
+            (AuthorityStatus::Suspended, AuthorityStatus::Revoked) => true,
+            // Same status (idempotent)
+            (a, b) if a == b => true,
+            // All other transitions are backward — rejected
+            _ => false,
+        };
+
+        if !valid {
+            return Err(AuraError::invalid(format!(
+                "Invalid lifecycle transition: {current:?} → {status:?} (backward transitions are forbidden)"
+            )));
+        }
+
         authority_info.status = status;
         tracing::info!("Updated authority {} status to {:?}", authority_id, status);
         Ok(())
@@ -226,6 +247,7 @@ mod tests {
     use super::*;
     use aura_core::Cap;
 
+    /// Active authority registers and appears in known_authorities map.
     #[test]
     fn test_authority_registration() {
         let mut verifier = AuthorityRegistry::new();
@@ -242,6 +264,7 @@ mod tests {
         assert!(verifier.known_authorities().contains_key(&authority_id));
     }
 
+    /// Active authority verifies with maximum confidence.
     #[test]
     fn test_authority_verification() {
         let mut verifier = AuthorityRegistry::new();
@@ -261,6 +284,7 @@ mod tests {
         assert_eq!(result.confidence, Confidence::MAX);
     }
 
+    /// Suspending an authority drops confidence and verification to false.
     #[test]
     fn test_authority_status_update() {
         let mut verifier = AuthorityRegistry::new();
@@ -288,6 +312,8 @@ mod tests {
         );
     }
 
+    /// Forward lifecycle: Active → Suspended → Revoked with decreasing
+    /// confidence at each step.
     #[test]
     fn test_authority_lifecycle_transition() {
         let mut verifier = AuthorityRegistry::new();
@@ -322,5 +348,87 @@ mod tests {
         let revoked = verifier.verify_authority(authority_id).unwrap();
         assert!(!revoked.verified);
         assert_eq!(revoked.confidence, Confidence::MIN);
+    }
+
+    /// Backward lifecycle transitions must be rejected — a revoked authority
+    /// cannot be reactivated. If this fails, an attacker who compromised
+    /// a revoked key can re-enable it.
+    #[test]
+    fn test_backward_lifecycle_rejected() {
+        let mut verifier = AuthorityRegistry::new();
+        let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
+
+        let authority_info = AuthorityInfo {
+            authority_id,
+            public_key: PublicKeyBytes::new([5u8; 32]),
+            capabilities: Cap::top(),
+            status: AuthorityStatus::Active,
+        };
+        verifier.register_authority(authority_info).unwrap();
+
+        // Suspend first
+        verifier
+            .update_authority_status(authority_id, AuthorityStatus::Suspended)
+            .unwrap();
+
+        // Backward: Suspended → Active must fail
+        let result = verifier.update_authority_status(authority_id, AuthorityStatus::Active);
+        assert!(
+            result.is_err(),
+            "Suspended → Active must be rejected (backward transition)"
+        );
+
+        // Forward to Revoked
+        verifier
+            .update_authority_status(authority_id, AuthorityStatus::Revoked)
+            .unwrap();
+
+        // Backward: Revoked → Active must fail
+        let result = verifier.update_authority_status(authority_id, AuthorityStatus::Active);
+        assert!(
+            result.is_err(),
+            "Revoked → Active must be rejected (backward transition)"
+        );
+
+        // Backward: Revoked → Suspended must fail
+        let result = verifier.update_authority_status(authority_id, AuthorityStatus::Suspended);
+        assert!(
+            result.is_err(),
+            "Revoked → Suspended must be rejected (backward transition)"
+        );
+    }
+
+    /// Verifying an unregistered authority must fail — prevents accepting
+    /// signatures from unknown trust roots.
+    #[test]
+    fn test_unregistered_authority_rejected() {
+        let verifier = AuthorityRegistry::new();
+        let unknown_id = AuthorityId::new_from_entropy([99u8; 32]);
+
+        let result = verifier.verify_authority(unknown_id);
+        assert!(
+            result.is_err(),
+            "unregistered authority must be rejected"
+        );
+    }
+
+    /// Idempotent status update (same status) must succeed.
+    #[test]
+    fn test_idempotent_status_update() {
+        let mut verifier = AuthorityRegistry::new();
+        let authority_id = AuthorityId::new_from_entropy([6u8; 32]);
+
+        let authority_info = AuthorityInfo {
+            authority_id,
+            public_key: PublicKeyBytes::new([6u8; 32]),
+            capabilities: Cap::top(),
+            status: AuthorityStatus::Active,
+        };
+        verifier.register_authority(authority_info).unwrap();
+
+        // Active → Active is idempotent
+        assert!(verifier
+            .update_authority_status(authority_id, AuthorityStatus::Active)
+            .is_ok());
     }
 }

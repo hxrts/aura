@@ -119,6 +119,7 @@ mod tests {
     use super::*;
     use aura_core::Ed25519SigningKey;
 
+    /// Threshold signature with >= min_signers verifies.
     #[test]
     fn test_verify_threshold_signature_sufficient_signers() {
         // Deterministic signing key avoids ambient randomness in tests
@@ -133,6 +134,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Threshold signature with < min_signers must fail.
     #[test]
     fn test_verify_threshold_signature_insufficient_signers() {
         let signing_key = Ed25519SigningKey::from_bytes([3u8; 32]);
@@ -150,6 +152,7 @@ mod tests {
         ));
     }
 
+    /// Threshold verification with explicit signer list.
     #[test]
     fn test_verify_threshold_signature_with_signers() {
         let expected_signers = vec![AuthorityId::new_from_entropy([55u8; 32])];
@@ -169,6 +172,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Empty signer list must be rejected — no signers means no attestation.
     #[test]
     fn test_verify_threshold_signature_with_empty_signers_fails() {
         let expected_signers = Vec::new();

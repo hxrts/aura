@@ -83,6 +83,33 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone transition laws.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines signature and threshold safety assumptions.
+## Testing
+
+### Strategy
+
+aura-signature is a pure verification crate. All tests are inline since
+each test is tightly coupled to a specific verification function. The
+critical concern is lifecycle monotonicity — a revoked authority must
+never be reactivated.
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Authority signature verified with wrong key | `src/authority.rs` | covered |
+| Session ticket expired but accepted | `src/session.rs` | covered |
+| Session scope mismatch accepted | `src/session.rs` | covered |
+| Threshold sig with insufficient signers | `src/threshold.rs` | covered |
+| Empty signer list accepted | `src/threshold.rs` | covered |
+| VerifyFact reducer merge not commutative | `src/facts/verification.rs` | covered (proptest) |
+| VerifyFact reducer merge not associative | `src/facts/verification.rs` | covered (proptest) |
+| Device naming context non-deterministic | `src/facts/device_naming.rs` | covered |
+| Device naming fact encoding breaks | `src/facts/device_naming.rs` | covered |
+| Guardian signature with wrong key accepted | `src/guardian.rs` | covered |
+| Backward lifecycle transition accepted | `src/registry.rs` | covered (+ monotonicity enforcement fix) |
+| Unregistered authority verified | `src/registry.rs` | covered |
+| Idempotent status update rejected | `src/registry.rs` | covered |
+
 ## Boundaries
 - No cryptographic operations (use `CryptoEffects`).
 - No key storage (use `StorageEffects`).

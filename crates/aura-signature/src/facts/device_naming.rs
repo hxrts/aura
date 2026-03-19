@@ -277,6 +277,7 @@ mod tests {
         DeviceId::new_from_entropy([seed; 32])
     }
 
+    /// Same authority always produces the same naming context — determinism.
     #[test]
     fn test_derive_context_is_deterministic() {
         let auth_id = test_authority_id(1);
@@ -285,6 +286,7 @@ mod tests {
         assert_eq!(ctx1, ctx2);
     }
 
+    /// Different authorities produce different naming contexts — isolation.
     #[test]
     fn test_derive_context_is_unique_per_authority() {
         let auth1 = test_authority_id(1);
@@ -294,6 +296,7 @@ mod tests {
         assert_ne!(ctx1, ctx2);
     }
 
+    /// DeviceNamingFact encode/decode roundtrip — encoding stability.
     #[test]
     fn test_fact_encoding_roundtrip() {
         let fact = DeviceNamingFact::suggestion_updated_ms(
@@ -308,6 +311,7 @@ mod tests {
         assert_eq!(restored, fact);
     }
 
+    /// Fact accessors preserve all fields from construction.
     #[test]
     fn test_accessor_methods() {
         let authority = test_authority_id(1);
@@ -321,6 +325,7 @@ mod tests {
         assert!(!fact.is_clear());
     }
 
+    /// Empty nickname marks fact as "clear" (name removed).
     #[test]
     fn test_empty_suggestion_is_clear() {
         let fact = DeviceNamingFact::suggestion_updated_ms(
@@ -334,6 +339,7 @@ mod tests {
         assert_eq!(fact.nickname_suggestion(), "");
     }
 
+    /// Fact's context_id is derived from the authority, not stored separately.
     #[test]
     fn test_context_id_derived_from_authority() {
         let authority = test_authority_id(42);

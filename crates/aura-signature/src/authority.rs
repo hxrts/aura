@@ -83,6 +83,7 @@ mod tests {
     use aura_core::AuthorityId;
     use uuid::Uuid;
 
+    /// Valid signature from the correct key verifies successfully.
     #[test]
     fn test_verify_authority_signature_success() {
         let digest = hash::hash(b"authority-test-1");
@@ -104,6 +105,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Signature from a different key must fail — prevents key substitution.
     #[test]
     fn test_verify_authority_signature_invalid() {
         let digest = hash::hash(b"authority-test-2");

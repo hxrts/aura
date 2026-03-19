@@ -196,6 +196,7 @@ mod tests {
         }
     }
 
+    /// Valid ticket within time window verifies — the happy path.
     #[test]
     fn test_verify_session_ticket_success() {
         let ticket = create_test_ticket();
@@ -219,6 +220,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Ticket past expires_at must be rejected — prevents replay.
     #[test]
     fn test_verify_session_ticket_expired() {
         let ticket = create_test_ticket();
@@ -246,6 +248,7 @@ mod tests {
         ));
     }
 
+    /// Matching scope passes authorization check.
     #[test]
     fn test_verify_session_authorization_matching_scope() {
         let ticket = create_test_ticket();
@@ -259,6 +262,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Mismatched scope must fail — prevents cross-scope key reuse.
     #[test]
     fn test_verify_session_authorization_mismatched_scope() {
         let ticket = create_test_ticket();
@@ -276,6 +280,7 @@ mod tests {
         ));
     }
 
+    /// Scope equality for DKD and Recovery variants.
     #[test]
     fn test_scope_matches() {
         let dkd_scope1 = SessionScope::Dkd {

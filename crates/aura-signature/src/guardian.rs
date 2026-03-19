@@ -106,6 +106,7 @@ mod tests {
     use super::*;
     use aura_core::hash;
 
+    /// Valid guardian signature verifies — happy path for recovery approval.
     #[test]
     fn test_verify_guardian_signature_success() {
         let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-1")[..16].try_into().unwrap());
@@ -123,6 +124,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Wrong key must fail — prevents key substitution in recovery.
     #[test]
     fn test_verify_guardian_signature_invalid() {
         let effects = Effects::test();
@@ -147,6 +149,7 @@ mod tests {
         ));
     }
 
+    /// Recovery approval: valid guardian signature with correct ceremony ID.
     #[test]
     fn test_verify_recovery_approval() {
         let effects = Effects::test();
@@ -173,6 +176,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    /// Recovery approval binding message is deterministic for same inputs.
     #[test]
     fn test_recovery_approval_message_format() {
         let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-approval-format")[..16].try_into().unwrap());

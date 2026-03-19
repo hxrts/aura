@@ -621,6 +621,7 @@ mod tests {
     use super::*;
     use aura_core::types::facts::FactDeltaReducer;
 
+    /// VerifyFact preserves authority_id, timestamp, epoch, and fact_type.
     #[test]
     fn test_verify_fact_authority_id() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
@@ -639,6 +640,7 @@ mod tests {
         assert_eq!(fact.fact_type(), "authority_registered");
     }
 
+    /// Reducer produces delta with registered authorities from VerifyFact.
     #[test]
     fn test_verify_fact_reducer() {
         let reducer = VerifyFactReducer::new();
@@ -657,6 +659,7 @@ mod tests {
         assert_eq!(delta.authorities_registered[0], authority_id);
     }
 
+    /// Identity verification fact tracks performed and successful counts.
     #[test]
     fn test_verification_fact() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
@@ -679,6 +682,7 @@ mod tests {
         assert_eq!(delta.verifications_successful, 1);
     }
 
+    /// Timestamp accessor on VerifyFact.
     #[test]
     fn test_timestamp_ms() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
@@ -692,6 +696,7 @@ mod tests {
         assert_eq!(fact.timestamp_ms(), 1234567890);
     }
 
+    /// PublicKeyBytes rejects wrong length — 32 bytes required for Ed25519.
     #[test]
     fn test_public_key_bytes_validation() {
         let ok = PublicKeyBytes::try_from_slice(&[0u8; 32]);
@@ -701,6 +706,7 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    /// Confidence must be in [0.0, 1.0] — out-of-range rejected.
     #[test]
     fn test_confidence_validation() {
         assert!(Confidence::new(0.0).is_ok());
