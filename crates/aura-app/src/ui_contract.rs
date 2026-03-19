@@ -5,6 +5,7 @@
 
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 
+use aura_core::{OwnerEpoch, PublicationSequence};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -826,6 +827,31 @@ impl SemanticOperationStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticOperationCausality {
+    pub owner_epoch: OwnerEpoch,
+    pub publication_sequence: PublicationSequence,
+}
+
+impl SemanticOperationCausality {
+    #[must_use]
+    pub const fn new(
+        owner_epoch: OwnerEpoch,
+        publication_sequence: PublicationSequence,
+    ) -> Self {
+        Self {
+            owner_epoch,
+            publication_sequence,
+        }
+    }
+
+    #[must_use]
+    pub fn is_older_than(self, other: Self) -> bool {
+        (self.owner_epoch.value(), self.publication_sequence.value())
+            < (other.owner_epoch.value(), other.publication_sequence.value())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthoritativeSemanticFactKind {
@@ -845,6 +871,7 @@ pub enum AuthoritativeSemanticFact {
     OperationStatus {
         operation_id: OperationId,
         instance_id: Option<OperationInstanceId>,
+        causality: Option<SemanticOperationCausality>,
         status: SemanticOperationStatus,
     },
     ContactLinkReady {
@@ -1029,14 +1056,21 @@ impl AuthoritativeSemanticFact {
     ) -> Option<(
         OperationId,
         Option<OperationInstanceId>,
+        Option<SemanticOperationCausality>,
         SemanticOperationStatus,
     )> {
         match self {
             Self::OperationStatus {
                 operation_id,
                 instance_id,
+                causality,
                 status,
-            } => Some((operation_id.clone(), instance_id.clone(), status.clone())),
+            } => Some((
+                operation_id.clone(),
+                instance_id.clone(),
+                *causality,
+                status.clone(),
+            )),
             _ => None,
         }
     }
@@ -1048,6 +1082,7 @@ pub fn bridged_operation_statuses(
 ) -> Vec<(
     OperationId,
     Option<OperationInstanceId>,
+    Option<SemanticOperationCausality>,
     SemanticOperationStatus,
 )> {
     let mut bridged = facts
@@ -1060,7 +1095,7 @@ pub fn bridged_operation_statuses(
         .any(|fact| matches!(fact, AuthoritativeSemanticFact::ContactLinkReady { .. }));
 
     if contact_link_ready {
-        for (operation_id, _instance_id, status) in &mut bridged {
+        for (operation_id, _instance_id, _causality, status) in &mut bridged {
             if *operation_id == OperationId::invitation_accept()
                 && status.kind == SemanticOperationKind::AcceptContactInvitation
                 && !status.phase.is_terminal()
@@ -3214,10 +3249,11 @@ mod tests {
         ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
         ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId,
         RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot,
-        SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
-        SemanticOperationPhase, SemanticOperationStatus, SettingsSectionSurfaceId,
-        SharedSettingsSectionId, ToastId, ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness,
-        UiSnapshot, ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
+        SemanticFailureCode, SemanticFailureDomain, SemanticOperationCausality,
+        SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+        SemanticOperationStatus, SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId,
+        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot,
+        ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
         BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
         FRONTEND_EXECUTION_BOUNDARIES, FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
         PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
@@ -3225,6 +3261,7 @@ mod tests {
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
         TUI_OBSERVATION_SURFACE_METHODS,
     };
+    use aura_core::{OwnerEpoch, PublicationSequence};
     use std::collections::HashSet;
     use std::path::Path;
 
@@ -3470,6 +3507,10 @@ mod tests {
         let fact = AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::send_message(),
             instance_id: Some(OperationInstanceId("semantic-op-1".to_string())),
+            causality: Some(SemanticOperationCausality::new(
+                OwnerEpoch::new(3),
+                PublicationSequence::new(9),
+            )),
             status: SemanticOperationStatus::new(
                 SemanticOperationKind::SendChatMessage,
                 SemanticOperationPhase::PeerChannelReady,
@@ -3523,6 +3564,10 @@ mod tests {
         let fact = AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::invitation_accept(),
             instance_id: Some(OperationInstanceId("accept-1".to_string())),
+            causality: Some(SemanticOperationCausality::new(
+                OwnerEpoch::new(1),
+                PublicationSequence::new(4),
+            )),
             status: SemanticOperationStatus::new(
                 SemanticOperationKind::AcceptContactInvitation,
                 SemanticOperationPhase::Succeeded,
@@ -3534,6 +3579,10 @@ mod tests {
             Some((
                 OperationId::invitation_accept(),
                 Some(OperationInstanceId("accept-1".to_string())),
+                Some(SemanticOperationCausality::new(
+                    OwnerEpoch::new(1),
+                    PublicationSequence::new(4),
+                )),
                 SemanticOperationStatus::new(
                     SemanticOperationKind::AcceptContactInvitation,
                     SemanticOperationPhase::Succeeded,
@@ -3547,6 +3596,7 @@ mod tests {
         let contact_invite = AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::invitation_create(),
             instance_id: None,
+            causality: None,
             status: SemanticOperationStatus::new(
                 SemanticOperationKind::CreateContactInvitation,
                 SemanticOperationPhase::Succeeded,
@@ -3555,6 +3605,7 @@ mod tests {
         let channel_invite = AuthoritativeSemanticFact::OperationStatus {
             operation_id: OperationId::invitation_create(),
             instance_id: None,
+            causality: None,
             status: SemanticOperationStatus::new(
                 SemanticOperationKind::InviteActorToChannel,
                 SemanticOperationPhase::WorkflowDispatched,
@@ -3570,6 +3621,7 @@ mod tests {
             AuthoritativeSemanticFact::OperationStatus {
                 operation_id: OperationId::invitation_accept(),
                 instance_id: None,
+                causality: None,
                 status: SemanticOperationStatus::new(
                     SemanticOperationKind::AcceptContactInvitation,
                     SemanticOperationPhase::WorkflowDispatched,
@@ -3585,6 +3637,7 @@ mod tests {
             statuses,
             vec![(
                 OperationId::invitation_accept(),
+                None,
                 None,
                 SemanticOperationStatus::new(
                     SemanticOperationKind::AcceptContactInvitation,

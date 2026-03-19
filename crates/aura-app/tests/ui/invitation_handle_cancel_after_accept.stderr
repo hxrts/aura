@@ -1,0 +1,9 @@
+error[E0382]: use of moved value: `handle`
+  --> tests/ui/invitation_handle_cancel_after_accept.rs:12:42
+   |
+10 | async fn consume_twice(app_core: Arc<RwLock<AppCore>>, handle: InvitationHandle) {
+   |                                                        ------ move occurs because `handle` has type `InvitationHandle`, which does not implement the `Copy` trait
+11 |     let _ = accept_invitation(&app_core, handle).await;
+   |                                          ------ value moved here
+12 |     let _ = cancel_invitation(&app_core, handle).await;
+   |                                          ^^^^^^ value used here after move

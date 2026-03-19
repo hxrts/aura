@@ -356,9 +356,9 @@ pub async fn ensure_runtime_peer_connectivity(
 
 #[cfg(test)]
 mod tests {
-    use super::ensure_runtime_peer_connectivity;
+    use super::{ensure_runtime_peer_connectivity, workflow_best_effort};
     use crate::runtime_bridge::{OfflineRuntimeBridge, RuntimeBridge};
-    use aura_core::types::identifiers::AuthorityId;
+    use aura_core::{types::identifiers::AuthorityId, AuraError};
     use std::future::Future;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -422,8 +422,8 @@ mod tests {
             .expect_err("offline runtime should not satisfy peer connectivity");
 
         let message = error.to_string();
-        assert!(message.contains("Connectivity prerequisite not met"));
-        assert!(message.contains("test_flow"));
+        assert!(message.contains("get sync status"));
+        assert!(message.contains("No agent configured"));
     }
 
     #[test]
@@ -450,5 +450,30 @@ mod tests {
         });
 
         assert_eq!(normal, harness);
+    }
+
+    #[tokio::test]
+    async fn workflow_best_effort_preserves_first_error_across_multiple_captures() {
+        let mut best_effort = workflow_best_effort();
+
+        let _ = best_effort
+            .capture(async { Err::<(), _>(AuraError::agent("first best-effort failure")) })
+            .await;
+        let _ = best_effort
+            .capture(async { Err::<(), _>(AuraError::agent("second best-effort failure")) })
+            .await;
+
+        let first_error = best_effort
+            .first_error()
+            .expect("first error should be retained")
+            .to_string();
+        assert!(first_error.contains("first best-effort failure"));
+
+        let final_error = best_effort
+            .finish()
+            .expect_err("best-effort collector should surface the first error");
+        let message = final_error.to_string();
+        assert!(message.contains("first best-effort failure"));
+        assert!(!message.contains("second best-effort failure"));
     }
 }

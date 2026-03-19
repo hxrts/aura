@@ -46,6 +46,11 @@ This diagram shows the primary data flow. Authorities own journals that store fa
 
 Every operation flows through the effect system. Every state change is replicated through journals. Every external action is authorized through guards. These three invariants define the architectural contract.
 
+Shared semantic workflow ownership follows the same rule: there is one
+authoritative publication owner for parity-critical operation lifecycle.
+Frontend and harness layers may submit commands and observe results, but they
+do not keep a parallel source of semantic terminal truth after handoff.
+
 ## 1. Dual Semilattice Model
 
 Aura state consists of two complementary semilattices. Facts form a join-semilattice where information accumulates through the join operation. Capabilities form a meet-semilattice where authority restricts through the meet operation.

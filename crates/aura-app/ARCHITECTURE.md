@@ -105,6 +105,8 @@ Changes to `aura-app` ownership boundaries should ship with:
   - frontend-local submission cannot mask authoritative terminal state after
     handoff
   - stale authoritative instances cannot overwrite newer local submissions
+  - channel identity rebinding in derived chat state is clone-modify-swap, so a
+    panic during rebinding cannot leak partial projection mutation
 
 ### Capability-Gated Points
 

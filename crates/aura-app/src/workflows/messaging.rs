@@ -24,11 +24,8 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
-    issue_semantic_operation_context,
-    publish_authoritative_operation_failure, publish_authoritative_operation_phase,
-    replace_authoritative_semantic_facts_of_kind, semantic_lifecycle_publication_capability,
-    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
-    SemanticWorkflowOwner,
+    replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
+    update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
 use crate::workflows::signals::{emit_signal, read_signal, read_signal_or_default};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
@@ -447,74 +444,11 @@ fn authoritative_send_readiness_for_channel(
     readiness
 }
 
-async fn publish_send_message_phase(
-    app_core: &Arc<RwLock<AppCore>>,
-    owner: Option<&SemanticWorkflowOwner>,
-    phase: SemanticOperationPhase,
-) -> Result<(), AuraError> {
-    if let Some(owner) = owner {
-        owner.publish_phase(phase).await
-    } else {
-        publish_authoritative_operation_phase(
-            app_core,
-            semantic_lifecycle_publication_capability(),
-            OperationId::send_message(),
-            SemanticOperationKind::SendChatMessage,
-            phase,
-        )
-        .await
-    }
-}
-
-async fn publish_create_channel_phase(
-    app_core: &Arc<RwLock<AppCore>>,
-    phase: SemanticOperationPhase,
-) -> Result<(), AuraError> {
-    publish_authoritative_operation_phase(
-        app_core,
-        semantic_lifecycle_publication_capability(),
-        OperationId::create_channel(),
-        SemanticOperationKind::CreateChannel,
-        phase,
-    )
-    .await
-}
-
-async fn publish_create_channel_failure(
-    app_core: &Arc<RwLock<AppCore>>,
-    error: &AuraError,
-) -> Result<(), AuraError> {
-    publish_authoritative_operation_failure(
-        app_core,
-        semantic_lifecycle_publication_capability(),
-        OperationId::create_channel(),
-        SemanticOperationKind::CreateChannel,
-        SemanticOperationError::new(
-            SemanticFailureDomain::Internal,
-            SemanticFailureCode::InternalError,
-        )
-        .with_detail(error.to_string()),
-    )
-    .await
-}
-
 async fn publish_send_message_failure(
-    app_core: &Arc<RwLock<AppCore>>,
-    owner: Option<&SemanticWorkflowOwner>,
+    owner: &SemanticWorkflowOwner,
     error: &SendMessageError,
 ) -> Result<(), AuraError> {
-    if let Some(owner) = owner {
-        owner.publish_failure(error.semantic_error()).await
-    } else {
-        publish_authoritative_operation_failure(
-            app_core,
-            semantic_lifecycle_publication_capability(),
-            OperationId::send_message(),
-            SemanticOperationKind::SendChatMessage,
-            error.semantic_error(),
-        )
-        .await
-    }
+    owner.publish_failure(error.semantic_error()).await
 }
 
 async fn require_send_message_readiness(
@@ -537,11 +471,10 @@ pub(crate) fn is_amp_channel_state_unavailable(error: &impl std::fmt::Display) -
 }
 
 async fn fail_send_message<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    owner: Option<&SemanticWorkflowOwner>,
+    owner: &SemanticWorkflowOwner,
     error: SendMessageError,
 ) -> Result<T, AuraError> {
-    publish_send_message_failure(app_core, owner, &error).await?;
+    publish_send_message_failure(owner, &error).await?;
     Err(error.into())
 }
 
@@ -2014,7 +1947,7 @@ pub async fn send_direct_message_to_authority(
     }
 
     let channel_id = start_direct_chat_with_authority(app_core, target, timestamp_ms).await?;
-    let _message_id = send_message(app_core, channel_id, content, timestamp_ms).await?;
+    send_message(app_core, channel_id, content, timestamp_ms).await?;
     Ok(channel_id)
 }
 
@@ -2063,9 +1996,17 @@ pub async fn create_channel_with_authoritative_binding(
     threshold_k: u8,
     timestamp_ms: u64,
 ) -> Result<CreatedChannel, AuraError> {
-    publish_create_channel_phase(app_core, SemanticOperationPhase::WorkflowDispatched).await?;
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::create_channel(),
+        None,
+        SemanticOperationKind::CreateChannel,
+    );
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
 
-    let result = async {
+    let result: Result<CreatedChannel, AuraError> = async {
     let backend = messaging_backend(app_core).await;
     let member_ids: Vec<AuthorityId> = members
         .iter()
@@ -2280,7 +2221,7 @@ pub async fn create_channel_with_authoritative_binding(
                     continue;
                 }
             };
-            invitation_ids.push(invitation.invitation_id.as_str().to_string());
+            invitation_ids.push(invitation.invitation_id().as_str().to_string());
         }
 
         if !invitation_ids.is_empty() {
@@ -2301,18 +2242,17 @@ pub async fn create_channel_with_authoritative_binding(
     .await;
 
     match &result {
-        Ok(_) => {
-            publish_create_channel_phase(app_core, SemanticOperationPhase::Succeeded).await?;
-        }
+        Ok(_) => owner.publish_phase(SemanticOperationPhase::Succeeded).await?,
         Err(error) => {
-            if let Err(_pub_err) = publish_create_channel_failure(app_core, error).await {
-                #[cfg(feature = "instrumented")]
-                tracing::error!(
-                    operation_error = %error,
-                    publish_error = %_pub_err,
-                    "create_channel: failed to publish failure fact"
-                );
-            }
+            owner
+                .publish_failure(
+                    SemanticOperationError::new(
+                        SemanticFailureDomain::Internal,
+                        SemanticFailureCode::InternalError,
+                    )
+                    .with_detail(error.to_string()),
+                )
+                .await?;
         }
     }
 
@@ -2403,9 +2343,7 @@ pub async fn join_channel_by_name_with_instance(
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let mut operation_context =
-        issue_semantic_operation_context(OperationId::join_channel(), instance_id);
-    join_channel_by_name_owned(app_core, channel_name, &owner, operation_context.as_mut()).await
+    join_channel_by_name_owned(app_core, channel_name, &owner, None).await
 }
 
 #[aura_macros::semantic_owner(
@@ -2783,7 +2721,7 @@ pub async fn send_message_ref_with_instance(
         instance_id,
         SemanticOperationKind::SendChatMessage,
     );
-    send_message_ref_owned(app_core, channel, content, timestamp_ms, Some(&owner)).await
+    send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await
 }
 
 /// Send a message to a channel by reference.
@@ -2793,7 +2731,13 @@ pub async fn send_message_ref(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    send_message_ref_owned(app_core, channel, content, timestamp_ms, None).await
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::send_message(),
+        None,
+        SemanticOperationKind::SendChatMessage,
+    );
+    send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await
 }
 
 async fn send_message_ref_owned(
@@ -2801,9 +2745,10 @@ async fn send_message_ref_owned(
     channel: ChannelRef,
     content: &str,
     timestamp_ms: u64,
-    owner: Option<&SemanticWorkflowOwner>,
+    owner: &SemanticWorkflowOwner,
 ) -> Result<String, AuraError> {
-    publish_send_message_phase(app_core, owner, SemanticOperationPhase::WorkflowDispatched)
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
 
     let (channel_id, channel_label) = match &channel {
@@ -2813,7 +2758,6 @@ async fn send_message_ref_owned(
             Ok(channel_id) => (channel_id, name.clone()),
             Err(error) => {
                 return fail_send_message(
-                    app_core,
                     owner,
                     SendMessageError::ChannelResolution {
                         channel: name.clone(),
@@ -2864,39 +2808,29 @@ async fn send_message_ref_owned(
                 Some(context_id) => context_id,
                 None => {
                     return fail_send_message(
-                        app_core,
                         owner,
                         SendMessageError::MissingAuthoritativeContext { channel_id },
                     )
                     .await;
                 }
             };
-            publish_send_message_phase(
-                app_core,
-                owner,
-                SemanticOperationPhase::AuthoritativeContextReady,
-            )
-            .await?;
+            owner
+                .publish_phase(SemanticOperationPhase::AuthoritativeContextReady)
+                .await?;
             if send_operation_requires_delivery_readiness(channel_view.as_ref()) {
                 let readiness = match require_send_message_readiness(app_core, channel_id).await {
                     Ok(readiness) => readiness,
-                    Err(error) => return fail_send_message(app_core, owner, error).await,
+                    Err(error) => return fail_send_message(owner, error).await,
                 };
                 if readiness.recipient_resolution_ready {
-                    publish_send_message_phase(
-                        app_core,
-                        owner,
-                        SemanticOperationPhase::RecipientResolutionReady,
-                    )
-                    .await?;
+                    owner
+                        .publish_phase(SemanticOperationPhase::RecipientResolutionReady)
+                        .await?;
                 }
                 if readiness.delivery_ready {
-                    publish_send_message_phase(
-                        app_core,
-                        owner,
-                        SemanticOperationPhase::DeliveryReady,
-                    )
-                    .await?;
+                    owner
+                        .publish_phase(SemanticOperationPhase::DeliveryReady)
+                        .await?;
                 }
             }
             enforce_home_moderation_for_sender(
@@ -2923,7 +2857,6 @@ async fn send_message_ref_owned(
                         None
                     } else {
                         return fail_send_message(
-                            app_core,
                             owner,
                             SendMessageError::Transport {
                                 channel_id,
@@ -2973,7 +2906,6 @@ async fn send_message_ref_owned(
                     Ok(cipher) => maybe_cipher = Some(cipher),
                     Err(RetryRunError::Timeout(timeout_error)) => {
                         return fail_send_message(
-                            app_core,
                             owner,
                             SendMessageError::Transport {
                                 channel_id,
@@ -2992,7 +2924,6 @@ async fn send_message_ref_owned(
                     }
                     Err(RetryRunError::AttemptsExhausted { last_error, .. }) => {
                         return fail_send_message(
-                            app_core,
                             owner,
                             SendMessageError::Transport {
                                 channel_id,
@@ -3093,7 +3024,6 @@ async fn send_message_ref_owned(
                 }
             } else {
                 return fail_send_message(
-                    app_core,
                     owner,
                     SendMessageError::ChannelBootstrapUnavailable {
                         channel_id,
@@ -3151,7 +3081,7 @@ async fn send_message_ref_owned(
     })
     .await?;
 
-    publish_send_message_phase(app_core, owner, SemanticOperationPhase::Succeeded).await?;
+    owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
 
     Ok(message_id)
 }
@@ -3427,10 +3357,6 @@ pub async fn invite_user_to_channel_with_context(
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let mut operation_context = issue_semantic_operation_context(
-        OperationId::invitation_create(),
-        operation_instance_id.clone(),
-    );
     invite_user_to_channel_with_context_owned(
         app_core,
         target_user_id,
@@ -3440,7 +3366,7 @@ pub async fn invite_user_to_channel_with_context(
         message,
         ttl_ms,
         &owner,
-        operation_context.as_mut(),
+        None,
     )
     .await
 }
@@ -3455,7 +3381,7 @@ async fn invite_user_to_channel_with_context_owned(
     target_user_id: &str,
     channel_name_or_id: &str,
     context_id: Option<ContextId>,
-    operation_instance_id: Option<OperationInstanceId>,
+    _operation_instance_id: Option<OperationInstanceId>,
     message: Option<String>,
     ttl_ms: Option<u64>,
     owner: &SemanticWorkflowOwner,
@@ -3500,8 +3426,8 @@ async fn invite_user_to_channel_with_context_owned(
             channel_id,
             context_id,
             Some(channel_name_hint),
-            Some(&owner),
-            operation_instance_id.clone(),
+            &owner,
+            None,
             Some(deadline),
             stage_tracker.clone(),
             message,
@@ -3553,22 +3479,38 @@ pub async fn invite_authority_to_channel(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        None,
+        SemanticOperationKind::InviteActorToChannel,
+    );
     invite_authority_to_channel_with_context(
-        app_core, receiver, channel_id, None, None, None, None, None, None, message, ttl_ms,
+        app_core,
+        receiver,
+        channel_id,
+        None,
+        None,
+        &owner,
+        None,
+        None,
+        None,
+        message,
+        ttl_ms,
     )
     .await
 }
 
 /// Invite a canonical authority to a canonical channel while carrying an
 /// already-authoritative context, when the caller has one.
-pub(crate) async fn invite_authority_to_channel_with_context(
+pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     channel_id: ChannelId,
     context_id: Option<ContextId>,
     channel_name_hint: Option<String>,
-    owner: Option<&SemanticWorkflowOwner>,
-    operation_instance_id: Option<OperationInstanceId>,
+    owner: &SemanticWorkflowOwner,
+    _operation_instance_id: Option<OperationInstanceId>,
     deadline: Option<TimeoutBudget>,
     stage_tracker: Option<InviteStageTracker>,
     message: Option<String>,
@@ -3604,7 +3546,6 @@ pub(crate) async fn invite_authority_to_channel_with_context(
         channel_name_hint,
         None,
         owner,
-        operation_instance_id,
         deadline,
         stage_tracker.clone(),
         message,
@@ -4226,6 +4167,7 @@ mod tests {
                 operation_id,
                 instance_id: Some(observed_instance_id),
                 status,
+                ..
             } if *operation_id == OperationId::join_channel()
                 && observed_instance_id == &instance_id
                 && status.kind == SemanticOperationKind::JoinChannel
@@ -4251,6 +4193,7 @@ mod tests {
                 operation_id,
                 instance_id: Some(observed_instance_id),
                 status,
+                ..
             } if *operation_id == OperationId::join_channel()
                 && observed_instance_id == &instance_id
                 && status.kind == SemanticOperationKind::JoinChannel
@@ -4284,6 +4227,7 @@ mod tests {
                 operation_id,
                 instance_id: Some(observed_instance_id),
                 status,
+                ..
             } if *operation_id == OperationId::send_message()
                 && observed_instance_id == &instance_id
                 && status.kind == SemanticOperationKind::SendChatMessage
@@ -4316,6 +4260,7 @@ mod tests {
                 operation_id,
                 instance_id: Some(observed_instance_id),
                 status,
+                ..
             } if *operation_id == OperationId::send_message()
                 && observed_instance_id == &instance_id
                 && status.kind == SemanticOperationKind::SendChatMessage

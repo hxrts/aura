@@ -18,9 +18,9 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::invitation::{
-    accept_invitation_by_str, cancel_invitation_by_str, create_channel_invitation,
-    create_contact_invitation, create_guardian_invitation, decline_invitation_by_str,
+    create_channel_invitation, create_contact_invitation, create_guardian_invitation,
     export_invitation, export_invitation_by_str, import_invitation_details,
+    resolve_pending_invitation_handle,
 };
 
 async fn resolve_contact_authority_id(
@@ -192,9 +192,9 @@ pub async fn handle_invitations(
                 }
             };
 
-            match export_invitation(app_core, &info.invitation_id).await {
+            match export_invitation(app_core, info.invitation_id()).await {
                 Ok(code) => Some(Ok(OpResponse::InvitationCode {
-                    id: info.invitation_id.as_str().to_string(),
+                    id: info.invitation_id().as_str().to_string(),
                     code,
                 })),
                 Err(e) => Some(Err(OpError::typed(
@@ -223,7 +223,7 @@ pub async fn handle_invitations(
             .await
             {
                 Ok(info) => Some(Ok(OpResponse::ChannelInvitationSent {
-                    invitation_id: info.invitation_id.as_str().to_string(),
+                    invitation_id: info.invitation_id().as_str().to_string(),
                 })),
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::CreateChannelInvitation,
@@ -254,20 +254,20 @@ pub async fn handle_invitations(
             // Delegate to workflow for parsing via RuntimeBridge
             match import_invitation_details(app_core, code).await {
                 Ok(invitation) => {
+                    let invitation_info = invitation.info().clone();
                     // Interactive semantics: importing non-device invitations
                     // performs the acceptance step immediately.
                     if matches!(
-                        invitation.invitation_type,
+                        invitation_info.invitation_type,
                         InvitationBridgeType::Contact { .. }
                             | InvitationBridgeType::Channel { .. }
                             | InvitationBridgeType::Guardian { .. }
                     ) {
-                        if let Err(e) =
-                            aura_app::ui::workflows::invitation::accept_imported_invitation(
-                                app_core,
-                                &invitation,
-                            )
-                            .await
+                        if let Err(e) = aura_app::ui::workflows::invitation::accept_imported_invitation(
+                            app_core,
+                            invitation,
+                        )
+                        .await
                         {
                             return Some(Err(OpError::typed(
                                 OpFailureCode::AcceptInvitation,
@@ -277,7 +277,7 @@ pub async fn handle_invitations(
                     }
 
                     // Format invitation type for display
-                    let invitation_type = match &invitation.invitation_type {
+                    let invitation_type = match &invitation_info.invitation_type {
                         InvitationBridgeType::Channel { home_id, .. } => {
                             format!("channel:{home_id}")
                         }
@@ -303,11 +303,11 @@ pub async fn handle_invitations(
                     };
 
                     Some(Ok(OpResponse::InvitationImported {
-                        invitation_id: invitation.invitation_id.as_str().to_string(),
-                        sender_id: invitation.sender_id.to_string(),
+                        invitation_id: invitation_info.invitation_id.as_str().to_string(),
+                        sender_id: invitation_info.sender_id.to_string(),
                         invitation_type,
-                        expires_at: invitation.expires_at_ms,
-                        message: invitation.message,
+                        expires_at: invitation_info.expires_at_ms,
+                        message: invitation_info.message,
                     }))
                 }
                 Err(e) => Some(Err(OpError::typed(
@@ -318,31 +318,61 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::AcceptInvitation { invitation_id } => {
-            match accept_invitation_by_str(app_core, invitation_id).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
+            match resolve_pending_invitation_handle(app_core, invitation_id).await {
+                Ok(handle) => match aura_app::ui::workflows::invitation::accept_invitation(
+                    app_core, handle,
+                )
+                .await
+                {
+                    Ok(()) => Some(Ok(OpResponse::Ok)),
+                    Err(e) => Some(Err(OpError::typed(
+                        OpFailureCode::AcceptInvitation,
+                        format!("Failed to accept invitation: {e}"),
+                    ))),
+                },
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::AcceptInvitation,
-                    format!("Failed to accept invitation: {e}"),
+                    format!("Failed to resolve invitation handle: {e}"),
                 ))),
             }
         }
 
         EffectCommand::DeclineInvitation { invitation_id } => {
-            match decline_invitation_by_str(app_core, invitation_id).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
+            match resolve_pending_invitation_handle(app_core, invitation_id).await {
+                Ok(handle) => match aura_app::ui::workflows::invitation::decline_invitation(
+                    app_core, handle,
+                )
+                .await
+                {
+                    Ok(()) => Some(Ok(OpResponse::Ok)),
+                    Err(e) => Some(Err(OpError::typed(
+                        OpFailureCode::DeclineInvitation,
+                        format!("Failed to decline invitation: {e}"),
+                    ))),
+                },
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::DeclineInvitation,
-                    format!("Failed to decline invitation: {e}"),
+                    format!("Failed to resolve invitation handle: {e}"),
                 ))),
             }
         }
 
         EffectCommand::CancelInvitation { invitation_id } => {
-            match cancel_invitation_by_str(app_core, invitation_id).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
+            match resolve_pending_invitation_handle(app_core, invitation_id).await {
+                Ok(handle) => match aura_app::ui::workflows::invitation::cancel_invitation(
+                    app_core, handle,
+                )
+                .await
+                {
+                    Ok(()) => Some(Ok(OpResponse::Ok)),
+                    Err(e) => Some(Err(OpError::typed(
+                        OpFailureCode::CancelInvitation,
+                        format!("Failed to cancel invitation: {e}"),
+                    ))),
+                },
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::CancelInvitation,
-                    format!("Failed to cancel invitation: {e}"),
+                    format!("Failed to resolve invitation handle: {e}"),
                 ))),
             }
         }

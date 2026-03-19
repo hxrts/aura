@@ -1,14 +1,5 @@
-error[E0603]: function `publish_exact_operation_lifecycle` is private
- --> tests/ui/exact_operation_lifecycle_private.rs:2:54
+error[E0433]: failed to resolve: could not find `semantic_facts` in `workflows`
+ --> tests/ui/exact_operation_lifecycle_private.rs:2:38
   |
 2 |     let _ = aura_app::ui::workflows::semantic_facts::publish_exact_operation_lifecycle;
-  |                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ private function
-  |
-note: the function `publish_exact_operation_lifecycle` is defined here
- --> src/workflows/semantic_facts.rs
-  |
-  | / pub(crate) async fn publish_exact_operation_lifecycle(
-  | |     app_core: &Arc<RwLock<AppCore>>,
-  | |     publication: ExactOperationLifecyclePublication,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |                                      ^^^^^^^^^^^^^^ could not find `semantic_facts` in `workflows`

@@ -34,7 +34,6 @@ use aura_app::ui_contract::{
     ChannelFactKey, InvitationFactKind, OperationState, RuntimeEventKind, RuntimeFact,
     SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationStatus,
 };
-use aura_core::types::identifiers::CeremonyId;
 use aura_core::AuthorityId;
 use futures::FutureExt;
 
@@ -65,9 +64,9 @@ fn enqueue_ui_update_required(ctx: Arc<IoContext>, tx: UiUpdateSender, update: U
 }
 
 fn invitation_import_runtime_fact_update(
-    invitation: Option<&aura_app::ui::types::InvitationInfo>,
+    invitation: Option<&aura_app::ui::workflows::invitation::InvitationHandle>,
 ) -> Option<UiUpdate> {
-    let invitation = invitation?;
+    let invitation = invitation?.info();
     if matches!(
         invitation.invitation_type,
         InvitationBridgeType::Contact { .. }
@@ -87,7 +86,7 @@ fn invitation_import_runtime_fact_update(
 
 fn invitation_import_success_updates(
     code: &str,
-    invitation: Option<&aura_app::ui::types::InvitationInfo>,
+    invitation: Option<&aura_app::ui::workflows::invitation::InvitationHandle>,
 ) -> Vec<UiUpdate> {
     let mut updates = vec![UiUpdate::InvitationImported {
         invitation_code: code.to_string(),
@@ -124,6 +123,7 @@ async fn run_invitation_import_flow(
                 authoritative_operation_status_update(
                     transfer.operation_id().clone(),
                     Some(transfer.instance_id().clone()),
+                    None,
                     SemanticOperationStatus::failed(
                         transfer.kind(),
                         SemanticOperationError::new(

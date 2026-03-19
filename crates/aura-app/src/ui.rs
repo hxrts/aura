@@ -109,7 +109,6 @@ pub mod workflows {
     pub use crate::workflows::query;
     pub use crate::workflows::recovery_cli;
     pub use crate::workflows::runtime;
-    pub use crate::workflows::semantic_facts;
     pub use crate::workflows::settings;
     pub use crate::workflows::signals;
     pub use crate::workflows::snapshot;

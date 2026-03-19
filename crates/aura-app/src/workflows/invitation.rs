@@ -153,12 +153,8 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
-    issue_semantic_operation_context,
-    publish_authoritative_operation_failure, publish_authoritative_operation_failure_with_instance,
-    publish_authoritative_operation_phase, publish_authoritative_operation_phase_with_instance,
-    replace_authoritative_semantic_facts_of_kind, semantic_lifecycle_publication_capability,
-    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
-    SemanticWorkflowOwner,
+    replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
+    update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
 use crate::workflows::settings;
 #[cfg(feature = "signals")]
@@ -169,8 +165,8 @@ use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::{
-    AuraError, OperationContext, OwnedTaskSpawner, RetryRunError, TimeoutBudget,
-    TimeoutBudgetError, TimeoutRunError, TraceContext,
+    AuraError, OperationContext, OwnedTaskSpawner, RetryBudgetPolicy, RetryRunError,
+    TimeoutBudget, TimeoutBudgetError, TimeoutRunError, TraceContext,
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -191,6 +187,36 @@ const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
+
+/// Move-owned invitation lifecycle handle.
+///
+/// Frontend and workflow code may inspect invitation metadata through shared
+/// borrows, but lifecycle transitions consume the handle so stale owners cannot
+/// act twice.
+#[derive(Debug)]
+pub struct InvitationHandle {
+    invitation: InvitationInfo,
+}
+
+impl InvitationHandle {
+    fn new(invitation: InvitationInfo) -> Self {
+        Self { invitation }
+    }
+
+    /// Stable invitation identifier for export/display.
+    pub fn invitation_id(&self) -> &InvitationId {
+        &self.invitation.invitation_id
+    }
+
+    /// Borrow the bridge-level invitation metadata.
+    pub fn info(&self) -> &InvitationInfo {
+        &self.invitation
+    }
+
+    fn into_info(self) -> InvitationInfo {
+        self.invitation
+    }
+}
 
 fn update_channel_invitation_stage(
     tracker: &Option<ChannelInvitationStageTracker>,
@@ -248,6 +274,29 @@ async fn timeout_channel_invitation_stage_with_deadline<T>(
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
     }
+}
+
+async fn invitation_accept_timeout_budget(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    pending_runtime_invitation: Option<&crate::runtime_bridge::InvitationInfo>,
+    accepted_invitation: Option<&crate::views::invitations::Invitation>,
+) -> Result<TimeoutBudget, AcceptInvitationError> {
+    workflow_timeout_budget(
+        runtime,
+        Duration::from_millis(invitation_accept_runtime_stage_timeout_ms(
+            pending_runtime_invitation,
+            accepted_invitation,
+        )),
+    )
+    .await
+    .map_err(|error| AcceptInvitationError::AcceptFailed {
+        detail: error.to_string(),
+    })
+}
+
+fn device_enrollment_accept_retry_policy() -> Result<RetryBudgetPolicy, AuraError> {
+    workflow_retry_policy(16, Duration::from_millis(250), Duration::from_millis(250))
+        .map_err(AuraError::from)
 }
 
 fn channel_invitation_bootstrap_timeout(
@@ -355,52 +404,8 @@ async fn publish_invitation_operation_status(
     kind: SemanticOperationKind,
     phase: SemanticOperationPhase,
 ) -> Result<(), AuraError> {
-    // Invitation workflows still need stage-aware deadline wrapping, but the
-    // lifecycle fact itself must flow through the canonical semantic-facts
-    // publication helpers rather than being assembled locally.
-    let stage = match phase {
-        SemanticOperationPhase::Submitted => "publish_submitted",
-        SemanticOperationPhase::WorkflowDispatched => "publish_workflow_dispatched",
-        SemanticOperationPhase::AuthoritativeContextReady => "publish_authoritative_context_ready",
-        SemanticOperationPhase::ContactLinkReady => "publish_contact_link_ready",
-        SemanticOperationPhase::MembershipReady => "publish_membership_ready",
-        SemanticOperationPhase::RecipientResolutionReady => "publish_recipient_resolution_ready",
-        SemanticOperationPhase::PeerChannelReady => "publish_peer_channel_ready",
-        SemanticOperationPhase::DeliveryReady => "publish_delivery_ready",
-        SemanticOperationPhase::Succeeded => "publish_succeeded",
-        SemanticOperationPhase::Failed => "publish_failed",
-        SemanticOperationPhase::Cancelled => "publish_cancelled",
-    };
-    if let Some(instance_id) = instance_id {
-        timeout_channel_invitation_stage_with_deadline(
-            None,
-            stage,
-            deadline,
-            publish_authoritative_operation_phase_with_instance(
-                app_core,
-                semantic_lifecycle_publication_capability(),
-                operation_id,
-                Some(instance_id),
-                kind,
-                phase,
-            ),
-        )
-        .await
-    } else {
-        timeout_channel_invitation_stage_with_deadline(
-            None,
-            stage,
-            deadline,
-            publish_authoritative_operation_phase(
-                app_core,
-                semantic_lifecycle_publication_capability(),
-                operation_id,
-                kind,
-                phase,
-            ),
-        )
-        .await
-    }
+    let owner = SemanticWorkflowOwner::new(app_core, operation_id, instance_id, kind);
+    publish_invitation_owner_status(&owner, deadline, phase).await
 }
 
 async fn publish_invitation_owner_status(
@@ -439,7 +444,7 @@ async fn publish_contact_accept_success_for_owner(
         authority_id: authority_id.to_string(),
         contact_count,
     };
-    let operation_status = owner.phase_fact(SemanticOperationPhase::Succeeded);
+    let operation_status = owner.terminal_success_fact().await?;
 
     update_authoritative_semantic_facts(owner.app_core(), |facts| {
         facts.retain(|existing| {
@@ -677,39 +682,8 @@ async fn publish_invitation_operation_failure(
     kind: SemanticOperationKind,
     error: crate::ui_contract::SemanticOperationError,
 ) -> Result<(), AuraError> {
-    // Invitation workflows still need stage-aware deadline wrapping, but the
-    // terminal failure fact itself must flow through the canonical
-    // semantic-facts publication helpers rather than being assembled locally.
-    if let Some(instance_id) = instance_id {
-        timeout_channel_invitation_stage_with_deadline(
-            None,
-            "publish_failure",
-            deadline,
-            publish_authoritative_operation_failure_with_instance(
-                app_core,
-                semantic_lifecycle_publication_capability(),
-                operation_id,
-                Some(instance_id),
-                kind,
-                error,
-            ),
-        )
-        .await
-    } else {
-        timeout_channel_invitation_stage_with_deadline(
-            None,
-            "publish_failure",
-            deadline,
-            publish_authoritative_operation_failure(
-                app_core,
-                semantic_lifecycle_publication_capability(),
-                operation_id,
-                kind,
-                error,
-            ),
-        )
-        .await
-    }
+    let owner = SemanticWorkflowOwner::new(app_core, operation_id, instance_id, kind);
+    publish_invitation_owner_failure(&owner, deadline, error).await
 }
 
 async fn publish_invitation_owner_failure(
@@ -727,25 +701,11 @@ async fn publish_invitation_owner_failure(
 }
 
 async fn fail_channel_invitation<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    owner: Option<&SemanticWorkflowOwner>,
-    instance_id: Option<OperationInstanceId>,
+    owner: &SemanticWorkflowOwner,
     _deadline: Option<TimeoutBudget>,
     error: ChannelInvitationBootstrapError,
 ) -> Result<T, AuraError> {
-    if let Some(owner) = owner {
-        publish_invitation_owner_failure(owner, None, error.semantic_error()).await?;
-    } else {
-        publish_invitation_operation_failure(
-            app_core,
-            OperationId::invitation_create(),
-            instance_id,
-            None,
-            SemanticOperationKind::InviteActorToChannel,
-            error.semantic_error(),
-        )
-        .await?;
-    }
+    publish_invitation_owner_failure(owner, None, error.semantic_error()).await?;
     Err(error.into())
 }
 
@@ -804,10 +764,11 @@ async fn fail_device_enrollment_accept<T>(
         crate::ui_contract::SemanticFailureCode::InternalError,
     )
     .with_detail(detail.into());
-    publish_authoritative_operation_failure(
+    publish_invitation_operation_failure(
         app_core,
-        semantic_lifecycle_publication_capability(),
         OperationId::device_enrollment(),
+        None,
+        None,
         SemanticOperationKind::ImportDeviceEnrollmentCode,
         error.clone(),
     )
@@ -1455,23 +1416,23 @@ pub async fn create_contact_invitation(
     nickname: Option<String>,
     message: Option<String>,
     ttl_ms: Option<u64>,
-) -> Result<InvitationInfo, AuraError> {
-    publish_invitation_operation_status(
+) -> Result<InvitationHandle, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
         None,
-        None,
         SemanticOperationKind::CreateContactInvitation,
-        SemanticOperationPhase::WorkflowDispatched,
-    )
-    .await?;
+    );
+    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+        .await?;
     let runtime = require_runtime(app_core).await?;
 
     let invitation = runtime
         .create_contact_invitation(receiver, nickname, message, ttl_ms)
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
-    Ok(invitation)
+    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::Succeeded).await?;
+    Ok(InvitationHandle::new(invitation))
 }
 
 /// Create a guardian invitation
@@ -1485,16 +1446,15 @@ pub async fn create_guardian_invitation(
     subject: AuthorityId,
     message: Option<String>,
     ttl_ms: Option<u64>,
-) -> Result<InvitationInfo, AuraError> {
-    publish_invitation_operation_status(
+) -> Result<InvitationHandle, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
         None,
-        None,
         SemanticOperationKind::CreateContactInvitation,
-        SemanticOperationPhase::WorkflowDispatched,
-    )
-    .await?;
+    );
+    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+        .await?;
     let runtime = require_runtime(app_core).await?;
 
     let invitation = runtime
@@ -1503,7 +1463,8 @@ pub async fn create_guardian_invitation(
         .map_err(|e| {
             AuraError::from(super::error::runtime_call("create guardian invitation", e))
         })?;
-    Ok(invitation)
+    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::Succeeded).await?;
+    Ok(InvitationHandle::new(invitation))
 }
 
 /// Create a channel invitation
@@ -1523,7 +1484,13 @@ pub async fn create_channel_invitation(
     external_stage_tracker: Option<ChannelInvitationStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
-) -> Result<InvitationInfo, AuraError> {
+) -> Result<InvitationHandle, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        operation_instance_id.clone(),
+        SemanticOperationKind::InviteActorToChannel,
+    );
     create_channel_invitation_owned(
         app_core,
         receiver,
@@ -1531,25 +1498,24 @@ pub async fn create_channel_invitation(
         context_id,
         channel_name_hint,
         bootstrap,
-        None,
-        operation_instance_id,
+        &owner,
         deadline,
         external_stage_tracker,
         message,
         ttl_ms,
     )
     .await
+    .map(InvitationHandle::new)
 }
 
-pub(crate) async fn create_channel_invitation_owned(
+pub(in crate::workflows) async fn create_channel_invitation_owned(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     home_id: String,
     context_id: Option<ContextId>,
     channel_name_hint: Option<String>,
     bootstrap: Option<ChannelBootstrapPackage>,
-    owner: Option<&SemanticWorkflowOwner>,
-    operation_instance_id: Option<OperationInstanceId>,
+    owner: &SemanticWorkflowOwner,
     deadline: Option<TimeoutBudget>,
     external_stage_tracker: Option<ChannelInvitationStageTracker>,
     message: Option<String>,
@@ -1580,12 +1546,7 @@ pub(crate) async fn create_channel_invitation_owned(
     let invitation_result =
         execute_with_runtime_timeout_budget(&runtime, &operation_budget, || async {
             update_channel_invitation_stage(&stage_tracker, "publish_workflow_dispatched");
-            if let Some(owner) = owner {
-                publish_invitation_owner_status(
-                    owner,
-                    deadline,
-                    SemanticOperationPhase::WorkflowDispatched,
-                )
+            publish_invitation_owner_status(owner, deadline, SemanticOperationPhase::WorkflowDispatched)
                 .await
                 .map_err(
                     |error| ChannelInvitationBootstrapError::BootstrapTransport {
@@ -1594,24 +1555,6 @@ pub(crate) async fn create_channel_invitation_owned(
                         detail: error.to_string(),
                     },
                 )?;
-            } else {
-                publish_invitation_operation_status(
-                    app_core,
-                    OperationId::invitation_create(),
-                    operation_instance_id.clone(),
-                    deadline,
-                    SemanticOperationKind::InviteActorToChannel,
-                    SemanticOperationPhase::WorkflowDispatched,
-                )
-                .await
-                .map_err(
-                    |error| ChannelInvitationBootstrapError::BootstrapTransport {
-                        channel_id: fallback_channel_id
-                            .unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32]))),
-                        detail: error.to_string(),
-                    },
-                )?;
-            }
             update_channel_invitation_stage(&stage_tracker, "parse_channel_id");
             let channel_id = match home_id.parse::<ChannelId>() {
                 Ok(channel_id) => channel_id,
@@ -1634,36 +1577,18 @@ pub(crate) async fn create_channel_invitation_owned(
             )
             .await?;
             update_channel_invitation_stage(&stage_tracker, "publish_authoritative_context_ready");
-            if let Some(owner) = owner {
-                publish_invitation_owner_status(
-                    owner,
-                    deadline,
-                    SemanticOperationPhase::AuthoritativeContextReady,
-                )
-                .await
-                .map_err(
-                    |error| ChannelInvitationBootstrapError::BootstrapTransport {
-                        channel_id,
-                        detail: error.to_string(),
-                    },
-                )?;
-            } else {
-                publish_invitation_operation_status(
-                    app_core,
-                    OperationId::invitation_create(),
-                    operation_instance_id.clone(),
-                    deadline,
-                    SemanticOperationKind::InviteActorToChannel,
-                    SemanticOperationPhase::AuthoritativeContextReady,
-                )
-                .await
-                .map_err(
-                    |error| ChannelInvitationBootstrapError::BootstrapTransport {
-                        channel_id,
-                        detail: error.to_string(),
-                    },
-                )?;
-            }
+            publish_invitation_owner_status(
+                owner,
+                deadline,
+                SemanticOperationPhase::AuthoritativeContextReady,
+            )
+            .await
+            .map_err(
+                |error| ChannelInvitationBootstrapError::BootstrapTransport {
+                    channel_id,
+                    detail: error.to_string(),
+                },
+            )?;
 
             update_channel_invitation_stage(&stage_tracker, "runtime.create_channel_invitation");
             let invitation_budget = workflow_timeout_budget(
@@ -1735,9 +1660,7 @@ pub(crate) async fn create_channel_invitation_owned(
             let channel_id =
                 fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32])));
             return fail_channel_invitation(
-                app_core,
                 owner,
-                operation_instance_id.clone(),
                 deadline,
                 ChannelInvitationBootstrapError::BootstrapTransport {
                     channel_id,
@@ -1750,29 +1673,10 @@ pub(crate) async fn create_channel_invitation_owned(
             .await;
         }
         Err(TimeoutRunError::Operation(error)) => {
-            return fail_channel_invitation(
-                app_core,
-                owner,
-                operation_instance_id.clone(),
-                deadline,
-                error,
-            )
-            .await;
+            return fail_channel_invitation(owner, deadline, error).await;
         }
     };
-    if let Some(owner) = owner {
-        publish_invitation_owner_status(owner, deadline, SemanticOperationPhase::Succeeded).await?;
-    } else {
-        publish_invitation_operation_status(
-            app_core,
-            OperationId::invitation_create(),
-            operation_instance_id,
-            deadline,
-            SemanticOperationKind::InviteActorToChannel,
-            SemanticOperationPhase::Succeeded,
-        )
-        .await?;
-    }
+    publish_invitation_owner_status(owner, deadline, SemanticOperationPhase::Succeeded).await?;
     Ok(invitation)
 }
 
@@ -1810,13 +1714,32 @@ pub async fn list_pending_invitations(
 pub async fn import_invitation_details(
     app_core: &Arc<RwLock<AppCore>>,
     code: &str,
-) -> Result<InvitationInfo, AuraError> {
+) -> Result<InvitationHandle, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
         .import_invitation(code)
         .await
+        .map(InvitationHandle::new)
         .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
+}
+
+/// Resolve a pending invitation into a move-owned lifecycle handle.
+pub async fn resolve_pending_invitation_handle(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+) -> Result<InvitationHandle, AuraError> {
+    let invitation_id = InvitationId::new(invitation_id);
+    let runtime = require_runtime(app_core).await?;
+    let invitations = runtime
+        .try_list_pending_invitations()
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
+    let invitation = invitations
+        .into_iter()
+        .find(|invitation| invitation.invitation_id == invitation_id)
+        .ok_or_else(|| AuraError::not_found(invitation_id.to_string()))?;
+    Ok(InvitationHandle::new(invitation))
 }
 
 // ============================================================================
@@ -1881,9 +1804,9 @@ pub async fn list_invitations(app_core: &Arc<RwLock<AppCore>>) -> InvitationsSta
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn accept_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &InvitationId,
+    invitation: InvitationHandle,
 ) -> Result<(), AuraError> {
-    accept_invitation_with_instance(app_core, invitation_id, None).await
+    accept_invitation_with_instance(app_core, invitation, None).await
 }
 
 #[aura_macros::semantic_owner(
@@ -1915,17 +1838,12 @@ async fn accept_invitation_id_owned(
             }
         };
 
-    let accept_budget = match workflow_timeout_budget(
+    let accept_budget = match invitation_accept_timeout_budget(
         &runtime,
-        Duration::from_millis(invitation_accept_runtime_stage_timeout_ms(
-            pending_runtime_invitation.as_ref(),
-            accepted_invitation.as_ref(),
-        )),
+        pending_runtime_invitation.as_ref(),
+        accepted_invitation.as_ref(),
     )
-    .await
-    .map_err(|error| AcceptInvitationError::AcceptFailed {
-        detail: error.to_string(),
-    }) {
+    .await {
         Ok(budget) => budget,
         Err(error) => return fail_invitation_accept(owner, error).await,
     };
@@ -2051,16 +1969,17 @@ async fn accept_invitation_id_owned(
 /// Accept an invitation and attribute the semantic operation to a specific UI instance.
 pub async fn accept_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &InvitationId,
+    invitation: InvitationHandle,
     instance_id: Option<OperationInstanceId>,
 ) -> Result<(), AuraError> {
+    let invitation_id = invitation.invitation_id().clone();
     let accepted_invitation = list_invitations(app_core)
         .await
         .invitation(invitation_id.as_str())
         .cloned();
     let runtime = require_runtime(app_core).await?;
     let pending_runtime_invitation =
-        match pending_invitation_by_id_with_timeout(&runtime, invitation_id).await {
+        match pending_invitation_by_id_with_timeout(&runtime, &invitation_id).await {
             Ok(invitation) => invitation,
             Err(error) => {
                 if accepted_invitation.is_none() {
@@ -2091,15 +2010,13 @@ pub async fn accept_invitation_with_instance(
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let mut operation_context =
-        issue_semantic_operation_context(OperationId::invitation_accept(), instance_id);
-    accept_invitation_id_owned(app_core, invitation_id, &owner, operation_context.as_mut()).await
+    accept_invitation_id_owned(app_core, &invitation_id, &owner, None).await
 }
 
 /// Accept an imported invitation using the invitation metadata returned by the runtime bridge.
 pub async fn accept_imported_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation: &crate::runtime_bridge::InvitationInfo,
+    invitation: InvitationHandle,
 ) -> Result<(), AuraError> {
     accept_imported_invitation_with_instance(app_core, invitation, None).await
 }
@@ -2134,17 +2051,8 @@ async fn accept_imported_invitation_owned(
 
     let runtime = require_runtime(app_core).await?;
 
-    let accept_budget = match workflow_timeout_budget(
-        &runtime,
-        Duration::from_millis(invitation_accept_runtime_stage_timeout_ms(
-            Some(invitation),
-            None,
-        )),
-    )
-    .await
-    .map_err(|error| AcceptInvitationError::AcceptFailed {
-        detail: error.to_string(),
-    }) {
+    let accept_budget = match invitation_accept_timeout_budget(&runtime, Some(invitation), None).await
+    {
         Ok(budget) => budget,
         Err(error) => return fail_invitation_accept(owner, error).await,
     };
@@ -2245,10 +2153,10 @@ async fn accept_imported_invitation_owned(
 /// Accept an imported invitation and attribute the semantic operation to a specific UI instance.
 pub async fn accept_imported_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation: &crate::runtime_bridge::InvitationInfo,
+    invitation: InvitationHandle,
     instance_id: Option<OperationInstanceId>,
 ) -> Result<(), AuraError> {
-    let operation_kind = semantic_kind_for_bridge_invitation(invitation);
+    let operation_kind = semantic_kind_for_bridge_invitation(invitation.info());
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_accept(),
@@ -2257,10 +2165,8 @@ pub async fn accept_imported_invitation_with_instance(
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let mut operation_context =
-        issue_semantic_operation_context(OperationId::invitation_accept(), instance_id);
-    accept_imported_invitation_owned(app_core, invitation, &owner, operation_context.as_mut())
-        .await
+    let invitation = invitation.into_info();
+    accept_imported_invitation_owned(app_core, &invitation, &owner, None).await
 }
 
 /// Accept a device-enrollment invitation and wait for the local device view to converge.
@@ -2299,7 +2205,7 @@ pub async fn accept_device_enrollment_invitation(
     converge_runtime(&runtime).await;
 
     let expected_min_devices = 2_usize;
-    let policy = workflow_retry_policy(16, Duration::from_millis(250), Duration::from_millis(250))?;
+    let policy = device_enrollment_accept_retry_policy()?;
     let enrollment_result = execute_with_runtime_retry_budget(&runtime, &policy, |attempt| async {
         #[cfg(not(feature = "instrumented"))]
         let _ = attempt;
@@ -2388,7 +2294,8 @@ pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    accept_invitation(app_core, &InvitationId::new(invitation_id)).await
+    let handle = resolve_pending_invitation_handle(app_core, invitation_id).await?;
+    accept_invitation(app_core, handle).await
 }
 
 /// Decline an invitation using typed InvitationId
@@ -2398,12 +2305,12 @@ pub async fn accept_invitation_by_str(
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn decline_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &InvitationId,
+    invitation: InvitationHandle,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .decline_invitation(invitation_id.as_str())
+        .decline_invitation(invitation.invitation_id().as_str())
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
 }
@@ -2413,7 +2320,8 @@ pub async fn decline_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    decline_invitation(app_core, &InvitationId::new(invitation_id)).await
+    let handle = resolve_pending_invitation_handle(app_core, invitation_id).await?;
+    decline_invitation(app_core, handle).await
 }
 
 /// Cancel an invitation using typed InvitationId
@@ -2423,12 +2331,12 @@ pub async fn decline_invitation_by_str(
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn cancel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &InvitationId,
+    invitation: InvitationHandle,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .cancel_invitation(invitation_id.as_str())
+        .cancel_invitation(invitation.invitation_id().as_str())
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
 }
@@ -2438,7 +2346,8 @@ pub async fn cancel_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    cancel_invitation(app_core, &InvitationId::new(invitation_id)).await
+    let handle = resolve_pending_invitation_handle(app_core, invitation_id).await?;
+    cancel_invitation(app_core, handle).await
 }
 
 /// Import an invitation from a shareable code
@@ -2794,13 +2703,11 @@ pub async fn accept_pending_home_invitation_with_instance(
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let mut operation_context =
-        issue_semantic_operation_context(OperationId::invitation_accept(), instance_id.clone());
     accept_pending_home_invitation_id_owned(
         app_core,
         &owner,
         instance_id,
-        operation_context.as_mut(),
+        None,
     )
     .await
 }
@@ -2831,6 +2738,7 @@ mod tests {
                 operation_id: observed_operation_id,
                 instance_id: Some(observed_instance_id),
                 status,
+                ..
             } if observed_operation_id == operation_id && observed_instance_id == instance_id => {
                 Some(status.clone())
             }
@@ -3359,6 +3267,7 @@ mod tests {
                 operation_id,
                 instance_id: Some(observed_instance_id),
                 status,
+                ..
             } if *operation_id == OperationId::invitation_accept()
                 && observed_instance_id == &instance_id
                 && status.kind == SemanticOperationKind::AcceptPendingChannelInvitation
@@ -3671,10 +3580,14 @@ mod tests {
 
         let channel_id = ChannelId::from_bytes([51u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([52u8; 32]);
-        let result = fail_channel_invitation::<()>(
+        let owner = SemanticWorkflowOwner::new(
             &app_core,
+            OperationId::invitation_create(),
             None,
-            None,
+            SemanticOperationKind::InviteActorToChannel,
+        );
+        let result = fail_channel_invitation::<()>(
+            &owner,
             None,
             ChannelInvitationBootstrapError::CreateFailed {
                 channel_id,

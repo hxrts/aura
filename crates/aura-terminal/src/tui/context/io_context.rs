@@ -36,13 +36,14 @@ use aura_app::ui::signals::{
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
+use aura_app::ui::workflows::ceremonies::CeremonyHandle;
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
     context as context_workflows, settings as settings_workflows, system as system_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
-use aura_core::AuthorityId;
+use aura_core::{AuthorityId, CeremonyId};
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::tui::{resolve_storage_path, TuiMode};
@@ -233,6 +234,7 @@ impl IoContextBuilder {
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
+        let ceremony_kinds = Arc::new(RwLock::new(HashMap::new()));
         let requested_authority_switch = Arc::new(std::sync::Mutex::new(None));
 
         let dispatch = DispatchHelper::new(
@@ -265,6 +267,7 @@ impl IoContextBuilder {
             invited_lan_peers,
             current_context,
             channel_modes,
+            ceremony_kinds,
             tasks,
             pending_runtime_bootstrap: self.pending_runtime_bootstrap,
             requested_authority_switch,
@@ -302,6 +305,7 @@ pub struct IoContext {
     invited_lan_peers: Arc<RwLock<HashSet<AuthorityId>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
+    ceremony_kinds: Arc<RwLock<HashMap<String, CeremonyKind>>>,
     tasks: Arc<UiTaskRegistry>,
     pending_runtime_bootstrap: bool,
     requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
@@ -962,7 +966,7 @@ impl IoContext {
             })?;
 
         if !matches!(
-            invitation.invitation_type,
+            invitation.info().invitation_type,
             InvitationBridgeType::DeviceEnrollment { .. }
         ) {
             return Err(TerminalError::Input(
@@ -972,7 +976,7 @@ impl IoContext {
 
         aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
             app_core,
-            &invitation,
+            invitation.info(),
         )
         .await
         .map_err(|e| {
@@ -1211,6 +1215,31 @@ impl IoContext {
 
     pub async fn set_current_context(&self, context_id: Option<String>) {
         *self.current_context.write().await = context_id;
+    }
+
+    pub async fn remember_key_rotation_ceremony(&self, ceremony_id: String, kind: CeremonyKind) {
+        self.ceremony_kinds.write().await.insert(ceremony_id, kind);
+    }
+
+    pub async fn key_rotation_ceremony_handle(
+        &self,
+        ceremony_id: &str,
+    ) -> TerminalResult<CeremonyHandle> {
+        let kind = self
+            .ceremony_kinds
+            .read()
+            .await
+            .get(ceremony_id)
+            .copied()
+            .ok_or_else(|| TerminalError::Operation(format!("Unknown ceremony handle for {ceremony_id}")))?;
+        Ok(CeremonyHandle::legacy_from_id(
+            CeremonyId::new(ceremony_id.to_string()),
+            kind,
+        ))
+    }
+
+    pub async fn forget_key_rotation_ceremony(&self, ceremony_id: &str) {
+        self.ceremony_kinds.write().await.remove(ceremony_id);
     }
 
     pub async fn get_channel_mode(&self, channel_id: &str) -> ChannelMode {

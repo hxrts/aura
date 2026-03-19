@@ -645,7 +645,7 @@ ci-move-semantics:
     cargo test -p aura-core --test compile_fail -- --nocapture
 
 ci-authoritative-fact-boundary:
-    bash scripts/check/authoritative-fact-authorship.sh
+    cargo test -p aura-app --test compile_fail -- --nocapture
 
 ci-capability-boundaries:
     cargo test -p aura-core --test compile_fail -- --nocapture

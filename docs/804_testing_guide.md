@@ -166,10 +166,20 @@ test plan should include the applicable items below.
 - invariant tests proving terminal lifecycle does not regress on the same
   logical instance
 - invariant tests proving observed layers do not author semantic lifecycle
+- invariant tests proving frontend-local submission yields immediately to the
+  app-owned workflow owner after handoff
 - timeout/backoff tests proving local wall-clock policy only changes budget and
   diagnostics, not semantic success/failure rules
 - the relevant ownership/time `just ci-*` policy checks in addition to crate
   tests
+
+For shared semantic workflow changes specifically:
+
+- `aura-app::workflows` is the authoritative publication owner
+- `aura-terminal`, `aura-web`, and `aura-harness` must not retain a parallel
+  terminal publication path after handoff
+- review and test plans should name the terminal owner explicitly and treat
+  frontend layers as submit/observe boundaries
 
 Use physical time for local deadline and backoff policy. Do not use wall-clock
 timeouts as the primary proof of distributed completion or ordering.

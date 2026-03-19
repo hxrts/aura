@@ -63,7 +63,7 @@ rg -q 'move semantics solve session and endpoint ownership transfer' "$agent_arc
 # Composition: delegates to sub-checks after the doc validation above.
 #   1. harness-readiness-ownership.sh — readiness-specific refresh API enforcement
 #   2. harness-move-ownership-boundary.sh — frontend handle/receipt fabrication boundaries
-# Note: semantic lifecycle ownership is now covered by authoritative-fact-authorship.sh.
+# Note: semantic lifecycle authorship is now covered by aura-app compile-fail ownership boundaries.
 bash scripts/check/harness-readiness-ownership.sh
 bash scripts/check/harness-move-ownership-boundary.sh
 

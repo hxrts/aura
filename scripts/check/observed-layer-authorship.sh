@@ -10,13 +10,12 @@ fail() {
 }
 
 # Composition script that delegates to:
-#   1. authoritative-fact-authorship.sh — lifecycle/readiness publication boundaries
-#      (also covers semantic lifecycle ownership since the merge)
+#   1. aura-app compile-fail ownership boundaries — lifecycle/readiness publication boundaries
 #   2. harness-readiness-ownership.sh — readiness-specific refresh API enforcement
 # Then asserts the UI projection layer does not introduce direct authoritative
 # publication on its own.
 
-bash scripts/check/authoritative-fact-authorship.sh
+cargo test -p aura-app --test compile_fail -- --nocapture
 bash scripts/check/harness-readiness-ownership.sh
 
 ui_violations="$(

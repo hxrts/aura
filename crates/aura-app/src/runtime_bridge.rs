@@ -1620,11 +1620,18 @@ mod tests {
         assert_eq!(bridge.authority_id(), authority);
         assert!(!bridge.is_authenticated().await);
         assert!(!bridge.has_signing_capability().await);
+        assert!(!bridge
+            .is_peer_online(AuthorityId::new_from_entropy([43u8; 32]))
+            .await);
         assert!(bridge.try_get_sync_peers().await.is_err());
         assert!(bridge.try_get_discovered_peers().await.is_err());
         assert!(bridge.try_get_lan_peers().await.is_err());
         assert!(bridge.try_list_pending_invitations().await.is_err());
-        assert!(bridge.try_get_settings().await.is_err());
+        let settings_error = bridge
+            .try_get_settings()
+            .await
+            .expect_err("offline bridge settings must fail explicitly");
+        assert!(settings_error.to_string().contains("No agent configured"));
         assert!(bridge.try_list_devices().await.is_err());
         assert!(bridge.try_list_authorities().await.is_err());
     }

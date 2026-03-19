@@ -453,6 +453,7 @@ pub enum UiUpdate {
     AuthoritativeOperationStatus {
         operation_id: OperationId,
         instance_id: Option<OperationInstanceId>,
+        causality: Option<aura_app::ui_contract::SemanticOperationCausality>,
         status: SemanticOperationStatus,
     },
 

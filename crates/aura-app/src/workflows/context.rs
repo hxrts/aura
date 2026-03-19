@@ -14,10 +14,8 @@ use crate::{
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
-    workflows::harness_determinism,
     workflows::semantic_facts::{
-        publish_authoritative_operation_failure, publish_authoritative_operation_phase,
-        semantic_lifecycle_publication_capability,
+        SemanticWorkflowOwner,
     },
     workflows::signals::read_signal,
     AppCore,
@@ -97,29 +95,6 @@ async fn homes_state_signal_fallback(app_core: &Arc<RwLock<AppCore>>) -> HomesSt
         core.views_mut().set_homes(signal_homes.clone());
     }
     signal_homes
-}
-
-async fn local_first_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
-    if harness_determinism::harness_mode_enabled() {
-        return harness_determinism::parity_timestamp_ms(app_core, "context-local-first", &[])
-            .await
-            .unwrap_or(1);
-    }
-
-    match current_time_ms(app_core).await {
-        Ok(ts) => ts,
-        Err(_e) => {
-            #[cfg(feature = "instrumented")]
-            tracing::warn!(
-                error = %_e,
-                "time source unavailable — using fallback timestamp 1"
-            );
-            // Use 1 instead of 0 so the timestamp is distinguishable from
-            // "not set" (which uses 0 by convention) while still being
-            // obviously wrong if it shows up in debugging.
-            1
-        }
-    }
 }
 
 /// Set active context for navigation and command targeting
@@ -262,7 +237,9 @@ pub async fn create_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
 ) -> Result<String, AuraError> {
-    let timestamp_ms = local_first_timestamp_ms(app_core).await;
+    let timestamp_ms =
+        crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
+            .await;
     let neighborhood_name = if name.trim().is_empty() {
         "Neighborhood".to_string()
     } else {
@@ -416,7 +393,9 @@ async fn create_home_with_creator(
     name: Option<String>,
     description: Option<String>,
 ) -> Result<ChannelId, AuraError> {
-    let timestamp_ms = local_first_timestamp_ms(app_core).await;
+    let timestamp_ms =
+        crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
+            .await;
     let home_name = name
         .as_deref()
         .map(str::trim)
@@ -500,7 +479,7 @@ async fn create_home_with_creator(
 }
 
 async fn fail_create_home<T>(
-    app_core: &Arc<RwLock<AppCore>>,
+    owner: &SemanticWorkflowOwner,
     detail: impl Into<String>,
 ) -> Result<T, AuraError> {
     let error = SemanticOperationError::new(
@@ -508,14 +487,7 @@ async fn fail_create_home<T>(
         SemanticFailureCode::InternalError,
     )
     .with_detail(detail.into());
-    publish_authoritative_operation_failure(
-        app_core,
-        semantic_lifecycle_publication_capability(),
-        OperationId::create_home(),
-        SemanticOperationKind::CreateHome,
-        error.clone(),
-    )
-    .await?;
+    owner.publish_failure(error.clone()).await?;
     Err(AuraError::agent(
         error
             .detail
@@ -529,14 +501,15 @@ pub async fn create_home(
     name: Option<String>,
     description: Option<String>,
 ) -> Result<ChannelId, AuraError> {
-    publish_authoritative_operation_phase(
+    let owner = SemanticWorkflowOwner::new(
         app_core,
-        semantic_lifecycle_publication_capability(),
         OperationId::create_home(),
+        None,
         SemanticOperationKind::CreateHome,
-        SemanticOperationPhase::WorkflowDispatched,
-    )
-    .await?;
+    );
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
     let creator = {
         let core = app_core.read().await;
         core.runtime()
@@ -547,22 +520,15 @@ pub async fn create_home(
 
     let creator = match creator {
         Ok(creator) => creator,
-        Err(error) => return fail_create_home(app_core, error.to_string()).await,
+        Err(error) => return fail_create_home(&owner, error.to_string()).await,
     };
 
     let home_id = match create_home_with_creator(app_core, creator, name, description).await {
         Ok(home_id) => home_id,
-        Err(error) => return fail_create_home(app_core, error.to_string()).await,
+        Err(error) => return fail_create_home(&owner, error.to_string()).await,
     };
 
-    publish_authoritative_operation_phase(
-        app_core,
-        semantic_lifecycle_publication_capability(),
-        OperationId::create_home(),
-        SemanticOperationKind::CreateHome,
-        SemanticOperationPhase::Succeeded,
-    )
-    .await?;
+    owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
     Ok(home_id)
 }
 
@@ -586,7 +552,9 @@ pub async fn ensure_local_home_projection(
 ) -> Result<(), AuraError> {
     let context_id =
         ContextId::new_from_entropy(hash(format!("home-context:{creator}:{home_id}").as_bytes()));
-    let timestamp_ms = local_first_timestamp_ms(app_core).await;
+    let timestamp_ms =
+        crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
+            .await;
 
     let (homes_state, neighborhood_state) = {
         let mut core = app_core.write().await;

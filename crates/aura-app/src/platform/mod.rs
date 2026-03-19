@@ -2,10 +2,10 @@
 //!
 //! This module contains platform-specific initialization and helpers.
 
-#[cfg(feature = "ios")]
+#[cfg(any(feature = "ios", test))]
 pub mod ios;
 
-#[cfg(feature = "android")]
+#[cfg(any(feature = "android", test))]
 pub mod android;
 
 #[cfg(feature = "wasm")]

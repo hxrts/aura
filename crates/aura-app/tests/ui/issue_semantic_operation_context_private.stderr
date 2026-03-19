@@ -1,5 +1,5 @@
 error[E0433]: failed to resolve: could not find `semantic_facts` in `workflows`
- --> tests/ui/semantic_lifecycle_capability_private.rs:2:38
+ --> tests/ui/issue_semantic_operation_context_private.rs:2:38
   |
-2 |     let _ = aura_app::ui::workflows::semantic_facts::semantic_lifecycle_publication_capability();
+2 |     let _ = aura_app::ui::workflows::semantic_facts::issue_semantic_operation_context;
   |                                      ^^^^^^^^^^^^^^ could not find `semantic_facts` in `workflows`

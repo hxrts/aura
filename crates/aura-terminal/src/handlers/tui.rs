@@ -1030,7 +1030,7 @@ async fn handle_tui_launch(
                             Ok(invitation) => {
                                 match aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
                                     &startup_core,
-                                    &invitation,
+                                    invitation.info(),
                                 )
                                 .await
                                 {

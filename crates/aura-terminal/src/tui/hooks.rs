@@ -165,6 +165,27 @@ impl AppCoreContext {
         self.io_context.export_invitation_code(invitation_id).await
     }
 
+    pub async fn remember_key_rotation_ceremony(
+        &self,
+        ceremony_id: String,
+        kind: aura_app::ui::prelude::CeremonyKind,
+    ) {
+        self.io_context
+            .remember_key_rotation_ceremony(ceremony_id, kind)
+            .await;
+    }
+
+    pub async fn key_rotation_ceremony_handle(
+        &self,
+        ceremony_id: &str,
+    ) -> TerminalResult<aura_app::ui::workflows::ceremonies::CeremonyHandle> {
+        self.io_context.key_rotation_ceremony_handle(ceremony_id).await
+    }
+
+    pub async fn forget_key_rotation_ceremony(&self, ceremony_id: &str) {
+        self.io_context.forget_key_rotation_ceremony(ceremony_id).await;
+    }
+
     pub async fn add_error_toast(&self, id: impl Into<String>, message: impl Into<String>) {
         self.io_context.add_error_toast(id, message).await;
     }

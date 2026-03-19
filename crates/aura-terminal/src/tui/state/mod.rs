@@ -55,12 +55,13 @@ use aura_app::ui::contract::{
     OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
     RuntimeEventKind, RuntimeEventSnapshot,
 };
-use aura_app::ui_contract::RuntimeFact;
+use aura_app::ui_contract::{RuntimeFact, SemanticOperationCausality};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 struct TrackedOperation {
     instance_id: OperationInstanceId,
+    causality: Option<SemanticOperationCausality>,
     state: OperationState,
 }
 
@@ -90,6 +91,16 @@ impl OperationTracker {
         }
     }
 
+    fn incoming_causality_is_older(
+        current: Option<SemanticOperationCausality>,
+        incoming: Option<SemanticOperationCausality>,
+    ) -> bool {
+        match (current, incoming) {
+            (Some(current), Some(incoming)) => incoming.is_older_than(current),
+            _ => false,
+        }
+    }
+
     fn terminal_transition_requires_new_instance(
         existing: OperationState,
         next: OperationState,
@@ -104,8 +115,14 @@ impl OperationTracker {
             || !self.entries.contains_key(&operation_id);
         if needs_new_instance {
             let instance_id = self.next_instance_id(&operation_id);
-            self.entries
-                .insert(operation_id, TrackedOperation { instance_id, state });
+            self.entries.insert(
+                operation_id,
+                TrackedOperation {
+                    instance_id,
+                    causality: None,
+                    state,
+                },
+            );
             return;
         }
 
@@ -118,15 +135,23 @@ impl OperationTracker {
         &mut self,
         operation_id: OperationId,
         instance_id: Option<OperationInstanceId>,
+        causality: Option<SemanticOperationCausality>,
         state: OperationState,
     ) {
         if let Some(instance_id) = instance_id {
             match self.entries.get_mut(&operation_id) {
                 Some(entry) if entry.instance_id == instance_id => {
+                    if Self::incoming_causality_is_older(entry.causality, causality) {
+                        return;
+                    }
                     if Self::terminal_transition_requires_new_instance(entry.state, state) {
                         return;
                     }
+                    entry.causality = causality;
                     entry.state = state;
+                    return;
+                }
+                Some(entry) if Self::incoming_causality_is_older(entry.causality, causality) => {
                     return;
                 }
                 Some(entry)
@@ -135,8 +160,14 @@ impl OperationTracker {
                     return;
                 }
                 _ => {
-                    self.entries
-                        .insert(operation_id, TrackedOperation { instance_id, state });
+                    self.entries.insert(
+                        operation_id,
+                        TrackedOperation {
+                            instance_id,
+                            causality,
+                            state,
+                        },
+                    );
                     return;
                 }
             }
@@ -149,6 +180,7 @@ impl OperationTracker {
             return;
         }
         if let Some(entry) = self.entries.get_mut(&operation_id) {
+            entry.causality = causality;
             entry.state = state;
             return;
         }
@@ -377,10 +409,11 @@ impl TuiState {
         &mut self,
         operation_id: OperationId,
         instance_id: Option<OperationInstanceId>,
+        causality: Option<SemanticOperationCausality>,
         state: OperationState,
     ) {
         self.operation_states
-            .set_authoritative_state(operation_id, instance_id, state);
+            .set_authoritative_state(operation_id, instance_id, causality, state);
     }
 
     pub fn clear_operation_state(&mut self, operation_id: &OperationId) {
@@ -629,12 +662,13 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
+            None,
             OperationState::Succeeded,
         );
         let first = state.exported_operation_snapshots();
         let first_instance = first[0].instance_id.clone();
 
-        state.set_authoritative_operation_state(operation_id, None, OperationState::Failed);
+        state.set_authoritative_operation_state(operation_id, None, None, OperationState::Failed);
 
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Failed);
@@ -651,11 +685,13 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             Some(current.clone()),
+            None,
             OperationState::Submitting,
         );
         state.set_authoritative_operation_state(
             operation_id,
             Some(stale),
+            None,
             OperationState::Succeeded,
         );
 
@@ -692,6 +728,7 @@ mod tests {
         state.set_authoritative_operation_state(
             OperationId::invitation_accept(),
             None,
+            None,
             OperationState::Submitting,
         );
         let first = state.exported_operation_snapshots();
@@ -700,6 +737,7 @@ mod tests {
         state.set_authoritative_operation_state(
             OperationId::invitation_accept(),
             None,
+            None,
             OperationState::Submitting,
         );
         let second = state.exported_operation_snapshots();
@@ -707,6 +745,7 @@ mod tests {
 
         state.set_authoritative_operation_state(
             OperationId::invitation_accept(),
+            None,
             None,
             OperationState::Succeeded,
         );
@@ -722,6 +761,7 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
+            None,
             OperationState::Submitting,
         );
         let first = state.exported_operation_snapshots();
@@ -730,9 +770,10 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
+            None,
             OperationState::Succeeded,
         );
-        state.set_authoritative_operation_state(operation_id, None, OperationState::Submitting);
+        state.set_authoritative_operation_state(operation_id, None, None, OperationState::Submitting);
 
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Submitting);
@@ -761,12 +802,13 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
+            None,
             OperationState::Succeeded,
         );
         let first = state.exported_operation_snapshots();
         let first_instance = first[0].instance_id.clone();
 
-        state.set_authoritative_operation_state(operation_id, None, OperationState::Failed);
+        state.set_authoritative_operation_state(operation_id, None, None, OperationState::Failed);
 
         let snapshots = state.exported_operation_snapshots();
         assert_eq!(snapshots[0].state, OperationState::Failed);
@@ -780,6 +822,7 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             None,
+            None,
             OperationState::Succeeded,
         );
         let first = state.exported_operation_snapshots();
@@ -788,6 +831,7 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id,
             Some(first_instance.clone()),
+            None,
             OperationState::Failed,
         );
 
@@ -804,11 +848,13 @@ mod tests {
         state.set_authoritative_operation_state(
             operation_id.clone(),
             Some(OperationInstanceId("tui-op-invitation_accept-3".to_string())),
+            None,
             OperationState::Submitting,
         );
         state.set_authoritative_operation_state(
             operation_id,
             Some(OperationInstanceId("tui-op-invitation_accept-2".to_string())),
+            None,
             OperationState::Succeeded,
         );
 
@@ -817,6 +863,39 @@ mod tests {
         assert_eq!(
             snapshots[0].instance_id,
             OperationInstanceId("tui-op-invitation_accept-3".to_string())
+        );
+        assert_eq!(snapshots[0].state, OperationState::Submitting);
+    }
+
+    #[test]
+    fn authoritative_update_uses_causality_before_instance_suffix_ordering() {
+        let mut state = TuiState::new();
+        let operation_id = OperationId::invitation_accept();
+
+        state.set_authoritative_operation_state(
+            operation_id.clone(),
+            Some(OperationInstanceId("tui-op-invitation_accept-2".to_string())),
+            Some(SemanticOperationCausality::new(
+                aura_core::OwnerEpoch::new(0),
+                aura_core::PublicationSequence::new(5),
+            )),
+            OperationState::Submitting,
+        );
+        state.set_authoritative_operation_state(
+            operation_id,
+            Some(OperationInstanceId("tui-op-invitation_accept-9".to_string())),
+            Some(SemanticOperationCausality::new(
+                aura_core::OwnerEpoch::new(0),
+                aura_core::PublicationSequence::new(4),
+            )),
+            OperationState::Succeeded,
+        );
+
+        let snapshots = state.exported_operation_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].instance_id,
+            OperationInstanceId("tui-op-invitation_accept-2".to_string())
         );
         assert_eq!(snapshots[0].state, OperationState::Submitting);
     }

@@ -123,6 +123,7 @@ mod tests {
         state.set_authoritative_operation_state(
             OperationId::device_enrollment(),
             None,
+            None,
             OperationState::Submitting,
         );
         state.show_modal(QueuedModal::SettingsDeviceEnrollment(modal));

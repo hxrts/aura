@@ -45,7 +45,6 @@ use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::types::identifiers::CeremonyId;
 use aura_core::types::FrostThreshold;
 use aura_core::{
     execute_with_retry_budget, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
@@ -1955,6 +1954,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             operation_id,
                             status,
                             instance_id,
+                            causality,
                         } => {
                             let failure_message = if matches!(
                                 status.phase,
@@ -1995,6 +1995,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 state.set_authoritative_operation_state(
                                     operation_id,
                                     instance_id,
+                                    causality,
                                     next_state,
                                 );
                             });
@@ -2437,6 +2438,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut tui = tui;
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
+        let io_ctx_for_ceremony = app_ctx.clone();
         let _tasks_for_dispatch = tasks;
         // Clone update channel sender for ceremony UI updates
         let update_tx_for_ceremony = props.update_tx.clone();
@@ -3589,14 +3591,28 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tracing::info!(ceremony_id = %ceremony_id, "Canceling guardian ceremony");
 
                                         let app_core = app_core_for_ceremony.clone();
+                                        let io_ctx = io_ctx_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
                                         let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
-
-                                            let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
-                                            if let Err(e) = aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony_by_id(app, &ceremony_id_typed).await {
+                                            let handle = match io_ctx.key_rotation_ceremony_handle(&ceremony_id).await {
+                                                Ok(handle) => handle,
+                                                Err(e) => {
+                                                    tracing::error!("Failed to resolve guardian ceremony handle: {}", e);
+                                                    send_optional_ui_update_required(
+                                                        &update_tx,
+                                                        UiUpdate::operation_failed(
+                                                            UiOperation::CancelGuardianCeremony,
+                                                            TerminalError::Operation(e.to_string()),
+                                                        ),
+                                                    )
+                                                    .await;
+                                                    return;
+                                                }
+                                            };
+                                            if let Err(e) = aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony(app, handle).await {
                                                 tracing::error!("Failed to cancel guardian ceremony: {}", e);
                                                 send_optional_ui_update_required(
                                                     &update_tx,
@@ -3608,6 +3624,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 .await;
                                                 return;
                                             }
+                                            io_ctx.forget_key_rotation_ceremony(&ceremony_id).await;
 
                                             if let Some(tx) = update_tx {
                                                 let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
@@ -3621,14 +3638,28 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         tracing::info!(ceremony_id = %ceremony_id, "Canceling ceremony");
 
                                         let app_core = app_core_for_ceremony.clone();
+                                        let io_ctx = io_ctx_for_ceremony.clone();
                                         let update_tx = update_tx_for_ceremony.clone();
 
                                         let tasks = tasks_for_events.clone();
                                         tasks.spawn(async move {
                                             let app = app_core.raw();
-
-                                            let ceremony_id_typed = CeremonyId::new(ceremony_id.clone());
-                                            if let Err(e) = aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony_by_id(app, &ceremony_id_typed).await {
+                                            let handle = match io_ctx.key_rotation_ceremony_handle(&ceremony_id).await {
+                                                Ok(handle) => handle,
+                                                Err(e) => {
+                                                    tracing::error!("Failed to resolve ceremony handle: {}", e);
+                                                    send_optional_ui_update_required(
+                                                        &update_tx,
+                                                        UiUpdate::operation_failed(
+                                                            UiOperation::CancelKeyRotationCeremony,
+                                                            TerminalError::Operation(e.to_string()),
+                                                        ),
+                                                    )
+                                                    .await;
+                                                    return;
+                                                }
+                                            };
+                                            if let Err(e) = aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony(app, handle).await {
                                                 tracing::error!("Failed to cancel ceremony: {}", e);
                                                 send_optional_ui_update_required(
                                                     &update_tx,
@@ -3640,6 +3671,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 .await;
                                                 return;
                                             }
+                                            io_ctx.forget_key_rotation_ceremony(&ceremony_id).await;
 
                                             if let Some(tx) = update_tx {
                                                 let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(

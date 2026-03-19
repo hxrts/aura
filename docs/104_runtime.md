@@ -18,6 +18,16 @@ That contract is intentionally opinionated about the split of responsibilities:
 
 Those are related concerns, but they are not the same abstraction boundary.
 
+For shared semantic operations, the split is stricter still:
+
+- `aura-app::workflows` owns authoritative semantic lifecycle publication
+- `aura-agent` owns long-lived runtime actors and readiness/state coordination
+- frontend crates and the harness submit through sanctioned handoff boundaries
+  and observe authoritative publication afterward
+
+No runtime, frontend, or harness path should keep a parallel terminal
+publication helper once the shared workflow owner has taken over.
+
 ## Ownership Categories In The Runtime
 
 The runtime is the main place where Aura's ownership categories become concrete:

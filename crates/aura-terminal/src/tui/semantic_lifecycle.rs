@@ -7,8 +7,8 @@ use async_lock::RwLock;
 use aura_app::ui::types::AppCore;
 use aura_app::ui_contract::{
     HarnessUiOperationHandle, OperationId, OperationInstanceId, SemanticFailureCode,
-    SemanticFailureDomain, SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
-    SemanticOperationStatus,
+    SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
 };
 use aura_core::SemanticOwnerProtocol;
 
@@ -63,11 +63,13 @@ fn send_ui_update_now_or_spawn(tasks: &Arc<UiTaskRegistry>, tx: &UiUpdateSender,
 pub(crate) fn authoritative_operation_status_update(
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
+    causality: Option<SemanticOperationCausality>,
     status: SemanticOperationStatus,
 ) -> UiUpdate {
     UiUpdate::AuthoritativeOperationStatus {
         operation_id,
         instance_id,
+        causality,
         status,
     }
 }
@@ -104,6 +106,7 @@ impl SubmittedOperationOwner {
             authoritative_operation_status_update(
                 operation_id.clone(),
                 Some(instance_id.clone()),
+                None,
                 status,
             ),
         );
@@ -128,6 +131,7 @@ impl SubmittedOperationOwner {
             authoritative_operation_status_update(
                 self.operation_id.clone(),
                 Some(self.instance_id.clone()),
+                None,
                 status,
             ),
         )
@@ -151,6 +155,7 @@ impl SubmittedOperationOwner {
             authoritative_operation_status_update(
                 self.operation_id.clone(),
                 Some(self.instance_id.clone()),
+                None,
                 status,
             ),
         )
@@ -218,6 +223,7 @@ impl Drop for SubmittedOperationOwner {
             authoritative_operation_status_update(
                 self.operation_id.clone(),
                 Some(self.instance_id.clone()),
+                None,
                 status,
             ),
         );
@@ -349,6 +355,7 @@ mod tests {
                 operation_id,
                 instance_id,
                 status,
+                ..
             } => {
                 assert_eq!(operation_id, (case.operation_id)());
                 assert_eq!(instance_id, Some(transfer.instance_id().clone()));
@@ -360,6 +367,7 @@ mod tests {
         let failed = authoritative_operation_status_update(
             transfer.operation_id().clone(),
             Some(transfer.instance_id().clone()),
+            None,
             SemanticOperationStatus::failed(
                 transfer.kind(),
                 SemanticOperationError::new(
@@ -375,6 +383,7 @@ mod tests {
                 operation_id,
                 instance_id,
                 status,
+                ..
             } => {
                 assert_eq!(operation_id, (case.operation_id)());
                 assert_eq!(instance_id, Some(transfer.instance_id().clone()));

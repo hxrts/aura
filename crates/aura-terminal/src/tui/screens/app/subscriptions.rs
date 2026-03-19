@@ -1069,10 +1069,13 @@ pub fn use_authoritative_semantic_facts_subscription(
                         return;
                     };
                     let mut updates = Vec::new();
-                    for (operation_id, instance_id, status) in bridged_operation_statuses(&facts) {
+                    for (operation_id, instance_id, causality, status) in
+                        bridged_operation_statuses(&facts)
+                    {
                         updates.push(authoritative_operation_status_update(
                             operation_id,
                             instance_id,
+                            causality,
                             status,
                         ));
                     }

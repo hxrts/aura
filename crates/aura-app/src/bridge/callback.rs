@@ -21,6 +21,7 @@ use crate::errors::AppError;
 use crate::views::{
     ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
 /// Observer trait for receiving state updates.
@@ -133,59 +134,127 @@ impl ObserverRegistry {
         self.observers.retain(|(obs_id, _)| *obs_id != id);
     }
 
-    /// Notify all observers of chat state change.
-    ///
-    /// # Panic safety
-    ///
-    /// Observer callbacks are invoked sequentially.  If one observer panics,
-    /// remaining observers in the list will not be notified.  Observers must
-    /// not panic; a panicking observer is a bug in the observer, not in the
-    /// notification system.
-    pub fn notify_chat(&self, state: &ChatState) {
-        for (_, observer) in &self.observers {
-            observer.on_chat_changed(state.clone());
+    fn log_observer_panic(id: u64, callback: &str) {
+        #[cfg(feature = "instrumented")]
+        tracing::error!(observer_id = id, callback, "state observer panicked during notification");
+        #[cfg(not(feature = "instrumented"))]
+        eprintln!("state observer {id} panicked during {callback} notification");
+    }
+
+    fn notify_with<T, F>(&self, callback: &str, value: &T, mut notify: F)
+    where
+        T: Clone,
+        F: FnMut(&dyn StateObserver, T),
+    {
+        for (id, observer) in &self.observers {
+            let result = catch_unwind(AssertUnwindSafe(|| notify(observer.as_ref(), value.clone())));
+            if result.is_err() {
+                Self::log_observer_panic(*id, callback);
+            }
         }
+    }
+
+    /// Notify all observers of chat state change.
+    pub fn notify_chat(&self, state: &ChatState) {
+        self.notify_with("on_chat_changed", state, |observer, state| {
+            observer.on_chat_changed(state);
+        });
     }
 
     /// Notify all observers of recovery state change
     pub fn notify_recovery(&self, state: &RecoveryState) {
-        for (_, observer) in &self.observers {
-            observer.on_recovery_changed(state.clone());
-        }
+        self.notify_with("on_recovery_changed", state, |observer, state| {
+            observer.on_recovery_changed(state);
+        });
     }
 
     /// Notify all observers of invitations state change
     pub fn notify_invitations(&self, state: &InvitationsState) {
-        for (_, observer) in &self.observers {
-            observer.on_invitations_changed(state.clone());
-        }
+        self.notify_with("on_invitations_changed", state, |observer, state| {
+            observer.on_invitations_changed(state);
+        });
     }
 
     /// Notify all observers of contacts state change
     pub fn notify_contacts(&self, state: &ContactsState) {
-        for (_, observer) in &self.observers {
-            observer.on_contacts_changed(state.clone());
-        }
+        self.notify_with("on_contacts_changed", state, |observer, state| {
+            observer.on_contacts_changed(state);
+        });
     }
 
     /// Notify all observers of homes state change
     pub fn notify_homes(&self, state: &HomesState) {
-        for (_, observer) in &self.observers {
-            observer.on_homes_changed(state.clone());
-        }
+        self.notify_with("on_homes_changed", state, |observer, state| {
+            observer.on_homes_changed(state);
+        });
     }
 
     /// Notify all observers of neighborhood state change
     pub fn notify_neighborhood(&self, state: &NeighborhoodState) {
-        for (_, observer) in &self.observers {
-            observer.on_neighborhood_changed(state.clone());
-        }
+        self.notify_with("on_neighborhood_changed", state, |observer, state| {
+            observer.on_neighborhood_changed(state);
+        });
     }
 
     /// Notify all observers of an error
     pub fn notify_error(&self, error: CallbackError) {
-        for (_, observer) in &self.observers {
-            observer.on_error(error.clone());
+        self.notify_with("on_error", &error, |observer, error| {
+            observer.on_error(error);
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct PanicObserver;
+
+    impl StateObserver for PanicObserver {
+        fn on_chat_changed(&self, _state: ChatState) {
+            panic!("observer panic");
         }
+
+        fn on_recovery_changed(&self, _state: RecoveryState) {}
+        fn on_invitations_changed(&self, _state: InvitationsState) {}
+        fn on_contacts_changed(&self, _state: ContactsState) {}
+        fn on_homes_changed(&self, _state: HomesState) {}
+        fn on_neighborhood_changed(&self, _state: NeighborhoodState) {}
+        fn on_error(&self, _error: CallbackError) {}
+    }
+
+    struct RecordingObserver {
+        notifications: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl StateObserver for RecordingObserver {
+        fn on_chat_changed(&self, _state: ChatState) {
+            self.notifications
+                .lock()
+                .expect("lock")
+                .push("chat");
+        }
+
+        fn on_recovery_changed(&self, _state: RecoveryState) {}
+        fn on_invitations_changed(&self, _state: InvitationsState) {}
+        fn on_contacts_changed(&self, _state: ContactsState) {}
+        fn on_homes_changed(&self, _state: HomesState) {}
+        fn on_neighborhood_changed(&self, _state: NeighborhoodState) {}
+        fn on_error(&self, _error: CallbackError) {}
+    }
+
+    #[test]
+    fn panicking_observer_does_not_block_remaining_observers() {
+        let mut registry = ObserverRegistry::new();
+        let notifications = Arc::new(Mutex::new(Vec::new()));
+        registry.add(Arc::new(PanicObserver));
+        registry.add(Arc::new(RecordingObserver {
+            notifications: Arc::clone(&notifications),
+        }));
+
+        registry.notify_chat(&ChatState::default());
+
+        assert_eq!(notifications.lock().expect("lock").as_slice(), ["chat"]);
     }
 }

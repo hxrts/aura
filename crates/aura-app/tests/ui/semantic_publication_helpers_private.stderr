@@ -1,17 +1,5 @@
-error[E0603]: function `publish_authoritative_operation_phase_with_instance` is private
- --> tests/ui/semantic_publication_helpers_private.rs:3:50
+error[E0433]: failed to resolve: could not find `semantic_facts` in `workflows`
+ --> tests/ui/semantic_publication_helpers_private.rs:3:34
   |
 3 |         aura_app::ui::workflows::semantic_facts::publish_authoritative_operation_phase_with_instance;
-  |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ private function
-  |
-note: the function `publish_authoritative_operation_phase_with_instance` is defined here
- --> src/workflows/semantic_facts.rs
-  |
-  | / pub(crate) async fn publish_authoritative_operation_phase_with_instance(
-  | |     app_core: &Arc<RwLock<AppCore>>,
-  | |     capability: &LifecyclePublicationCapability,
-  | |     operation_id: OperationId,
-... |
-  | |     phase: SemanticOperationPhase,
-  | | ) -> Result<(), AuraError> {
-  | |__________________________^
+  |                                  ^^^^^^^^^^^^^^ could not find `semantic_facts` in `workflows`

@@ -14,10 +14,7 @@ use crate::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind, SemanticOperationPhase,
 };
-use crate::workflows::semantic_facts::{
-    publish_authoritative_operation_failure, publish_authoritative_operation_phase,
-    semantic_lifecycle_publication_capability,
-};
+use crate::workflows::semantic_facts::SemanticWorkflowOwner;
 use crate::AppCore;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
@@ -70,7 +67,7 @@ impl CeremonyHandle {
 }
 
 async fn fail_start_device_enrollment<T>(
-    app_core: &Arc<RwLock<AppCore>>,
+    owner: &SemanticWorkflowOwner,
     detail: impl Into<String>,
 ) -> Result<T, AuraError> {
     let error = SemanticOperationError::new(
@@ -78,14 +75,7 @@ async fn fail_start_device_enrollment<T>(
         SemanticFailureCode::InternalError,
     )
     .with_detail(detail.into());
-    publish_authoritative_operation_failure(
-        app_core,
-        semantic_lifecycle_publication_capability(),
-        OperationId::device_enrollment(),
-        SemanticOperationKind::StartDeviceEnrollment,
-        error.clone(),
-    )
-    .await?;
+    owner.publish_failure(error.clone()).await?;
     Err(AuraError::agent(error.detail.unwrap_or_else(|| {
         "start device enrollment failed".to_string()
     })))
@@ -139,14 +129,15 @@ pub async fn start_device_enrollment_ceremony(
     nickname_suggestion: String,
     invitee_authority_id: Option<AuthorityId>,
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
-    publish_authoritative_operation_phase(
+    let owner = SemanticWorkflowOwner::new(
         app_core,
-        semantic_lifecycle_publication_capability(),
         OperationId::device_enrollment(),
+        None,
         SemanticOperationKind::StartDeviceEnrollment,
-        SemanticOperationPhase::WorkflowDispatched,
-    )
-    .await?;
+    );
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
     let runtime = {
         let core = app_core.read().await;
         core.runtime()
@@ -160,20 +151,13 @@ pub async fn start_device_enrollment_ceremony(
         Ok(start) => start,
         Err(error) => {
             return fail_start_device_enrollment(
-                app_core,
+                &owner,
                 ceremony_op("start device enrollment", error).to_string(),
             )
             .await;
         }
     };
-    publish_authoritative_operation_phase(
-        app_core,
-        semantic_lifecycle_publication_capability(),
-        OperationId::device_enrollment(),
-        SemanticOperationKind::StartDeviceEnrollment,
-        SemanticOperationPhase::Succeeded,
-    )
-    .await?;
+    owner.publish_phase(SemanticOperationPhase::Succeeded).await?;
     Ok(start)
 }
 /// Start a device removal ("remove device") ceremony.

@@ -39,6 +39,42 @@ pub struct ResolvedChannelId(pub ChannelId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResolvedContextId(pub ContextId);
 
+/// Canonical result of channel resolution for commands that may target an
+/// existing channel or intentionally create one later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelResolveOutcome {
+    Existing {
+        channel_id: ResolvedChannelId,
+        context_id: Option<ResolvedContextId>,
+    },
+    WillCreate {
+        channel_id: ResolvedChannelId,
+        channel_name: String,
+    },
+}
+
+impl ChannelResolveOutcome {
+    #[must_use]
+    pub const fn channel_id(&self) -> ResolvedChannelId {
+        match self {
+            Self::Existing { channel_id, .. } | Self::WillCreate { channel_id, .. } => *channel_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn context_id(&self) -> Option<ResolvedContextId> {
+        match self {
+            Self::Existing { context_id, .. } => *context_id,
+            Self::WillCreate { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_will_create(&self) -> bool {
+        matches!(self, Self::WillCreate { .. })
+    }
+}
+
 /// Snapshot token used to guarantee single-snapshot command resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SnapshotToken(u64);
@@ -212,9 +248,8 @@ pub enum ResolvedCommand {
     },
     Leave,
     Join {
-        channel_id: ResolvedChannelId,
         channel_name: String,
-        context_id: Option<ResolvedContextId>,
+        channel: ChannelResolveOutcome,
     },
     Help {
         command: Option<String>,
@@ -269,9 +304,8 @@ pub enum ResolvedCommand {
         target: ResolvedAuthorityId,
     },
     Mode {
-        channel_id: ResolvedChannelId,
         channel_name: String,
-        context_id: Option<ResolvedContextId>,
+        channel: ChannelResolveOutcome,
         flags: String,
     },
 }
@@ -615,12 +649,11 @@ impl CommandResolver {
             }),
             ParsedCommand::Leave => Ok(ResolvedCommand::Leave),
             ParsedCommand::Join { channel } => {
-                let (channel_id, context_id) =
-                    self.resolve_channel(snapshot.state(), &channel, true)?;
+                let channel_name = normalize_channel_name(&channel);
+                let channel = self.resolve_channel(snapshot.state(), &channel, true)?;
                 Ok(ResolvedCommand::Join {
-                    channel_id,
-                    channel_name: normalize_channel_name(&channel),
-                    context_id,
+                    channel_name,
+                    channel,
                 })
             }
             ParsedCommand::Help { command } => Ok(ResolvedCommand::Help { command }),
@@ -662,12 +695,11 @@ impl CommandResolver {
                 target: self.resolve_authority(snapshot.state(), &target)?,
             }),
             ParsedCommand::Mode { channel, flags } => {
-                let (channel_id, context_id) =
-                    self.resolve_channel(snapshot.state(), &channel, false)?;
+                let channel_name = normalize_channel_name(&channel);
+                let channel = self.resolve_channel(snapshot.state(), &channel, false)?;
                 Ok(ResolvedCommand::Mode {
-                    channel_id,
-                    channel_name: normalize_channel_name(&channel),
-                    context_id,
+                    channel_name,
+                    channel,
                     flags,
                 })
             }
@@ -688,38 +720,40 @@ impl CommandResolver {
 
         match resolved {
             ResolvedCommand::Join {
-                channel_id,
                 channel_name,
-                context_id,
+                channel,
             } => {
                 let scope = CommandScope::Channel {
-                    channel_id,
-                    context_id,
+                    channel_id: channel.channel_id(),
+                    context_id: channel.context_id(),
                 };
+                let mut preconditions = Vec::new();
+                if matches!(channel, ChannelResolveOutcome::Existing { .. }) {
+                    preconditions.push(PlanPrecondition::ChannelExists(channel.channel_id()));
+                }
                 Ok(PlannedCommand::Membership(CommandPlan {
                     actor,
                     scope,
-                    preconditions: vec![PlanPrecondition::ChannelExists(channel_id)],
+                    preconditions,
                     operation: MembershipPlan {
                         command: ResolvedCommand::Join {
-                            channel_id,
                             channel_name,
-                            context_id,
+                            channel,
                         },
                     },
                 }))
             }
             ResolvedCommand::Leave => {
-                let (channel_id, context_id) =
+                let channel =
                     self.resolve_current_channel(snapshot, current_channel_hint, "leave", false)?;
                 Ok(PlannedCommand::Membership(CommandPlan {
                     actor,
                     scope: CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     },
                     preconditions: vec![
-                        PlanPrecondition::ChannelExists(channel_id),
+                        PlanPrecondition::ChannelExists(channel.channel_id()),
                         PlanPrecondition::ActorInScope,
                     ],
                     operation: MembershipPlan {
@@ -728,17 +762,17 @@ impl CommandResolver {
                 }))
             }
             ResolvedCommand::Kick { target, reason } => {
-                let (channel_id, context_id) =
+                let channel =
                     self.resolve_current_channel(snapshot, current_channel_hint, "kick", false)?;
                 Ok(PlannedCommand::Moderation(CommandPlan {
                     actor,
                     scope: CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     },
                     preconditions: vec![
                         PlanPrecondition::TargetExists(target),
-                        PlanPrecondition::ChannelExists(channel_id),
+                        PlanPrecondition::ChannelExists(channel.channel_id()),
                         PlanPrecondition::ActorInScope,
                     ],
                     operation: ModerationPlan {
@@ -748,11 +782,10 @@ impl CommandResolver {
             }
             ResolvedCommand::Ban { target, reason } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let (channel_id, context_id) =
-                        self.resolve_current_channel(snapshot, Some(hint), "ban", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "ban", false)?;
                     CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     }
                 } else {
                     CommandScope::Global
@@ -769,11 +802,11 @@ impl CommandResolver {
             }
             ResolvedCommand::Unban { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let (channel_id, context_id) =
+                    let channel =
                         self.resolve_current_channel(snapshot, Some(hint), "unban", false)?;
                     CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     }
                 } else {
                     CommandScope::Global
@@ -790,11 +823,11 @@ impl CommandResolver {
             }
             ResolvedCommand::Mute { target, duration } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let (channel_id, context_id) =
+                    let channel =
                         self.resolve_current_channel(snapshot, Some(hint), "mute", false)?;
                     CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     }
                 } else {
                     CommandScope::Global
@@ -811,11 +844,11 @@ impl CommandResolver {
             }
             ResolvedCommand::Unmute { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let (channel_id, context_id) =
+                    let channel =
                         self.resolve_current_channel(snapshot, Some(hint), "unmute", false)?;
                     CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     }
                 } else {
                     CommandScope::Global
@@ -831,17 +864,17 @@ impl CommandResolver {
                 }))
             }
             ResolvedCommand::Invite { target } => {
-                let (channel_id, context_id) =
+                let channel =
                     self.resolve_current_channel(snapshot, current_channel_hint, "invite", false)?;
                 Ok(PlannedCommand::Moderation(CommandPlan {
                     actor,
                     scope: CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     },
                     preconditions: vec![
                         PlanPrecondition::TargetExists(target),
-                        PlanPrecondition::ChannelExists(channel_id),
+                        PlanPrecondition::ChannelExists(channel.channel_id()),
                     ],
                     operation: ModerationPlan {
                         command: ResolvedCommand::Invite { target },
@@ -850,11 +883,10 @@ impl CommandResolver {
             }
             ResolvedCommand::Op { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let (channel_id, context_id) =
-                        self.resolve_current_channel(snapshot, Some(hint), "op", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "op", false)?;
                     CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     }
                 } else {
                     CommandScope::Global
@@ -871,11 +903,11 @@ impl CommandResolver {
             }
             ResolvedCommand::Deop { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let (channel_id, context_id) =
+                    let channel =
                         self.resolve_current_channel(snapshot, Some(hint), "deop", false)?;
                     CommandScope::Channel {
-                        channel_id,
-                        context_id,
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
                     }
                 } else {
                     CommandScope::Global
@@ -891,22 +923,20 @@ impl CommandResolver {
                 }))
             }
             ResolvedCommand::Mode {
-                channel_id,
                 channel_name,
-                context_id,
+                channel,
                 flags,
             } => Ok(PlannedCommand::Moderator(CommandPlan {
                 actor,
                 scope: CommandScope::Channel {
-                    channel_id,
-                    context_id,
+                    channel_id: channel.channel_id(),
+                    context_id: channel.context_id(),
                 },
-                preconditions: vec![PlanPrecondition::ChannelExists(channel_id)],
+                preconditions: vec![PlanPrecondition::ChannelExists(channel.channel_id())],
                 operation: ModeratorPlan {
                     command: ResolvedCommand::Mode {
-                        channel_id,
                         channel_name,
-                        context_id,
+                        channel,
                         flags,
                     },
                 },
@@ -916,15 +946,15 @@ impl CommandResolver {
                     ResolvedCommand::Me { .. }
                     | ResolvedCommand::Who
                     | ResolvedCommand::Topic { .. } => {
-                        let (channel_id, context_id) = self.resolve_current_channel(
+                        let channel = self.resolve_current_channel(
                             snapshot,
                             current_channel_hint,
                             command_name(&command),
                             false,
                         )?;
                         CommandScope::Channel {
-                            channel_id,
-                            context_id,
+                            channel_id: channel.channel_id(),
+                            context_id: channel.context_id(),
                         }
                     }
                     _ => CommandScope::Global,
@@ -956,7 +986,7 @@ impl CommandResolver {
         current_channel_hint: Option<&str>,
         command: &'static str,
         allow_create: bool,
-    ) -> Result<(ResolvedChannelId, Option<ResolvedContextId>), CommandResolverError> {
+    ) -> Result<ChannelResolveOutcome, CommandResolverError> {
         let Some(current_channel_hint) = current_channel_hint else {
             return Err(CommandResolverError::MissingCurrentChannel { command });
         };
@@ -1050,7 +1080,7 @@ impl CommandResolver {
         state: &StateSnapshot,
         input: &str,
         allow_create: bool,
-    ) -> Result<(ResolvedChannelId, Option<ResolvedContextId>), CommandResolverError> {
+    ) -> Result<ChannelResolveOutcome, CommandResolverError> {
         let normalized = normalize_channel_name(input);
         let normalized = normalized.trim();
         if normalized.is_empty() {
@@ -1062,10 +1092,16 @@ impl CommandResolver {
 
         if let Ok(channel_id) = normalized.parse::<ChannelId>() {
             if let Some(ctx) = resolve_channel_context(state, channel_id) {
-                return Ok((ResolvedChannelId(channel_id), ctx));
+                return Ok(ChannelResolveOutcome::Existing {
+                    channel_id: ResolvedChannelId(channel_id),
+                    context_id: ctx,
+                });
             }
             if allow_create {
-                return Ok((ResolvedChannelId(channel_id), None));
+                return Ok(ChannelResolveOutcome::WillCreate {
+                    channel_id: ResolvedChannelId(channel_id),
+                    channel_name: normalized.to_string(),
+                });
             }
             return Err(CommandResolverError::UnknownTarget {
                 target: ResolveTarget::Channel,
@@ -1095,7 +1131,10 @@ impl CommandResolver {
                 .next()
                 .map(|(id, (name, context))| (*id, (name, *context)))
             {
-                return Ok((ResolvedChannelId(channel_id), context_id));
+                return Ok(ChannelResolveOutcome::Existing {
+                    channel_id: ResolvedChannelId(channel_id),
+                    context_id,
+                });
             }
         }
 
@@ -1112,10 +1151,12 @@ impl CommandResolver {
         }
 
         if allow_create {
-            return Ok((
-                ResolvedChannelId(ChannelRef::Name(normalized.to_string()).to_channel_id()),
-                None,
-            ));
+            return Ok(ChannelResolveOutcome::WillCreate {
+                channel_id: ResolvedChannelId(
+                    ChannelRef::Name(normalized.to_string()).to_channel_id(),
+                ),
+                channel_name: normalized.to_string(),
+            });
         }
 
         Err(CommandResolverError::UnknownTarget {
@@ -1251,8 +1292,8 @@ async fn consistency_invariant_holds(
     let snapshot = app_core.read().await.snapshot();
     match plan {
         PlannedCommand::Membership(plan) => match &plan.operation.command {
-            ResolvedCommand::Join { channel_id, .. } => {
-                snapshot.chat.channel(&channel_id.0).is_some()
+            ResolvedCommand::Join { channel, .. } => {
+                snapshot.chat.channel(&channel.channel_id().0).is_some()
             }
             ResolvedCommand::Leave => match scope_channel_id(&plan.scope, "leave") {
                 Ok(channel_id) => snapshot
@@ -1380,13 +1421,19 @@ async fn execute_membership(
     plan: &CommandPlan<MembershipPlan>,
 ) -> Result<Option<String>, AuraError> {
     match &plan.operation.command {
-        ResolvedCommand::Join { channel_name, .. } => {
-            // Preserve `/join` semantics as "join or create" by going through the
-            // name-based workflow that handles unknown-channel fallback.
-            messaging::join_channel_by_name(app_core, channel_name)
-                .await
-                .map(|_| ())
-        }
+        ResolvedCommand::Join {
+            channel_name,
+            channel,
+        } => match channel {
+            ChannelResolveOutcome::Existing { channel_id, .. } => {
+                messaging::join_channel(app_core, channel_id.0).await.map(|_| ())
+            }
+            ChannelResolveOutcome::WillCreate { .. } => {
+                messaging::join_channel_by_name(app_core, channel_name)
+                    .await
+                    .map(|_| ())
+            }
+        },
         ResolvedCommand::Leave => {
             let channel_id = scope_channel_id(&plan.scope, "leave")?;
             messaging::leave_channel(app_core, channel_id.0)
@@ -1459,7 +1506,7 @@ async fn execute_moderation(
         }
         ResolvedCommand::Invite { target } => {
             let channel_id = scope_channel_id(&plan.scope, "invite")?;
-            let _invitation_id = messaging::invite_authority_to_channel(
+            messaging::invite_authority_to_channel(
                 app_core,
                 target.0,
                 channel_id.0,
@@ -1495,11 +1542,11 @@ async fn execute_moderator(
         )
         .await
         .map(|_| Some("moderator revoked".to_string())),
-        ResolvedCommand::Mode {
-            channel_id, flags, ..
-        } => settings::set_channel_mode_resolved(app_core, channel_id.0, flags.clone())
-            .await
-            .map(|_| Some("channel mode updated".to_string())),
+        ResolvedCommand::Mode { channel, flags, .. } => {
+            settings::set_channel_mode_resolved(app_core, channel.channel_id().0, flags.clone())
+                .await
+                .map(|_| Some("channel mode updated".to_string()))
+        }
         _ => Err(AuraError::invalid("invalid moderator command")),
     }
 }
@@ -1511,17 +1558,25 @@ async fn execute_general(
 ) -> Result<Option<String>, AuraError> {
     match &plan.operation {
         ResolvedCommand::Msg { target, text } => {
-            let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
-            let _channel_id =
-                messaging::send_direct_message_to_authority(app_core, target.0, text, timestamp_ms)
-                    .await?;
+            let timestamp_ms = crate::workflows::time::local_first_timestamp_ms(
+                app_core,
+                "strong-command-msg",
+                &[text.as_str()],
+            )
+            .await;
+            messaging::send_direct_message_to_authority(app_core, target.0, text, timestamp_ms)
+                .await?;
             Ok(Some("direct message sent".to_string()))
         }
         ResolvedCommand::Me { action } => {
-            let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
+            let timestamp_ms = crate::workflows::time::local_first_timestamp_ms(
+                app_core,
+                "strong-command-me",
+                &[action.as_str()],
+            )
+            .await;
             let channel_id = scope_channel_id(&plan.scope, "me")?;
-            let _message_id =
-                messaging::send_action(app_core, channel_id.0, action, timestamp_ms).await?;
+            messaging::send_action(app_core, channel_id.0, action, timestamp_ms).await?;
             Ok(Some("action sent".to_string()))
         }
         ResolvedCommand::Nick { name } => settings::update_nickname(app_core, name.clone())
@@ -1552,7 +1607,7 @@ async fn execute_general(
         }
         ResolvedCommand::Help { .. } => Ok(None),
         ResolvedCommand::Neighborhood { name } => {
-            let _id = context::create_neighborhood(app_core, name.clone()).await?;
+            context::create_neighborhood(app_core, name.clone()).await?;
             Ok(Some("neighborhood updated".to_string()))
         }
         ResolvedCommand::NhAdd { home_id } => context::add_home_to_neighborhood(app_core, home_id)
@@ -1563,7 +1618,7 @@ async fn execute_general(
             .map(|_| Some("home one_hop_link linked".to_string())),
         ResolvedCommand::HomeInvite { target } => {
             let home_id = current_home_id_string(app_core).await?;
-            let _info = invitation::create_channel_invitation(
+            invitation::create_channel_invitation(
                 app_core, target.0, home_id, None, None, None, None, None, None, None, None,
             )
             .await?;
@@ -1696,6 +1751,15 @@ mod tests {
     use super::*;
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
     use crate::AppConfig;
+    #[cfg(feature = "signals")]
+    use crate::{
+        signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+        ui_contract::{
+            AuthoritativeSemanticFact, OperationId, SemanticOperationKind,
+            SemanticOperationPhase,
+        },
+        workflows::signals::read_signal_or_default,
+    };
     use proptest::prelude::*;
 
     #[tokio::test]
@@ -1895,14 +1959,50 @@ mod tests {
 
         match resolved {
             ResolvedCommand::Mode {
-                channel_id: resolved_id,
+                channel,
                 channel_name,
                 flags,
                 ..
             } => {
-                assert_eq!(resolved_id, ResolvedChannelId(channel_id));
+                assert_eq!(channel.channel_id(), ResolvedChannelId(channel_id));
                 assert_eq!(channel_name, "slash-lab");
                 assert_eq!(flags, "+m");
+                assert!(!channel.is_will_create());
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolver_marks_unknown_join_channel_as_will_create() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let resolver = CommandResolver::default();
+        let snapshot = resolver.capture_snapshot(&app_core).await;
+
+        let resolved = resolver
+            .resolve(
+                ParsedCommand::Join {
+                    channel: "typo-room".to_string(),
+                },
+                &snapshot,
+            )
+            .expect("join should preserve create semantics");
+
+        match resolved {
+            ResolvedCommand::Join {
+                channel_name,
+                channel:
+                    ChannelResolveOutcome::WillCreate {
+                        channel_id,
+                        channel_name: outcome_name,
+                    },
+            } => {
+                assert_eq!(channel_name, "typo-room");
+                assert_eq!(outcome_name, "typo-room");
+                assert_eq!(
+                    channel_id,
+                    ResolvedChannelId(ChannelRef::Name("typo-room".to_string()).to_channel_id())
+                );
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -1940,9 +2040,11 @@ mod tests {
     #[test]
     fn membership_plan_accepts_join_and_leave() {
         let valid_join = ResolvedCommand::Join {
-            channel_id: ResolvedChannelId(ChannelId::from_bytes([13u8; 32])),
             channel_name: "slash-lab".to_string(),
-            context_id: None,
+            channel: ChannelResolveOutcome::Existing {
+                channel_id: ResolvedChannelId(ChannelId::from_bytes([13u8; 32])),
+                context_id: None,
+            },
         };
         let valid_leave = ResolvedCommand::Leave;
         let invalid = ResolvedCommand::Nick {
@@ -1962,17 +2064,21 @@ mod tests {
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([14u8; 32]));
         let channel = ResolvedChannelId(ChannelId::from_bytes([15u8; 32]));
         let channel_mode = ResolvedCommand::Mode {
-            channel_id: channel,
             channel_name: "slash-lab".to_string(),
-            context_id: None,
+            channel: ChannelResolveOutcome::Existing {
+                channel_id: channel,
+                context_id: None,
+            },
             flags: "+m".to_string(),
         };
 
         assert_eq!(
             consistency_for_resolved(&ResolvedCommand::Join {
-                channel_id: channel,
                 channel_name: "slash-lab".to_string(),
-                context_id: None,
+                channel: ChannelResolveOutcome::Existing {
+                    channel_id: channel,
+                    context_id: None,
+                },
             }),
             ConsistencyRequirement::Replicated
         );
@@ -2127,9 +2233,11 @@ mod tests {
             ))],
             operation: MembershipPlan {
                 command: ResolvedCommand::Join {
-                    channel_id: ResolvedChannelId(channel_id),
                     channel_name: "replicated-room".to_string(),
-                    context_id: None,
+                    channel: ChannelResolveOutcome::Existing {
+                        channel_id: ResolvedChannelId(channel_id),
+                        context_id: None,
+                    },
                 },
             },
         });
@@ -2137,5 +2245,149 @@ mod tests {
         let state =
             wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated).await;
         assert_eq!(state, ConsistencyState::Replicated);
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn consistency_barrier_treats_missing_leave_scope_as_replicated() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let missing_channel = ChannelId::from_bytes([44u8; 32]);
+
+        let plan = PlannedCommand::Membership(CommandPlan {
+            actor: None,
+            scope: CommandScope::Channel {
+                channel_id: ResolvedChannelId(missing_channel),
+                context_id: None,
+            },
+            preconditions: Vec::new(),
+            operation: MembershipPlan {
+                command: ResolvedCommand::Leave,
+            },
+        });
+
+        let state =
+            wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated).await;
+        assert_eq!(state, ConsistencyState::Replicated);
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn consistency_barrier_treats_missing_home_scope_as_enforced() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let missing_channel = ChannelId::from_bytes([45u8; 32]);
+        let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([46u8; 32]));
+
+        let plan = PlannedCommand::Moderation(CommandPlan {
+            actor: None,
+            scope: CommandScope::Channel {
+                channel_id: ResolvedChannelId(missing_channel),
+                context_id: None,
+            },
+            preconditions: vec![PlanPrecondition::TargetExists(target)],
+            operation: ModerationPlan {
+                command: ResolvedCommand::Kick {
+                    target,
+                    reason: None,
+                },
+            },
+        });
+
+        let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
+        assert_eq!(state, ConsistencyState::Enforced);
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn execute_planned_join_preserves_join_operation_id() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let resolver = CommandResolver::default();
+        let snapshot = resolver.capture_snapshot(&app_core).await;
+        let resolved = resolver
+            .resolve(
+                ParsedCommand::Join {
+                    channel: "semantic-room".to_string(),
+                },
+                &snapshot,
+            )
+            .expect("join should resolve");
+        let plan = resolver
+            .plan(resolved, &snapshot, None, None)
+            .expect("join should plan");
+
+        execute_planned(&app_core, plan)
+            .await
+            .expect("join should execute");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id,
+                status,
+                ..
+            } if *operation_id == OperationId::join_channel()
+                && status.kind == SemanticOperationKind::JoinChannel
+                && status.phase == SemanticOperationPhase::Succeeded
+        )));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn execute_planned_me_preserves_send_message_operation_id() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        let channel_id = ChannelId::from_bytes([44u8; 32]);
+
+        {
+            let mut core = app_core.write().await;
+            core.views_mut()
+                .set_chat(ChatState::from_channels(vec![Channel {
+                    id: channel_id,
+                    context_id: None,
+                    name: "semantic-room".to_string(),
+                    topic: None,
+                    channel_type: ChannelType::Home,
+                    unread_count: 0,
+                    is_dm: false,
+                    member_ids: Vec::new(),
+                    member_count: 1,
+                    last_message: None,
+                    last_message_time: None,
+                    last_activity: 0,
+                    last_finalized_epoch: 0,
+                }]));
+        }
+
+        let resolver = CommandResolver::default();
+        let snapshot = resolver.capture_snapshot(&app_core).await;
+        let resolved = resolver
+            .resolve(
+                ParsedCommand::Me {
+                    action: "wave".to_string(),
+                },
+                &snapshot,
+            )
+            .expect("me should resolve");
+        let plan = resolver
+            .plan(resolved, &snapshot, Some("semantic-room"), None)
+            .expect("me should plan");
+
+        execute_planned(&app_core, plan)
+            .await
+            .expect("me should execute");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id,
+                status,
+                ..
+            } if *operation_id == OperationId::send_message()
+                && status.kind == SemanticOperationKind::SendChatMessage
+                && status.phase == SemanticOperationPhase::Succeeded
+        )));
     }
 }

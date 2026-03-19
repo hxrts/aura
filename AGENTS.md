@@ -71,6 +71,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Shared user-flow contributor sync**: when shared UX policy scripts change, keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
+- **Shared semantic lifecycle ownership**: `aura-app::workflows` owns authoritative parity-critical semantic lifecycle publication after handoff; `aura-terminal`, `aura-web`, and `aura-harness` submit and observe but do not keep parallel terminal publication paths
 - **Architecture enforcement split**: prefer type/API design, compile-fail
   tests, and Rust-native lints for syntactic or boundary-shape rules;
   `just check-arch` should stay focused on workspace topology, governance, and
