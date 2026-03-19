@@ -1131,4 +1131,64 @@ mod tests {
             "Plaintext blobs should be rejected when encryption is enabled"
         );
     }
+
+    /// Different storage keys must produce different raw ciphertext blobs,
+    /// even when the plaintext is identical. This validates per-key encryption
+    /// key derivation — if broken, cross-key ciphertext analysis becomes
+    /// possible.
+    #[tokio::test]
+    async fn test_different_keys_produce_different_ciphertext() {
+        let storage = MockStorage::new();
+        let crypto = Arc::new(MockCrypto);
+        let secure = Arc::new(MockSecureStorage::new());
+
+        let encrypted =
+            EncryptedStorage::new(storage, crypto, secure, EncryptedStorageConfig::default());
+
+        let value = b"identical-plaintext".to_vec();
+        encrypted.store("key-a", value.clone()).await.unwrap();
+        encrypted.store("key-b", value.clone()).await.unwrap();
+
+        let raw_a = encrypted.inner().retrieve("key-a").await.unwrap().unwrap();
+        let raw_b = encrypted.inner().retrieve("key-b").await.unwrap().unwrap();
+
+        // Ciphertext must differ because per-key encryption keys differ
+        assert_ne!(
+            raw_a, raw_b,
+            "Same plaintext under different storage keys must produce different ciphertext"
+        );
+    }
+
+    /// With encryption disabled, data must pass through to the inner storage
+    /// unchanged. If broken, either: (a) data is silently unencrypted in
+    /// production, or (b) test/bring-up environments fail because data is
+    /// unexpectedly encrypted.
+    #[tokio::test]
+    async fn test_disabled_encryption_passes_through_plaintext() {
+        let storage = MockStorage::new();
+        let crypto = Arc::new(MockCrypto);
+        let secure = Arc::new(MockSecureStorage::new());
+
+        let config = EncryptedStorageConfig::default().with_encryption_enabled(false);
+        let encrypted = EncryptedStorage::new(storage, crypto, secure, config);
+
+        let value = b"raw-data".to_vec();
+        encrypted.store("passthrough", value.clone()).await.unwrap();
+
+        // Raw storage should contain the exact plaintext
+        let raw = encrypted
+            .inner()
+            .retrieve("passthrough")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            raw, value,
+            "Disabled encryption must store plaintext unchanged"
+        );
+
+        // Retrieve should also return plaintext
+        let retrieved = encrypted.retrieve("passthrough").await.unwrap().unwrap();
+        assert_eq!(retrieved, value);
+    }
 }

@@ -115,15 +115,16 @@ cargo test -p aura-effects -- --nocapture   # with handler output
 
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
-| Handler retains state between calls | `src/transport/real.rs` (inline) | Covered |
-| EncryptedStorage roundtrip lossy | `tests/handlers/encrypted_storage_roundtrip.rs` | Covered |
-| Guard interpreter misinterprets plan | `tests/handlers/guard_interpreter.rs` | Covered |
+| Plaintext leaks to disk | `tests/handlers/encrypted_storage_roundtrip.rs`, `src/encrypted_storage.rs` (inline) | Covered |
+| EncryptedStorage key separation fails | `src/encrypted_storage.rs` `test_different_keys_produce_different_ciphertext` | Covered |
+| EncryptedStorage disabled mode broken | `src/encrypted_storage.rs` `test_disabled_encryption_passes_through_plaintext` | Covered |
+| EncryptedStorage rejects tampered blob | `src/encrypted_storage.rs` `test_plaintext_read_rejected` | Covered |
+| Guard interpreter misinterprets plan | `src/guard_interpreter.rs` (inline), `tests/handlers/guard_interpreter.rs` | Covered |
 | Impure API used outside effect impl | `tests/handlers/impure_api_confinement.rs` | Covered |
+| Handler retains state between calls | `src/transport/real.rs` (inline) | Covered |
 | Feature guards misconfigured | `tests/feature_guards.rs` | Covered |
-| Reactive signal graph propagation incorrect | `src/reactive/handler.rs` (inline) | Covered |
+| Crypto FROST key gen/sign/verify incorrect | `src/crypto.rs` (inline, 14 tests) | Covered |
 | Leakage budget accumulation wrong | `src/leakage.rs` (inline) | Covered |
-| Context metadata merging incorrect | `src/context.rs` (inline) | Covered |
-| Datalog value formatting/parsing wrong | `src/query/datalog.rs` (inline) | Covered |
 
 ## Boundaries
 - Stateful caches belong in Layer 6 services.
