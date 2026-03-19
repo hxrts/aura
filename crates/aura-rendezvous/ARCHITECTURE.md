@@ -114,7 +114,10 @@ cargo test -p aura-rendezvous
 | Nonce tracker unbounded memory | `src/flood/propagation.rs` `test_seen_nonces_capacity_clear` | Covered |
 | Missing capability allows connect | `tests/channel/` `test_missing_capability_blocks_connect` | Covered |
 | Insufficient budget allows publish | `tests/channel/` `test_insufficient_flow_budget_blocks_publish` | Covered |
+| Handshake produces mismatched channels | `tests/channel/` `test_handshake_initiator_responder_flow` | Covered |
+| Epoch advancement doesn't trigger rotation | `tests/channel/` `test_channel_manager_epoch_advancement` | Covered |
 | E2E discovery → channel flow broken | `tests/channel/` `test_complete_discovery_to_channel_flow` | Covered |
+| Flood key derivation non-unique | `src/flood/packet.rs` `test_derive_key_different_inputs` | Covered |
 
 ## Boundaries
 - Transport-level connections live in aura-transport.
