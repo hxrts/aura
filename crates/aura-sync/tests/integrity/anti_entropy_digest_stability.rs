@@ -1,3 +1,9 @@
+//! Anti-entropy digest stability tests.
+//!
+//! Verifies that identical journal state produces identical digests across
+//! serialization roundtrips. If digests are non-deterministic, peers cannot
+//! reliably compare state.
+
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)] // Test code uses expect for clarity
 use aura_core::{Fact, FactValue, Journal};

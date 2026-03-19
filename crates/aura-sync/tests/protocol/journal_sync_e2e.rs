@@ -1,3 +1,7 @@
+//! End-to-end journal sync test harness.
+//!
+//! Provides mock effect implementations for journal sync integration testing.
+
 #![allow(missing_docs)]
 #![allow(clippy::type_complexity)]
 use async_trait::async_trait;

@@ -84,6 +84,36 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic replication semantics.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines anti-entropy and integrity guarantees.
+## Testing
+
+### Strategy
+
+Merkle verification and anti-entropy determinism are the primary concerns.
+Tests are organized into three groups: `tests/integrity/` for data integrity
+and digest stability, `tests/protocol/` for sync protocol integration, and
+`tests/integration/` for multi-device and network partition scenarios.
+
+### Running tests
+
+```
+cargo test -p aura-sync
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Digest non-deterministic | `tests/integrity/anti_entropy_digest_stability.rs` | Covered |
+| Anti-entropy non-idempotent | `tests/integrity/anti_entropy_idempotence.rs` | Covered |
+| Migration breaks existing data | `tests/integrity/migration_validation.rs` (23 tests) | Covered |
+| Protocol creation/config invalid | `tests/protocol/protocol_integration.rs` (25 tests) | Covered |
+| Epoch rotation state machine wrong | `tests/protocol/protocol_integration.rs` (6 epoch tests) | Covered |
+| Journal sync loses facts or diverges | `tests/integration/journal_sync.rs` (9 tests) | Covered |
+| Network partition causes split-brain | `tests/integration/network_partition.rs` (8 tests) | Covered |
+| OTA ceremony insufficient approvals | `tests/integration/ota_coordination.rs` (9 tests) | Covered |
+| Multi-device coordination fails | `tests/integration/multi_device_scenarios.rs` (5 tests) | Covered |
+| Anti-entropy under packet loss | `tests/integration/anti_entropy.rs` (8 tests) | Covered |
+
 ## Boundaries
 - Fact storage lives in aura-journal.
 - Transport effects live in aura-effects.

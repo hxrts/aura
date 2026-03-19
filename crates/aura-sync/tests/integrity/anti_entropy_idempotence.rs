@@ -1,3 +1,8 @@
+//! Anti-entropy merge idempotence tests.
+//!
+//! Verifies that merging the same batch of attested operations twice produces
+//! the same result. If non-idempotent, repeated syncs cause state drift.
+
 #![allow(missing_docs)]
 use aura_core::tree::{AttestedOp, TreeOp, TreeOpKind};
 use aura_core::Epoch;
