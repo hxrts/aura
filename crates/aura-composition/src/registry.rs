@@ -840,6 +840,7 @@ mod tests {
         }
     }
 
+    /// Fresh registry has the requested mode and no registered handlers.
     #[test]
     fn test_registry_creation() {
         let registry = EffectRegistry::new(ExecutionMode::Testing);
@@ -847,6 +848,7 @@ mod tests {
         assert!(registry.registered_effect_types().is_empty());
     }
 
+    /// Registering a handler makes its effect type discoverable in the registry.
     #[test]
     fn test_handler_registration() {
         let mut registry = EffectRegistry::new(ExecutionMode::Testing);
@@ -870,6 +872,8 @@ mod tests {
         assert!(effect_types.contains(&EffectType::Crypto));
     }
 
+    /// `supported_operations` and `supports_operation` agree with what the
+    /// handler declared.
     #[test]
     fn test_operation_support() {
         let mut registry = EffectRegistry::new(ExecutionMode::Testing);
@@ -898,6 +902,8 @@ mod tests {
         assert!(!registry.supports_operation(EffectType::Network, "send"));
     }
 
+    /// Capability summary aggregates operation counts and execution modes
+    /// across multiple registered handlers.
     #[test]
     fn test_capability_summary() {
         let mut registry = EffectRegistry::new(ExecutionMode::Testing);
@@ -940,6 +946,8 @@ mod tests {
         assert!(!capabilities.supports_execution_mode(ExecutionMode::Simulation { seed: 42 }));
     }
 
+    /// Same (authority, context, mode) triple produces the same operation_id;
+    /// changing any input produces a different one.
     #[test]
     fn test_handler_context_operation_id_deterministic() {
         let authority_id = AuthorityId::new_from_entropy([1u8; 32]);

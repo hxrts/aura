@@ -62,6 +62,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use aura_effects::TcpTransportHandler as RealTransportHandler;
 
+    /// Every adapter reports exactly the operations declared in the
+    /// aura-core effect registry for its effect type.
     #[test]
     fn test_supported_operations_match_registry_map() {
         use crate::registry::RegistrableHandler;

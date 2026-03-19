@@ -432,6 +432,8 @@ mod tests {
         }
     }
 
+    /// All three execution modes (Testing, Production, Simulation) produce
+    /// handlers with the correct mode and device identity.
     #[test]
     fn test_composite_handler_creation() {
         let device_id = DeviceId::new_from_entropy([1u8; 32]);
@@ -450,6 +452,7 @@ mod tests {
         );
     }
 
+    /// Builder sets execution mode and preserves device identity through build.
     #[test]
     fn test_composite_handler_builder() {
         let device_id = DeviceId::new_from_entropy([2u8; 32]);
@@ -465,6 +468,7 @@ mod tests {
         assert_eq!(composite.device_id(), device_id);
     }
 
+    /// Adapter factories produce the correct execution mode for each variant.
     #[test]
     fn test_composite_handler_adapter() {
         let device_id = DeviceId::new_from_entropy([3u8; 32]);
@@ -482,6 +486,7 @@ mod tests {
         );
     }
 
+    /// Registering a handler updates `has_handler` and `registered_effect_types`.
     #[test]
     fn test_handler_registration() {
         let device_id = DeviceId::new_from_entropy([4u8; 32]);
@@ -504,6 +509,8 @@ mod tests {
         );
     }
 
+    /// Operation mapping returns known operations for registered types and
+    /// empty for unsupported types.
     #[test]
     fn test_supported_operations() {
         let device_id = DeviceId::new_from_entropy([5u8; 32]);

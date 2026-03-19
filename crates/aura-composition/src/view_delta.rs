@@ -296,6 +296,7 @@ mod tests {
         }
     }
 
+    /// Compaction merges same-key deltas and preserves distinct keys.
     #[test]
     fn test_compact_deltas_merges_by_key() {
         let deltas = vec![
@@ -327,6 +328,7 @@ mod tests {
         );
     }
 
+    /// Registered type is discoverable; unregistered types are not.
     #[test]
     fn test_registry_registration() {
         let mut registry = ViewDeltaRegistry::new();
@@ -336,6 +338,7 @@ mod tests {
         assert!(!registry.is_registered("unknown"));
     }
 
+    /// Reduce dispatches to the registered reducer and produces the correct delta.
     #[test]
     fn test_registry_reduce() {
         let mut registry = ViewDeltaRegistry::new();
@@ -353,6 +356,7 @@ mod tests {
         );
     }
 
+    /// Reducing an unregistered type returns empty — no panic, no fallback.
     #[test]
     fn test_registry_reduce_unknown_type() {
         let registry = ViewDeltaRegistry::new();
@@ -360,6 +364,7 @@ mod tests {
         assert!(deltas.is_empty());
     }
 
+    /// Type-erased ViewDelta round-trips through `into_view_delta` and `downcast_delta`.
     #[test]
     fn test_into_view_delta() {
         let delta = TestDelta::ItemRemoved {
@@ -371,6 +376,7 @@ mod tests {
         assert_eq!(recovered, &delta);
     }
 
+    /// `downcast_delta_owned` takes ownership and recovers the original value.
     #[test]
     fn test_downcast_owned() {
         let delta = TestDelta::ItemAdded {

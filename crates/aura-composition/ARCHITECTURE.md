@@ -82,6 +82,31 @@ Verification hooks:
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines layer placement.
 - [Effect System and Runtime](../../docs/103_effect_system.md) defines handler assembly rules.
+## Testing
+
+### Strategy
+
+All tests are inline — appropriate for a composition utility crate whose tests
+exercise type-safe registry wiring and builder patterns. No integration test
+surface is needed.
+
+### Running tests
+
+```
+cargo test -p aura-composition
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Type-safe registry lookup fails at runtime | `src/registry.rs` (inline) | Covered |
+| Composition carries state between queries | `src/composite.rs` (inline) | Covered |
+| Supported operations don't match registry | `src/adapters/mod.rs` (inline) | Covered |
+| View delta compaction loses deltas | `src/view_delta.rs` (inline) | Covered |
+| Reducer dispatch to wrong handler | `src/view_delta.rs` (inline) | Covered |
+| HandlerContext operation_id non-deterministic | `src/registry.rs` (inline) | Covered |
+
 ## Boundaries
 - Depends only on aura-core and aura-effects.
 - No domain crates or higher layers.
