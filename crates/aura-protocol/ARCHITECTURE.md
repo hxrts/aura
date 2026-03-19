@@ -73,6 +73,34 @@ Verification hooks:
 Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines charge-before-send behavior.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines fact-backed send requirements.
+## Testing
+
+### Strategy
+
+Protocol coordination contracts and guard mediation are the primary concerns.
+Integration tests in `tests/coordination/` verify transport coordinator
+behavior; inline tests verify state machines, context immutability, and
+CRDT delivery semantics.
+
+### Running tests
+
+```
+cargo test -p aura-protocol
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Send without guard mediation | — | InvariantProtocolGuardMediation (arch check) |
+| Transport coordinator invalid transition | `tests/coordination/transport_coordinator.rs` | Covered |
+| Context mutation breaks immutability | `src/handlers/context/mod.rs` (inline) | Covered |
+| Version handshake rejects compatible peer | `src/handlers/version_handshake.rs` (inline) | Covered |
+| CRDT causal ordering violated | `src/effects/crdt/delivery.rs` (inline) | Covered |
+| Intent state ordering incorrect | `src/state/intent_state.rs` (inline) | Covered |
+| Peer connection retry budget wrong | `src/handlers/peer_connection.rs` (inline) | Covered |
+| Admission capability validation fails | `src/admission.rs` (inline) | Covered |
+
 ## Boundaries
 - No runtime composition or lifecycle management (Layer 6 responsibility).
 - No application-specific protocol logic (Layer 5 responsibility).
