@@ -1,5 +1,6 @@
-//! Biscuit token behavior tests.
-#![allow(clippy::expect_used)] // Test code uses expect for clarity
+//! Token attenuation contracts — attenuated tokens must restrict scope,
+//! never widen it. If attenuation is not monotone, delegated tokens can
+//! gain capabilities the issuer didn't grant.
 
 use aura_authorization::{
     BiscuitAuthorizationBridge, BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority,
@@ -7,6 +8,8 @@ use aura_authorization::{
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::scope::AuthorizationOp;
 
+/// Read-attenuated token must block write operations — the core monotonicity
+/// property. If this fails, delegation can escalate privileges.
 #[test]
 fn attenuated_read_token_blocks_write() {
     let issuer = AuthorityId::new_from_entropy([1u8; 32]);

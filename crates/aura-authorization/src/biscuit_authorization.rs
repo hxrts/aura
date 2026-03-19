@@ -29,14 +29,14 @@ const AURA_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
 
 #[derive(Clone, Debug)]
 pub struct BiscuitAuthorizationBridge {
-    _root_public_key: PublicKey,
+    root_public_key: PublicKey,
     authority_id: AuthorityId,
 }
 
 impl BiscuitAuthorizationBridge {
     pub fn new(root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
         Self {
-            _root_public_key: root_public_key,
+            root_public_key,
             authority_id,
         }
     }
@@ -47,7 +47,7 @@ impl BiscuitAuthorizationBridge {
         use biscuit_auth::KeyPair;
         let keypair = KeyPair::new();
         Self {
-            _root_public_key: keypair.public(),
+            root_public_key: keypair.public(),
             authority_id: AuthorityId::new_from_entropy(hash(&keypair.public().to_bytes())),
         }
     }
@@ -58,7 +58,7 @@ impl BiscuitAuthorizationBridge {
         use biscuit_auth::KeyPair;
         let keypair = KeyPair::new();
         Self {
-            _root_public_key: keypair.public(),
+            root_public_key: keypair.public(),
             authority_id: AuthorityId::new_from_entropy(hash(&keypair.public().to_bytes())),
         }
     }
@@ -81,11 +81,15 @@ impl BiscuitAuthorizationBridge {
         resource: &ResourceScope,
         current_time_seconds: Option<u64>,
     ) -> Result<AuthorizationResult, BiscuitError> {
-        // Phase 1: Verify token signature with root public key
-        let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
-
-        // Verify the token signature is valid for our root key
-        // The authorizer creation already verifies the signature chain
+        // Phase 1: Verify token signature against our root public key.
+        // Re-serialize and re-verify to ensure the token was issued by the
+        // trusted root, not by a different authority with a different key.
+        let token_bytes = token.to_vec().map_err(BiscuitError::BiscuitLib)?;
+        let verified_token =
+            Biscuit::from(&token_bytes, self.root_public_key).map_err(BiscuitError::BiscuitLib)?;
+        let mut authorizer = verified_token
+            .authorizer()
+            .map_err(BiscuitError::BiscuitLib)?;
 
         // Phase 2: Add ambient facts for authorization context
         let operation_str = operation.as_str();
@@ -309,7 +313,7 @@ impl BiscuitAuthorizationBridge {
     }
 
     pub fn root_public_key(&self) -> PublicKey {
-        self._root_public_key
+        self.root_public_key
     }
 }
 

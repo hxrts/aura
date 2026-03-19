@@ -1,10 +1,13 @@
-//! Test modules for aura-authorization capability system
+//! Biscuit bridge contracts — token creation, fact extraction, and
+//! basic authorization flow through the BiscuitAuthorizationBridge.
 
 use aura_authorization::biscuit_authorization::BiscuitAuthorizationBridge;
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::types::scope::{AuthorityOp, AuthorizationOp, ResourceScope};
 use biscuit_auth::macros::*;
 
+/// Token with read capability passes authorization — the happy path
+/// through the full Biscuit Datalog evaluation pipeline.
 #[test]
 fn biscuit_bridge_authorizes_basic_token() {
     let keypair = biscuit_auth::KeyPair::new();
@@ -25,6 +28,8 @@ fn biscuit_bridge_authorizes_basic_token() {
     assert!(result.authorized);
 }
 
+/// Bridge extracts token facts from Biscuit blocks — needed for
+/// Datalog policy evaluation to access issuer/authority metadata.
 #[test]
 fn biscuit_bridge_extracts_token_facts() {
     let keypair = biscuit_auth::KeyPair::new();

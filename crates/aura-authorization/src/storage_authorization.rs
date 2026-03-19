@@ -4,7 +4,6 @@
 //! to eliminate improper domain coupling. Storage access control is fundamentally an
 //! authorization concern and belongs in the authorization domain (aura-authorization).
 
-// Authorization logic moved from aura-store to proper domain (aura-authorization)
 use aura_core::types::scope::{ResourceScope, StoragePath};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
@@ -731,7 +730,8 @@ mod tests {
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
     }
 
-    // Tests updated for the new authority-centric API
+    /// Content resource converts to Storage scope with the evaluator's authority
+    /// and a content-prefixed path.
     #[test]
     fn test_authority_centric_content_access() {
         let evaluator = setup_test_evaluator();
@@ -755,6 +755,7 @@ mod tests {
         }
     }
 
+    /// Namespace resource converts to Storage scope with wildcard path.
     #[test]
     fn test_authority_centric_namespace_access() {
         let evaluator = setup_test_evaluator();
@@ -776,6 +777,7 @@ mod tests {
         }
     }
 
+    /// Global resource converts to Storage scope with global/* path.
     #[test]
     fn test_authority_centric_global_access() {
         let evaluator = setup_test_evaluator();
@@ -797,6 +799,8 @@ mod tests {
         }
     }
 
+    /// Flow cost scales by operation type (Read=10, Write=50, Admin=100) and
+    /// resource multiplier (Global=5x) — incorrect costs under/overcharge budgets.
     #[test]
     fn test_flow_cost_calculation() {
         let evaluator = setup_test_evaluator();
@@ -818,6 +822,8 @@ mod tests {
         assert_eq!(global_read_cost, 50.into()); // 10 * 5
     }
 
+    /// Token serialization roundtrip via BiscuitAccessRequest — tokens must
+    /// survive ser/deser for cross-device token transfer.
     #[test]
     fn test_biscuit_access_request() {
         let (authority, _authority_id) = setup_test_authority();
@@ -837,6 +843,8 @@ mod tests {
         assert_eq!(deserialized_token.to_vec().unwrap(), request.token);
     }
 
+    /// Permission → operation string mapping must be stable — Biscuit Datalog
+    /// policies match on these exact strings.
     #[test]
     fn test_permission_mappings() {
         let mappings = PermissionMappings::new();

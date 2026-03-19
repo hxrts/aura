@@ -73,6 +73,43 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines meet monotonicity.
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) depends on capability checks before send.
+## Testing
+
+### Strategy
+
+aura-authorization is security-critical — if capability attenuation widens
+scope or cross-authority tokens are accepted, privilege escalation is
+possible. Testing priorities:
+
+1. **Cross-authority token rejection**: tokens signed by one root key must
+   fail verification against a different root key
+2. **Attenuation monotonicity**: attenuated tokens must never grant more
+   than the base token
+3. **Policy evaluation**: Datalog rules must deny missing/insufficient
+   capabilities
+4. **Scope isolation**: resource scopes must bind to the correct authority
+
+### Running tests
+
+```
+cargo test -p aura-authorization --test contracts  # authorization contracts
+cargo test -p aura-authorization --lib             # inline unit tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Cross-authority token accepted | `tests/contracts/authorization_isolation.rs` | covered |
+| Attenuation widens scope (read→write) | `tests/contracts/token_attenuation.rs` | covered |
+| Double attenuation restores capabilities | `tests/contracts/authorization_isolation.rs` | covered |
+| Missing capability authorized | `tests/contracts/authorization_isolation.rs` | covered |
+| Read capability implies write | `tests/contracts/authorization_isolation.rs` | covered |
+| Token roundtrip breaks verification | `src/storage_authorization.rs` inline | covered |
+| Permission string mapping wrong | `src/storage_authorization.rs` inline | covered |
+| Scope conversion loses authority binding | `src/storage_authorization.rs` inline | covered |
+| Flow cost calculation wrong | `src/storage_authorization.rs` inline | covered |
+
 ## Boundaries
 - No cryptographic signing (use aura-signature).
 - No transport operations (use effect traits).
