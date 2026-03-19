@@ -107,12 +107,14 @@ cargo test -p aura-anti-entropy
 
 | What breaks if wrong | Invariant | Status |
 |---------------------|-----------|--------|
-| Reconciliation non-deterministic | InvariantAntiEntropyReconciliationPurity | Covered (`src/pure.rs` inline) |
+| Reconciliation non-deterministic | InvariantAntiEntropyReconciliationPurity | Covered (`src/pure.rs` `reconciliation_is_deterministic`) |
+| Push/pull asymmetric (peers diverge) | InvariantAntiEntropyReconciliationPurity | Covered (`src/pure.rs` `reconciliation_is_symmetric`) |
 | Vector clock order violated | InvariantVectorClockConsistent | Covered (Quint) |
 | Digest order-dependent | — | Covered (`tests/reconciliation/`) |
 | Digest non-deterministic | — | Covered (`tests/reconciliation/`) |
 | Broadcast rate limiting broken | — | Covered (`src/broadcast.rs` inline) |
 | Back pressure threshold ignored | — | Covered (`src/broadcast.rs` inline) |
+| Sync error codes collide | — | Covered (`tests/reconciliation/`) |
 | Sync error codes collide | — | Covered (`tests/reconciliation/`) |
 
 ## Boundaries
