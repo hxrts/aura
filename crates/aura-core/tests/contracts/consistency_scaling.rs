@@ -1,12 +1,10 @@
-//! Performance tests for consistency metadata types.
+//! Scaling tests for consistency metadata types.
 //!
 //! These tests validate that consistency metadata operations perform
 //! acceptably at scale. They are marked #[ignore] by default as they
-//! take longer to run and are intended for benchmarking rather than CI.
+//! take longer to run and are intended for targeted runs rather than CI.
 //!
-//! Run with: cargo test -p aura-core --test consistency_performance -- --ignored
-
-#![allow(clippy::expect_used, clippy::disallowed_methods, missing_docs)]
+//! Run with: cargo test -p aura-core --test contracts -- consistency --ignored
 
 use aura_core::{
     domain::{
@@ -50,7 +48,7 @@ fn create_acknowledgment_for_peers(num_peers: u16) -> Acknowledgment {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Test: Ack Storage at Scale (9.4.1)
+// Test: Ack Storage at Scale
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Test acknowledgment storage with 10k messages and 100 peers each.
@@ -148,7 +146,7 @@ fn test_ack_storage_at_scale() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Test: ConsistencyMap Query Performance (9.4.2)
+// Test: ConsistencyMap Query Performance
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Test ConsistencyMap with 10k entries.
@@ -264,7 +262,7 @@ fn test_consistency_map_query_performance() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Test: GC Performance Under Load (9.4.3)
+// Test: GC Performance Under Load
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Simulate garbage collection of acknowledgments under load.
@@ -434,7 +432,7 @@ fn test_gc_performance_under_load() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Standard tests (not ignored, run in CI)
+// Standard tests
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Sanity check that types work correctly at small scale.

@@ -2,8 +2,6 @@
 //!
 //! Tests all core identifier types for creation, uniqueness, serialization, and conversions.
 
-#![allow(clippy::expect_used)]
-
 use aura_core::{
     derive_legacy_authority_from_device, AccountId, DataId, DeviceId, EventId, EventNonce,
     GuardianId, IndividualId, LegacyAuthorityFromDeviceReason, LegacyAuthorityFromDeviceRequest,
