@@ -1,3 +1,8 @@
+//! End-to-end invitation service tests.
+//!
+//! Verifies the complete send → accept and send → decline flows with
+//! guard evaluation outcomes.
+
 #![allow(missing_docs)]
 
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};

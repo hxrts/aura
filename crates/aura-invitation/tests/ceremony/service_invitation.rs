@@ -1,3 +1,8 @@
+//! Invitation service capability and guard tests.
+//!
+//! Verifies that invitation operations require the correct capabilities
+//! and are denied without them.
+
 #![allow(missing_docs)]
 
 use aura_core::types::identifiers::{ContextId, InvitationId};

@@ -1,3 +1,8 @@
+//! Contact establishment matrix tests.
+//!
+//! Verifies that all authority class pair combinations can establish
+//! contact invitations — cross-flow equivalence test.
+
 #![allow(missing_docs)]
 
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
