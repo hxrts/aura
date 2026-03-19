@@ -162,16 +162,20 @@ cargo test -p aura-journal --lib               # inline unit tests
 
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
-| Reducer non-deterministic for same facts | `tests/convergence/tree_reduction_determinism.rs` | covered (proptest) |
+| Context reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered (proptest: shuffled insertion) |
+| Authority reducer non-deterministic | `src/reduction.rs` inline | **partial** — handcrafted only, no proptest shuffle |
+| Tree reduction non-deterministic | `tests/convergence/tree_reduction_determinism.rs` | covered (proptest) |
 | Journal join not associative/commutative | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
-| Journal join not idempotent | `tests/convergence/journal_join_laws.rs` | covered |
+| Journal join not idempotent | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
+| Adding fact removes existing facts | — | **missing** — no monotonic growth test |
 | Convergence certificates not emitted | `tests/convergence/convergence_cert.rs` | covered |
 | Tree topology incoherent after mutation | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
-| Incremental update diverges from recompute | `tests/contracts/authority_tree_integrity.rs` | covered |
+| Incremental update diverges from recompute | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
 | Merkle proofs invalid after mutation | `tests/contracts/authority_tree_integrity.rs` | covered |
-| Fact encoding changes between releases | `tests/contracts/fact_encoding_stability.rs` | covered |
-| Nonce collision accepted | `src/fact.rs` inline | covered |
-| Namespace cross-contamination | `src/fact.rs` inline | covered |
+| Fact encoding changes between releases | `tests/contracts/fact_encoding_stability.rs` | covered (roundtrip) |
+| Fact encoding bytes drift silently | — | **missing** — no pinned byte vectors |
+| Fact deduplication via BTreeSet identity | `src/fact.rs` inline | covered |
+| Wrong namespace type accepted by reducer | `src/reduction.rs` inline | covered |
 | AMP epoch reduction order-dependent | `src/reduction.rs` inline | covered |
 | Recovery AMP reconstruction fails | `tests/contracts/recovery_amp_reconstruction.rs` | covered |
 
