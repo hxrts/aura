@@ -35,6 +35,7 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 | Dev | `just watch` | Rebuild on changes |
 | Dev | `just clean` | Clean artifacts |
 | Arch | `just check-arch` | Verify architecture compliance |
+| Arch | `just lint-arch-syntax` | Run Rust-native syntax/policy lints that replaced grep-heavy `arch.sh` checks |
 
 ## Architecture Overview
 
@@ -78,6 +79,10 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
   tests, and Rust-native lints for syntactic or boundary-shape rules;
   `just check-arch` should stay focused on workspace topology, governance, and
   integration checks that are not realistically provable at compile time
+- **Architecture syntax lint gate**: run `just lint-arch-syntax` when changing
+  effect placement, runtime-coupling, raw impure/time/random usage,
+  concurrency escape hatches, crypto-boundary syntax, or syntax-owned
+  serialization/style rules
 
 ### Conditional Compilation
 

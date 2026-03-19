@@ -282,21 +282,8 @@ check_layers() {
     fi
   done
 
-  section "Layer 4 lint policy — no crate-level #![allow] in lib.rs"
-  local l4_libs=(
-    "crates/aura-guards/src/lib.rs"
-    "crates/aura-consensus/src/lib.rs"
-    "crates/aura-amp/src/lib.rs"
-    "crates/aura-anti-entropy/src/lib.rs"
-    "crates/aura-protocol/src/lib.rs"
-  )
-  local l4_allow_hits existing_l4_allow
-  existing_l4_allow=$(rg --no-heading "^#!\\[allow" "${l4_libs[@]}" 2>/dev/null \
-    | grep -E "^crates/aura-(amp|anti-entropy|consensus)/src/lib\\.rs:" || true)
-  l4_allow_hits=$(rg --no-heading "^#!\\[allow" "${l4_libs[@]}" 2>/dev/null \
-    | grep -Ev "^crates/aura-(amp|anti-entropy|consensus)/src/lib\\.rs:" || true)
-  emit_hits "Layer 4 crate-level allow attributes" "$l4_allow_hits"
-  [[ -n "$existing_l4_allow" ]] && info "Layer 4 crate-level allow attributes: existing allowlisted hits remain in aura-amp/aura-anti-entropy/aura-consensus"
+  section "Layer 4 lint policy — delegated to Rust-native lint path"
+  info "Run 'just lint-arch-syntax' for crate-level allow-attribute enforcement."
 }
 
 
@@ -346,35 +333,8 @@ check_deps() {
 # CHECK: Effects System
 # ═══════════════════════════════════════════════════════════════════════════════
 check_effects() {
-  # ─── Infrastructure effect trait placement ───
-  section "Effects — infra traits in aura-core; impls in aura-effects; mocks in aura-testkit"
-
-  local infra_traits="CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects|LeakageEffects"
-  local infra_defs
-  infra_defs=$(find crates/ -name "*.rs" -not -path "*/aura-core/*" -exec grep -El "pub trait ($infra_traits)" {} + 2>/dev/null || true)
-  emit_hits "Infrastructure effect traits defined outside aura-core" "$infra_defs"
-
-  # Stateful constructs in aura-effects (should be stateless)
-  local stateful
-  stateful=$(grep -R "Arc<Mutex\|Arc<RwLock\|Rc<RefCell" crates/aura-effects/src 2>/dev/null | grep -v "test" | grep -v "reactive/handler.rs" | grep -v "query/handler.rs" || true)
-  emit_hits "Stateful constructs in aura-effects" "$stateful"
-
-  # Mock handlers in wrong location
-  local mock_handlers
-  mock_handlers=$(grep -R "Mock.*Handler\|InMemory.*Handler" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
-  emit_hits "Mock handlers in aura-effects (should be in aura-testkit)" "$mock_handlers"
-
-  # Infrastructure effects outside aura-effects
-  local infra_impls
-  infra_impls=$(rg --no-heading --glob "*.rs" "impl\s+[^\n{}]*for[^\n{}]*(CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects)" crates \
-    | grep -v "crates/aura-effects/" | grep -v "crates/aura-testkit/" | grep -v "crates/aura-core/" | grep -v "tests/" || true)
-  emit_hits "Infrastructure effects outside aura-effects" "$infra_impls"
-
-  # Application effects in aura-effects
-  local app_effects="JournalEffects|AuthorityEffects|FlowBudgetEffects|AuthorizationEffects|RelationalContextEffects|GuardianEffects|ChoreographicEffects|EffectApiEffects|SyncEffects"
-  local app_impls
-  app_impls=$(grep -R "impl.*\($app_effects\)" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
-  emit_hits "Application effects in aura-effects (should be in domain crates)" "$app_impls"
+  section "Effects syntax and escape hatches — delegated to Rust-native lint path"
+  info "Run 'just lint-arch-syntax' for effect placement, runtime coupling, and impure/time/random checks."
 
   section "VM bridge discipline — bridge state and ownership stay centralized"
 
@@ -404,147 +364,8 @@ check_effects() {
   ota_global_cutover_hits=$(filter_test_modules "$ota_global_cutover_hits")
   emit_hits "OTA code assumes a network-wide authoritative cutover model" "$ota_global_cutover_hits"
 
-  # ─── Direct OS operations ───
-  section "Direct OS operations — use effect traits instead"
-
-  # std::fs usage
-  local fs_hits filtered_fs
-  fs_hits=$(rg --no-heading "std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter" crates -g "*.rs" || true)
-  filtered_fs=$(filter_allow "$fs_hits" "$ALLOW_RUNTIME|$ALLOW_APP_NATIVE|$ALLOW_TUI_BOOTSTRAP|$ALLOW_TUI_INFRA|$ALLOW_MACROS|$ALLOW_HARNESS")
-  filtered_fs=$(filter_test_modules "$filtered_fs")
-  emit_hits "Direct std::fs (use StorageEffects)" "$filtered_fs"
-
-  # std::net usage
-  local net_hits filtered_net
-  net_hits=$(rg --no-heading "std::net::|TcpStream|TcpListener|UdpSocket" crates -g "*.rs" || true)
-  filtered_net=$(filter_allow "$net_hits" "$ALLOW_RUNTIME|$ALLOW_HARNESS")
-  emit_hits "Direct std::net (use NetworkEffects)" "$filtered_net"
-
-  # ─── Runtime coupling ───
-  section "Runtime coupling — wrap tokio/async-std behind effects"
-
-  local runtime_hits filtered_runtime
-  runtime_hits=$(rg --no-heading -n "tokio::|async_std::" crates -g "*.rs" || true)
-  filtered_runtime=$(echo "$runtime_hits" \
-    | grep -v "crates/aura-effects/" \
-    | grep -v "crates/aura-agent/" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-terminal/" \
-    | grep -v "crates/aura-composition/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "crates/aura-harness/" \
-    | grep -v "crates/aura-macros/" \
-    | grep -Ev "$ALLOW_APP_NATIVE" \
-    | grep -v "crates/aura-authorization/src/storage_authorization.rs" \
-    | grep -v "crates/aura-rendezvous/src/service.rs" \
-    | grep -v "crates/aura-core/src/effects/reactive.rs" \
-    | grep -v "#\\[tokio::test\\]" \
-    | grep -v "#\\[async_std::test\\]" \
-    | grep -v "#\\[tokio::main\\]" \
-    | grep -Ev "/tests/|/examples/|benches/" || true)
-  filtered_runtime=$(filter_test_modules "$filtered_runtime")
-  emit_hits "Runtime usage outside handler layers" "$filtered_runtime"
-
-  # aura-app should be runtime-agnostic
-  section "aura-app runtime-agnostic surface"
-  local app_runtime
-  app_runtime=$(rg --no-heading -n "tokio::|async_std::" crates/aura-app/src -g "*.rs" \
-    | grep -v "#\\[tokio::test\\]" | grep -v "#\\[async_std::test\\]" | grep -Ev "/tests/|/benches/" || true)
-  emit_hits "tokio/async-std in aura-app" "$app_runtime"
-
-  # ─── Impure functions ───
-  section "Impure functions — route through effect traits"
-
-  local impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
-  local impure_hits filtered_impure
-  impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
-  filtered_impure=$(echo "$impure_hits" \
-    | grep -v "crates/aura-effects/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-harness/" \
-    | grep -Ev "$ALLOW_RUNTIME" \
-    | grep -v "crates/aura-terminal/" \
-    | grep -Ev "/tests/|/benches/" \
-    | grep -v "///" | grep -v "//!" | grep -v "//" \
-    | grep -v "\.unwrap()" | grep -v "#\[tokio::test\]" | grep -v "#\[test\]" || true)
-  filtered_impure=$(filter_test_modules "$filtered_impure")
-  emit_hits "Impure functions outside effect handlers" "$filtered_impure"
-
-  # ─── Physical time guardrails ───
-  section "Physical time — use PhysicalTimeEffects::sleep_ms"
-
-  local tokio_sleep filtered_sleep
-  tokio_sleep=$(rg --no-heading -n "tokio::time::sleep" crates -g "*.rs" || true)
-  filtered_sleep=$(echo "$tokio_sleep" \
-    | grep -v "crates/aura-effects/" \
-    | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "crates/aura-terminal/" \
-    | grep -Ev "/tests/|/examples/|benches/" || true)
-  filtered_sleep=$(filter_test_modules "$filtered_sleep")
-  emit_hits "Direct tokio::time::sleep" "$filtered_sleep"
-
-  local std_sleep
-  std_sleep=$(rg --no-heading "std::thread::sleep|async_std::task::sleep" crates -g "*.rs" \
-    | grep -v "crates/aura-effects/src/time.rs" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "crates/aura-harness/" \
-    | grep -Ev "/tests/|benches/" || true)
-  emit_hits "Direct std/async-std sleep" "$std_sleep"
-
-  # ─── Determinism parity-critical paths ───
-  section "Determinism parity lanes — no wall-clock/runtime timers in parity-critical code"
-
-  local parity_scope=(
-    "crates/aura-agent/src/runtime/services"
-    "crates/aura-agent/src/reactive"
-    "crates/aura-quint/src"
-  )
-
-  local parity_clock_hits parity_clock_filtered
-  parity_clock_hits=$(rg --no-heading -n "Instant::now\\(|SystemTime::now\\(" "${parity_scope[@]}" -g "*.rs" || true)
-  parity_clock_filtered=$(echo "$parity_clock_hits" \
-    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
-  parity_clock_filtered=$(filter_test_modules "$parity_clock_filtered")
-  if [[ -n "$parity_clock_filtered" ]]; then
-    emit_hits "Wall-clock access in parity-critical paths" "$parity_clock_filtered"
-    hint "Inject wall-clock through PhysicalTimeEffects/TimeEffects; do not call Instant::now/SystemTime::now in parity-critical code."
-    hint "Persist start/deadline as PhysicalTime/TimeStamp and compare using effect-provided time."
-    hint "Reference: docs/103_effect_system.md (time effects) and docs/805_simulation_guide.md (deterministic simulation constraints)."
-  else
-    info "Wall-clock access in parity-critical paths: none"
-  fi
-
-  local parity_timer_hits parity_timer_filtered
-  parity_timer_hits=$(rg --no-heading -n "tokio::time::(sleep|sleep_until|timeout|interval)|async_std::task::sleep|std::thread::sleep|futures_timer::Delay" "${parity_scope[@]}" -g "*.rs" || true)
-  parity_timer_filtered=$(echo "$parity_timer_hits" \
-    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
-  parity_timer_filtered=$(filter_test_modules "$parity_timer_filtered")
-  if [[ -n "$parity_timer_filtered" ]]; then
-    emit_hits "Runtime timer primitives in parity-critical paths" "$parity_timer_filtered"
-    hint "Replace runtime timers with effect-injected scheduling: PhysicalTimeEffects::sleep_ms plus logical step/weighted-budget progress."
-    hint "Use timeout handles/wake conditions through effects instead of tokio/futures wall-clock timers."
-    hint "Reference: docs/103_effect_system.md (effect boundary rules), docs/805_simulation_guide.md (no wall-clock in simulation)."
-  else
-    info "Runtime timer primitives in parity-critical paths: none"
-  fi
-
-  local parity_random_hits parity_random_filtered
-  parity_random_hits=$(rg --no-heading -n "rand::random|thread_rng\\(\\)|rand::thread_rng|getrandom::|OsRng|Uuid::new_v4|AuthorityId::new\\(\\)|ContextId::new\\(\\)|DeviceId::new\\(\\)" "${parity_scope[@]}" -g "*.rs" || true)
-  parity_random_filtered=$(echo "$parity_random_hits" \
-    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
-  parity_random_filtered=$(filter_test_modules "$parity_random_filtered")
-  if [[ -n "$parity_random_filtered" ]]; then
-    emit_hits "Nondeterministic randomness/ID generation in parity-critical paths" "$parity_random_filtered"
-    hint "Route randomness through RandomEffects and derive values from explicit run seed + deterministic context."
-    hint "Use XxxId::new_from_entropy([...]) / from_uuid(Uuid::from_bytes([...])) in parity lanes; avoid entropy-consuming constructors."
-    hint "Reference: docs/103_effect_system.md (effect boundaries) and docs/804_testing_guide.md (strict conformance lanes)."
-  else
-    info "Nondeterministic randomness/ID generation in parity-critical paths: none"
-  fi
+  section "Impure/time/random syntax — delegated to Rust-native lint path"
+  info "Run 'just lint-arch-syntax' for std::fs/std::net/runtime/time/random/sleep checks."
 
   section "Conformance envelope registry — classify every effect envelope kind"
 
@@ -597,26 +418,12 @@ check_effects() {
 
   # aura-sync runtime neutrality
   section "aura-sync runtime neutrality"
-  local sync_runtime
-  sync_runtime=$(rg --no-heading -n "tokio::|async_std::" crates/aura-sync/src/protocols -g "*.rs" | grep -v "///" | grep -v "//!" | grep -v "//" || true)
-  [[ -n "$sync_runtime" ]] && emit_hits "Runtime in aura-sync protocols" "$sync_runtime" || info "aura-sync protocols: runtime-neutral"
+  info "Run 'just lint-arch-syntax' for aura-sync runtime-neutrality enforcement."
 
   # ─── Simulation control surfaces ───
   section "Simulation surfaces — inject via effects"
 
-  local sim_pattern="rand::random|rand::thread_rng|rand::rngs::OsRng|RngCore::fill_bytes|std::io::stdin|read_line\\(|std::thread::spawn"
-  local sim_hits filtered_sim
-  sim_hits=$(rg --no-heading "$sim_pattern" crates -g "*.rs" || true)
-  filtered_sim=$(echo "$sim_hits" \
-    | grep -v "crates/aura-effects/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -v "$ALLOW_TUI_BOOTSTRAP" \
-    | grep -Ev "/tests/" \
-    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
-  filtered_sim=$(filter_test_modules "$filtered_sim")
-  emit_hits "Non-injected randomness/IO/spawn" "$filtered_sim"
+  info "Run 'just lint-arch-syntax' for simulation-surface syntax guardrails."
 
   # ─── Pure interpreter alignment ───
   section "Pure interpreter — migrate to GuardSnapshot + EffectCommand"
@@ -628,70 +435,7 @@ check_effects() {
   # ─── Identifier determinism ───
   section "Identifier determinism — avoid entropy-consuming IDs"
 
-  local entropy_pattern="AuthorityId::new\\(\\)|ContextId::new\\(\\)|DeviceId::new\\(\\)"
-  local entropy_hits filtered_entropy
-  entropy_hits=$(rg --no-heading "$entropy_pattern" crates -g "*.rs" || true)
-  filtered_entropy=$(echo "$entropy_hits" | grep -v "$ALLOW_EFFECTS" | grep -Ev "$ALLOW_RUNTIME" | grep -v "$ALLOW_CLI" || true)
-  if [[ -n "$filtered_entropy" ]]; then
-    local sorted
-    sorted=$(echo "$filtered_entropy" | sort_by_layer)
-    while IFS= read -r entry; do
-      [[ -z "$entry" ]] && continue
-      local layer="${entry:0:2}" content="${entry:3}"
-      [[ "$layer" == "99" ]] && layer="?"
-      layer="${layer#0}"
-      layer_filter_matches "$layer" || continue
-      violation "[L${layer}] Entropy-consuming ID: $content"
-      hint "Use XxxId::new_from_entropy([n; 32]) or from_uuid(Uuid::from_bytes([n; 16]))"
-    done <<< "$sorted"
-  else
-    info "Entropy-consuming IDs: none"
-  fi
-
-  # Uuid::new_v4
-  local uuid_hits filtered_uuid
-  uuid_hits=$(rg --no-heading "Uuid::new_v4|uuid::Uuid::new_v4" crates -g "*.rs" || true)
-  filtered_uuid=$(echo "$uuid_hits" | grep -v "$ALLOW_EFFECTS" | grep -Ev "$ALLOW_RUNTIME" | grep -v "$ALLOW_CLI" || true)
-  if [[ -n "$filtered_uuid" ]]; then
-    local sorted
-    sorted=$(echo "$filtered_uuid" | sort_by_layer)
-    while IFS= read -r entry; do
-      [[ -z "$entry" ]] && continue
-      local layer="${entry:0:2}" content="${entry:3}"
-      [[ "$layer" == "99" ]] && layer="?"
-      layer="${layer#0}"
-      layer_filter_matches "$layer" || continue
-      violation "[L${layer}] Entropy-consuming UUID: $content"
-      hint "Use Uuid::nil() or Uuid::from_bytes([n; 16])"
-    done <<< "$sorted"
-  else
-    info "Entropy-consuming UUIDs: none"
-  fi
-
-  # Direct rand usage
-  local rand_hits filtered_rand
-  rand_hits=$(rg --no-heading "rand::random|thread_rng\\(\\)|rand::thread_rng" crates -g "*.rs" || true)
-  filtered_rand=$(echo "$rand_hits" \
-    | grep -v "crates/aura-effects/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -v "///" | grep -v "//!" || true)
-  if [[ -n "$filtered_rand" ]]; then
-    local sorted
-    sorted=$(echo "$filtered_rand" | sort_by_layer)
-    while IFS= read -r entry; do
-      [[ -z "$entry" ]] && continue
-      local layer="${entry:0:2}" content="${entry:3}"
-      [[ "$layer" == "99" ]] && layer="?"
-      layer="${layer#0}"
-      layer_filter_matches "$layer" || continue
-      violation "[L${layer}] Direct randomness: $content"
-      hint "Use RandomEffects trait"
-    done <<< "$sorted"
-  else
-    info "Direct randomness: none"
-  fi
+  info "Run 'just lint-arch-syntax' for entropy-consuming ID and direct randomness checks."
 }
 # ═══════════════════════════════════════════════════════════════════════════════
 # CHECK: Invariant Documentation
@@ -737,39 +481,8 @@ check_invariants() {
 # CHECK: Crypto Boundaries
 # ═══════════════════════════════════════════════════════════════════════════════
 check_crypto() {
-  section "Crypto boundaries — route through aura-core wrappers"
-
-  # ed25519_dalek imports
-  local ed_hits filtered_ed
-  ed_hits=$(rg --no-heading "use ed25519_dalek" crates -g "*.rs" || true)
-  filtered_ed=$(echo "$ed_hits" | grep -Ev "$ALLOW_CRYPTO" || true)
-  if [[ -n "$filtered_ed" ]]; then
-    emit_hits "Direct ed25519_dalek import" "$filtered_ed"
-    verbose "Allowed: aura-core/crypto, aura-effects, aura-testkit, tests"
-  else
-    info "ed25519_dalek: only in allowed locations"
-  fi
-
-  # OsRng usage
-  local osrng_hits filtered_osrng
-  osrng_hits=$(rg --no-heading "OsRng" crates -g "*.rs" | grep -v "///" | grep -v "//!" | grep -v "// " || true)
-  filtered_osrng=$(echo "$osrng_hits" | grep -Ev "$ALLOW_RANDOM" || true)
-  filtered_osrng=$(filter_test_modules "$filtered_osrng")
-  if [[ -n "$filtered_osrng" ]]; then
-    emit_hits "Direct OsRng usage" "$filtered_osrng"
-  else
-    info "OsRng: only in allowed locations"
-  fi
-
-  # getrandom usage
-  local getrandom_hits filtered_getrandom
-  getrandom_hits=$(rg --no-heading "getrandom::" crates -g "*.rs" | grep -v "///" | grep -v "//" || true)
-  filtered_getrandom=$(echo "$getrandom_hits" | grep -Ev "$ALLOW_RANDOM" || true)
-  if [[ -n "$filtered_getrandom" ]]; then
-    emit_hits "Direct getrandom usage" "$filtered_getrandom"
-  else
-    info "getrandom: only in allowed locations"
-  fi
+  section "Crypto boundaries — delegated to Rust-native lint path"
+  info "Run 'just lint-arch-syntax' for direct crypto/randomness boundary enforcement."
 }
 
 
@@ -777,17 +490,8 @@ check_crypto() {
 # CHECK: Concurrency Hygiene
 # ═══════════════════════════════════════════════════════════════════════════════
 check_concurrency() {
-  section "Concurrency — avoid block_in_place and unbounded channels"
-
-  local block_hits filtered_block
-  block_hits=$(rg --no-heading "tokio::task::block_in_place|Handle::current\\(\\)\\.block_on" crates -g "*.rs" || true)
-  filtered_block=$(filter_allow "$block_hits")
-  emit_hits "Blocking async bridge" "$filtered_block"
-
-  local unbounded_hits filtered_unbounded
-  unbounded_hits=$(rg --no-heading "mpsc::unbounded_channel\\(|async_channel::unbounded\\(|mpsc::unbounded\\(" crates -g "*.rs" || true)
-  filtered_unbounded=$(filter_allow "$unbounded_hits")
-  emit_hits "Unbounded channel" "$filtered_unbounded"
+  section "Concurrency — delegated to Rust-native lint path"
+  info "Run 'just lint-arch-syntax' for block_in_place / block_on / unbounded-channel checks."
 }
 
 
@@ -954,11 +658,8 @@ check_ui() {
   emit_hits "Direct protocol/domain crate usage" "$forbidden"
 
   # ─── Terminal time ───
-  section "Terminal time — use algebraic effects"
-  local time_hits
-  time_hits=$(rg --no-heading -n "SystemTime::now|Instant::now|std::time::Instant|std::time::SystemTime|chrono::Utc::now|chrono::Local::now" crates/aura-terminal/src -g "*.rs" \
-    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
-  emit_hits "Direct OS time in terminal" "$time_hits"
+  section "Terminal time — delegated to Rust-native lint path"
+  info "Run 'just lint-arch-syntax' for direct wall-clock usage in aura-terminal."
 
   # ─── Terminal business logic ───
   section "Terminal business logic — keep in aura_app::workflows"
@@ -1099,16 +800,7 @@ check_workflows() {
 # ═══════════════════════════════════════════════════════════════════════════════
 check_serialization() {
   section "Serialization — use DAG-CBOR; no bincode"
-
-  # bincode usage
-  local bincode_hits
-  bincode_hits=$(rg --no-heading "bincode::" crates -g "*.rs" | grep -Ev "/examples/|benches/" || true)
-  if [[ -n "$bincode_hits" ]]; then
-    emit_hits "bincode usage" "$bincode_hits"
-    hint "Migrate: bincode::serialize → to_vec, deserialize → from_slice"
-  else
-    info "bincode: none"
-  fi
+  info "Run 'just lint-arch-syntax' for bincode usage and syntax-owned serialization/style checks."
 
   # Wire protocols without canonical serialization
   local wire_files non_canonical=""
@@ -1191,55 +883,7 @@ check_handler_hygiene() {
 # ═══════════════════════════════════════════════════════════════════════════════
 check_style() {
   section "Rust style — safety and API rules"
-
-  # usize in serialized structs
-  local usize_hits field_usize
-  usize_hits=$(rg --no-heading -n "usize" crates -g "*.rs" \
-    | xargs -I{} sh -c 'file="${1%%:*}"; grep -l "#\[derive.*Serialize" "$file" >/dev/null 2>&1 && echo "$1"' _ {} 2>/dev/null || true)
-  field_usize=$(echo "$usize_hits" \
-    | grep -Ev "/tests/|/benches/|crates/aura-testkit/" \
-    | grep -v "// usize ok:" \
-    | grep -Ev "fn |let |for |impl " \
-    | grep -E ":\s*usize\s*[,}]|pub\s+\w+:\s*usize" || true)
-  emit_hits "usize in serialized field (use u32/u64)" "$field_usize"
-
-  # Vec<u8> without MAX_* bounds
-  local unbounded_bytes missing_bounds=""
-  unbounded_bytes=$(rg --no-heading -n "pub\s+\w+:\s*Vec<u8>" crates/aura-core/src -g "*.rs" || true)
-  while IFS= read -r hit; do
-    [[ -z "$hit" ]] && continue
-    local file="${hit%%:*}"
-    grep -qE "const\s+MAX_.*_(BYTES|SIZE|LEN)" "$file" 2>/dev/null || missing_bounds+="$hit"$'\n'
-  done <<< "$unbounded_bytes"
-  emit_hits "Vec<u8> without MAX_* constant" "$missing_bounds"
-
-  # Numeric constants without unit suffixes
-  local constants_no_units
-  constants_no_units=$(rg --no-heading -n "const\s+[A-Z][A-Z0-9_]+:\s*(u\d+|i\d+|usize)\s*=\s*\d+" crates/aura-core/src -g "*.rs" \
-    | grep -vE "_(MS|BYTES|COUNT|SIZE|MAX|MIN|LEN|LIMIT|DEPTH|HEIGHT|BITS|SECS|NANOS)(\s*:|:)" \
-    | grep -vE "VERSION|MAGIC|EPOCH|THRESHOLD|FACTOR|RATIO|WIRE_FORMAT|DEFAULT_" \
-    | grep -Ev "/tests/|/benches/" || true)
-  [[ -n "$constants_no_units" ]] && emit_hits "Constant without unit suffix" "$constants_no_units" || info "Constants: all have units"
-
-  # Builder methods without #[must_use]
-  local builder_methods missing_must_use=""
-  builder_methods=$(rg --no-heading -n "pub\s+(const\s+)?fn\s+with_\w+\s*\(" crates/aura-core/src -g "*.rs" || true)
-  if [[ -n "$builder_methods" ]]; then
-    while IFS= read -r hit; do
-      [[ -z "$hit" ]] && continue
-      local file rest linenum
-      file="${hit%%:*}"
-      rest="${hit#*:}"
-      linenum="${rest%%:*}"
-      local has=false
-      for offset in 1 2 3; do
-        local prev=$((linenum - offset))
-        [[ "$prev" -gt 0 ]] && sed -n "${prev}p" "$file" 2>/dev/null | grep -qE "#\[must_use" && { has=true; break; }
-      done
-      $has || missing_must_use+="$hit"$'\n'
-    done <<< "$builder_methods"
-  fi
-  emit_hits "Builder without #[must_use]" "$missing_must_use"
+  info "Run 'just lint-arch-syntax' for serialized-usize, unit-suffix, and builder-#[must_use] checks."
 
   # Lonely mod.rs files (directory with only mod.rs should be a single file)
   local lonely_mods=""

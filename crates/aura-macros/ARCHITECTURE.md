@@ -16,6 +16,8 @@ type-safe Rust code for distributed protocols.
 - `aura_effect_handlers` macro: Mock/real handler variant boilerplate.
 - `aura_handler_adapters` macro: AuraHandler trait adapters.
 - `aura_test` attribute macro: Async test setup with tracing.
+- `src/bin/arch_lints.rs`: repo-local Rust-native syntax lints used by
+  `just lint-arch-syntax`.
 
 ## Invariants
 - Depends only on aura-core (pure compile-time code generation).
@@ -56,6 +58,8 @@ type-safe Rust code for distributed protocols.
 
 - `aura-macros` is part of the compile-time enforcement path for boundary-shape
   rules that can be expressed through generated surfaces or Rust-native linting.
+- `src/bin/arch_lints.rs` owns the Rust-native lint path for grep-heavy syntax
+  rules that moved out of `scripts/check/arch.sh` in the architecture upgrade.
 - `scripts/check/arch.sh` should not remain the primary enforcement path for a
   rule when macro expansion, visibility, or linting can reject the pattern
   earlier and more precisely.
@@ -77,6 +81,7 @@ Failure mode:
 
 Verification hooks:
 - just test-crate aura-macros
+- just lint-arch-syntax
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.

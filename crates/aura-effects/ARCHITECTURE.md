@@ -69,6 +69,7 @@ coordination.
 ### Verification Hooks
 
 - `cargo check -p aura-effects`
+- `just lint-arch-syntax`
 - `just check-arch`
 - `cargo test -p aura-effects -- --nocapture`
 
@@ -80,6 +81,9 @@ Infrastructure handlers remain stateless, single-party, and isolated from domain
 Enforcement locus:
 - src handler implementations map effect traits to operating system integration points.
 - No domain crate dependencies are introduced in handler modules.
+- `just lint-arch-syntax` owns the syntax-level checks for stateless handler
+  boundaries, raw impure/runtime escape hatches, and direct crypto/time/random
+  usage; `just check-arch` keeps the integration/governance checks.
 
 Failure mode:
 - Behavior diverges from the crate contract and produces non-reproducible outcomes.

@@ -314,6 +314,15 @@ clippy-strict:
         -D clippy::disallowed_methods \
         -D clippy::disallowed_types
 
+# Rust-native architecture syntax lints that replaced grep-heavy arch.sh checks
+lint-arch-syntax:
+    cargo run -q -p aura-macros --bin arch_lints -- layer-policy crates
+    cargo run -q -p aura-macros --bin arch_lints -- effect-boundaries crates
+    cargo run -q -p aura-macros --bin arch_lints -- impure-escapes crates
+    cargo run -q -p aura-macros --bin arch_lints -- concurrency crates
+    cargo run -q -p aura-macros --bin arch_lints -- crypto-boundaries crates
+    cargo run -q -p aura-macros --bin arch_lints -- style crates
+
 # Format code
 fmt:
     cargo fmt --all
