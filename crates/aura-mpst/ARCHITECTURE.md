@@ -74,6 +74,34 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines MPST safety and duality.
 - [MPST and Choreography](../../docs/110_mpst_and_choreography.md) defines runtime projection rules.
+## Testing
+
+### Strategy
+
+aura-mpst defines session types and choreographic extensions. If annotations
+are lost or reordered, the guard chain executes in the wrong sequence —
+capability checks may happen after journal commits.
+
+### Running tests
+
+```
+cargo test -p aura-mpst --test protocols  # annotation and extension contracts
+cargo test -p aura-mpst --lib             # inline unit tests
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Guard capability annotation lost | `tests/protocols/annotation_extraction.rs` | covered |
+| Leak annotation lost | `tests/protocols/annotation_extraction.rs` | covered |
+| Multiple annotations reordered | `tests/protocols/annotation_extraction.rs` | covered |
+| Extension registry creation fails | `tests/protocols/extension_types.rs` | covered |
+| Extension types can't be composed | `tests/protocols/extension_types.rs` | covered |
+| Composite extension ordering wrong | `tests/protocols/extension_types.rs` | covered |
+| Extension field values silently lost | `tests/protocols/extension_types.rs` | covered |
+| Core types unavailable via re-exports | `tests/protocols/extension_types.rs` | covered |
+
 ## Boundaries
 - No multi-party coordination logic (only types and runtime abstractions).
 - Protocol implementations belong in feature crates (Layer 5).
