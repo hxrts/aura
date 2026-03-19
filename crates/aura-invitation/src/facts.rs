@@ -611,6 +611,7 @@ mod tests {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
+    /// InvitationFact survives to_bytes/from_bytes roundtrip without loss.
     #[test]
     fn test_invitation_fact_serialization() {
         let fact = InvitationFact::sent_ms(
@@ -677,6 +678,8 @@ mod tests {
         ));
     }
 
+    /// Reducer rejects facts whose context_id doesn't match the reduction
+    /// context. If broken, invitations from one relationship affect another.
     #[test]
     fn test_reducer_rejects_context_mismatch() {
         let reducer = InvitationFactReducer;
@@ -707,6 +710,8 @@ mod tests {
         assert_eq!(key.data, b"inv-42".to_vec());
     }
 
+    /// Reducing the same fact twice produces identical bindings — needed
+    /// for replay-safe journal reduction.
     #[test]
     fn test_reducer_idempotence() {
         let reducer = InvitationFactReducer;
@@ -734,6 +739,8 @@ mod tests {
         assert_eq!(binding1.data, binding2.data);
     }
 
+    /// invitation_id() returns the correct ID for all fact variants that
+    /// carry one. If wrong, invitation lifecycle tracking breaks.
     #[test]
     fn test_invitation_id_extraction() {
         let facts = [

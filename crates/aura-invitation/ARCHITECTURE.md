@@ -78,6 +78,39 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines context-scoped fact semantics.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines invitation safety expectations.
+## Testing
+
+### Strategy
+
+Invitation redemption uniqueness and ceremony correctness are the primary
+concerns. Integration tests in `tests/ceremony/` verify end-to-end send/accept
+flows with guard evaluation. The contact establishment matrix stays top-level
+as a cross-flow equivalence test. Inline tests verify fact reduction, guard
+evaluation, descriptor validity, and protocol serialization.
+
+### Running tests
+
+```
+cargo test -p aura-invitation
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Test location | Status |
+|---------------------|--------------|--------|
+| Fact reduces under wrong context | `src/facts.rs` `test_reducer_rejects_context_mismatch` | Covered |
+| Expired descriptor accepted | `src/descriptor.rs` `test_is_expired`, `test_is_valid_at` | Covered |
+| Capability check bypassed | `src/service.rs` `test_prepare_send_invitation_missing_capability` | Covered |
+| Insufficient budget allows invitation | `src/service.rs` `test_prepare_send_invitation_insufficient_budget` | Covered |
+| E2E send → accept produces wrong state | `tests/ceremony/invitation_service_e2e.rs` | Covered |
+| Contact flows produce different facts | `tests/contact_establishment_matrix.rs` | Covered |
+| Ceremony ID non-deterministic | `src/invitation_ceremony.rs` `test_ceremony_id_determinism` | Covered |
+| Fact serialization roundtrip lossy | `src/facts.rs` `test_invitation_fact_serialization` | Covered |
+| Reducer non-idempotent | `src/facts.rs` `test_reducer_idempotence` | Covered |
+| Protocol message serialization breaks | `src/protocol.rs` (15 inline tests) | Covered |
+| Message exceeds max length | `src/service.rs` `test_prepare_send_invitation_message_too_long` | Covered |
+| Legacy ceremony payload incompatible | `src/view.rs` `test_view_reducer_handles_legacy_ceremony_committed_payload` | Covered |
+
 ## Boundaries
 - Relationship state lives in aura-relational.
 - Transport coordination lives in aura-protocol.

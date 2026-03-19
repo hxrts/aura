@@ -246,6 +246,8 @@ mod tests {
         }
     }
 
+    /// Descriptor validity window is [valid_from, valid_until). Before start
+    /// or at/after end → invalid.
     #[test]
     fn test_is_valid_at() {
         let desc = test_descriptor();
@@ -256,6 +258,8 @@ mod tests {
         assert!(!desc.is_valid_at(2000)); // At end (exclusive)
     }
 
+    /// Expired descriptors must not be accepted — stale invitations become
+    /// reusable if expiry is not enforced.
     #[test]
     fn test_is_expired() {
         let desc = test_descriptor();

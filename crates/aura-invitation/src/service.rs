@@ -635,6 +635,8 @@ mod tests {
         assert_eq!(outcome.effects.len(), 4);
     }
 
+    /// Send denied without required capability — invitation operations are
+    /// capability-gated.
     #[test]
     fn test_prepare_send_invitation_missing_capability() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
@@ -783,6 +785,8 @@ mod tests {
         assert!(decoded.is_err());
     }
 
+    /// Invitations with expiry are expired after the deadline. Without expiry,
+    /// they never expire.
     #[test]
     fn test_invitation_is_expired() {
         let inv = Invitation {
