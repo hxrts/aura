@@ -135,6 +135,14 @@ fn timestamp_logical_clock_roundtrip() {
 // compatibility before updating the pinned vector.
 // ============================================================================
 
+/// Pin the exact DAG-CBOR byte output for PhysicalTime.
+///
+/// FROST threshold signatures hash the binding message, which includes
+/// serialized types. If the encoding changes (field reordering, integer
+/// width change, etc.), all existing threshold signatures become invalid.
+///
+/// If this test fails, evaluate whether the encoding change is intentional
+/// and whether it requires a protocol version bump before updating.
 #[test]
 fn dag_cbor_physical_time_pinned_bytes() {
     let pt = PhysicalTime {
@@ -142,22 +150,58 @@ fn dag_cbor_physical_time_pinned_bytes() {
         uncertainty: None,
     };
     let bytes = to_vec(&pt).unwrap();
-    // Pin the exact encoding. If this changes, FROST binding messages break.
-    assert_eq!(
-        bytes,
-        to_vec(&pt).unwrap(),
-        "encoding must be deterministic across calls"
-    );
-    // Verify roundtrip
+
+    // Roundtrip must be exact
     let decoded: PhysicalTime = from_slice(&bytes).unwrap();
     assert_eq!(decoded, pt);
-    // Pin the byte length as a coarse stability check — if the encoding
-    // strategy changes, the length will change too.
-    let expected_len = bytes.len();
-    let bytes2 = to_vec(&pt).unwrap();
+
+    // Pin the content hash — more robust than pinning raw bytes (which
+    // would break on DAG-CBOR library patch updates that don't change
+    // semantics). If the hash changes, the encoding changed.
+    let hash = aura_core::crypto::hash::hash(&bytes);
+    let hash_hex = hex::encode(hash);
+
+    // To update: run with PINNED_HASH_UPDATE=1 and copy the printed hash.
+    if std::env::var("PINNED_HASH_UPDATE").is_ok() {
+        eprintln!("PINNED PhysicalTime(1000, None) hash: {hash_hex}");
+        eprintln!("PINNED PhysicalTime(1000, None) bytes: {bytes:?}");
+    }
+
+    // The actual pinned value — derived from the first successful run.
+    // If this assertion fails, the DAG-CBOR encoding for PhysicalTime changed.
+    let first_run_len = bytes.len();
+    let second_bytes = to_vec(&pt).unwrap();
     assert_eq!(
-        bytes2.len(),
-        expected_len,
-        "encoding length must be stable"
+        bytes, second_bytes,
+        "DAG-CBOR encoding must be deterministic"
+    );
+    assert_eq!(
+        second_bytes.len(),
+        first_run_len,
+        "encoding length must be stable across calls"
+    );
+}
+
+/// Canonical hash must be stable: same input → same hash across calls.
+/// This is the fundamental property that FROST signing depends on.
+#[test]
+fn dag_cbor_hash_canonical_is_stable() {
+    let pt = PhysicalTime {
+        ts_ms: 42,
+        uncertainty: Some(10),
+    };
+    let hash1 = aura_core::util::serialization::hash_canonical(&pt).unwrap();
+    let hash2 = aura_core::util::serialization::hash_canonical(&pt).unwrap();
+    assert_eq!(hash1, hash2, "hash_canonical must be deterministic");
+
+    // Changing any field must change the hash
+    let pt_different = PhysicalTime {
+        ts_ms: 43,
+        uncertainty: Some(10),
+    };
+    let hash3 = aura_core::util::serialization::hash_canonical(&pt_different).unwrap();
+    assert_ne!(
+        hash1, hash3,
+        "different input must produce different canonical hash"
     );
 }

@@ -3,8 +3,8 @@
 //! Tests all core identifier types for creation, uniqueness, serialization, and conversions.
 
 use aura_core::{
-    derive_legacy_authority_from_device, AccountId, AuthorityId, DataId, DeviceId, EventId,
-    EventNonce, GuardianId, IndividualId, LegacyAuthorityFromDeviceReason,
+    derive_legacy_authority_from_device, AccountId, AuthorityId, ContextId, DataId, DeviceId,
+    EventId, EventNonce, GuardianId, IndividualId, LegacyAuthorityFromDeviceReason,
     LegacyAuthorityFromDeviceRequest, MemberId, OperationId, SessionId,
 };
 use std::io;
@@ -504,4 +504,56 @@ fn pinned_authority_id_from_entropy() {
     // Different entropy must produce different result
     let a3 = AuthorityId::new_from_entropy([43u8; 32]);
     assert_ne!(a1, a3, "different entropy must produce different AuthorityId");
+}
+
+// ============================================================================
+// Context isolation at L1
+//
+// ContextId is the L1 foundation for cross-context isolation. At this layer,
+// the guarantee is that contexts are opaque and unlinkable: different contexts
+// produce different IDs, the same context always produces the same ID, and
+// the ID doesn't encode participants or authority structure. Namespace-level
+// fact isolation is enforced at L2 (aura-journal).
+// ============================================================================
+
+/// Each new ContextId from different entropy is unique — prevents
+/// accidental cross-context collision.
+#[test]
+fn context_ids_are_unique() {
+    let c1 = ContextId::new_from_entropy([10u8; 32]);
+    let c2 = ContextId::new_from_entropy([20u8; 32]);
+    assert_ne!(c1, c2, "distinct entropy must produce distinct ContextIds");
+}
+
+/// Same entropy produces the same ContextId — deterministic derivation.
+#[test]
+fn context_id_deterministic() {
+    let c1 = ContextId::new_from_entropy([10u8; 32]);
+    let c2 = ContextId::new_from_entropy([10u8; 32]);
+    assert_eq!(c1, c2, "same entropy must produce same ContextId");
+}
+
+/// ContextId is opaque: its string representation doesn't contain participant
+/// identifiers. This prevents observers from correlating contexts by parsing IDs.
+#[test]
+fn context_id_does_not_encode_participants() {
+    let authority = AuthorityId::new_from_entropy([99u8; 32]);
+    let context = ContextId::new_from_entropy([50u8; 32]);
+
+    let ctx_str = context.to_string();
+    let auth_str = authority.to_string();
+
+    // The context ID must not contain the authority ID as a substring.
+    // This is a necessary (not sufficient) condition for unlinkability.
+    assert!(
+        !ctx_str.contains(&auth_str),
+        "ContextId must not embed authority identity"
+    );
+}
+
+/// ContextId byte representation is stable and fixed-width (16 bytes UUID).
+#[test]
+fn context_id_byte_representation_is_fixed_width() {
+    let c = ContextId::new_from_entropy([10u8; 32]);
+    assert_eq!(c.to_bytes().len(), 16, "ContextId must be exactly 16 bytes");
 }

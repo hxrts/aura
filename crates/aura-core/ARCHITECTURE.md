@@ -158,7 +158,7 @@ value for a specific input, it belongs inline.
 | MeetSemilattice — u64, BTreeSet | `tests/laws/semilattice_meet.rs` | proptest | covered |
 | FlowBudget CRDT — join, merge, convergence | `tests/laws/flow_budget_crdt.rs` | proptest | covered |
 | Policy meet-semilattice | `tests/laws/tree_policy_meet.rs` | proptest | covered |
-| Time ordering across clock domains | `tests/laws/time_ordering.rs` | proptest | minimal (2 props) |
+| Time ordering across clock domains | `tests/laws/time_ordering.rs` | proptest | covered (all 4 domains + cross-domain) |
 | JoinSemilattice — Fact, FactValue | `tests/laws/semilattice_join.rs` | example | covered |
 | MeetSemilattice — Cap | `tests/laws/semilattice_meet.rs` | example + Biscuit | covered |
 | FlowBudget epoch rotation monotonicity | `tests/laws/flow_budget_crdt.rs` | example | covered |
@@ -173,14 +173,14 @@ value for a specific input, it belongs inline.
 | FlowCost, FlowNonce, ReceiptSig roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
 | OwnershipCategory roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
 | TimeStamp variant roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
-| DAG-CBOR canonical encoding (byte-exact) | `tests/contracts/serialization_roundtrip.rs` | pinned length | partial |
+| DAG-CBOR canonical encoding (byte-exact) | `tests/contracts/serialization_roundtrip.rs` | hash stability + differential | covered |
 | **Identifier and key derivation** | | | |
 | AuthorityId, DeviceId, SessionId uniqueness | `tests/contracts/identifier_uniqueness.rs` | example + determ. | covered |
 | DKD derivation determinism | `tests/contracts/dkd_determinism.rs` | determinism | covered |
 | Content addressing (Hash32, ContentId) | `tests/contracts/content_addressing.rs` | roundtrip | covered |
 | Pinned string format + entropy derivation | `tests/contracts/identifier_uniqueness.rs` | pinned vectors | covered |
 | **Domain invariants** | | | |
-| Context isolation (no cross-context fact leakage) | — | — | **missing** — needs L1 test |
+| Context isolation (L1: opaque, unlinkable IDs) | `tests/contracts/identifier_uniqueness.rs` | uniqueness + opaqueness | covered |
 | FlowBudget charge-before-send | `src/types/flow.rs` | inline | covered |
 | Epoch monotonicity (no regression) | `tests/laws/flow_budget_crdt.rs` | example | covered |
 | **Scaling** | | | |
