@@ -120,6 +120,34 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantEquivocatorsExcluded`.
+## Testing
+
+### Strategy
+
+Consensus safety invariants are the highest-consequence tests in the system.
+`tests/safety/` validates equivocation detection, guard enforcement, and
+protocol coherence. `tests/contracts/` validates wire format stability and
+DKG transcript correctness. Inline tests cover the pure state machine.
+
+### Running tests
+
+```
+cargo test -p aura-consensus
+```
+
+### Coverage matrix
+
+| What breaks if wrong | Invariant | Status |
+|---------------------|-----------|--------|
+| Two commits for same prestate | InvariantUniqueCommitPerInstance | Covered (inline + Quint) |
+| Commit without threshold attestation | InvariantCommitRequiresThreshold | Covered (inline + Quint) |
+| Equivocating witness admitted | InvariantEquivocatorsExcluded | Covered (`tests/safety/`) |
+| Wire format breaks between versions | — | Covered (`tests/contracts/wire_compatibility.rs`) |
+| DKG produces invalid threshold keys | — | Covered (`tests/contracts/dkg_transcript.rs`) |
+| Guard enforcement bypassed | — | Covered (`tests/safety/guard_enforcement.rs`) |
+| Orphan protocol messages accepted | — | Covered (`tests/safety/protocol_orphan_free.rs`) |
+| Quint mapping roundtrip drift | — | Covered (`src/core/verification/quint_mapping.rs`) |
+
 ## Boundaries
 - Pure core (`core/`) has no effects; orchestration (`protocol/`) has effects.
 - Guard chain: CapGuard → FlowGuard → LeakageTracker → JournalCoupler.

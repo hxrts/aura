@@ -2,6 +2,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use proc_macro2::Span;
 use quote::ToTokens;
@@ -101,9 +102,11 @@ fn run() -> Result<(), String> {
         return Err("expected at least one path to scan".to_string());
     }
 
-    let mut rust_files = Vec::new();
-    for path in &paths {
-        collect_rust_files(path, &mut rust_files)?;
+    let mut rust_files = collect_tracked_rust_files(&paths)?;
+    if rust_files.is_empty() {
+        for path in &paths {
+            collect_rust_files(path, &mut rust_files)?;
+        }
     }
     rust_files.sort();
     rust_files.dedup();
@@ -129,6 +132,32 @@ fn run() -> Result<(), String> {
 
     println!("{}: clean (0 temporary exemptions)", mode.display_name());
     Ok(())
+}
+
+fn collect_tracked_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut command = Command::new("git");
+    command.arg("ls-files").arg("--cached").arg("--");
+    for path in paths {
+        command.arg(path);
+    }
+
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(_) => return Ok(Vec::new()),
+    };
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|error| format!("git ls-files output was not valid utf-8: {error}"))?;
+
+    Ok(stdout
+        .lines()
+        .map(PathBuf::from)
+        .filter(|path| path.extension() == Some(OsStr::new("rs")))
+        .filter(|path| path.exists())
+        .collect())
 }
 
 fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
