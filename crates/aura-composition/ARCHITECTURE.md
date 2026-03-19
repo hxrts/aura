@@ -101,7 +101,7 @@ cargo test -p aura-composition
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
 | Type-safe registry lookup fails at runtime | `src/registry.rs` (inline) | Covered |
-| Composition carries state between queries | `src/composite.rs` (inline) | Covered |
+| Duplicate registration silently replaces handler | `src/registry.rs` `test_duplicate_registration_replaces_handler` | Covered |
 | Supported operations don't match registry | `src/adapters/mod.rs` (inline) | Covered |
 | View delta compaction loses deltas | `src/view_delta.rs` (inline) | Covered |
 | Reducer dispatch to wrong handler | `src/view_delta.rs` (inline) | Covered |

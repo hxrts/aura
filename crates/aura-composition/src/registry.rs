@@ -967,4 +967,36 @@ mod tests {
         let ctx4 = HandlerContext::new(authority_id, context_id, ExecutionMode::Production);
         assert_ne!(ctx1.operation_id, ctx4.operation_id);
     }
+
+    /// Registering a second handler for the same effect type silently
+    /// replaces the first. Callers relying on the original handler would
+    /// route to the wrong implementation. This test documents the current
+    /// behavior so any change is caught.
+    #[test]
+    fn test_duplicate_registration_replaces_handler() {
+        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
+
+        let handler1 = Box::new(MockRegistrableHandler::new(
+            EffectType::Crypto,
+            vec!["hash", "sign"],
+            ExecutionMode::Testing,
+        ));
+        let handler2 = Box::new(MockRegistrableHandler::new(
+            EffectType::Crypto,
+            vec!["hash", "sign", "verify", "encrypt"],
+            ExecutionMode::Testing,
+        ));
+
+        registry
+            .register_handler(EffectType::Crypto, handler1)
+            .unwrap();
+        registry
+            .register_handler(EffectType::Crypto, handler2)
+            .unwrap();
+
+        // Second registration wins — operation list reflects handler2
+        let ops = registry.supported_operations(EffectType::Crypto).unwrap();
+        assert_eq!(ops.len(), 4);
+        assert!(ops.contains(&"encrypt".to_string()));
+    }
 }
