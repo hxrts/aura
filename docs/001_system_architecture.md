@@ -260,7 +260,7 @@ Journal state converges through anti-entropy after network partitions. Each peer
 
 ### 7.1 Ownership model
 
-Aura uses four ownership categories to prevent multiple layers from co-owning the same semantic truth: `Pure` for reducers and validators, `MoveOwned` for handle and session transfer, `ActorOwned` for long-lived mutable runtime state, and `Observed` for projections and UI reads. Parity-critical mutation must be capability-gated. Parity-critical operations must terminate explicitly with typed success, failure, or cancellation. See [Ownership Model](122_ownership_model.md) for the full contract.
+Aura uses four ownership categories to prevent multiple layers from co-owning the same semantic truth: `Pure` for reducers and validators, `MoveOwned` for handle and session transfer, `ActorOwned` for long-lived mutable runtime state, and `Observed` for projections and UI reads. Parity-critical mutation must be capability-gated. Parity-critical operations must terminate explicitly with typed success, failure, or cancellation. Errors are classified by recoverability and propagated through `Result` types. See [Ownership Model](122_ownership_model.md) for the full contract.
 
 ### 7.2 Structured concurrency
 
@@ -277,10 +277,6 @@ Subscription to an unregistered signal is a typed failure. Lagging subscribers m
 ### 7.4 Workflow ownership
 
 User-facing operations such as sending a message, accepting an invitation, or rotating a key are executed as workflows that progress through typed lifecycle phases to a terminal outcome. Each workflow has one authoritative lifecycle owner. Frontend and harness layers may submit commands and observe results, but they do not publish terminal truth. Ownership transfers through explicit handoff before the workflow begins awaited work. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
-
-### 7.5 Error handling
-
-Errors are unified through `AuraError` and classified by recoverability: transient errors may succeed on retry, permanent errors indicate invalid operations, and system errors indicate infrastructure failures. Effects propagate errors through `Result` types. The journal provides durability for recovery. Uncommitted facts are replayed after restart. Committed facts are immutable.
 
 ## 8. Maintenance and Evolution
 
