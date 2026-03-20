@@ -238,7 +238,7 @@ Device recovery uses guardian protocols. Guardians hold encrypted recovery share
 
 Recovery operates through the same consensus and session-type infrastructure as other protocols. The recovered authority retains its identity while rotating to new key material. See [Relational Contexts](114_relational_contexts.md) for recovery architecture.
 
-## 6. Networking
+## 6. Communication
 
 ### 6.1 Secure channels
 
