@@ -42,7 +42,7 @@ This contract uses shared terminology from [Theoretical Model](002_theoretical_m
 
 ## 2. Privacy Philosophy
 
-Traditional privacy systems force users to choose between complete isolation and complete exposure. Aura recognizes that privacy is relational. Sharing information with trusted parties is not a privacy violation, it's the foundation of meaningful collaboration.
+Traditional privacy systems offer only complete isolation or complete exposure. Aura treats privacy as relational. Sharing information with trusted parties is a consented disclosure, not a privacy violation.
 
 ### 2.1 Core Principles
 

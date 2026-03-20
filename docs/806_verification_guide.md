@@ -174,13 +174,9 @@ just quint-semantic-trace spec=verification/quint/harness/flows.qnt \
   out=verification/quint/traces/harness_flows.itf.json
 ```
 
-ITF traces capture semantic state sequences and non-deterministic choices.
-These traces are model artifacts. Real TUI and web execution belongs to the
-harness, which consumes the shared semantic scenario contract. Shared web/TUI parity assertions also run against the same `UiSnapshot` contract rather than renderer text or DOM structure.
+ITF traces capture semantic state sequences and non-deterministic choices. These traces are model artifacts. Real TUI and web execution belongs to the harness, which consumes the shared semantic scenario contract. Shared web/TUI parity assertions also run against the same `UiSnapshot` contract rather than renderer text or DOM structure.
 
-Do not add direct Quint-to-TUI or Quint-to-browser execution paths. Quint should
-hand off semantic traces to the shared contract layer, then let the harness or
-simulator consume them through their own adapters.
+Do not add direct Quint-to-TUI or Quint-to-browser execution paths. Quint should hand off semantic traces to the shared contract layer, then let the harness or simulator consume them through their own adapters.
 
 For shared end-to-end flows, the harness contract is semantic and state-based. Do not introduce frontend-specific Quint replay formats that encode raw keypress sequences, browser selectors, or label-based button targeting. Those belong in driver adapters and diagnostics, not in the semantic trace contract.
 
@@ -295,9 +291,7 @@ The main repository policy gate for shared-flow drift is:
 just ci-shared-flow-policy
 ```
 
-This complements Quint and simulator checks by enforcing that shared real-runtime
-scenarios still use the semantic contract and that the shared-flow support map in
-`aura-app` remains consistent with the harness/frontend surfaces.
+This complements Quint and simulator checks by enforcing that shared real-runtime scenarios still use the semantic contract and that the shared-flow support map in `aura-app` remains consistent with the harness/frontend surfaces.
 
 ## Telltale Verification Workflow in Aura
 
@@ -346,8 +340,7 @@ Call `aura_quint::upstream_telltale_lean_bridge_schema_version()` to get the ups
 
 ### 5) `aura-testkit` Lean verification API migration (March 5, 2026)
 
-As of March 5, 2026, legacy Lean verification compatibility types were removed from
-`aura_testkit::verification` and `aura_testkit::verification::lean_oracle`.
+As of March 5, 2026, legacy Lean verification compatibility types were removed from `aura_testkit::verification` and `aura_testkit::verification::lean_oracle`.
 
 Use the canonical full-fidelity types and methods.
 

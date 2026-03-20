@@ -119,19 +119,19 @@ The `aura-transport` crate demonstrates privacy-by-design principles where priva
 
 ### 8.1 Core Principles
 
-**Privacy-by-Design Integration**:
+Privacy-by-design integration:
 - Privacy mechanisms built into core types (Envelope, FrameHeader, TransportConfig)
 - Privacy levels as first-class configuration, not bolt-on features
 - Relationship scoping embedded in message routing
 - Capability blinding at the envelope level
 
-**Minimal Metadata Exposure**:
+Minimal metadata exposure:
 - Frame headers contain only essential routing information
 - Capability hints are blinded before transmission
 - Selection criteria hide detailed capability requirements
 - Peer selection uses privacy-preserving scoring
 
-**Context Isolation**:
+Context isolation:
 - All messages scoped to RelationshipId or ContextId
 - No cross-context message routing
 - Connection state partitioned by context
@@ -159,7 +159,7 @@ let envelope = Envelope::new_blinded(
 );
 ```
 
-**Pattern**: Always use `new_scoped()` for relationship communication. Only use `new()` for public announcements. Use `new_blinded()` when metadata exposure must be minimized.
+Pattern: Always use `new_scoped()` for relationship communication. Only use `new()` for public announcements. Use `new_blinded()` when metadata exposure must be minimized.
 
 ### 8.3 Privacy-Preserving Peer Selection
 
@@ -174,7 +174,7 @@ let criteria = PrivacyAwareSelectionCriteria::for_relationship(relationship_id)
 let selection = criteria.select_peers(&available_peers);
 ```
 
-**Pattern**:
+Pattern:
 - Selection criteria blinded before network transmission
 - Selection scores computed without revealing weights
 - Rejected candidates not logged or exposed
@@ -182,14 +182,14 @@ let selection = criteria.select_peers(&available_peers);
 
 ### 8.4 Common Privacy Pitfalls
 
-**✗ Avoid**:
+Avoid:
 - Logging detailed capability requirements
 - Exposing relationship membership in error messages
 - Reusing connection state across contexts
 - Sending capability names in clear text
 - Correlating message sizes with content types
 
-**✓ Do**:
+Do:
 - Use generic error messages ("authorization failed" not "missing capability: admin")
 - Pad messages to fixed sizes when possible
 - Rotate connection identifiers on epoch changes
@@ -260,7 +260,7 @@ Anti-entropy provides callbacks via `SyncProgressEvent` to track progress:
 
 For facts with `ack_tracked = true`, the transport layer implements the ack protocol:
 
-**Transmission Envelope:**
+Transmission envelope:
 ```rust
 pub struct FactEnvelope {
     pub fact: Fact,
@@ -268,7 +268,7 @@ pub struct FactEnvelope {
 }
 ```
 
-**FactAck Response:**
+FactAck response:
 ```rust
 pub struct FactAck {
     pub fact_id: String,
@@ -277,7 +277,7 @@ pub struct FactAck {
 }
 ```
 
-**Protocol Flow:**
+Protocol flow:
 1. Sender marks fact as `ack_tracked` when committing
 2. Transport includes `ack_requested: true` in envelope
 3. Receiver processes fact and sends `FactAck` response

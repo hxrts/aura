@@ -8,21 +8,21 @@ For the full effect system specification, see [Effect System](103_effect_system.
 
 A critical distinction guides where code belongs in the architecture.
 
-**Single-party operations** go in `aura-effects`. These are stateless, context-free handlers that take input and produce output without maintaining state or coordinating with other handlers.
+Single-party operations go in `aura-effects`. These are stateless, context-free handlers that take input and produce output without maintaining state or coordinating with other handlers.
 
 Examples:
 - `sign(key, msg) -> Signature` - one device, one cryptographic operation
 - `store_chunk(id, data) -> Ok(())` - one device, one write
 - `RealCryptoHandler` - self-contained cryptographic operations
 
-**Multi-party coordination** goes in `aura-protocol`. These orchestrate multiple handlers together with stateful, context-specific operations.
+Multi-party coordination goes in `aura-protocol`. These orchestrate multiple handlers together with stateful, context-specific operations.
 
 Examples:
 - `execute_anti_entropy(...)` - orchestrates sync across multiple parties
 - `CrdtCoordinator` - manages state of multiple CRDT handlers
 - `GuardChain` - coordinates authorization checks across sequential operations
 
-**Rule of thumb**: If removing one effect handler requires changing the logic of how other handlers are called (not just removing calls), it's orchestration and belongs in Layer 4.
+If removing one effect handler requires changing the logic of how other handlers are called (not just removing calls), it belongs in Layer 4 as orchestration.
 
 ### Decision Matrix
 

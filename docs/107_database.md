@@ -551,9 +551,7 @@ Aura Consensus is not linearizable by default. Each consensus instance independe
 
 Agreement modes are orthogonal to the coordination matrix: A1 (provisional) and A2 (soft-safe) may provide immediate usability, but any durable shared database state must be A3 (consensus-finalized) with prestate binding. Soft-safe windows should be bounded with convergence certificates and explicit reversion facts.
 
-BFT-DKG integration: When key material is required (K3), the database must bind
-operations to a consensus‑finalized `DkgTranscriptCommit`. This ensures the
-transaction prestate and the cryptographic prestate are aligned.
+BFT-DKG integration: When key material is required (K3), the database must bind operations to a consensus‑finalized `DkgTranscriptCommit`. This ensures the transaction prestate and the cryptographic prestate are aligned.
 
 ### 7.3 Mutation Receipts
 

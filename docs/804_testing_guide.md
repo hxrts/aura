@@ -2,8 +2,7 @@
 
 This guide covers how to write tests for Aura protocols using the testing infrastructure. It includes unit testing, integration testing, property-based testing, conformance testing, and runtime harness validation.
 
-For infrastructure details, see [Test Infrastructure Reference](118_testkit.md).
-For the deterministic shared-flow design rules, see [User Flow Harness](121_user_flow_harness.md).
+For infrastructure details, see [Test Infrastructure Reference](118_testkit.md). For the deterministic shared-flow design rules, see [User Flow Harness](121_user_flow_harness.md).
 
 ## 1. Core Philosophy
 
@@ -24,9 +23,7 @@ For parity-critical ownership work, completeness also means:
 
 ### Harness Policy
 
-Aura's runtime harness is the primary end-to-end validation lane.
-Default harness runs exercise the real Aura runtime with real TUI and webfront ends.
-The goal is to catch integration failures in the actual product, not just prove a model.
+Aura's runtime harness is the primary end-to-end validation lane. Default harness runs exercise the real Aura runtime with real TUI and web frontends. The goal is to catch integration failures in the actual product, not just prove a model.
 
 The harness now has two distinct responsibilities:
 
@@ -39,12 +36,9 @@ The harness now has two distinct responsibilities:
   - may use renderer-specific mechanics intentionally
   - must not be the primary execution substrate for shared scenarios
 
-Quint and other verification tools generate models, traces, and invariants.
-They are not a replacement for real frontends.
+Quint and other verification tools generate models, traces, and invariants. They are not a replacement for real frontends.
 
-`aura-app` owns the shared semantic scenario, command-plane, and UI contracts.
-`aura-harness` consumes those contracts and submits shared semantic commands to real frontends.
-`aura-simulator` is the separate alternate runtime substrate.
+`aura-app` owns the shared semantic scenario, command-plane, and UI contracts. `aura-harness` consumes those contracts and submits shared semantic commands to real frontends. `aura-simulator` is the separate alternate runtime substrate.
 
 Use this lane matrix when selecting harness mode.
 
@@ -57,26 +51,20 @@ Use this lane matrix when selecting harness mode.
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot/readiness waits.
 
-`aura-app::ui_contract` is the canonical module for shared flow support.
-It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`,
-`UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and
-`RuntimeEventSnapshot`.
-Use semantic readiness and state assertions before using fallback text matching.
+`aura-app::ui_contract` is the canonical module for shared flow support. It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and `RuntimeEventSnapshot`. Use semantic readiness and state assertions before using fallback text matching.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
 
 ### Shared UX Contract And Determinism
 
-For parity-critical shared flows, `aura-app::ui_contract` is the authoritative
-contract surface. It owns:
+For parity-critical shared flows, `aura-app::ui_contract` is the authoritative contract surface. It owns:
 
 - canonical screen, modal, control, field, list, and operation identifiers
 - focus and selection semantics
 - shared-flow support and coverage metadata
 - `UiSnapshot`, `RenderHeartbeat`, and typed runtime-event shapes
 
-The web shell and the TUI must consume that contract rather than deriving local
-IDs, local focus semantics, or ad hoc flow metadata.
+The web shell and the TUI must consume that contract rather than deriving local IDs, local focus semantics, or ad hoc flow metadata.
 
 For parity-critical shared-flow execution:
 
@@ -88,8 +76,7 @@ For parity-critical shared-flow execution:
 
 ### Shared Semantic Ownership Model
 
-Parity-critical shared semantic flows must use one explicit ownership category.
-Do not mix categories casually inside the same flow.
+Parity-critical shared semantic flows must use one explicit ownership category. Do not mix categories casually inside the same flow.
 
 - `Pure`
   - deterministic reducers, validators, typed domain transitions, and value
@@ -130,14 +117,12 @@ For shared semantic flows, the default expectation is:
 - `aura-harness` consumes typed handles, readiness, and projections; it does
   not mutate semantic lifecycle directly
 
-If a migrated parity-critical flow needs both actor and move semantics, the
-split must stay explicit:
+If a migrated parity-critical flow needs both actor and move semantics, the split must stay explicit:
 
 - the actor owns mutable lifecycle state
 - move-owned handles/tokens define which caller may advance or transfer it
 
-If that split is not explicit, the flow is not considered correct by
-construction.
+If that split is not explicit, the flow is not considered correct by construction.
 
 For parity-critical observation:
 
@@ -157,8 +142,7 @@ For parity-critical waits and assertions:
 
 ### Ownership Test Expectations
 
-When a change introduces or modifies a parity-critical ownership boundary, the
-test plan should include the applicable items below.
+When a change introduces or modifies a parity-critical ownership boundary, the test plan should include the applicable items below.
 
 - compile-fail tests for private constructors, capability misuse, or stale
   move-owned handles when the boundary is type-enforced
@@ -181,8 +165,7 @@ For shared semantic workflow changes specifically:
 - review and test plans should name the terminal owner explicitly and treat
   frontend layers as submit/observe boundaries
 
-Use physical time for local deadline and backoff policy. Do not use wall-clock
-timeouts as the primary proof of distributed completion or ordering.
+Use physical time for local deadline and backoff policy. Do not use wall-clock timeouts as the primary proof of distributed completion or ordering.
 
 For failure analysis:
 
@@ -198,11 +181,9 @@ For ownership cleanup discipline:
 
 ### Ownership Cleanup Tasks
 
-Each parity-critical ownership change must include explicit cleanup work for the
-abstraction it replaces. Do not treat the ownership model as additive.
+Each parity-critical ownership change must include explicit cleanup work for the abstraction it replaces. Do not treat the ownership model as additive.
 
-For every migrated flow, include these cleanup questions and complete the
-matching deletion work in the same migration or the next named cleanup task:
+For every migrated flow, include these cleanup questions and complete the matching deletion work in the same migration or the next named cleanup task:
 
 - delete actor wrappers around purely local/value transitions that should stay
   `Pure`
@@ -225,22 +206,11 @@ final CI entrypoints:
 - `just ci-harness-ownership-policy` for the harness-specific ownership policy
 - `just ci-user-flow-policy` for shared UX governance and documentation sync
 
-The authoritative frontend matrix for converted shared scenarios comes from
-`scenarios/harness_inventory.toml` and is enforced by
-`just ci-harness-matrix-inventory`.
-Allowlisted harness-mode hooks must carry explicit owner, justification, and
-design-note references in `scripts/check/user-flow-policy-guardrails.sh`.
-Changes to the browser harness bridge request/response or observation surface
-must update both `crates/aura-web/ARCHITECTURE.md` and this guide so
-compatibility expectations stay explicit.
-Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a
-reason code, scope, affected surface, and authoritative doc reference.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
 ### Shared Semantic Ownership Inventory
 
-Use this as the authoritative ownership map for the shared semantic stack. If
-code does not match this table, treat it as ownership cleanup debt rather than
-as an acceptable alternate pattern.
+Use this as the authoritative ownership map for the shared semantic stack. If code does not match this table, treat it as ownership cleanup debt rather than as an acceptable alternate pattern.
 
 | Subsystem | Crate / locus | Ownership category | Authoritative owner | May mutate | May observe only |
 |-----------|----------------|--------------------|---------------------|------------|------------------|
@@ -274,8 +244,7 @@ Reactive subscription policy for tests:
 
 ### Required Ownership Invariants
 
-Ownership-model migrations are not complete until the following test classes
-exist for the affected parity-critical surface:
+Ownership-model migrations are not complete until the following test classes exist for the affected parity-critical surface:
 
 - compile-fail guards for private constructors, wrong-capability issuance, and
   stale-owner misuse where the boundary is enforced in types
@@ -290,22 +259,17 @@ exist for the affected parity-critical surface:
 - timeout/backoff invariant tests proving typed timeout failure,
   remaining-budget propagation, bounded attempts, and local-choice scaling
 
-If a flow changes ownership model or timeout policy and these test classes do
-not move with it, treat the migration as incomplete.
+If a flow changes ownership model or timeout policy and these test classes do not move with it, treat the migration as incomplete.
 - move-owned surfaces own exclusive right-to-act and ownership transfer
 - observed surfaces render, wait, and diagnose without authoring semantic truth
 
-Do not use this table to justify ambient shared ownership. If a subsystem needs
-both actor and move semantics, the actor owns mutable lifecycle state while the
-move-owned handle or token defines who may advance or transfer it.
+Do not use this table to justify ambient shared ownership. If a subsystem needs both actor and move semantics, the actor owns mutable lifecycle state while the move-owned handle or token defines who may advance or transfer it.
 
 ### Release And Update Matrix Expectations
 
-OTA and module release/update validation must follow the same semantic-lane
-contract as other parity-critical shared flows.
+OTA and module release/update validation must follow the same semantic-lane contract as other parity-critical shared flows.
 
-For planned coverage in [Flow Coverage](997_flow_coverage.md), each release row
-must define:
+For planned coverage in [Flow Coverage](997_flow_coverage.md), each release row must define:
 
 - typed command/control surfaces for publication, staging, cutover, health
   confirmation, rollback, and promotion-state transitions
@@ -314,8 +278,7 @@ must define:
 - a designated primary harness lane, which is expected to be the shared
   semantic lane for lifecycle validation
 
-Frontend-conformance coverage may validate release-screen wiring, but it does
-not satisfy OTA/module lifecycle validation on its own.
+Frontend-conformance coverage may validate release-screen wiring, but it does not satisfy OTA/module lifecycle validation on its own.
 
 ## 2. The `#[aura_test]` Macro
 
@@ -682,12 +645,7 @@ just ci-shared-flow-policy
 
 `just ci-shared-flow-policy` validates the shared-flow contract end to end. It checks that `aura-app` shared-flow support declarations are internally consistent, that every fully shared flow has explicit parity-scenario coverage, and that required shell and modal ids still exist. It confirms browser control and field mappings still line up with the shared contract and that core shared scenarios have not drifted back to raw mechanics.
 
-When shared flows export data through runtime events, the event payload is part
-of the contract. Invitation and device-enrollment code capture should come from
-`RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or
-frontend-local heuristics. Shared chat waits should likewise bind to semantic
-selection state so the harness targets the single shared channel instead of
-falling back to incidental render order.
+When shared flows export data through runtime events, the event payload is part of the contract. Invitation and device-enrollment code capture should come from `RuntimeFact` payloads in `UiSnapshot.runtime_events`, not clipboard scraping or frontend-local heuristics. Shared chat waits should likewise bind to semantic selection state so the harness targets the single shared channel instead of falling back to incidental render order.
 
 Use `just ci-ui-parity-contract` for the narrower parity gate. That lane validates shared screen/module mappings, shared-flow scenario coverage, and parity-manifest consistency without running a full scenario matrix.
 
@@ -771,14 +729,9 @@ artifacts/harness/<run>/network_backend_preflight.json
 ```
 
 Patchbay is the authoritative NAT-realism backend for holepunch validation.
-Use native `patchbay` on Linux CI and Linux developers when capabilities are available.
-Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM.
-Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
 
-Implementation follows three tiers.
-Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants.
-Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating.
-Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
+Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
 
 When a scenario fails, triage artifacts in this order.
 1. Check `network_backend_preflight.json` to confirm selected backend and fallback reason.
@@ -787,8 +740,7 @@ When a scenario fails, triage artifacts in this order.
 4. Check namespace and network dumps and pcap files for packet and routing diagnosis.
 5. Check agent logs for authority-local failures and retry state transitions.
 
-For harness-specific state debugging, treat `timeout_diagnostics.json` as the first failure bundle.
-It includes semantic state snapshots, render readiness, and runtime event history.
+For harness-specific state debugging, treat `timeout_diagnostics.json` as the first failure bundle. It includes semantic state snapshots, render readiness, and runtime event history.
 
 ## 14. Browser Harness Workflow (WASM + Playwright)
 
@@ -832,15 +784,9 @@ When debugging browser failures, check `web-serve.log` for bundle and runtime st
 
 `timeout_diagnostics.json` is now the primary authoritative failure bundle. In addition to `UiSnapshot`, it should be treated as the first source for runtime event history through `runtime_events`. It contains operation lifecycle and instance ids. It provides render and readiness diagnostics along with browser and TUI backend log tails.
 
-For mixed-runtime debugging, inspect `runtime_events` before logs when a code
-exchange or chat handoff fails. The expected evidence is a typed event payload,
-the selected semantic target in the snapshot, and only then supporting browser
-or TUI render diagnostics.
+For mixed-runtime debugging, inspect `runtime_events` before logs when a code exchange or chat handoff fails. The expected evidence is a typed event payload, the selected semantic target in the snapshot, and only then supporting browser or TUI render diagnostics.
 
-For browser runs, the harness observes the semantic state contract first and
-uses DOM/text fallbacks only for diagnostics. If semantic state and rendered UI
-diverge, treat that as a product or frontend contract bug rather than papering
-over it with text-based assertions.
+For browser runs, the harness observes the semantic state contract first and uses DOM/text fallbacks only for diagnostics. If semantic state and rendered UI diverge, treat that as a product or frontend contract bug rather than papering over it with text-based assertions.
 
 ### Frontend Shell Roadmap
 

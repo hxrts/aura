@@ -4,12 +4,7 @@
 
 The Aura runtime assembles effect handlers into working systems. It manages lifecycle, executes the guard chain, schedules reactive updates, and exposes services through `AuraAgent`. The `AppCore` provides a unified interface for all frontends.
 
-This document covers runtime composition and execution. See [Effect System](103_effect_system.md) for trait definitions and handler design.
-See [Ownership Model](122_ownership_model.md) for the repo-wide ownership
-taxonomy.
-The `aura-agent` crate-level runtime contract, including structured concurrency,
-canonical ingress, ownership, typed errors, and CI policy gates, lives in
-`crates/aura-agent/ARCHITECTURE.md`.
+This document covers runtime composition and execution. See [Effect System](103_effect_system.md) for trait definitions and handler design. See [Ownership Model](122_ownership_model.md) for the repo-wide ownership taxonomy. The `aura-agent` crate-level runtime contract, including structured concurrency, canonical ingress, ownership, typed errors, and CI policy gates, lives in `crates/aura-agent/ARCHITECTURE.md`.
 
 That contract is intentionally opinionated about the split of responsibilities:
 
@@ -22,16 +17,11 @@ For shared semantic operations, the split is stricter still:
 
 - `aura-app::workflows` owns authoritative semantic lifecycle publication
 - `aura-agent` owns long-lived runtime actors and readiness/state coordination
-- frontend crates and the harness submit through sanctioned handoff boundaries
-  and observe authoritative publication afterward
+- frontend crates and the harness submit through sanctioned handoff boundaries and observe authoritative publication afterward
 
-No runtime, frontend, or harness path should keep a parallel terminal
-publication helper once the shared workflow owner has taken over.
+No runtime, frontend, or harness path should keep a parallel terminal publication helper once the shared workflow owner has taken over.
 
-The same visibility rule applies to runtime-owned mutation helpers. Raw VM
-admission helpers, fragment ownership registry mutation, and the mutable
-reconfiguration controller stay inside `aura-agent` runtime internals. Shared
-consumers go through sanctioned ingress, session-owner, or manager surfaces.
+The same visibility rule applies to runtime-owned mutation helpers. Raw VM admission helpers, fragment ownership registry mutation, and the mutable reconfiguration controller stay inside `aura-agent` runtime internals. Shared consumers go through sanctioned ingress, session-owner, or manager surfaces.
 
 ## Ownership Categories In The Runtime
 
@@ -101,29 +91,24 @@ This actor layer is the runtime supervision layer. Use it for:
 
 Do not treat actor mailboxes as the ownership-transfer primitive for sessions or delegated endpoints.
 
-Runtime shutdown ordering remains an orchestration-level invariant, not a
-compile-time type property. Aura keeps a targeted integration check for the
-final shutdown sequence in `aura-agent::runtime::system`:
+Runtime shutdown ordering remains an orchestration-level invariant, not a compile-time type property. Aura keeps a targeted integration check for the final shutdown sequence in `aura-agent::runtime::system`:
 1. stop the reactive pipeline
 2. cancel the runtime task tree
 3. tear down services
 4. shut down the lifecycle manager
 
-That check is governance for the final runtime owner graph, not a replacement
-for the compile-time ownership model.
+That check is governance for the final runtime owner graph, not a replacement for the compile-time ownership model.
 
 ### Async Primitives
 
 Preferred primitives:
 
 - `aura-core::BoundedActorIngress` for declaring parity-critical actor ingress.
-- crate-private service-actor handles/mailboxes in `aura-agent` for runtime
-  command routing.
+- crate-private service-actor handles/mailboxes in `aura-agent` for runtime command routing.
 - `tokio::sync::oneshot` for typed request/reply acknowledgements.
 - `tokio::sync::watch` for snapshots rather than command routing.
 - `tokio::sync::Notify` for ownership-local wakeups.
-- supervised task groups and actor loops rooted in `TaskSupervisor` /
-  `TaskGroup`
+- supervised task groups and actor loops rooted in `TaskSupervisor` / `TaskGroup`
 
 Forbidden in production:
 
@@ -132,17 +117,11 @@ Forbidden in production:
 - Direct session mutation from non-owner tasks.
 - Multi-writer service state as the default pattern.
 
-The only sanctioned raw spawn implementation boundary in production runtime
-code is `aura-agent`'s task registry. Other runtime code must go through
-owned task-group APIs and retain or explicitly discard the returned owned task
-handle.
+The only sanctioned raw spawn implementation boundary in production runtime code is `aura-agent`'s task registry. Other runtime code must go through owned task-group APIs and retain or explicitly discard the returned owned task handle.
 
 ## Lifecycle Management
 
-`aura-agent` uses an explicit service lifecycle contract with authoritative
-service states, structured task ownership, and deterministic teardown. The
-crate-level runtime contract in `crates/aura-agent/ARCHITECTURE.md` is the
-source of truth.
+`aura-agent` uses an explicit service lifecycle contract with authoritative service states, structured task ownership, and deterministic teardown. The crate-level runtime contract in `crates/aura-agent/ARCHITECTURE.md` is the source of truth.
 
 All long-lived services implement a shared lifecycle state machine:
 
@@ -193,20 +172,15 @@ Runtime timeout behavior must preserve Aura's time-system contract:
 - physical time drives local waiting, retry, and backoff policy
 - logical, order, and provenanced time remain semantic ordering tools
 - runtime owners publish typed timeout failure when local waiting is exhausted
-- harness and simulation may scale timeout policy, but they should not invent a
-  different semantic model
+- harness and simulation may scale timeout policy, but they should not invent a different semantic model
 
 In practice this means:
 
-- long-lived owners should consume a remaining timeout budget across nested
-  stages instead of resetting fresh wall-clock literals at each call site
+- long-lived owners should consume a remaining timeout budget across nested stages instead of resetting fresh wall-clock literals at each call site
 - retry loops should use shared backoff policy rather than duplicated sleeps
 - timeout policy belongs to owner/coordinator code, not UI observation layers
-- reducing timeout duration in tests or harness mode is acceptable; changing
-  what timeout means is not
-- runtime-facing workflow/task boundaries should carry `OperationTimeoutBudget`,
-  `OwnedShutdownToken`, and `OwnedTaskSpawner` rather than raw `Duration`,
-  raw cancellation traits, or ad hoc spawn helpers
+- reducing timeout duration in tests or harness mode is acceptable; changing what timeout means is not
+- runtime-facing workflow/task boundaries should carry `OperationTimeoutBudget`, `OwnedShutdownToken`, and `OwnedTaskSpawner` rather than raw `Duration`, raw cancellation traits, or ad hoc spawn helpers
 
 ## Guard Chain Execution
 
@@ -505,9 +479,7 @@ This is why the runtime uses both abstractions at once:
 - actor services for host-side runtime structure
 - explicit move-style ownership for fragment/session transfer
 
-When delegation changes ownership, the runtime must also define whether the moved
-capability is transferred intact or attenuated to a narrower scope. That decision
-is part of the protocol/runtime contract, not a host-side convenience choice.
+When delegation changes ownership, the runtime must also define whether the moved capability is transferred intact or attenuated to a narrower scope. That decision is part of the protocol/runtime contract, not a host-side convenience choice.
 
 The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside VM callbacks in `vm_host_bridge` and service loops.
 
@@ -616,9 +588,7 @@ Reactive subscription policy is explicit:
 - subscribing to an unregistered signal fails fast with `ReactiveError::SignalNotFound`
 - there is no implicit wait-for-registration or dead-stream fallback
 - subscriber delivery is eventually consistent rather than lossless
-- if a subscriber lags behind the bounded broadcast buffer, intermediate values
-  may be dropped and the subscriber resumes from a newer snapshot after a lag
-  warning is logged
+- if a subscriber lags behind the bounded broadcast buffer, intermediate values may be dropped and the subscriber resumes from a newer snapshot after a lag warning is logged
 
 Production code obtains the registry via `effect_system.fact_registry()`. Tests may use `build_fact_registry()` for isolation. The registry assembly stays in Layer 6 rather than Layer 1.
 

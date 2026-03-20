@@ -266,7 +266,7 @@ The `Threshold` mode is used for multi-device accounts such as 2-of-3 or 3-of-5 
 
 FROST requires at least 2 signers. For 1-of-1 configurations, we use standard Ed25519.
 
-Ed25519 uses the same curve as FROST and produces compatible signatures for verification, however single signature does not require nonce coordination or aggregation.
+Ed25519 uses the same curve as FROST and produces compatible signatures for verification. Single signatures do not require nonce coordination or aggregation.
 
 ### 6.3 API Usage
 
@@ -357,7 +357,7 @@ The handler in `aura-effects/src/crypto.rs` implements FROST key generation and 
 
 ### 7.2 Serialized Size Invariants (FROST)
 
-Aura treats the postcard serialization of FROST round-one data as **canonical and fixed-size**. This prevents malleability and makes invalid encodings unrepresentable at the boundary.
+Aura treats the postcard serialization of FROST round-one data as canonical and fixed-size. This prevents malleability and makes invalid encodings unrepresentable at the boundary.
 
 - `SigningNonces` (secret) **must serialize to exactly 138 bytes**
 - `SigningCommitments` (public) **must serialize to exactly 69 bytes**

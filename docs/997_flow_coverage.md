@@ -38,8 +38,7 @@ Aura tracks three different coverage classes in this document:
 | Mixed-runtime interoperability | User-visible flow that intentionally spans different frontend/runtime combinations | Canonical mixed-runtime scenarios |
 | Frontend-specific or auxiliary coverage | Focused smoke, modal, renderer-specific, or conformance-only coverage that is useful but not the parity contract | Supplementary scenarios |
 
-This report is a traceability document for those classes. It is not a proof of
-protocol correctness, and it does not replace conformance or verification lanes.
+This report is a traceability document for those classes. It is not a proof of protocol correctness, and it does not replace conformance or verification lanes.
 
 ## Canonical UX Scenario Set
 
@@ -56,8 +55,7 @@ protocol correctness, and it does not replace conformance or verification lanes.
 | TUI Observation | `scenarios/harness/semantic-observation-tui-smoke.toml` | TUI semantic observation contract smoke |
 | Quint Observation | `scenarios/harness/quint-semantic-observation-smoke.toml` | Quint-origin semantic observation reference |
 
-Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. All
-harness scenarios in this inventory now use the semantic scenario format.
+Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. All harness scenarios in this inventory now use the semantic scenario format.
 
 ## User Flow Matrix
 
@@ -95,8 +93,7 @@ These scenarios are maintained outside the main shared semantic lane:
 
 ## Planned Release And Update Validation Matrix
 
-This matrix is the planned coverage target for harness-driven validation of
-module and OTA distribution/update behavior.
+This matrix is the planned coverage target for harness-driven validation of module and OTA distribution/update behavior.
 
 The intended rollout order is:
 
@@ -104,9 +101,7 @@ The intended rollout order is:
 2. candidate-release rehearsal matrix
 3. live-release promotion gates
 
-Mechanism validation proves the lifecycle machinery itself under synthetic
-releases and controlled failures. Candidate-release rehearsal proves that one
-specific release works before promotion or real cutover.
+Mechanism validation proves the lifecycle machinery itself under synthetic releases and controlled failures. Candidate-release rehearsal proves that one specific release works before promotion or real cutover.
 
 | Order | Domain | Mode | Target | Example Coverage Goal | Status |
 |------|--------|------|--------|------------------------|--------|
@@ -121,13 +116,11 @@ specific release works before promotion or real cutover.
 | 9 | OTA | Promotion gate | Release operation | Real cutover remains blocked until rehearsal passes | Planned |
 | 10 | Module | Promotion gate | Release operation | Real publication/activation remains blocked until rehearsal passes | Planned |
 
-This matrix should remain typed-lifecycle driven. It should not be satisfied by
-log scraping or ad hoc manual release notes.
+This matrix should remain typed-lifecycle driven. It should not be satisfied by log scraping or ad hoc manual release notes.
 
 ### Typed Release Validation Contract
 
-Each planned release/update row above must map to a typed harness contract
-before it is counted as implemented.
+Each planned release/update row above must map to a typed harness contract before it is counted as implemented.
 
 | Coverage Entry | Typed command/control surface | Typed lifecycle evidence | Primary lane |
 |---------------|-------------------------------|--------------------------|--------------|
@@ -136,9 +129,7 @@ before it is counted as implemented.
 | Module mechanism validation | `PublishSyntheticModuleRelease`, `StageModuleCandidate`, `PrepareModuleAdmission`, `CommitModuleCutover`, `RollbackModuleCutover` | `ModuleReleasePublished`, `ModuleArtifactAvailable`, `ModuleVerified`, `ModuleStaged`, `ModuleAdmissionPrepared`, `ModuleCutoverCommitted`, `ModuleRolledBack` | Shared semantic lane |
 | Module candidate-release rehearsal | `PublishCandidateModuleRelease`, `StageModuleCandidate`, `ApproveModuleCutover`, `CommitModuleCutover`, `RollbackModuleCutover` | `ModuleCandidatePublished`, `ModuleStaged`, `ModulePromotionStateChanged`, `ModuleCutoverCommitted`, `ModuleHealthConfirmed`, `ModuleRehearsalPassed` | Shared semantic lane |
 
-These rows are intentionally semantic-lane requirements. Frontend-conformance
-coverage may validate renderer wiring for release screens or controls, but it
-does not satisfy release/update lifecycle coverage on its own.
+These rows are intentionally semantic-lane requirements. Frontend-conformance coverage may validate renderer wiring for release screens or controls, but it does not satisfy release/update lifecycle coverage on its own.
 
 ## Coverage Expectations
 
@@ -153,12 +144,9 @@ Every parity-critical shared flow should have, in code and metadata:
 - any parity exception recorded as typed metadata in `aura-app::ui_contract`
 - at least one canonical scenario reference in this report
 
-Shared-flow scenarios must not rely on raw PTY keys, raw selector clicks, raw
-label matching, or incidental focus-stepping as their primary mechanics.
-Those behaviors belong in frontend-conformance coverage instead.
+Shared-flow scenarios must not rely on raw PTY keys, raw selector clicks, raw label matching, or incidental focus-stepping as their primary mechanics. Those behaviors belong in frontend-conformance coverage instead.
 
-Frontend-specific flows may still have scenario coverage, but they are not part
-of the portability contract unless explicitly promoted into the shared contract.
+Frontend-specific flows may still have scenario coverage, but they are not part of the portability contract unless explicitly promoted into the shared contract.
 
 ### PR Gate Expectations
 

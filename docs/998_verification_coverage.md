@@ -152,7 +152,7 @@ Lean 4 mathematical proofs in `verification/lean/` providing formal guarantees.
 
 #### Proof Modules (14 files, 118 theorems)
 
-**Consensus Proofs:**
+#### Consensus Proofs
 
 | Module | Theorems | Content |
 |--------|----------|---------|
@@ -165,7 +165,7 @@ Lean 4 mathematical proofs in `verification/lean/` providing formal guarantees.
 | `Proofs/Consensus/Adversary.lean` | 7 | Byzantine model bounds |
 | `Proofs/Consensus/Summary.lean` | - | Master consensus claims bundle |
 
-**Infrastructure Proofs:**
+#### Infrastructure Proofs
 
 | Module | Theorems | Content |
 |--------|----------|---------|

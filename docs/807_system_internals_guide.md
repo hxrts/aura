@@ -240,7 +240,7 @@ The scheduler:
 
 The TUI uses `futures-signals` for fine-grained reactive state management.
 
-**Note**: The reactive architecture pattern below represents the target design for TUI state management. Implementation status varies by view.
+The reactive architecture pattern below represents the target design for TUI state management. Implementation status varies by view.
 
 #### Signal Types
 

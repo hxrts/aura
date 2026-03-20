@@ -84,11 +84,7 @@ let transfer = token.handoff("invite-coordinator");
 
 The original `token` is consumed by `handoff`. Trying to act through the old owner is a compile-time error.
 
-Typed ownership capabilities from the same wrapper family can also be issued
-onto Aura's existing Biscuit path without first down-converting them to raw
-`CapabilityKey` values via `ownership_capability_token_request_for(...)`.
-Lower layers should not expose parallel raw ownership-capability request
-helpers once a typed wrapper family exists.
+Typed ownership capabilities from the same wrapper family can also be issued onto Aura's existing Biscuit path without first down-converting them to raw `CapabilityKey` values via `ownership_capability_token_request_for(...)`. Lower layers should not expose parallel raw ownership-capability request helpers once a typed wrapper family exists.
 
 ### When To Use Capability Tokens
 
@@ -124,13 +120,9 @@ let terminal = ctx
     .fail("timeout");
 ```
 
-Context minting and publication both require capability-shaped inputs. Random
-helper code cannot fabricate owner context or publish lifecycle by accident.
+Context minting and publication both require capability-shaped inputs. Random helper code cannot fabricate owner context or publish lifecycle by accident.
 
-The same rule applies to readiness and actor-ingress mutation. Higher layers
-should prefer `AuthorizedReadinessPublication<T>` and
-`AuthorizedActorIngressMutation<T>` over raw capability arguments when they
-need to move parity-critical authority across API boundaries.
+The same rule applies to readiness and actor-ingress mutation. Higher layers should prefer `AuthorizedReadinessPublication<T>` and `AuthorizedActorIngressMutation<T>` over raw capability arguments when they need to move parity-critical authority across API boundaries.
 
 ### When To Use `ActorOwned`
 
@@ -176,8 +168,7 @@ That declaration must name:
 - the capability-gated mutation/publication points
 - the local timeout/backoff owner if deadlines or retries are involved
 
-The ownership declaration is part of the change, not optional follow-up
-documentation.
+The ownership declaration is part of the change, not optional follow-up documentation.
 
 ## Terminality
 
@@ -185,10 +176,7 @@ Every parity-critical operation must have typed terminal behavior. Direct bounda
 
 Every submitted operation must reach a terminal state. Terminal states may not regress. Owner drop must publish failure or cancellation explicitly.
 
-Terminality alone is not strong enough. Aura also requires *owner-internal
-liveness*: a legal owner may not contain unbounded internal work that can keep
-an operation in `Submitting` forever. If the owner can hang indefinitely while
-still technically being the "right" owner, the architecture is incomplete.
+Terminality alone is not strong enough. Aura also requires owner-internal liveness: a legal owner may not contain unbounded internal work that can keep an operation in `Submitting` forever. If the owner can hang indefinitely while still technically being the "right" owner, the architecture is incomplete.
 
 ## Semantic Owner Protocol
 
@@ -212,8 +200,7 @@ This forbids the bug shape where:
 - but the callback keeps local `Submitting` state alive while the workflow has
   already reached terminal publication or is blocked in best-effort work
 
-The handoff boundary must therefore be *before* awaited workflow execution, not
-after it.
+The handoff boundary must therefore be before awaited workflow execution, not after it.
 
 Macro declaration rule:
 
@@ -234,6 +221,17 @@ Macro declaration rule:
 - `#[aura_macros::ownership_lifecycle(initial = "...", ordered = "...", terminals = "...")]`
   is the sanctioned declaration surface for small parity-critical lifecycle
   enums
+
+## Reactive Contract
+
+Parity-critical reactive consumers must rely on one explicit subscription contract.
+
+- subscription to an unregistered signal is a typed failure, not an empty or inert stream
+- there is no implicit registration wait for parity-critical consumers
+- if a subscriber lags behind the broadcast buffer, the handler logs the lag and resumes from a newer snapshot
+- parity-critical owners may not infer replay or lossless history from the reactive layer unless an explicit replay contract exists
+
+This means reactive delivery is a transport for authoritative snapshots, not an alternate owner of semantic truth. Owner code must tolerate "newer snapshot after lag" semantics without silently treating a missed update as "no change."
 
 ## Owner Body Rules
 
@@ -258,16 +256,11 @@ Forbidden:
 - silently discarding parity-critical results or errors
 - ad hoc local retries, sleeps, or polling loops
 
-If a semantic owner needs long-lived convergence, that convergence must be
-owned by a dedicated `ActorOwned` coordinator and expressed as typed readiness
-or typed terminal lifecycle, not as an unbounded await hidden inside a helper.
+If a semantic owner needs long-lived convergence, that convergence must be owned by a dedicated `ActorOwned` coordinator and expressed as typed readiness or typed terminal lifecycle, not as an unbounded await hidden inside a helper.
 
 ## Typed Success Proofs
 
-Declared postconditions are not documentation-only. For parity-critical
-operation families, `Succeeded` should be tied to an opaque typed proof surface
-whenever the authoritative postcondition is stronger than "the function
-returned `Ok`".
+Declared postconditions are not documentation-only. For parity-critical operation families, `Succeeded` should be tied to an opaque typed proof surface whenever the authoritative postcondition is stronger than "the function returned `Ok`".
 
 The required pattern is:
 
@@ -283,8 +276,7 @@ This is intentionally different from a capability token:
 - a capability answers who is allowed to act
 - a proof answers what has become true
 
-Proofs must therefore be minted by capability-gated code, but the proof itself
-must not be the authority token.
+Proofs must therefore be minted by capability-gated code, but the proof itself must not be the authority token.
 
 The canonical direction is:
 
@@ -293,8 +285,7 @@ The canonical direction is:
   canonical proof-bearing success helper
 - plain `publish_phase(Succeeded)` is forbidden for proof-bound owners
 
-Proof constructors stay private. External code must not be able to forge a
-proof witness, and the compile-fail suites should prove that boundary.
+Proof constructors stay private. External code must not be able to forge a proof witness, and the compile-fail suites should prove that boundary.
 
 ## Best-Effort Separation
 
@@ -322,8 +313,7 @@ Best-effort work:
   boundary and lints it accordingly even when the helper forgot to add an
   explicit `#[best_effort_boundary]`
 
-If a step mutates authoritative state required by a later semantic operation,
-it is not best-effort. It belongs either:
+If a step mutates authoritative state required by a later semantic operation, it is not best-effort. It belongs either:
 
 - inside the canonical semantic owner before `Succeeded`, or
 - inside a distinct owned child operation with its own explicit lifecycle and dependency edge
@@ -363,13 +353,11 @@ The desired order of strength is:
 7. thin CI shell wrappers that call those stronger checks
 
 Shell scripts remain useful as workflow glue, but they are the weakest layer.
-If a policy matters for parity-critical correctness, the long-term goal is to
-encode it in types, macros, or AST-backed analysis rather than rely on grep.
+If a policy matters for parity-critical correctness, the long-term goal is to encode it in types, macros, or AST-backed analysis rather than rely on grep.
 
 ## Required Invariants For Parity-Critical Operations
 
-Every parity-critical operation family should have invariant tests for all of
-the following:
+Every parity-critical operation family should have invariant tests for all of the following:
 
 - owner drop forces `Failed` or `Cancelled`
 - terminal state cannot regress
@@ -385,8 +373,7 @@ the following:
   handoff
 - older authoritative instances cannot overwrite newer local submissions
 
-If one of these invariants is missing for an operation family, the family is
-not yet fully migrated to the ownership model.
+If one of these invariants is missing for an operation family, the family is not yet fully migrated to the ownership model.
 
 ## Frontend Handoff Rule
 
@@ -431,9 +418,7 @@ Layer 8 (testing) may simulate actors and capabilities. Parity-critical lanes mu
 
 ## Workspace Ownership Inventory
 
-This inventory covers every Rust crate under `crates/`. It is the workspace-level
-baseline. Detailed per-module inventories belong in crate `ARCHITECTURE.md`
-files.
+This inventory covers every Rust crate under `crates/`. It is the workspace-level baseline. Detailed per-module inventories belong in crate `ARCHITECTURE.md` files.
 
 ### Layer Summary
 
@@ -468,9 +453,7 @@ files.
   where they mirror production owner boundaries rather than inventing a
   separate semantic model.
 
-Each crate `ARCHITECTURE.md` must classify its parity-critical modules,
-identify actor-owned domains, name consumed move-owned surfaces, and list the
-capability-gated mutation/publication points it exposes.
+Each crate `ARCHITECTURE.md` must classify its parity-critical modules, identify actor-owned domains, name consumed move-owned surfaces, and list the capability-gated mutation/publication points it exposes.
 
 ## Enforcement
 
@@ -510,8 +493,7 @@ Current enforcement split:
   shutdown ordering and instrumentation schema discipline because those are
   orchestration-level invariants, not just API-shape rules.
 
-Primary enforcement belongs in typed ownership primitives and proc-macro
-declarations. For the frontend/harness stack this means:
+Primary enforcement belongs in typed ownership primitives and proc-macro declarations. For the frontend/harness stack this means:
 
 - `HarnessUiOperationHandle` and `UiOperationHandle` are constructor/accessor
   surfaces, not public-field records
@@ -521,9 +503,7 @@ declarations. For the frontend/harness stack this means:
 - `UiTaskOwner` and `WebTaskOwner` are the only sanctioned frontend
   task-ownership surfaces
 
-Shell checks such as semantic-owner bounded-await and frontend/harness boundary
-wrappers are secondary fences for narrow escape hatches, not the source of
-truth for semantic correctness.
+Shell checks such as semantic-owner bounded-await and frontend/harness boundary wrappers are secondary fences for narrow escape hatches, not the source of truth for semantic correctness.
 
 For proof-bearing postconditions specifically, the desired enforcement order is:
 

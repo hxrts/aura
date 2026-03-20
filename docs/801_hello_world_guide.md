@@ -247,7 +247,7 @@ The test validates protocol correctness without requiring network infrastructure
 
 ## Understanding System Invariants
 
-As you develop protocols, be aware of Aura's system invariants - properties that must always hold true:
+As you develop protocols, be aware of Aura's system invariants:
 
 - **Charge-Before-Send**: All messages pass through the guard chain, which evaluates over a prepared `GuardSnapshot` and emits `EffectCommand` items that the interpreter executes before any transport send
 - **CRDT Convergence**: Identical facts always produce identical state

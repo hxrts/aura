@@ -4,14 +4,9 @@
 
 Aura uses algebraic effects to abstract system capabilities. Effect traits define abstract interfaces for cryptography, storage, networking, time, and randomness. Handlers implement these traits with concrete behavior. Context propagation ensures consistent execution across async boundaries.
 
-This document covers effect trait design, handler patterns, and the context model. See [Runtime](104_runtime.md) for lifecycle management, service composition, and guard chain execution.
-See [Ownership Model](122_ownership_model.md) for the repo-wide
-`Pure`/`MoveOwned`/`ActorOwned`/`Observed` taxonomy.
+This document covers effect trait design, handler patterns, and the context model. See [Runtime](104_runtime.md) for lifecycle management, service composition, and guard chain execution. See [Ownership Model](122_ownership_model.md) for the repo-wide `Pure`/`MoveOwned`/`ActorOwned`/`Observed` taxonomy.
 
-The `aura-agent` runtime uses structured concurrency with explicit session ownership.
-Session-bound effects execute only under the current owner via canonical ingress.
-For complete details on async ownership, session ownership, typed runtime errors,
-and instrumentation policy, see `crates/aura-agent/ARCHITECTURE.md`.
+The `aura-agent` runtime uses structured concurrency with explicit session ownership. Session-bound effects execute only under the current owner via canonical ingress. For complete details on async ownership, session ownership, typed runtime errors, and instrumentation policy, see `crates/aura-agent/ARCHITECTURE.md`.
 
 The runtime contract is intentionally split:
 
@@ -22,8 +17,7 @@ Effect execution that touches session state belongs to the second category, not 
 
 ## Ownership At Effect Boundaries
 
-Effect traits sit at an ownership boundary and should preserve the repo-wide
-ownership model rather than hide it.
+Effect traits sit at an ownership boundary and should preserve the repo-wide ownership model rather than hide it.
 
 - Effect trait definitions in `aura-core` are primarily `Pure`.
 - Long-lived mutable async ownership belongs to `ActorOwned` runtime services,
@@ -215,7 +209,7 @@ pub trait ReactiveEffects: Send + Sync {
 }
 ```
 
-The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](104_runtime.md) for reactive scheduling implementation. Subscribing an unregistered signal fails fast; Aura no longer permits "dead stream" subscription success for missing registrations.
+The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](104_runtime.md) for reactive scheduling implementation. Subscribing an unregistered signal fails fast. Aura no longer permits "dead stream" subscription success for missing registrations.
 
 ## QueryEffects Trait
 
@@ -262,8 +256,7 @@ Async host work resumes outside the VM step boundary in Layer 6 runtime services
 
 `aura-agent` runtime code preserves this boundary through canonical ingress and explicit session ownership. Network callbacks, timers, and background tasks route typed session-ingress messages to the current local owner. Each active session has exactly one owner at any time.
 
-That owner may be hosted by an actor, but the effect-routing rule is still ownership-based:
-session-bound effects execute because the caller is the current owner, not merely because it runs inside a service actor.
+That owner may be hosted by an actor, but the effect-routing rule is still ownership-based: session-bound effects execute because the caller is the current owner, not merely because it runs inside a service actor.
 
 The runtime must also distinguish owner identity from owner capability:
 
@@ -272,8 +265,7 @@ The runtime must also distinguish owner identity from owner capability:
 
 Both checks matter for effect routing, especially across delegation boundaries.
 
-Parity-critical ownership boundaries should declare that split explicitly
-through `aura-macros` rather than comments or naming convention alone:
+Parity-critical ownership boundaries should declare that split explicitly through `aura-macros` rather than comments or naming convention alone:
 - `#[semantic_owner(..., category = "move_owned")]` for move-owned workflow owners
 - `#[actor_owned(..., category = "actor_owned")]` for long-lived async domains
 - `#[capability_boundary(category = "capability_gated", ...)]` for mint/publication helpers

@@ -428,31 +428,31 @@ if recovery_op.is_emergency() {
 
 ### Best Practices
 
-**Guardian Configuration:**
+Guardian configuration:
 - Use 24-hour minimum recovery delay for security
 - Always require notification unless emergency scenario
 - Set expiration for temporary guardian relationships
 - Rotate guardian bindings periodically
 
-**Recovery Grants:**
+Recovery grants:
 - Always require consensus proof for recovery operations
 - Validate prestate commitments before accepting grants
 - Log all recovery operations for audit trail
 - Emergency operations should be rare and logged prominently
 
-**Generic Bindings:**
+Generic bindings:
 - Document your FactTypeId schemas externally
 - Use schema_version field to version your payload format
 - Include consensus_proof for critical application bindings
 - Keep payload size reasonable for sync performance
 
-**Context Management:**
+Context management:
 - Use opaque ContextId - never encode participant info
 - Limit participants to 2-10 authorities for efficiency
 - Separate contexts for different relationship types
 - Garbage collect expired bindings periodically
 
-**Lifecycle Notes:**
+Lifecycle notes:
 - A1/A2 facts are usable immediately but are provisional; any durable relational state must be A3 (consensus-finalized).
 - Soft-safe operations should emit `ConvergenceCert` and `ReversionFact` protocol facts to make convergence and reversion risk explicit.
 
@@ -462,26 +462,26 @@ Understanding the distinction between relational contexts and channels is essent
 
 ### 10.1 Relational Contexts (Category C - Consensus Required)
 
-Creating a relational context establishes a cryptographic relationship between authorities. This is a **Category C (consensus-gated)** operation because:
+Creating a relational context establishes a cryptographic relationship between authorities. This is a Category C (consensus-gated) operation because:
 
 - It creates the shared secret foundation for all future communication
 - Both parties must agree to establish the relationship
 - Partial state (one party thinks relationship exists, other doesn't) is dangerous
 
-**Examples:**
+Examples:
 - Adding a contact (bilateral context between two authorities)
 - Creating a group (multi-party context with all members)
 - Adding a member to an existing group (extends the cryptographic context)
 
 ### 10.2 Channels Within Contexts (Category A - Optimistic)
 
-Once a relational context exists, channels are **Category A (optimistic)** operations:
+Once a relational context exists, channels are Category A (optimistic) operations:
 
 - Channels are just organizational substreams within the context
 - No new cryptographic agreement needed - keys derive from context
 - Channel facts sync via anti-entropy, eventual consistency is sufficient
 
-**Examples within existing context:**
+Examples within existing context:
 - Create channel → emit `ChannelCheckpoint` fact
 - Send message → derive key from context, encrypt, send
 - Update topic → emit fact to context journal

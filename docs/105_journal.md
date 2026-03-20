@@ -55,7 +55,7 @@ pub enum FactContent {
 }
 ```
 
-The `order` field provides an opaque, privacy-preserving total order for deterministic fact ordering in the BTreeSet. The `timestamp` field provides semantic time information for application logic. Facts implement `Ord` via the `OrderTime` field. Do not use `TimeStamp` for cross-domain indexing or total ordering; use `OrderTime` or consensus/session sequencing.
+The `order` field provides an opaque, privacy-preserving total order for deterministic fact ordering in the BTreeSet. The `timestamp` field provides semantic time information for application logic. Facts implement `Ord` via the `OrderTime` field. Do not use `TimeStamp` for cross-domain indexing or total ordering. Use `OrderTime` or consensus/session sequencing instead.
 
 This model supports account operations, relational context operations, snapshots, and rendezvous receipts. Each fact is self contained. Facts are validated before insertion into a namespace.
 
@@ -66,15 +66,15 @@ This model supports account operations, relational context operations, snapshots
 - `Protocol(ProtocolRelationalFact)`: Protocol-level facts that must live in `aura-journal` because reduction semantics depend on them.
 - `Generic { .. }`: Extensibility hook for domain facts (`DomainFact` + `FactReducer`).
 
-**Criteria for ProtocolRelationalFact** (all must hold):
+Criteria for ProtocolRelationalFact (all must hold):
 
 1. **Reduction-coupled**: the fact directly affects core reduction invariants in `reduce_context()` (not just a view).
 2. **Cross-domain**: the fact’s semantics are shared across multiple protocols or layers.
 3. **Non-derivable**: the state cannot be reconstructed purely via `FactReducer` + `RelationalFact::Generic`.
 
-If a fact does **not** meet all three criteria, it must be implemented as a domain fact and stored via `RelationalFact::Generic`.
+If a fact does not meet all three criteria, it must be implemented as a domain fact and stored via `RelationalFact::Generic`.
 
-**Enforcement**:
+Enforcement:
 
 - All protocol facts are defined in `crates/aura-journal/src/protocol_facts.rs`.
 - Any new protocol fact requires a doc update in this section and a matching reduction rule.
@@ -264,7 +264,7 @@ At the choreography runtime boundary, journal coupling is always driven by guard
 
 AttestedOp exists in two layers with different levels of detail:
 
-**Layer 1 (aura-core)** - Full operation metadata:
+Layer 1 (aura-core) - Full operation metadata:
 
 ```rust
 pub struct AttestedOp {
@@ -281,7 +281,7 @@ pub struct TreeOp {
 }
 ```
 
-**Layer 2 (aura-journal)** - Flattened for journal storage:
+Layer 2 (aura-journal) - Flattened for journal storage:
 
 ```rust
 pub struct AttestedOp {
@@ -314,7 +314,7 @@ Every fact inserted into a journal must be validated before merge. The following
 
 ### 13.1 AttestedOp Facts
 
-**Checks**
+Checks
 - Verify the threshold signature (`agg_sig`) using the two-phase verification model from `aura-core::tree::verification`:
   - `verify_attested_op()`: Cryptographic signature check against `BranchSigningKey` stored in TreeState
   - `check_attested_op()`: Full verification plus state consistency (epoch, parent commitment)
@@ -323,42 +323,42 @@ Every fact inserted into a journal must be validated before merge. The following
 
 See [Tree Operation Verification](102_authority_and_identity.md#8-tree-operation-verification) for details on the verify/check model and binding message security.
 
-**Responsible Effects**
+Responsible Effects
 - `CryptoEffects` for FROST signature verification via `verify_attested_op()`.
 - `JournalEffects` for parent lookup, state consistency via `check_attested_op()`, and conflict detection.
 - `StorageEffects` to persist the fact once validated.
 
 ### 13.2 Relational Facts
 
-**Checks**
+Checks
 - Validate that each authority commitment referenced in the fact matches the current reduced state (`AuthorityState::root_commitment`).
 - Verify Aura Consensus proofs if present (guardian bindings, recovery grants).
 - Enforce application-specific invariants (e.g., no duplicate guardian bindings).
 
-**Responsible Effects**
+Responsible Effects
 - `AuthorizationEffects` / `RelationalEffects` for context membership checks.
 - `CryptoEffects` for consensus proof verification.
 - `JournalEffects` for context-specific merge.
 
 ### 13.3 FlowBudget Facts
 
-**Checks**
+Checks
 - Ensure `spent` deltas are non-negative and reference the active epoch for the `(ContextId, peer)` pair.
 - Reject facts that would decrease the recorded `spent` (monotone requirement).
 - Validate receipt signatures associated with the charge (see `111_transport_and_information_flow.md`).
 
-**Responsible Effects**
+Responsible Effects
 - `FlowBudgetEffects` (or FlowGuard) produce the fact and enforce monotonicity before inserting.
 - `JournalEffects` gate insertion to prevent stale epochs from updating headroom.
 
 ### 13.4 Snapshot Facts
 
-**Checks**
+Checks
 - Confirm the snapshot `state_hash` matches the hash of all facts below the snapshot.
 - Ensure no newer snapshot already exists for the namespace (check `sequence` number).
 - Verify that pruning according to the snapshot does not remove facts still referenced by receipts or pending consensus operations.
 
-**Responsible Effects**
+Responsible Effects
 - `JournalEffects` compute and validate snapshot digests.
 - `StorageEffects` persist the snapshot atomically with pruning metadata.
 

@@ -604,9 +604,8 @@ Aura treats protocol execution as interpretation over an algebraic effect interf
 
 Because the interface is algebraic, there is a single semantics regardless of execution strategy. This enables two interchangeable modes:
 
-**Static compilation:** choreographies lower to direct effect calls with zero runtime overhead.
-
-**Dynamic interpretation:** choreographies execute through the runtime interpreter for flexibility and tooling.
+- Static compilation: choreographies lower to direct effect calls with zero runtime overhead.
+- Dynamic interpretation: choreographies execute through the runtime interpreter for flexibility and tooling.
 
 Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding `merge`/`check_caps`/`refine`/`record_leak` sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
 

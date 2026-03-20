@@ -78,7 +78,7 @@ choreography! {
 }
 ```
 
-**Annotation syntax**: `Role[guard_capability = "...", flow_cost = N, journal_facts = "..."] -> Target: Message`
+Annotation syntax: `Role[guard_capability = "...", flow_cost = N, journal_facts = "..."] -> Target: Message`
 
 Select the narrowest `TimeStamp` domain for each time field. See [Effect System](103_effect_system.md) for time domains.
 
@@ -397,7 +397,7 @@ Choreography annotations compile to guard chain commands:
 
 ## 7. Domain Service Pattern
 
-Domain crates define stateless handlers; the agent layer wraps them with services.
+Domain crates define stateless handlers. The agent layer wraps them with services.
 
 ### Domain Handler
 

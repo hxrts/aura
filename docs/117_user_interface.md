@@ -93,7 +93,7 @@ The developer demo UX is intentionally separate from harness orchestration. It i
 - contact exchange between TUI and web
 - shared-channel messaging between TUI and web
 
-It is not a replacement for harness automation. Harness scenarios remain the expected automated regression path for browser/TUI startup, onboarding readiness, device enrollment, contact exchange, and messaging coverage where those scenarios already exist. Use the demo UX to reproduce and inspect behavior locally; use harness lanes to prevent regressions.
+It is not a replacement for harness automation. Harness scenarios remain the expected automated regression path for browser/TUI startup, onboarding readiness, device enrollment, contact exchange, and messaging coverage where those scenarios already exist. Use the demo UX to reproduce and inspect behavior locally. Use harness lanes to prevent regressions.
 
 ### Developer demo resource policy
 

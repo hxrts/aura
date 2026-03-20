@@ -46,18 +46,14 @@ This diagram shows the primary data flow. Authorities own journals that store fa
 
 Every operation flows through the effect system. Every state change is replicated through journals. Every external action is authorized through guards. These three invariants define the architectural contract.
 
-Shared semantic workflow ownership follows the same rule: there is one
-authoritative publication owner for parity-critical operation lifecycle.
-Frontend and harness layers may submit commands and observe results, but they
-do not keep a parallel source of semantic terminal truth after handoff.
+Shared semantic workflow ownership follows the same rule: there is one authoritative publication owner for parity-critical operation lifecycle. Frontend and harness layers may submit commands and observe results, but they do not keep a parallel source of semantic terminal truth after handoff.
 
 The runtime side is equally strict:
 
 - `aura-agent` is the only production structured-concurrency path
 - long-lived runtime state is actor-owned behind bounded ingress
 - session, endpoint, fragment, and delegation transfer remain move-owned
-- raw task spawning stays inside the runtime supervision boundary rather than
-  service code or frontend layers
+- raw task spawning stays inside the runtime supervision boundary rather than service code or frontend layers
 
 ## 1. Dual Semilattice Model
 
@@ -258,11 +254,7 @@ pub struct EffectContext {
 
 Context propagation ensures that all operations within a call chain share the same scope. Guards access context to make authorization decisions. Handlers access context to route operations to the correct namespace.
 
-For parity-critical workflow ownership, Aura also uses a separate move-owned
-`OperationContext` from `aura-core::ownership`. `EffectContext` answers
-"where is this effect executing?"; `OperationContext` answers "who currently
-owns semantic lifecycle, timeout budget, and terminal publication for this
-workflow instance?" The two must not be conflated.
+For parity-critical workflow ownership, Aura also uses a separate move-owned `OperationContext` from `aura-core::ownership`. `EffectContext` answers "where is this effect executing?". `OperationContext` answers "who currently owns semantic lifecycle, timeout budget, and terminal publication for this workflow instance?" The two must not be conflated.
 
 ### 4.4 Impure function control
 
@@ -484,34 +476,27 @@ This diagram shows dependency flow. Testing crates can depend on any layer for t
 
 ### 9.1 Layer descriptions
 
-**Layer 1, Foundation** — `aura-core` with effect traits, identifiers, and cryptographic utilities.
+Layer 1, Foundation — `aura-core` with effect traits, identifiers, and cryptographic utilities.
 
-**Layer 2, Specification** — domain crates defining semantics without runtime. No OS access, no Tokio. Facts use DAG-CBOR.
+Layer 2, Specification — domain crates defining semantics without runtime. No OS access, no Tokio. Facts use DAG-CBOR.
 
-**Layer 3, Implementation** — `aura-effects` for production handlers, `aura-composition` for handler assembly.
+Layer 3, Implementation — `aura-effects` for production handlers, `aura-composition` for handler assembly.
 
-**Layer 4, Orchestration** — multi-party coordination via `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`.
+Layer 4, Orchestration — multi-party coordination via `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`.
 
-**Layer 5, Feature** — end-to-end protocols. Each crate declares `OPERATION_CATEGORIES`. Runtime caches live in Layer 6.
+Layer 5, Feature — end-to-end protocols. Each crate declares `OPERATION_CATEGORIES`. Runtime caches live in Layer 6.
 
-**Layer 6, Runtime** — `aura-agent` for assembly, `aura-app` for portable logic, `aura-simulator` for deterministic simulation.
+Layer 6, Runtime — `aura-agent` for assembly, `aura-app` for portable logic, `aura-simulator` for deterministic simulation.
 
-**Layer 7, Interface** — `aura-terminal` for CLI/TUI shells, `aura-ui` for
-shared observed UI state and components, and `aura-web` for the browser shell.
-Layer 7 remains primarily `Observed`. The only sanctioned ownership inside this
-layer is:
+Layer 7, Interface — `aura-terminal` for CLI/TUI shells, `aura-ui` for shared observed UI state and components, and `aura-web` for the browser shell. Layer 7 remains primarily `Observed`. The only sanctioned ownership inside this layer is:
 
-- narrow `MoveOwned` submission windows for frontend-local operations that
-  terminate locally
-- narrow `MoveOwned` handoff windows for operations that must transfer into
-  `aura-app` workflow ownership before awaited work begins
-- narrow `ActorOwned` ingress/bridge mechanics such as the TUI update loop and
-  browser harness bridge plumbing
+- narrow `MoveOwned` submission windows for frontend-local operations that terminate locally
+- narrow `MoveOwned` handoff windows for operations that must transfer into `aura-app` workflow ownership before awaited work begins
+- narrow `ActorOwned` ingress/bridge mechanics such as the TUI update loop and browser harness bridge plumbing
 
-Layer 7 must not keep a second source of parity-critical semantic lifecycle or
-readiness truth after handoff.
+Layer 7 must not keep a second source of parity-critical semantic lifecycle or readiness truth after handoff.
 
-**Layer 8, Testing** — `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure.
+Layer 8, Testing — `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure.
 
 ### 9.2 Code location guidance
 
@@ -567,18 +552,14 @@ Signal emission is non-blocking. Handlers batch rapid updates to reduce overhead
 Journal fact changes flow through reducers to signals. Reducers compute derived state from facts. Signals expose that state to UI observers. The flow is unidirectional and predictable.
 
 The `aura-app` crate defines application signals. The `aura-terminal` crate consumes these signals for rendering. This separation keeps UI concerns out of core logic.
-For shared UX validation, `aura-app::ui_contract` is the canonical authority
-for parity-critical UI identity, readiness semantics, and typed observation
-payloads. Frontend shells consume that contract and publish deterministic
-semantic state. `aura-harness` is the primary execution lane for real TUI/web
-validation and must observe side-effect-free semantic state rather than rely on
-DOM or text scraping as a correctness path.
+
+For shared UX validation, `aura-app::ui_contract` is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads. Frontend shells consume that contract and publish deterministic semantic state. `aura-harness` is the primary execution lane for real TUI/web validation and must observe side-effect-free semantic state rather than rely on DOM or text scraping as a correctness path.
 
 ## 12. Error Handling
 
 Errors are unified through the `AuraError` type in `aura-core`. Domain crates define specific error variants. Effects propagate errors through `Result` types.
 
-### 11.1 Error classification
+### 12.1 Error classification
 
 Errors are classified by recoverability. Transient errors may succeed on retry. Permanent errors indicate invalid operations. System errors indicate infrastructure failures.
 
@@ -592,7 +573,7 @@ pub enum ErrorKind {
 
 Error classification guides retry behavior and user feedback. Transient errors trigger automatic retry with backoff. Permanent errors are reported to the user. System errors may require recovery procedures.
 
-### 11.2 Error propagation
+### 12.2 Error propagation
 
 Effects propagate errors through `Result` types. Handlers convert low-level errors to domain errors. The error chain preserves context for debugging. Logging captures error details without exposing sensitive data.
 
@@ -607,7 +588,7 @@ async fn operation<E: JournalEffects>(effects: &E) -> Result<(), AuraError> {
 
 Error context includes the operation name and relevant identifiers. Stack traces are available in debug builds. Production builds log structured error data for monitoring.
 
-### 11.3 Consensus and recovery
+### 12.3 Consensus and recovery
 
 Consensus failures have specific handling. Fast path failures fall back to gossip. Network partitions delay but do not corrupt state. Recovery procedures restore operation after failures.
 

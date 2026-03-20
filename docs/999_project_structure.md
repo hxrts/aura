@@ -2,11 +2,9 @@
 
 This document provides the authoritative reference for Aura's crate organization, dependencies, and development policies.
 
-The **primary specifications** live in `docs/` (e.g., consensus in `docs/108_consensus.md`, ceremony lifecycles in `docs/109_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
+The primary specifications live in `docs/` (e.g., consensus in `docs/108_consensus.md`, ceremony lifecycles in `docs/109_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
 
-The repo-wide ownership taxonomy is defined in
-[Ownership Model](122_ownership_model.md). This document specifies how those
-ownership rules map onto Aura's crate and layer structure.
+The repo-wide ownership taxonomy is defined in [Ownership Model](122_ownership_model.md). This document specifies how those ownership rules map onto Aura's crate and layer structure.
 
 ## 8-Layer Architecture
 
@@ -84,14 +82,13 @@ For Layer 6 runtime code this means:
 - raw task spawn is implementation detail inside the sanctioned supervisor
   boundary, not a public runtime programming model
 
-If a parity-critical subsystem cannot explain who owns state, how ownership is
-transferred, and how failure terminates, the architecture is incomplete.
+If a parity-critical subsystem cannot explain who owns state, how ownership is transferred, and how failure terminates, the architecture is incomplete.
 
-## Layer 1: Foundation — `aura-core`
+## Layer 1: Foundation (`aura-core`)
 
-**Purpose**: Single source of truth for all domain concepts and interfaces.
+Purpose: Single source of truth for all domain concepts and interfaces.
 
-**Contains**:
+Contains:
 - Effect traits for core infrastructure, authentication, storage, network, cryptography, privacy, configuration, and testing
 - Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, `ObserverClass`, `Capability`
 - Cryptographic utilities: key derivation, FROST types, merkle trees, Ed25519 helpers
@@ -101,9 +98,9 @@ transferred, and how failure terminates, the architecture is incomplete.
 - Causal context types for CRDT ordering
 - AMP channel lifecycle effect surface: `aura-core::effects::amp::AmpChannelEffects` (implemented by runtime, simulator, and testkit mocks).
 
-**Key principle**: Interfaces only, no implementations or business logic.
+Key principle: Interfaces only, no implementations or business logic.
 
-**Ownership expectation**:
+Ownership expectation:
 - primarily `Pure`
 - defines the shared ownership, capability, and terminality vocabulary used by
   higher layers
@@ -113,7 +110,7 @@ transferred, and how failure terminates, the architecture is incomplete.
   explicitly split into `actor_owned::*`, `move_owned::*`, and
   `capability_gated::*`
 
-**Exceptions**:
+Exceptions:
 
 1. **Extension traits** providing convenience methods are allowed (e.g., `LeakageChoreographyExt`, `SimulationEffects`, `AuthorityRelationalEffects`). These blanket implementations extend existing effect traits with domain-specific convenience methods while maintaining interface-only semantics.
 
@@ -126,24 +123,24 @@ transferred, and how failure terminates, the architecture is incomplete.
    }
    ```
 
-   **Why this is architecturally sound**: `Arc` is a language-level primitive (like `Vec`, `Box`, or `&`), not a "runtime" in the architectural sense. These implementations add no behavior or state - they simply say "if T can do X, then Arc<T> can too by asking T." Without these, any handler wrapped in `Arc` would fail to satisfy effect trait bounds, breaking the entire dependency injection pattern.
+   `Arc` is a language-level primitive (like `Vec`, `Box`, or `&`), not a "runtime" in the architectural sense. These implementations add no behavior or state. They simply say "if T can do X, then Arc<T> can too by asking T." Without these, any handler wrapped in `Arc` would fail to satisfy effect trait bounds, breaking the entire dependency injection pattern.
 
-**Architectural Compliance**: aura-core maintains strict interface-only semantics. Test utilities like MockEffects are provided in aura-testkit (Layer 8) where they architecturally belong.
+Architectural compliance: aura-core maintains strict interface-only semantics. Test utilities like MockEffects are provided in aura-testkit (Layer 8) where they architecturally belong.
 
-**Dependencies**: None (foundation crate).
+Dependencies: None (foundation crate).
 
 ### Commitment Tree Types and Functions
 
-**Location**: `aura-core/src/tree/`
+Location: `aura-core/src/tree/`
 
-**Contains**:
+Contains:
 - Core tree types: `TreeOp`, `AttestedOp`, `Policy`, `LeafNode`, `BranchNode`, `BranchSigningKey`, `TreeCommitment`, `Epoch`
 - Commitment functions: `commit_branch()`, `commit_leaf()`, `policy_hash()`, `compute_root_commitment()`
 - Policy meet-semilattice implementation for threshold refinement
 - Snapshot types: `Snapshot`, `Cut`, `ProposalId`, `Partial`
 - Verification module: `verify_attested_op()` (cryptographic), `check_attested_op()` (state consistency), `compute_binding_message()`
 
-**Why Layer 1?**
+Why Layer 1?
 
 Commitment tree types MUST remain in `aura-core` because:
 1. **Effect traits require them**: `TreeEffects` and `SyncEffects` in `aura-core/src/effects/` use these types in their signatures
@@ -151,24 +148,24 @@ Commitment tree types MUST remain in `aura-core` because:
 3. **Authority abstraction needs them**: `aura-core/src/authority.rs` uses `Policy`, `AttestedOp`, and `TreeOpKind`
 4. **Foundational cryptographic structures**: Commitment trees are merkle trees with threshold policies - core cryptographic primitives, not domain logic
 
-**Layer 2 separation (`aura-journal`) contains**:
+Layer 2 separation (`aura-journal`) contains:
 - Tree state machine: Full `TreeState` with branches, leaves, topology, and path validation
 - Reduction logic: Deterministic state derivation from `OpLog<AttestedOp>`
 - Domain validation: Business rules for tree operations (e.g., policy monotonicity, leaf lifecycle)
 - Application logic: `apply_verified()`, compaction, garbage collection
 - Re-exports: `pub use aura_core::tree::*` for convenience via `aura_journal::commitment_tree`
 
-**Key architectural distinction**:
+Key architectural distinction:
 - **Layer 1 (`aura-core`)**: Tree *types* and *cryptographic commitment functions* (pure primitives)
 - **Layer 2 (`aura-journal`)**: Tree *state machine*, *CRDT semantics*, and *validation rules* (domain implementation)
 
 This separation allows effect traits in Layer 1 to reference tree types without creating circular dependencies, while keeping the stateful CRDT logic in the appropriate domain crate.
 
-## Layer 2: Specification — Domain Crates and Choreography
+## Layer 2: Specification (Domain Crates and Choreography)
 
-**Purpose**: Define domain semantics and protocol specifications.
+Purpose: Define domain semantics and protocol specifications.
 
-**Ownership expectation**:
+Ownership expectation:
 - default to `Pure`
 - use `MoveOwned` only when transfer semantics are part of the domain model
 - avoid `ActorOwned` runtime-style state
@@ -178,14 +175,14 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 
 Layer 2 is the *specification* layer: pure domain semantics with zero runtime coupling.
 
-**Must hold:**
+Must hold:
 - No handler composition, runtime assembly, or UI dependencies.
 - Domain facts are versioned and encoded via canonical DAG-CBOR.
 - Fact reducers register through `FactRegistry`; no direct wiring in `aura-journal`.
 - Authorization scopes use `aura-core` `ResourceScope` and typed operations.
 - No in-memory production state; stateful test handlers live in `aura-testkit`.
 
-**Forbidden:**
+Forbidden:
 - Direct OS access (time, fs, network) outside effect traits.
 - Tokio/async-std usage in domain protocols.
 - State-bearing singletons or process-wide caches.
@@ -201,17 +198,17 @@ Layer 2 is the *specification* layer: pure domain semantics with zero runtime co
 | `aura-transport` | Transport semantics | P2P communication abstractions |
 | `aura-maintenance` | Maintenance facts | Snapshot, cache invalidation, OTA activation, admin replacement facts + reducer |
 
-**Key characteristics**: Implement domain logic without effect handlers or coordination.
+Key characteristics: Implement domain logic without effect handlers or coordination.
 
 ### Extensible Fact Types (`aura-journal`)
 
-The journal provides **generic fact infrastructure** that higher-level crates extend with domain-specific fact types. This follows the Open/Closed Principle: the journal is open for extension but closed for modification.
+The journal provides generic fact infrastructure that higher-level crates extend with domain-specific fact types. This follows the Open/Closed Principle: the journal is open for extension but closed for modification.
 
 #### Protocol-Level vs Domain-Level Facts
 
 The `RelationalFact` enum in `aura-journal/src/fact.rs` contains two categories:
 
-**Protocol-Level Facts** (stay in `aura-journal`):
+Protocol-Level Facts (stay in `aura-journal`):
 
 These are core protocol constructs with complex reduction logic in `reduce_context()`. They have interdependencies and specialized state derivation that cannot be delegated to simple domain reducers:
 
@@ -225,7 +222,7 @@ These are core protocol constructs with complex reduction logic in `reduce_conte
 | `Protocol(AmpCommittedChannelEpochBump)` | Finalized epoch transitions | Epoch chain validation |
 | `Protocol(AmpChannelPolicy)` | Channel policy overrides | Skip window derivation |
 
-**Domain-Level Facts** (via `Generic` + `FactRegistry`):
+Domain-Level Facts (via `Generic` + `FactRegistry`):
 
 Application-specific facts use `RelationalFact::Generic` and are reduced by registered `FactReducer` implementations.
 
@@ -236,7 +233,7 @@ Application-specific facts use `RelationalFact::Generic` and are reduced by regi
 | `aura-relational` | `ContactFact` | Contact management |
 | `aura-social/moderation` | `Block*Fact` | Block, mute, ban, kick |
 
-**Design Pattern**:
+Design Pattern:
 1. **`aura-journal`** provides:
    - `DomainFact` trait for fact type identity and serialization
    - `FactReducer` trait for domain-specific reduction logic
@@ -260,14 +257,14 @@ Application-specific facts use `RelationalFact::Generic` and are reduced by regi
    }
    ```
 
-**Why This Architecture**:
+Why This Architecture:
 - **Open/Closed Principle**: New domain facts don't require modifying `aura-journal`
 - **Domain Isolation**: Each crate owns its fact semantics
 - **Protocol Integrity**: Core protocol facts with complex reduction stay in `aura-journal`
 - **Testability**: Domain facts can be tested independently
 - **Type Safety**: Compile-time guarantees within each domain
 
-**Core Fact Types in `aura-journal`**:
+Core Fact Types in `aura-journal`:
 Only facts fundamental to journal operation remain as direct enum variants:
 - `AttestedOp`: Commitment tree operations (cryptographic primitives)
 - `Snapshot`: Journal compaction checkpoints
@@ -276,11 +273,11 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 #### Fact Implementation Patterns by Layer
 
-Aura uses **two distinct fact patterns** based on architectural layer to prevent circular dependencies:
+Aura uses two distinct fact patterns based on architectural layer to prevent circular dependencies:
 
-**Layer 2 Pattern** (Domain Crates: `aura-maintenance`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`):
+Layer 2 Pattern (Domain Crates: `aura-maintenance`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`):
 
-These crates use the `aura-core::types::facts` pattern with **NO dependency on `aura-journal`**:
+These crates use the `aura-core::types::facts` pattern with no dependency on `aura-journal`:
 
 ```rust
 use aura_core::types::facts::{FactTypeId, FactError, FactEnvelope, FactDeltaReducer};
@@ -307,9 +304,9 @@ impl FactDeltaReducer<MyFact, MyFactDelta> for MyFactReducer {
 }
 ```
 
-**Layer 4/5 Pattern** (Feature Crates: `aura-chat`, `aura-invitation`, `aura-relational`, `aura-recovery`, `aura-social`):
+Layer 4/5 Pattern (Feature Crates: `aura-chat`, `aura-invitation`, `aura-relational`, `aura-recovery`, `aura-social`):
 
-These crates use the `aura-journal::extensibility::DomainFact` pattern and **register with `FactRegistry`**:
+These crates use the `aura-journal::extensibility::DomainFact` pattern and register with `FactRegistry`:
 
 ```rust
 use aura_journal::extensibility::{DomainFact, FactReducer};
@@ -325,7 +322,7 @@ impl FactReducer for MyFactReducer {
 }
 ```
 
-**Why Two Patterns?**
+Why Two Patterns?
 
 - **Layer 2 → Layer 2 dependencies create circular risk**: `aura-journal` is itself a Layer 2 crate. If other Layer 2 crates depend on `aura-journal` for the `DomainFact` trait, we risk circular dependencies.
 - **Layer 4/5 can safely depend on Layer 2**: Higher layers depend on lower layers by design, so feature crates can use the `DomainFact` trait from `aura-journal`.
@@ -335,75 +332,77 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 
 ### Choreography Specification
 
-**`aura-mpst`**: Aura-facing compatibility crate over Telltale. Re-exports choreography/runtime surfaces and Aura extension traits used by generated protocols, VM artifacts, and testing utilities.
+`aura-mpst`: Aura-facing compatibility crate over Telltale. Re-exports choreography/runtime surfaces and Aura extension traits used by generated protocols, VM artifacts, and testing utilities.
 
-**`aura-macros`**: Compile-time choreography frontend. Parses Aura annotations (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) and emits Telltale-backed generated modules plus Aura effect-bridge helpers.
+`aura-macros`: Compile-time choreography frontend. Parses Aura annotations (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) and emits Telltale-backed generated modules plus Aura effect-bridge helpers.
 
-## Layer 3: Implementation — `aura-effects` and `aura-composition`
+## Layer 3: Implementation (`aura-effects` and `aura-composition`)
 
-**Purpose**: Effect implementation and handler composition.
+Purpose: Effect implementation and handler composition.
 
-**Ownership expectation**:
+Ownership expectation:
 - `aura-effects` handlers remain stateless by default
 - `aura-composition` may assemble and configure systems, but should not grow ad
   hoc authority ownership or hidden semantic lifecycle
 - capability checks should flow through shared contracts, not handler-local
   shortcuts
 
-### `aura-effects` — Stateless Effect Handlers
+### `aura-effects`: Stateless Effect Handlers
 
-**Purpose**: Stateless, single-party effect implementations. **Architectural Decision**: `aura-effects` is the designated singular point of interaction with non-deterministic operating system services (entropy, wall-clock time, network I/O, file system). This design choice makes the architectural boundary explicit and centralizes impure operations.
+Purpose: Stateless, single-party effect implementations.
 
-**Contains**:
+`aura-effects` is the designated singular point of interaction with non-deterministic operating system services (entropy, wall-clock time, network I/O, file system). This design choice makes the architectural boundary explicit and centralizes impure operations.
+
+Contains:
 - **Production handlers**: `RealCryptoHandler`, `TcpTransportHandler`, `FilesystemStorageHandler`, `PhysicalTimeHandler`
 - OS integration adapters that delegate to system services
 - Pure functions that transform inputs to outputs without state
 
-**What doesn't go here**:
+What doesn't go here:
 - Handler composition or registries
 - Multi-handler coordination
 - Stateful implementations
 - Mock/test handlers
 
-**Key characteristics**: Each handler should be independently testable and reusable. No handler should know about other handlers. This enables clean dependency injection and modular testing.
+Key characteristics: Each handler should be independently testable and reusable. No handler should know about other handlers. This enables clean dependency injection and modular testing.
 
-**Dependencies**: `aura-core` and external libraries.
+Dependencies: `aura-core` and external libraries.
 
-**Note**: Mock and test handlers are located in `aura-testkit` (Layer 8) to maintain clean separation between production and testing concerns.
+Note: Mock and test handlers are located in `aura-testkit` (Layer 8) to maintain clean separation between production and testing concerns.
 
-### `aura-composition` — Handler Composition
+### `aura-composition`: Handler Composition
 
-**Purpose**: Assemble individual handlers into cohesive effect systems.
+Purpose: Assemble individual handlers into cohesive effect systems.
 
-**Contains**:
+Contains:
 - Effect registry and builder patterns
 - Handler composition utilities
 - Effect system configuration
 - Handler lifecycle management (start/stop/configure)
 - Reactive infrastructure: `Dynamic<T>` FRP primitives for composing view updates over effect changes
 
-**What doesn't go here**:
+What doesn't go here:
 - Individual handler implementations
 - Multi-party protocol logic
 - Runtime-specific concerns
 - Application lifecycle
 
-**Key characteristics**: Feature crates need to compose handlers without pulling in full runtime infrastructure. This is about "how do I assemble handlers?" not "how do I coordinate distributed protocols?"
+Key characteristics: Feature crates need to compose handlers without pulling in full runtime infrastructure. This is about "how do I assemble handlers?" not "how do I coordinate distributed protocols?"
 
-**Dependencies**: `aura-core`, `aura-effects`.
+Dependencies: `aura-core`, `aura-effects`.
 
-## Layer 4: Orchestration — `aura-protocol` + subcrates
+## Layer 4: Orchestration (`aura-protocol` and subcrates)
 
-**Purpose**: Multi-party coordination and distributed protocol orchestration.
+Purpose: Multi-party coordination and distributed protocol orchestration.
 
-**Ownership expectation**:
+Ownership expectation:
 - use `MoveOwned` for delegation, session ownership, endpoint transfer, and
   stale-owner invalidation
 - use `ActorOwned` only for justified long-lived orchestration state
 - coordination authority and semantic publication should be capability-gated
 - async orchestration flows should have typed terminal outcomes
 
-**Contains**:
+Contains:
 - Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`) in `aura-guards`
 - Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
 - Quorum-driven DKG orchestration and transcript handling in `aura-consensus/src/dkg/`
@@ -411,7 +410,7 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 - Distributed state management
 - Stateful coordinators for multi-party protocols
 
-**What doesn't go here**:
+What doesn't go here:
 - Effect trait definitions (all traits belong in `aura-core`)
 - Handler composition infrastructure (belongs in `aura-composition`)
 - Single-party effect implementations (belongs in `aura-effects`)
@@ -419,15 +418,15 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 - Runtime assembly (belongs in `aura-agent`)
 - Application-specific business logic (belongs in domain crates)
 
-**Key characteristics**: This layer coordinates multiple handlers working together across network boundaries. It implements the "choreography conductor" pattern, ensuring distributed protocols execute correctly with proper authorization, flow control, and state consistency. All handlers here manage multi-party coordination, not single-party operations.
+Key characteristics: This layer coordinates multiple handlers working together across network boundaries. It implements the "choreography conductor" pattern, ensuring distributed protocols execute correctly with proper authorization, flow control, and state consistency. All handlers here manage multi-party coordination, not single-party operations.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates, and Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`). Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
+Dependencies: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates, and Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`). Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
 
 ## Layer 5: Feature/Protocol Implementation
 
-**Purpose**: Complete end-to-end protocol implementations.
+Purpose: Complete end-to-end protocol implementations.
 
-**Ownership expectation**:
+Ownership expectation:
 - feature workflows should have one authoritative semantic owner
 - wrappers, adapters, and compatibility helpers must not publish stronger
   semantics than canonical workflows
@@ -435,7 +434,7 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
   failure
 - parity-critical mutation/publication must be capability-gated
 
-**Crates**:
+Crates:
 
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
@@ -448,9 +447,9 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 | `aura-social` | Social topology | Block/neighborhood materialized views, relay selection, progressive discovery layers, role/access semantics (`Member`/`Participant`, `Full`/`Partial`/`Limited`) |
 | `aura-sync` | Synchronization | Journal sync and anti-entropy protocols |
 
-**Key characteristics**: Reusable building blocks with no UI or binary entry points.
+Key characteristics: Reusable building blocks with no UI or binary entry points.
 
-**Notes**:
+Notes:
 - Layer 5 crates now include `ARCHITECTURE.md` describing facts, invariants, and operation categories.
 - `OPERATION_CATEGORIES` constants in each Layer 5 crate map operations to A/B/C classes.
 - Runtime-owned caches (e.g., invitation/rendezvous descriptors) live in Layer 6 handlers, not in Layer 5 services.
@@ -458,13 +457,13 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 - FactKey helper types are required for reducers/views to keep binding key derivation consistent.
 - Ceremony facts carry optional `trace_id` values to support cross-protocol traceability.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, plus Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
+Dependencies: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, plus Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
-## Layer 6: Runtime Composition — `aura-agent`, `aura-simulator`, and `aura-app`
+## Layer 6: Runtime Composition (`aura-agent`, `aura-simulator`, and `aura-app`)
 
-**Purpose**: Assemble complete running systems for production deployment.
+Purpose: Assemble complete running systems for production deployment.
 
-**Ownership expectation**:
+Ownership expectation:
 - this is the primary `ActorOwned` layer
 - runtime services, supervisors, readiness coordinators, and caches should be
   actor-owned
@@ -473,80 +472,80 @@ For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Dec
 - runtime mutation and publication should require explicit capabilities
 - long-running operations and services must have typed terminal lifecycle
 
-**`aura-agent`**: Production runtime for deployment with application lifecycle management, runtime-specific configuration, production deployment concerns, and system integration.
+`aura-agent`: Production runtime for deployment with application lifecycle management, runtime-specific configuration, production deployment concerns, and system integration.
 
-**`aura-app`**: Portable headless application core providing the business logic and state management layer for all platforms. Exposes a platform-agnostic API consumed by terminal, iOS, Android, and web frontends. Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`).
+`aura-app`: Portable headless application core providing the business logic and state management layer for all platforms. Exposes a platform-agnostic API consumed by terminal, iOS, Android, and web frontends. Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`).
 
-**`aura-simulator`**: Deterministic simulation runtime with virtual time, transport shims, failure injection, and generative testing via Quint integration (see `aura-simulator/src/quint/` for generative simulation bridge).
+`aura-simulator`: Deterministic simulation runtime with virtual time, transport shims, failure injection, and generative testing via Quint integration (see `aura-simulator/src/quint/` for generative simulation bridge).
 
-**Contains**:
+Contains:
 - Application lifecycle management (startup, shutdown, signals)
 - Runtime-specific configuration and policies
 - Production deployment concerns
 - System integration and monitoring hooks
 - Reactive event loop: `ReactiveScheduler` (Tokio task) that orchestrates fact ingestion, journal updates, and view propagation
 
-**What doesn't go here**:
+What doesn't go here:
 - Effect handler implementations
 - Handler composition utilities
 - Protocol coordination logic
 - CLI or UI concerns
 
-**Key characteristics**: This is about "how do I deploy and run this as a production system?" It's the bridge between composed handlers/protocols and actual running applications.
+Key characteristics: This is about "how do I deploy and run this as a production system?" It's the bridge between composed handlers/protocols and actual running applications.
 
-**Dependencies**: All domain crates, `aura-effects`, `aura-composition`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
+Dependencies: All domain crates, `aura-effects`, `aura-composition`, and Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
 
-## Layer 7: User Interface — `aura-terminal`, `aura-ui`, and `aura-web`
+## Layer 7: User Interface (`aura-terminal`, `aura-ui`, and `aura-web`)
 
-**Purpose**: User-facing applications with main entry points.
+Purpose: User-facing applications with main entry points.
 
-**Ownership expectation**:
+Ownership expectation:
 - primarily `Observed`
 - command ingress mechanics may be `ActorOwned` at the shell boundary
 - UI must not co-author parity-critical semantic lifecycle or readiness truth
 - render and projection layers consume authoritative state rather than
   inventing it
 
-**`aura-terminal`**: Terminal-based interface combining CLI commands and an interactive TUI (Terminal User Interface). Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic and state management.
+`aura-terminal`: Terminal-based interface combining CLI commands and an interactive TUI (Terminal User Interface). Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic and state management.
 
-**`aura-ui`**: Shared Dioxus UI core. Owns cross-frontend semantic snapshot shaping, deterministic keyboard routing, and shared presentation state, while remaining platform agnostic and downstream of `aura-app`'s authoritative semantic contract.
+`aura-ui`: Shared Dioxus UI core. Owns cross-frontend semantic snapshot shaping, deterministic keyboard routing, and shared presentation state, while remaining platform agnostic and downstream of `aura-app`'s authoritative semantic contract.
 
-**`aura-web`**: Browser/WASM shell. Mounts `aura-ui`, integrates browser-specific adapters and harness bridge surfaces, and remains an observed shell rather than a semantic owner for parity-critical workflows.
+`aura-web`: Browser/WASM shell. Mounts `aura-ui`, integrates browser-specific adapters and harness bridge surfaces, and remains an observed shell rather than a semantic owner for parity-critical workflows.
 
-**Key characteristics**:
+Key characteristics:
 - Layer 7 includes both shell binaries (`aura-terminal`, `aura-web`) and the shared UI core (`aura-ui`) they consume.
 - `aura-terminal` and `aura-web` contain user-facing entry points and platform interop.
 - `aura-ui` stays platform neutral and expresses shared UI structure over `aura-app` contracts.
 
-**Dependencies**:
+Dependencies:
 - `aura-ui`: `aura-app`, `aura-core`
 - `aura-terminal`: `aura-app`, `aura-agent`, `aura-core`, `aura-recovery`, and selected Layer 4/5 crates needed for terminal shell integration
 - `aura-web`: `aura-ui`, `aura-app`, `aura-agent`, `aura-core`, `aura-effects`, and browser-only ecosystem crates for WASM interop
 
 ## Layer 8: Testing and Development Tools
 
-**Purpose**: Cross-cutting test utilities, formal verification bridges, and generative testing infrastructure.
+Purpose: Cross-cutting test utilities, formal verification bridges, and generative testing infrastructure.
 
-**Ownership expectation**:
+Ownership expectation:
 - test infrastructure may simulate `ActorOwned` and `MoveOwned` systems
 - parity-critical lanes must still respect production ownership boundaries
 - harness and diagnostics are primarily `Observed`
 - test-only mutation shortcuts should be narrow, documented, and
   capability-aware
 
-**`aura-testkit`**: Comprehensive testing infrastructure including:
+`aura-testkit`: Comprehensive testing infrastructure including:
 - Shared test fixtures and scenario builders
 - Property test helpers and deterministic utilities
 - **Mock effect handlers**: `MockCryptoHandler`, `SimulatedTimeHandler`, `MemoryStorageHandler`, etc.
 - Stateful test handlers that maintain controllable state for deterministic testing
 
-**`aura-quint`**: Formal verification bridge to Quint model checker including:
+`aura-quint`: Formal verification bridge to Quint model checker including:
 - Native Quint subprocess interface for parsing and type checking
 - Property specification management with classification (authorization, budget, integrity)
 - Verification runner with caching and counterexample generation
 - Effect trait implementations for property evaluation during simulation
 
-**`aura-harness`**: Multi-instance runtime harness for orchestrating test scenarios including:
+`aura-harness`: Multi-instance runtime harness for orchestrating test scenarios including:
 - Coordinator and executor for managing multiple Aura instances
 - Scenario definition and replay capabilities
 - Artifact synchronization and determinism validation
@@ -567,11 +566,11 @@ Deterministic observation policy:
 - harness mode may change instrumentation or rendering stability, but not business-flow semantics
 - placeholder IDs, exporter override caches, and heuristic success/event synthesis are not valid parity-critical correctness paths
 
-**Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
+Key characteristics: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
-**Deterministic seed policy**: Test construction of `AuraEffectSystem` must use seeded helper constructors (`simulation_for_test*`). Do not call legacy `testing*` or raw `simulation*` constructors from test code. For multiple instances from the same callsite, use `simulation_for_named_test_with_salt(...)` so each seed is unique and replayable.
+Deterministic seed policy: Test construction of `AuraEffectSystem` must use seeded helper constructors (`simulation_for_test*`). Do not call legacy `testing*` or raw `simulation*` constructors from test code. For multiple instances from the same callsite, use `simulation_for_named_test_with_salt(...)` so each seed is unique and replayable.
 
-**Dependencies**: `aura-core` (for aura-harness); `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy` (for aura-testkit and aura-quint).
+Dependencies: `aura-core` (for aura-harness). For aura-testkit and aura-quint: `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`.
 
 ## Workspace Structure
 
@@ -870,19 +869,19 @@ graph TD
 
 Not all effect traits are created equal. Aura organizes effect traits into three categories that determine where their implementations should live:
 
-**Fundamental Principle**: All effect trait definitions belong in `aura-core` (Layer 1) to maintain a single source of truth for interfaces. This includes infrastructure effects (OS integration), application effects (domain-specific), and protocol coordination effects (multi-party orchestration).
+All effect trait definitions belong in `aura-core` (Layer 1) to maintain a single source of truth for interfaces. This includes infrastructure effects (OS integration), application effects (domain-specific), and protocol coordination effects (multi-party orchestration).
 
 ### Infrastructure Effects (Implemented in aura-effects)
 
 Infrastructure effects are truly foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all Aura use cases.
 
-**Characteristics**:
+Characteristics:
 - OS integration (file system, network, cryptographic primitives)
 - No Aura-specific semantics
 - Reusable across any distributed system
 - Required for basic system operation
 
-**Examples**:
+Examples:
 - `CryptoEffects`: Ed25519 signing, key generation, hashing
 - `NetworkEffects`: TCP connections, message sending/receiving
 - `StorageEffects`: File read/write, directory operations
@@ -893,19 +892,19 @@ Infrastructure effects are truly foundational capabilities that every Aura syste
 - `LeakageEffects`: Cross-cutting metadata leakage tracking (composable infrastructure)
 - `ReactiveEffects`: Type-safe signal-based state management for UI and inter-component communication
 
-**Implementation Location**: These traits have stateless handlers in `aura-effects` that delegate to OS services.
+Implementation Location: These traits have stateless handlers in `aura-effects` that delegate to OS services.
 
 ### Application Effects (Implemented in Domain Crates)
 
 Application effects encode Aura-specific abstractions and business logic. These traits capture domain concepts that are meaningful only within Aura's architecture.
 
-**Characteristics**:
+Characteristics:
 - Aura-specific semantics and domain knowledge
 - Built on top of infrastructure effects
 - Implement business logic and domain rules
 - May have multiple implementations for different contexts
 
-**Examples**:
+Examples:
 - `JournalEffects`: Fact-based journal operations, specific to Aura's CRDT design (aura-journal)
 - `AuthorityEffects`: Authority-specific operations, central to Aura's identity model
 - `FlowBudgetEffects`: Privacy budget management, unique to Aura's information flow control (aura-authorization)
@@ -913,16 +912,16 @@ Application effects encode Aura-specific abstractions and business logic. These 
 - `RelationalEffects`: Cross-authority relationship management
 - `GuardianEffects`: Recovery protocol operations
 
-**Protocol Coordination Effects** (new category):
+Protocol Coordination Effects (new category):
 - `ChoreographicEffects`: Multi-party protocol coordination
 - `EffectApiEffects`: Event sourcing and audit for protocols
 - `SyncEffects`: Anti-entropy synchronization operations
 
-**Implementation Location**: Application effects are implemented in their respective domain crates (`aura-journal`, `aura-authorization`, etc.). Protocol coordination effects are implemented in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) as they manage multi-party state.
+Application effects are implemented in their respective domain crates (`aura-journal`, `aura-authorization`, etc.). Protocol coordination effects are implemented in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) as they manage multi-party state.
 
-**Why Not in aura-effects?**: Moving these to `aura-effects` would create circular dependencies. Domain crates need to implement these effects using their own domain logic, but `aura-effects` cannot depend on domain crates due to the layered architecture.
+Moving these to `aura-effects` would create circular dependencies. Domain crates need to implement these effects using their own domain logic, but `aura-effects` cannot depend on domain crates due to the layered architecture.
 
-**Implementation Pattern**: Domain crates implement application effects by creating domain-specific handler structs that compose infrastructure effects for OS operations while encoding Aura-specific business logic.
+Domain crates implement application effects by creating domain-specific handler structs that compose infrastructure effects for OS operations while encoding Aura-specific business logic.
 
 ```rust
 // Example: aura-journal implements JournalEffects
@@ -1019,7 +1018,7 @@ impl<N: NetworkEffects> MyDomainHandler<N> {
 }
 ```
 
-**Key principles for domain effect implementations**:
+Key principles for domain effect implementations:
 - **Domain logic first**: Encode business rules and validation specific to the domain
 - **Infrastructure composition**: Use infrastructure effects for OS operations, never direct syscalls
 - **Clean separation**: Domain handlers should not contain OS integration code
@@ -1027,48 +1026,48 @@ impl<N: NetworkEffects> MyDomainHandler<N> {
 
 ### Fallback Handlers and the Null Object Pattern
 
-Infrastructure effects sometimes require **fallback implementations** for platforms or environments where the underlying capability is unavailable (e.g., biometric hardware on servers, secure enclaves in CI, HSMs in development).
+Infrastructure effects sometimes require fallback implementations for platforms or environments where the underlying capability is unavailable (e.g., biometric hardware on servers, secure enclaves in CI, HSMs in development).
 
-**When fallback handlers are appropriate**:
+When fallback handlers are appropriate:
 - The effect trait represents optional hardware/OS capabilities
 - Code must run on platforms without the capability
 - Graceful degradation is preferable to compile-time feature flags everywhere
 
-**Naming conventions**:
+Naming conventions:
 - Good: `FallbackBiometricHandler`, `NoOpSecureEnclaveHandler`, `UnsupportedHsmHandler`
 - Avoid: `RealBiometricHandler` (misleading - implies real implementation)
 
-**Fallback handler behavior**:
+Fallback handler behavior:
 - Return `false` for capability checks (`is_available()`, `supports_feature()`)
 - Return descriptive errors for operations (`Err(NotSupported)`)
 - Never panic or silently succeed when the capability is unavailable
 
 For a checklist on removing stub handlers, see `CLAUDE.md` under "Agent Decision Aids".
 
-**Why this matters**: A fallback handler is not dead code if its trait is actively used. It's the Null Object Pattern providing safe defaults. The architectural violation is a misleading name, not the existence of the fallback.
+A fallback handler is not dead code if its trait is actively used. It represents the Null Object Pattern providing safe defaults. The architectural violation is a misleading name, not the existence of the fallback.
 
 ### Composite Effects (Convenience Extensions)
 
 Composite effects provide convenience methods that combine multiple lower-level operations. These are typically extension traits that add domain-specific convenience to infrastructure effects.
 
-**Characteristics**:
+Characteristics:
 - Convenience wrappers around other effects
 - Domain-specific combinations of operations
 - Often implemented as blanket implementations
 - Improve developer ergonomics
 
-**Examples**:
+Examples:
 - `TreeEffects`: Combines `CryptoEffects` and `StorageEffects` for merkle tree operations
 - `SimulationEffects`: Testing-specific combinations for deterministic simulation
 - `LeakageChoreographyExt`: Combines leakage tracking with choreography operations
 
-**Implementation Location**: Usually implemented as extension traits in `aura-core` or as blanket implementations in domain crates.
+Implementation Location: Usually implemented as extension traits in `aura-core` or as blanket implementations in domain crates.
 
 ### Effect Classification
 
 For quick decision aids (decision matrix, decision tree), see `CLAUDE.md` under "Agent Decision Aids".
 
-**Examples:**
+Examples:
 
 - **CryptoEffects** → Infrastructure (OS crypto, no Aura semantics, reusable)
 - **JournalEffects** → Application (Aura facts, domain validation, not reusable)
@@ -1109,10 +1108,10 @@ This is acceptable technical debt - the pattern consistency outweighs the semant
 
 The project includes an automated architectural compliance checker to enforce these layering principles:
 
-**Command**: `just check-arch`  
-**Script**: `scripts/check/arch.sh`
+Command: `just check-arch`  
+Script: `scripts/check/arch.sh`
 
-**What it validates**:
+What it validates:
 - Layer boundary violations (no upward dependencies)
 - Dependency direction (Lx→Ly where y≤x only)
 - Effect trait classification and placement
@@ -1149,7 +1148,7 @@ Aura uses a minimal set of deliberate feature flags organized into three tiers.
 | `wasm` | Web via wasm-bindgen → JavaScript/TypeScript. |
 | `web-dominator` | Pure Rust WASM apps using futures-signals + dominator. |
 
-**Development features**: `instrumented` (tracing), `debug-serialize` (JSON debug output), `host` (binding stub).
+Development features: `instrumented` (tracing), `debug-serialize` (JSON debug output), `host` (binding stub).
 
 ### Tier 3: Crate-Specific Features
 
@@ -1188,7 +1187,7 @@ cargo build -p aura-app --features ios
 
 ### Core Principle: Deterministic Simulation
 
-Aura's effect system ensures **fully deterministic simulation** by requiring all impure operations (time, randomness, filesystem, network) to flow through effect traits. This enables:
+Aura's effect system ensures fully deterministic simulation by requiring all impure operations (time, randomness, filesystem, network) to flow through effect traits. This enables:
 
 - **Predictable testing**: Mock all external dependencies for unit tests
 - **WASM compatibility**: No blocking operations or OS thread assumptions
@@ -1197,7 +1196,7 @@ Aura's effect system ensures **fully deterministic simulation** by requiring all
 
 ### Impure Function Classification
 
-**FORBIDDEN: Direct impure function usage**
+FORBIDDEN: Direct impure function usage
 ```rust
 // VIOLATION: Direct system calls
 let now = SystemTime::now();
@@ -1209,7 +1208,7 @@ let socket = TcpStream::connect("127.0.0.1:8080").await?;
 static CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 ```
 
-**REQUIRED: Effect trait usage**
+REQUIRED: Effect trait usage
 ```rust
 // CORRECT: Via effect traits with explicit context
 async fn my_operation<T: TimeEffects + RandomEffects + StorageEffects>(
@@ -1227,7 +1226,7 @@ async fn my_operation<T: TimeEffects + RandomEffects + StorageEffects>(
 
 ### Legitimate Effect Injection Sites
 
-The architectural compliance checker **ONLY** allows direct impure function usage in these specific locations:
+The architectural compliance checker allows direct impure function usage only in these specific locations:
 
 #### 1. Effect Handler Implementations (`aura-effects`)
 ```rust
@@ -1270,13 +1269,13 @@ pub fn hash(data: &[u8]) -> [u8; 32] {
 
 ### Exemption Rationale
 
-**Why these exemptions are architecturally sound**:
+Why these exemptions are architecturally sound:
 
 1. **Effect implementations** MUST access the actual system - that's their purpose
 2. **Runtime assembly** is the controlled injection point where production vs. mock effects are chosen
 3. **Pure functions** are deterministic regardless of when/where they're called
 
-**Why broad exemptions are dangerous**:
+Why broad exemptions are dangerous:
 - Crate-level exemptions (`aura-agent`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`) would allow business logic to bypass effects
 - This breaks simulation determinism and WASM compatibility
 - Makes testing unreliable by introducing hidden external dependencies
@@ -1335,7 +1334,7 @@ pub async fn start_frost_ceremony() -> Result<()> {
 
 ### Context Propagation Requirements
 
-**All async operations must propagate EffectContext**:
+All async operations must propagate EffectContext:
 ```rust
 // CORRECT: Explicit context propagation
 async fn process_request<T: AllEffects>(
@@ -1361,7 +1360,7 @@ async fn process_request<T: AllEffects>(
 
 ### Mock Testing Pattern
 
-**Tests use controllable mock effects**:
+Tests use controllable mock effects:
 ```rust
 // File: tests/integration/frost_test.rs
 #[tokio::test]
@@ -1385,14 +1384,14 @@ async fn test_frost_ceremony_timing() {
 
 ### WASM Compatibility Guidelines
 
-**Forbidden in all crates (except effect implementations)**:
+Forbidden in all crates (except effect implementations):
 - `std::thread` - No OS threads in WASM
 - `std::fs` - No filesystem in browsers  
 - `SystemTime::now()` - Time must be injected
 - `rand::thread_rng()` - Randomness must be controllable
 - Blocking operations - Everything must be async
 
-**Required patterns**:
+Required patterns:
 - Async/await for all I/O operations
 - Effect trait injection for all impure operations
 - Explicit context propagation through call chains
@@ -1411,7 +1410,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 
 ## Serialization Policy
 
-Aura uses **DAG-CBOR** as the canonical serialization format for:
+Aura uses DAG-CBOR as the canonical serialization format for:
 - **Wire protocols**: Network messages between peers
 - **Facts**: CRDT state, journal entries, attestations
 - **Cryptographic commitments**: Content-addressable hashes (determinism required)

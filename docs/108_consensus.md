@@ -30,12 +30,9 @@ Each consensus instance independently agrees on:
 - A single prestate
 - Produces a single commit fact
 
-**Consensus does NOT provide:**
-- Global operation ordering
-- Sequential linearization across instances
-- Automatic operation dependencies
+Consensus does NOT provide global operation ordering, sequential linearization across instances, or automatic operation dependencies.
 
-**To sequence operations, use session types** (`docs/110_mpst_and_choreography.md`) executed through Aura’s Telltale-backed choreography runtime (`execute_as` runners or VM backend):
+To sequence operations, use session types (`docs/110_mpst_and_choreography.md`) executed through Aura’s Telltale-backed choreography runtime (`execute_as` runners or VM backend):
 
 ```rust
 use aura_mpst::{choreography, Role};
@@ -73,7 +70,7 @@ async fn sequential_device_updates<C: EffectContext>(
 }
 ```
 
-**Cross-reference:** See `docs/107_database.md` §8 for database transaction integration.
+Cross-reference: See `docs/107_database.md` §8 for database transaction integration.
 
 ## 2. Core Protocol
 
@@ -514,12 +511,12 @@ The pipelined commitment optimization reduces steady-state consensus from 2 RTT 
 
 The FROST pipelining optimization improves consensus performance by bundling next-round nonce commitments with current-round signature shares. This allows the coordinator to start the next consensus round immediately without waiting for a separate nonce commitment phase.
 
-**Standard FROST Consensus (2 RTT)**:
-1. **Execute → NonceCommit** (1 RTT): Coordinator sends execute request, witnesses respond with nonce commitments
-2. **SignRequest → SignShare** (1 RTT): Coordinator sends aggregated nonces, witnesses respond with signature shares
+Standard FROST Consensus (2 RTT):
+1. Execute → NonceCommit (1 RTT): Coordinator sends execute request, witnesses respond with nonce commitments
+2. SignRequest → SignShare (1 RTT): Coordinator sends aggregated nonces, witnesses respond with signature shares
 
-**Pipelined FROST Consensus (1 RTT)** (after warm-up):
-1. **Execute+SignRequest → SignShare+NextCommitment** (1 RTT): 
+Pipelined FROST Consensus (1 RTT) (after warm-up):
+1. Execute+SignRequest → SignShare+NextCommitment (1 RTT):
    - Coordinator sends execute request with cached commitments from previous round
    - Witnesses respond with signature share AND next-round nonce commitment
 
@@ -549,7 +546,7 @@ Key methods:
 - `set_next_nonce()`: Stores new nonce for future use
 - `invalidate()`: Clears cached state on epoch change
 
-**Message Schema Updates**: The `SignShare` message now includes optional next-round commitment:
+Message schema updates: The `SignShare` message now includes optional next-round commitment:
 
 ```rust
 SignShare {
@@ -607,31 +604,31 @@ if has_quorum {
 
 ### 12.5 Performance Impact
 
-**Latency Reduction**:
+Latency reduction:
 - Before: 2 RTT per consensus
 - After: 1 RTT per consensus (steady state)
 - Improvement: 50% latency reduction
 
-**Message Count**:
+Message count:
 - Before: 4 messages per witness (Execute, NonceCommit, SignRequest, SignShare)
 - After: 2 messages per witness (Execute+SignRequest, SignShare+NextCommitment)
 - Improvement: 50% message reduction
 
-**Trade-offs**:
+Trade-offs:
 - Memory: Small overhead for caching one nonce per witness
 - Complexity: Additional state management and epoch tracking
 - Bootstrap: First round still requires 2 RTT
 
 ### 12.6 Implementation Guidelines
 
-**Adding Pipelining to New Consensus Operations**:
+Adding pipelining to new consensus operations:
 
 1. Update message schema: Add `next_commitment` and `epoch` fields to response messages
 2. Generate next nonce: During signature generation, also generate next-round nonce
 3. Cache management: Store next nonce in `WitnessState` for future use
 4. Epoch handling: Always validate epoch before using cached commitments
 
-**Example Witness Implementation**:
+Example witness implementation:
 
 ```rust
 pub async fn handle_sign_request<R: RandomEffects + ?Sized>(
@@ -677,17 +674,17 @@ pub async fn handle_sign_request<R: RandomEffects + ?Sized>(
 
 ### 12.8 Testing Strategy
 
-**Unit Tests**:
+Unit tests:
 - Epoch invalidation logic
 - Nonce caching and retrieval
 - Message serialization with new fields
 
-**Integration Tests**:
+Integration tests:
 - Fast path vs slow path selection
 - Epoch transition handling
 - Performance measurement
 
-**Simulation Tests**:
+Simulation tests:
 - Network delay impact on 1 RTT vs 2 RTT
 - Behavior under partial failures
 - Convergence properties
@@ -752,7 +749,7 @@ On AggregateShare(cid, proposals', evidΔ) from any peer:
     CheckThreshold(cid)
 ```
 
-Aggregate shares spread proposal sets through gossip. Each witness checks for threshold after updates. Threshold-complete messages carry the final aggregated signature; once validated, the witness commits and stops its timers.
+Aggregate shares spread proposal sets through gossip. Each witness checks for threshold after updates. Threshold-complete messages carry the final aggregated signature. Once validated, the witness commits and stops its timers.
 
 ## 14. Safety Guarantees
 
@@ -827,24 +824,24 @@ The two protocol paths optimize for different objectives:
 | **Coordination** | Leader-driven (initiator) | Leaderless gossip |
 | **Failure Tolerance** | Requires all/most online | Tolerates n-k failures |
 
-**Why leaderless gossip for fallback?**
+Why leaderless gossip for fallback:
 
 We intentionally sacrifice tight timing bounds (the theoretical 2Δ from [optimal protocols](https://decentralizedthoughts.github.io/2020-06-12-optimal-optimistic-responsiveness/)) for:
 
-1. **Partition tolerance**: Any connected component with k honest witnesses can complete independently. No leader election needed across partitions.
+1. Partition tolerance: Any connected component with k honest witnesses can complete independently. No leader election needed across partitions.
 
-2. **No single point of failure**: If the initiator fails, any witness can drive completion. View-based protocols require leader handoff.
+2. No single point of failure: If the initiator fails, any witness can drive completion. View-based protocols require leader handoff.
 
-3. **Simpler protocol**: No view numbers, no leader election, no synchronization barriers. Witnesses simply gossip until threshold is reached.
+3. Simpler protocol: No view numbers, no leader election, no synchronization barriers. Witnesses simply gossip until threshold is reached.
 
-4. **Natural CRDT integration**: Evidence propagates as a CRDT set. Gossip naturally merges evidence without coordination.
+4. Natural CRDT integration: Evidence propagates as a CRDT set. Gossip naturally merges evidence without coordination.
 
-**What we can prove:**
+What we can prove:
 - Fast path: Commits within 2δ when all witnesses online (verified: `TemporalFastPathBound`)
 - Slow path: Commits when any connected component has k honest witnesses (not time-bounded)
 - Safety: Always holds regardless of network conditions
 
-**What we cannot prove (by design):**
+What we cannot prove (by design):
 - Slow path completion in fixed time (would require synchrony assumption)
 - Termination under permanent partition (FLP impossibility)
 
@@ -860,7 +857,7 @@ These parameters should be tuned per deployment. The ranges above keep fallback 
 
 The slow path requires the gossip network to be connected for evidence propagation. The key question is how many gossip peers (fanout f) are needed.
 
-**Random Graph Connectivity Theory**
+Random graph connectivity theory:
 
 For a random graph G(n, p) to be connected with high probability (w.h.p.), the classical Erdős-Rényi result states:
 
@@ -874,7 +871,7 @@ Translating to gossip: each node selects `f` random peers, giving edge probabili
 f ≥ c × ln(n)    where c ≈ 1.1-1.2 for practical certainty
 ```
 
-**Recommended Fanout by Witness Count**
+Recommended fanout by witness count:
 
 | Witnesses (n) | Minimum Fanout (f) | Recommended | Notes |
 |---------------|-------------------|-------------|-------|
@@ -886,7 +883,7 @@ f ≥ c × ln(n)    where c ≈ 1.1-1.2 for practical certainty
 | 21 | 4 | 5 | ln(21) ≈ 3.0 |
 | 50 | 5 | 6 | ln(50) ≈ 3.9 |
 
-**Failure Tolerance**
+Failure tolerance:
 
 With fanout f and n witnesses, the graph remains connected under random node failures as long as:
 - At least `f + 1` nodes remain (sufficient edges for spanning tree)
@@ -897,14 +894,14 @@ For k-of-n threshold where `k ≤ n - f`:
 - Each honest witness can reach at least one other honest witness via gossip
 - Evidence propagates to all honest witnesses in O(log(n)) gossip rounds
 
-**Adversarial Considerations**
+Adversarial considerations:
 
 Random graph analysis assumes non-adversarial peer selection. Against Byzantine adversaries:
-1. **Eclipse attacks**: If adversary controls gossip peer selection, connectivity guarantees fail
-2. **Mitigation**: Use deterministic peer selection based on witness IDs (e.g., consistent hashing)
-3. **Stronger bound**: For Byzantine tolerance, use `f ≥ 2t + 1` where t is Byzantine threshold
+1. Eclipse attacks: If adversary controls gossip peer selection, connectivity guarantees fail
+2. Mitigation: Use deterministic peer selection based on witness IDs (e.g., consistent hashing)
+3. Stronger bound: For Byzantine tolerance, use `f ≥ 2t + 1` where t is Byzantine threshold
 
-**Verified Properties (Quint)**
+Verified properties (Quint):
 
 The following properties are model-checked in `protocol_consensus_liveness.qnt`:
 
@@ -928,13 +925,13 @@ Not all operations require consensus. Aura classifies operations into three cate
 
 Operations that can proceed immediately without consensus. These use CRDT facts with eventual consistency.
 
-**Characteristics:**
+Characteristics:
 - Immediate local effect
 - Background sync via anti-entropy
 - Failure shows indicator, doesn't block functionality
 - Partial success is acceptable
 
-**Examples:**
+Examples:
 - Send message (within established context)
 - Create channel (within established relational context)
 - Update channel topic
@@ -947,13 +944,13 @@ These operations work because the cryptographic context already exists. Keys der
 
 Operations that apply locally but require agreement for finalization. Effect is pending until confirmed.
 
-**Characteristics:**
+Characteristics:
 - Immediate local effect shown as "pending"
 - Background ceremony for agreement
 - Failure triggers rollback with user notification
 - Multi-moderator operations use this pattern
 
-**Examples:**
+Examples:
 - Change channel permissions (requires moderator consensus)
 - Remove channel member (may be contested)
 - Transfer channel ownership
@@ -963,12 +960,12 @@ Operations that apply locally but require agreement for finalization. Effect is 
 
 Operations where partial state is dangerous. These block until consensus completes.
 
-**Characteristics:**
+Characteristics:
 - Operation does NOT proceed until consensus achieved
 - Partial state would be dangerous or irrecoverable
 - User must wait for confirmation
 
-**Examples:**
+Examples:
 - Guardian rotation (key shares distributed atomically)
 - Recovery execution (account state replacement)
 - OTA hard fork activation (breaking protocol change)
@@ -1017,19 +1014,19 @@ See `work/optimistic.md` for detailed design and effect policy integration.
 
 Consensus is also used to finalize BFT-DKG transcripts. The output of the DKG is a `DkgTranscriptCommit` fact that is consensus-finalized and then merged into the relevant journal.
 
-**Inputs**
+Inputs:
 - `DkgConfig`: `epoch`, `threshold`, `max_signers`, `participants`, `membership_hash`.
 - `DealerPackage[]`: one package per dealer, containing encrypted shares for all
   participants and a deterministic commitment.
 - `prestate_hash` and `operation_hash`: bind the transcript to the authority/context
   state and the intended ceremony operation.
 
-**Transcript formation**
+Transcript formation:
 1. Validate `DkgConfig` and dealer packages (unique dealers, complete share sets).
 2. Assemble the transcript deterministically.
 3. Hash the transcript using canonical DAG-CBOR encoding.
 
-**Finalize with consensus**
+Finalize with consensus:
 1. Build `DkgTranscriptCommit` with:
    - `transcript_hash`
    - `blob_ref` (optional, if stored out‑of‑line)
@@ -1040,32 +1037,30 @@ Consensus is also used to finalize BFT-DKG transcripts. The output of the DKG is
 3. Insert both `CommitFact` evidence and the `DkgTranscriptCommit` fact into the
    authority or context journal.
 
-The transcript commit is the single durable artifact used to bootstrap all subsequent threshold operations. Any K3 ceremony that depends on keys must bind
-to this commit by reference (direct hash or blob ref).
+The transcript commit is the single durable artifact used to bootstrap all subsequent threshold operations. Any K3 ceremony that depends on keys must bind to this commit by reference (direct hash or blob ref).
 
 ## 19. Decentralized Coordinator Selection (Lottery)
 
 Coordinator-based fast paths (A2) require a deterministic, decentralized selection mechanism so every participant can independently derive the same leader without extra coordination.
 
-**Round seed**
+Round seed:
 - `round_seed` is a 32‑byte value shared by all participants for the round.
 - Sources:
   - VRF output (preferred when available).
   - Trusted oracle or beacon.
   - Initiator‑provided seed (acceptable in trusted settings).
 
-**Selection rule**
+Selection rule:
 ```
 score_i = H("AURA_COORD_LOTTERY" || round_seed || authority_id_i)
 winner = argmin_i score_i
 ```
 
-**Fencing + safety**
+Fencing and safety:
 - The coordinator must hold a monotonic fencing token (`coord_epoch`).
-- Proposals are rejected if `coord_epoch` does not advance or if `prestate_hash`
-  mismatches local state.
+- Proposals are rejected if `coord_epoch` does not advance or if `prestate_hash` mismatches local state.
 
-**Convergence**
+Convergence:
 - Coordinators emit a `ConvergenceCert` once a quorum acks the proposal.
 - Fast-path results remain soft-safe until a consensus `CommitFact` is merged.
 

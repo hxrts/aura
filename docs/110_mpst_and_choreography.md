@@ -55,8 +55,7 @@ These values are sourced from runtime state such as params, journal facts, UI in
 Aura has one production choreography backend:
 - VM backend (`AuraChoreoEngine`) for admitted Telltale VM execution, replay, and parity checks.
 
-The authoritative async ownership contract for how `aura-agent` hosts these
-sessions lives in `crates/aura-agent/ARCHITECTURE.md`.
+The authoritative async ownership contract for how `aura-agent` hosts these sessions lives in `crates/aura-agent/ARCHITECTURE.md`.
 
 That contract is intentionally split:
 
@@ -71,8 +70,7 @@ Production runtime ownership is fragment-scoped. The admitted unit is one VM fra
 
 `delegate` and `link` define how ownership moves. Local runtime services claim fragment ownership through `AuraEffectSystem`. Runtime transfer goes through `ReconfigurationManager`. The runtime rejects ambiguous local ownership before a transfer reaches the VM.
 
-The host runtime may use actor services to supervise the surrounding work, but
-fragment ownership itself remains a singular move boundary with stale-owner rejection.
+The host runtime may use actor services to supervise the surrounding work, but fragment ownership itself remains a singular move boundary with stale-owner rejection.
 
 Owner record and capability are also distinct here:
 
@@ -81,8 +79,7 @@ Owner record and capability are also distinct here:
 
 Delegation must define both the ownership handoff and the capability scope that moves with it.
 
-Host-side async code must preserve that ownership model. External network,
-timer, and callback work enters through canonical ingress and is routed to the current local owner before any session mutation occurs.
+Host-side async code must preserve that ownership model. External network, timer, and callback work enters through canonical ingress and is routed to the current local owner before any session mutation occurs.
 
 `VmBridgeEffects` is the synchronous host boundary for one fragment. VM callbacks use it for session-local payload queues, blocked receive snapshots, and scheduler signals. Async transport, journal, and storage work stay outside the callback path in the host bridge loop.
 
@@ -210,8 +207,7 @@ pub mod effect_bridge {
 ### Macro Output Contracts & Stability
 
 The `choreography!` macro emits a stable, minimal surface intended for runtime integration.
-Consumers should rely only on the contracts below. All other generated items are internal and
-may change without notice.
+Consumers should rely only on the contracts below. All other generated items are internal and may change without notice.
 
 Stable contracts:
 

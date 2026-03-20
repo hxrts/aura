@@ -6,8 +6,7 @@ This guide covers how to use Aura's simulation infrastructure for testing distri
 
 Simulation suits scenarios that unit tests cannot address. Use simulation for fault injection testing. Use it for multi-participant protocol testing. Use it for time-dependent behavior validation.
 
-Do not use simulation for simple unit tests. Direct effect handler testing is faster and simpler for single-component validation.
-Do not treat simulation as the default end-to-end correctness oracle for user-facing flows. Aura's primary feedback loop remains the real-runtime harness running against the real software stack.
+Do not use simulation for simple unit tests. Direct effect handler testing is faster and simpler for single-component validation. Do not treat simulation as the default end-to-end correctness oracle for user-facing flows. Aura's primary feedback loop remains the real-runtime harness running against the real software stack.
 
 See [Simulation Infrastructure Reference](119_simulator.md) for the complete architecture documentation.
 
@@ -17,9 +16,7 @@ Simulation is a first-class alternate runtime substrate, not the primary one. Us
 
 This separation keeps responsibilities clean. The harness executes real frontends and gathers semantic observations. The simulator provides controlled runtime conditions when explicitly selected. Quint and related verification tooling generate traces and invariants.
 
-The shared semantic contracts for UI state and scenario execution live in
-`aura-app`. Simulation should integrate through those contracts rather than
-introducing a parallel frontend-driving format.
+The shared semantic contracts for UI state and scenario execution live in `aura-app`. Simulation should integrate through those contracts rather than introducing a parallel frontend-driving format.
 
 ## Two Simulation Systems
 
@@ -36,9 +33,7 @@ Quint actions suit model-based testing. They enable generative state space explo
 | Conformance testing | Quint actions |
 | State space exploration | Quint actions |
 
-When you need user-facing coverage, promote the scenario into the real-runtime
-harness lane after it is stable in simulation. Treat simulation as a substrate
-for controlled runtime conditions, not as the final UI executor.
+When you need user-facing coverage, promote the scenario into the real-runtime harness lane after it is stable in simulation. Treat simulation as a substrate for controlled runtime conditions, not as the final UI executor.
 
 ## TOML Scenario Authoring
 

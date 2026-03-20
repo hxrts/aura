@@ -22,19 +22,19 @@ The maintenance service publishes events to the journal as facts. These events a
 
 The system defines several event families:
 
-**SnapshotProposed** marks the beginning of a snapshot operation. It contains the proposal identifier, proposer authority, target epoch, and state digest of the candidate snapshot.
+`SnapshotProposed` marks the beginning of a snapshot operation. It contains the proposal identifier, proposer authority, target epoch, and state digest of the candidate snapshot.
 
-**SnapshotCompleted** records a successful snapshot. It includes the accepted proposal identifier, finalized snapshot payload, participating authorities, and threshold signature attesting to the snapshot.
+`SnapshotCompleted` records a successful snapshot. It includes the accepted proposal identifier, finalized snapshot payload, participating authorities, and threshold signature attesting to the snapshot.
 
-**CacheInvalidated** signals cache invalidation. It specifies which cache keys must be refreshed and the earliest identity epoch the cache entry remains valid for.
+`CacheInvalidated` signals cache invalidation. It specifies which cache keys must be refreshed and the earliest identity epoch the cache entry remains valid for.
 
-**ReleaseDistribution** facts announce release declarations, build certificates, and artifact availability.
+`ReleaseDistribution` facts announce release declarations, build certificates, and artifact availability.
 
-**ReleasePolicy** facts announce discovery, sharing, and activation policy publications.
+`ReleasePolicy` facts announce discovery, sharing, and activation policy publications.
 
-**UpgradeExecution** facts announce scoped staging, residency changes, transition changes, cutover results, partition outcomes, and rollback execution.
+`UpgradeExecution` facts announce scoped staging, residency changes, transition changes, cutover results, partition outcomes, and rollback execution.
 
-**AdminReplacement** announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.
+`AdminReplacement` announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.
 
 ## Snapshot Protocol
 
@@ -194,9 +194,9 @@ There is no network-wide authoritative cutover phase for the whole Aura network.
 
 ### Upgrade Types
 
-**Soft Fork** upgrades are compatibility-preserving. Old and new code can interoperate while one scope is in `ReleaseResidency::Coexisting`.
+Soft fork upgrades are compatibility-preserving. Old and new code can interoperate while one scope is in `ReleaseResidency::Coexisting`.
 
-**Hard Fork** upgrades are scope-bound incompatibility transitions. They reject incompatible new sessions after local cutover and require explicit in-flight handling for old sessions. A hard fork may use threshold approval or epoch fencing, but only if the chosen scope actually owns that mechanism.
+Hard fork upgrades are scope-bound incompatibility transitions. They reject incompatible new sessions after local cutover and require explicit in-flight handling for old sessions. A hard fork may use threshold approval or epoch fencing, but only if the chosen scope actually owns that mechanism.
 
 ### Basic Upgrade Operation
 
