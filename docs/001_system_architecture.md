@@ -270,9 +270,7 @@ Session and endpoint transfer uses move-owned capabilities with monotone generat
 
 ### 7.3 Workflow ownership boundary
 
-The shared semantic workflow layer owns authoritative lifecycle publication for parity-critical operations. Frontend and harness layers may submit commands and observe results, but they do not keep a parallel source of semantic terminal truth after handoff.
-
-A parity-critical workflow follows one protocol from submission to terminal publication. If the frontend does not own terminal publication, it must relinquish local ownership before awaiting the workflow. The canonical workflow owner publishes terminal state before any best-effort follow-up work. This prevents the bug shape where two layers both believe they own the operation lifecycle. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
+Each parity-critical operation has one authoritative lifecycle owner. Frontend and harness layers may submit commands and observe results, but they do not publish terminal truth. Ownership transfers through explicit handoff before the workflow begins awaited work. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
 
 ### 7.3 Reactive state
 
