@@ -23,7 +23,7 @@ use crate::views::{
     recovery::RecoveryState,
 };
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::parse::parse_context_id;
+use crate::workflows::parse::{parse_authority_id as parse_workflow_authority_id, parse_context_id};
 use crate::AppCore;
 use aura_core::AuraError;
 
@@ -94,7 +94,7 @@ fn parse_channel_id(raw: &str) -> Result<ChannelId, AuraError> {
 }
 
 fn parse_authority_id(raw: &str) -> Result<AuthorityId, AuraError> {
-    raw.parse::<AuthorityId>()
+    parse_workflow_authority_id(raw)
         .map_err(|_| AuraError::invalid(format!("Invalid authority ID in chat delta: {raw}")))
 }
 

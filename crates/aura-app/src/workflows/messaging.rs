@@ -3305,7 +3305,7 @@ mod tests {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
-        app_core.write().await.init_signals().await.unwrap();
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let _channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42)
             .await
@@ -3331,7 +3331,7 @@ mod tests {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
-        app_core.write().await.init_signals().await.unwrap();
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         join_channel_by_name_with_instance(
             &app_core,
