@@ -154,76 +154,13 @@ The `aura-testkit` crate provides mock implementations for deterministic testing
 
 The mock handler lives in `crates/aura-testkit/src/stateful_effects/crypto.rs`. `MockCryptoHandler` uses a seed and counter for deterministic behavior, enabling reproducible test results, simulation of edge cases, and faster test execution.
 
-## 3. Code Organization Patterns
+## 3. Usage Boundary
 
-### 3.1 Correct Usage
-
-Application code should use effect traits.
-
-```rust
-async fn authenticate<E: CryptoCoreEffects>(effects: &E, private_key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    effects.ed25519_sign(data, private_key).await
-}
-```
-
-This pattern ensures all cryptographic operations flow through the effect system. The generic constraint allows both production and mock implementations.
-
-Application code should use aura-core wrappers for type safety.
-
-```rust
-use aura_core::crypto::ed25519::{Ed25519SigningKey, Ed25519VerifyingKey, Ed25519Signature};
-
-fn verify_authority(key: &Ed25519VerifyingKey, data: &[u8], sig: &Ed25519Signature) -> Result<(), AuraError> {
-    key.verify(data, sig)
-}
-```
-
-The wrapper types provide a stable API and enable algorithm migration without changing application code.
-
-### 3.2 Incorrect Usage
-
-Do not import crypto libraries directly in application code.
-
-```rust
-// INCORRECT: Direct crypto library import
-use ed25519_dalek::{SigningKey, VerifyingKey};  // BAD
-
-// INCORRECT: Direct randomness
-use rand_core::OsRng;  // BAD (outside Layer 3)
-let mut rng = OsRng;
-```
-
-Direct imports bypass the effect system and break testability. They also scatter cryptographic usage throughout the codebase.
-
-### 3.3 Randomness Patterns
-
-All randomness should flow through `RandomCoreEffects`.
-
-```rust
-async fn generate_nonce<E: RandomCoreEffects>(effects: &E) -> [u8; 12] {
-    let bytes = effects.random_bytes(12).await;
-    bytes.try_into().expect("12 bytes")
-}
-```
-
-For encryption in feature crates, use parameter injection.
-
-```rust
-pub struct EncryptionRandomness {
-    nonce: [u8; 12],
-    padding: Vec<u8>,
-}
-
-pub fn encrypt_with_randomness(data: &[u8], key: &[u8], randomness: EncryptionRandomness) -> Vec<u8> {
-    // Deterministic given the randomness parameter
-}
-```
-
-This pattern enables deterministic testing by externalizing randomness.
+Application code accesses cryptographic operations exclusively through effect traits. Direct imports of cryptographic libraries are forbidden outside Layer 3 handlers. Randomness flows through `RandomCoreEffects` for testability and simulation. See [Effects and Handlers Guide](802_effects_guide.md) for usage patterns and anti-patterns.
 
 ## 4. Allowed Locations
 
-The following locations may directly use cryptographic libraries.
+Direct cryptographic library usage is restricted to the following locations.
 
 | Location | Allowed Libraries | Purpose |
 |----------|-------------------|---------|
@@ -270,32 +207,11 @@ Ed25519 uses the same curve as FROST and produces compatible signatures for veri
 
 ### 6.3 API Usage
 
-The unified API handles mode selection automatically.
-
-```rust
-// Generate keys - mode is determined by threshold
-let keys = crypto.generate_signing_keys(threshold, max_signers).await?;
-// keys.mode == SingleSigner if (1, 1), Threshold otherwise
-
-// Sign with the key package (single-signer only)
-let signature = crypto.sign_with_key(message, &key_package, keys.mode).await?;
-
-// Verify the signature
-let valid = crypto.verify_signature(message, &signature, &keys.public_key_package, keys.mode).await?;
-```
-
-For threshold mode where m >= 2, the `sign_with_key()` method returns an error. Threshold signing requires the full FROST protocol flow with nonce coordination across signers.
+The unified signing API selects between `SingleSigner` and `Threshold` modes based on the threshold parameter. For implementation patterns, see [Effects and Handlers Guide](802_effects_guide.md).
 
 ### 6.4 Storage Separation
 
-Single-signer and threshold keys use different storage paths.
-
-```
-signing_keys/<authority>/<epoch>/1       # SingleSignerKeyPackage (Ed25519)
-frost_keys/<authority>/<epoch>/<index>   # FROST KeyPackage
-```
-
-The storage location is managed by `SecureStorageEffects`. The `authority` is the `AuthorityId` in display format. The `epoch` is the current key epoch. The `index` is the signer index for FROST keys.
+Single-signer and threshold keys use separate storage paths managed by `SecureStorageEffects`. Path conventions are documented in [Effects and Handlers Guide](802_effects_guide.md).
 
 ## 7. FROST and Threshold Signatures
 
@@ -362,7 +278,7 @@ Aura treats the postcard serialization of FROST round-one data as canonical and 
 - `SigningNonces` (secret) **must serialize to exactly 138 bytes**
 - `SigningCommitments` (public) **must serialize to exactly 69 bytes**
 
-These sizes are enforced in `aura-core/src/crypto/tree_signing.rs` and mirrored in `aura-core/src/constants.rs`. If the upstream FROST or postcard encoding changes, update the constants and add/adjust tests to lock in the new canonical sizes.
+These sizes are enforced in `aura-core/src/crypto/tree_signing.rs` and mirrored in `aura-core/src/constants.rs`. See [Distributed Maintenance Guide](808_maintenance_guide.md) for update procedures when upstream encodings change.
 
 ### 7.3 Lifecycle Taxonomy (Key Generation vs Agreement)
 
@@ -382,46 +298,15 @@ Leader selection (lottery/round seed/fixed coordinator) and pipelining are ortho
 
 ### 7.4 Usage Pattern
 
-The recommended pattern uses `AppCore` for high-level operations.
-
-```rust
-// Sign a tree operation
-let attested_op = app_core.sign_tree_op(&tree_op).await?;
-
-// Bootstrap 1-of-1 keys for single-device accounts (uses Ed25519)
-let public_key = app_core.bootstrap_signing_keys().await?;
-```
-
-For direct trait usage, import and call the service.
-
-```rust
-use aura_core::effects::ThresholdSigningEffects;
-
-let context = SigningContext::self_tree_op(authority, tree_op);
-let signature = signing_service.sign(context).await?;
-```
-
-### 7.5 Design Rationale
-
-The unified trait abstraction enables a consistent interface across multi-device, guardian, and group scenarios. It provides proper audit context via `ApprovalContext` for UX and logging. It enables testability via mock implementations in `aura-testkit`. It provides key isolation with secure storage integration.
+High-level signing operations use `AppCore` or direct `ThresholdSigningEffects` trait calls. See [Effects and Handlers Guide](802_effects_guide.md) for recommended patterns.
 
 ### 7.6 FROST Minimum Threshold
 
 FROST requires `threshold >= 2`. Calling `frost_generate_keys(1, 1)` returns an error. For single-signer scenarios, use `generate_signing_keys(1, 1)` which routes to Ed25519 automatically.
 
-## 8. Future Considerations
+## 8. Extensibility
 
-### 8.1 Algorithm Migration
-
-The wrapper pattern enables algorithm migration.
-
-1. Update wrappers in `aura-core/src/crypto/`
-2. Update handler in `aura-effects/src/crypto.rs`
-3. Application code remains unchanged
-
-### 8.2 HSM Integration
-
-Hardware Security Module support would require a new `HsmCryptoHandler` implementing `CryptoCoreEffects`. Runtime selection between `RealCryptoHandler` and `HsmCryptoHandler` would be needed. Application code would require no changes.
+The wrapper and trait abstraction enables algorithm migration and HSM integration without changing application code. Migration procedures are documented in [Distributed Maintenance Guide](808_maintenance_guide.md).
 
 ## See Also
 

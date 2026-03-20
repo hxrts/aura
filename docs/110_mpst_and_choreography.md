@@ -98,186 +98,13 @@ Choreographies support annotations that modify runtime behavior. The `choreograp
 | `audit_log = "event"` | Audit trail entry | `StoreMetadata` (audit key) |
 | `leak = "External"` | Leakage tracking | `RecordLeakage` |
 
-### Annotation Syntax
-
-```rust
-// Single annotation
-A[guard_capability = "sync"] -> B: SyncMsg;
-
-// Multiple annotations
-A[guard_capability = "sync", flow_cost = 10, journal_facts = "sync_started"] -> B: SyncMsg;
-
-// Leakage annotation (multiple syntaxes supported)
-A[leak = "External,Neighbor"] -> B: PublicMsg;
-A[leak: External] -> B: PublicMsg;
-```
-
-### Protocol Artifact Requirements
-
-Aura binds choreography bundles to runtime capability requirements through generated `CompositionManifest` metadata and `aura-protocol::admission`. Production startup uses `open_manifest_vm_session_admitted(...)` so protocol id, capability requirements, determinism policy reference, and link constraints come from one canonical manifest.
-
-Admission also resolves the runtime execution envelope. Cooperative protocols stay on the canonical VM path. Replay-deterministic and envelope-bounded protocols select the threaded runtime path only when the required runtime capabilities and envelope artifacts are present.
-
-Current registry mappings:
-
-- `aura.consensus` -> `byzantine_envelope`
-- `aura.sync.epoch_rotation` -> `termination_bounded`
-- `aura.dkg.ceremony` -> `byzantine_envelope` + `termination_bounded`
-- `aura.recovery.grant` -> `termination_bounded`
-
-For lower-level VM tests, `AuraChoreoEngine::open_session_admitted(...)` remains available. Production services should use `open_manifest_vm_session_admitted(...)` instead.
-
-### Dynamic Reconfiguration (`@link` + delegation)
-
-Aura treats protocol reconfiguration as a first-class choreography concern. Static composition uses `@link` metadata in choreographies so compatible bundles can be merged at compile time. Runtime transfer uses delegation receipts and session-footprint coherence checks.
-
-- `@link` annotations are parsed by `aura-mpst` and validated by `aura-macros` for import/export compatibility.
-- `ReconfigurationManager` in `aura-agent` executes link/delegate operations and verifies coherence after each delegation.
-- Delegation writes a `SessionDelegationFact` audit record to the relational journal.
-
-This model is used by device migration and guardian handoff flows: session ownership moves without restarting the full choreography, while invariants remain checkable from persisted facts.
-
-The runtime now treats linked composition metadata as an ownership boundary as well as a composition boundary. Fragment keys derive from protocol id or link bundle id. This keeps runtime ownership aligned with Telltale's composition model.
-
-### Protocol Evolution Compatibility Policy
-
-Aura classifies choreography evolution by comparing baseline and candidate projections with `async_subtype(new_local, old_local)` for every shared role.
-
-Compatibility rule:
-- Compatible if `async_subtype` succeeds for every shared role.
-- Breaking if `async_subtype` fails for any shared role.
-
-Version bump rules:
-
-- Patch: no projection-shape change (comments, docs, metadata-only updates).
-- Minor: projection changes are present, but compatibility check passes for all shared roles.
-- Major: any compatibility failure, role-set change, or protocol namespace replacement.
-
-Reviewer decision table:
-
-| Change type | Default classification | Required action |
-|---|---|---|
-| Additive branch (existing roles unchanged) | Minor if async-subtype passes | Run compatibility checker. Bump minor on pass, major on fail. |
-| Payload narrowing/widening | Minor or Major based on async-subtype result | Treat checker as source of truth. Bump major on any role failure. |
-| Role added/removed/renamed | Major | Bump major and treat as new protocol contract. |
-| Namespace change with same semantics | Major (new contract surface) | Register as new protocol namespace. Keep old baseline until migration completes. |
-
-Operational notes:
-
-- Compatibility checks are tooling and CI gates, never runtime hot-path logic.
-- New protocol files without a baseline are not auto-classified. Reviewers must explicitly approve initial versioning.
-- Baseline and current checks are implemented by `scripts/check/protocol-compat.sh` and `just ci-protocol-compat`.
-
-### Quantitative Termination Budgets
-
-Aura derives deterministic step budgets from Telltale's weighted measure:
-
-`W = 2 * sum(depth(local_type)) + sum(buffer_sizes)`
-
-Runtime execution applies:
-
-`max_steps = ceil(k_sigma(protocol) * W * budget_multiplier)`
-
-Implementation points:
-
-- `aura-mpst::termination` computes local-type depth, buffer weight, and weighted measure.
-- `aura-protocol::termination` defines protocol classes (`consensus`, `sync`, `dkg`, `recovery`), calibrated `k_sigma` factors, and expected budget ranges.
-- `AuraChoreoEngine` constructs a `TerminationBudget` at run start, checks budget consumption after every VM scheduler step, emits deterministic `BoundExceeded` failures, warns at >80% utilization, and logs multiplier divergence from computed bounds.
-
-### Effect Command Generation
-
-The macro generates an `effect_bridge` module containing:
-
-```rust
-pub mod effect_bridge {
-    use aura_core::effects::guard::{EffectCommand, EffectInterpreter};
-
-    /// Convert annotations to effect commands
-    pub fn annotation_to_commands(ctx: &EffectContext, annotation: ...) -> Vec<EffectCommand>;
-
-    /// Execute commands through interpreter
-    pub async fn execute_commands<I: EffectInterpreter>(
-        interpreter: &I,
-        ctx: &EffectContext,
-        annotations: Vec<...>,
-    ) -> Result<Vec<EffectResult>, String>;
-}
-```
-
-### Macro Output Contracts & Stability
-
-The `choreography!` macro emits a stable, minimal surface intended for runtime integration.
-Consumers should rely only on the contracts below. All other generated items are internal and may change without notice.
-
-Stable contracts:
-
-- `effect_bridge::EffectBridgeContext` (context, authority, peer, timestamp)
-- `effect_bridge::annotation_to_commands(...)`
-- `effect_bridge::annotations_to_commands(...)`
-- `effect_bridge::create_context(...)`
-- `effect_bridge::execute_commands(...)`
-
-Stability rules:
-
-- The above names and signatures are stable within a minor release series.
-- Additional helper functions may be added, but existing signatures will not change without a schema/version bump in the macro output.
-- Generated role enums and protocol-specific modules are not part of the stable API surface.
-
-### Integration with Effect Interpreters
-
-Generated `EffectCommand` sequences execute through different interpreters:
-
-- Production: `ProductionEffectInterpreter` (aura-effects)
-- Simulation: `SimulationEffectInterpreter` (aura-simulator)
-- Testing: `BorrowedEffectInterpreter` and mock interpreters
-
-This unified approach ensures consistent guard behavior across all execution environments.
+See [Choreography Development Guide](803_choreography_guide.md) for annotation syntax and usage, including protocol artifact requirements, dynamic reconfiguration, protocol evolution compatibility policy, termination budgets, effect command generation, macro output contracts, and effect interpreter integration.
 
 ## 5. Guard Chain Integration
 
-Guard effects originate from two sources that share the same `EffectCommand` system.
+Choreography annotations compile to `EffectCommand` sequences that feed the same guard chain used at runtime send sites (CapGuard, FlowGuard, JournalCoupler, LeakageTracker). Annotation-derived effects execute first, then runtime guards validate and charge budgets before transport. Guard evaluation is synchronous over a prepared `GuardSnapshot` and yields `EffectCommand` items interpreted asynchronously.
 
-Choreographic annotations (compile-time): The `choreography!` macro generates `EffectCommand` sequences from annotations. These represent per-message guard requirements.
-
-Runtime guard chain (send-site): The `GuardChain::standard()` evaluates pure guards against a `GuardSnapshot` at each protocol send site. This enforces invariants like charge-before-send.
-
-### Guard Chain Sequence
-
-The runtime guard chain contains `CapGuard`, `FlowGuard`, `JournalCoupler`, and `LeakageTracker`. These guards enforce authorization and budget constraints:
-
-- `CapGuard` checks that the active capabilities satisfy the message requirements
-- `FlowGuard` checks that flow budget is available for the context and peer
-- `JournalCoupler` synchronizes journal updates with protocol execution
-- `LeakageTracker` records metadata leakage per observer class
-
-Guard evaluation is synchronous over a prepared `GuardSnapshot` and yields `EffectCommand` items. An async interpreter executes those commands, keeping guard logic pure while preserving charge-before-send.
-
-```mermaid
-graph TD
-    S[Send] --> A[Annotation Effects];
-    A --> C[CapGuard];
-    C --> F[FlowGuard];
-    F --> J[JournalCoupler];
-    J --> L[LeakageTracker];
-    L --> N[Network Send];
-```
-
-This diagram shows the combined guard sequence. Annotation-derived effects execute first, then runtime guards validate and charge budgets before the send.
-
-### Combined Execution
-
-Use `execute_guarded_choreography()` from `aura_guards` to execute both annotation-derived commands and runtime guards atomically:
-
-```rust
-use aura_guards::{execute_guarded_choreography, GuardChain};
-
-let result = execute_guarded_choreography(
-    &effect_system,
-    &request,
-    annotation_commands,  // From choreography macro
-    interpreter,
-).await?;
-```
+See [Choreography Development Guide](803_choreography_guide.md) for guard chain integration patterns.
 
 ## 6. Execution Modes
 
@@ -312,141 +139,15 @@ Not all multi-party operations require full choreographic specification. Aura cl
 
 ### 8.1 When to Use Choreography
 
-Category C (Consensus-Gated) operations require full choreography:
+Full choreography (Category C) is required for operations where partial execution is dangerous and all parties must agree before effects apply -- such as establishing or modifying cryptographic relationships. Operations within established cryptographic contexts (Category A) use CRDT fact emission without choreography. Operations affecting other users' policies (Category B) may use lightweight proposal/approval patterns.
 
-- Guardian rotation ceremonies
-- Recovery execution flows
-- OTA hard fork activation
-- Device revocation
-- Adding contacts or creating groups (establishing cryptographic context)
-- Adding members to existing groups
-
-These operations require explicit session types because partial execution is dangerous, all parties must agree before effects apply, and strong ordering guarantees are necessary.
-
-Example invitation ceremony:
-
-```rust
-choreography! {
-    #[namespace = "invitation"]
-    protocol InvitationCeremony {
-        roles: Sender, Receiver;
-        Sender -> Receiver: Invitation(data: InvitationPayload);
-        Receiver -> Sender: Accept(commitment: Hash32);
-        // Context is now established
-    }
-}
-```
-
-### 8.2 When Choreography is NOT Required
-
-Category A (Optimistic) operations do not need choreography:
-
-- Send message (within established context)
-- Create channel (within existing relational context)
-- Update channel topic
-- Block or unblock contact
-
-These use simple CRDT fact emission because cryptographic context already exists, keys derive deterministically from shared state, eventual consistency is sufficient, and no coordination is required.
-
-Example without choreography:
-
-```rust
-// Just emit a fact - no ceremony needed
-journal.append(ChannelCheckpoint {
-    context: existing_context_id,
-    channel: new_channel_id,
-    chan_epoch: 0,
-    base_gen: 0,
-    window: 1024,
-    ..
-});
-```
-
-Category B (Deferred) operations may use lightweight choreography:
-
-- Change channel permissions
-- Remove channel member (may be contested)
-- Transfer ownership
-
-These may use a proposal and approval pattern but do not require the full ceremony infrastructure.
-
-### 8.3 Decision Tree for Protocol Design
-
-```
-Is this operation establishing or modifying cryptographic relationships?
-│
-├─ YES → Use full choreography (Category C)
-│        Define explicit session types and guards
-│
-└─ NO: Does this affect other users' policies/access?
-       │
-       ├─ YES: Is strong agreement required?
-       │       │
-       │       ├─ YES → Use lightweight choreography (Category B)
-       │       │        Proposal/approval pattern
-       │       │
-       │       └─ NO → Use CRDT facts (Category A)
-       │               Eventually consistent
-       │
-       └─ NO → Use CRDT facts (Category A)
-               No coordination needed
-```
-
-See [Consensus - Operation Categories](108_consensus.md#17-operation-categories) for detailed categorization.
+See [Choreography Development Guide](803_choreography_guide.md) for the decision framework. See [Consensus - Operation Categories](108_consensus.md#17-operation-categories) for detailed categorization.
 
 ## 9. Choreography Inventory
 
-This section lists all choreographies in the codebase with their locations and purposes.
+The codebase contains choreographic protocols spanning core consensus, rendezvous, authentication, recovery, invitation, sync, and runtime coordination -- approximately 15 protocols across 7 domains.
 
-### 9.1 Core Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| AuraConsensus | `aura-consensus/src/protocol/choreography.choreo` | Fast path and fallback consensus |
-| AmpTransport | `aura-amp/src/choreography.choreo` | Asynchronous message transport |
-
-### 9.2 Rendezvous Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| RendezvousExchange | `aura-rendezvous/src/protocol.rendezvous_exchange.choreo` | Direct peer discovery |
-| RelayedRendezvous | `aura-rendezvous/src/protocol.relayed_rendezvous.choreo` | Relay-assisted connection |
-
-### 9.3 Authentication Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| GuardianAuthRelational | `aura-authentication/src/guardian_auth_relational.choreo` | Guardian authentication |
-| DkdChoreography | `aura-authentication/src/dkd.choreo` | Distributed key derivation |
-
-### 9.4 Recovery Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| RecoveryProtocol | `aura-recovery/src/recovery_protocol.choreo` | Account recovery flow |
-| GuardianMembershipChange | `aura-recovery/src/guardian_membership.choreo` | Guardian add/remove |
-| GuardianCeremony | `aura-recovery/src/guardian_ceremony.choreo` | Guardian key ceremony |
-| GuardianSetup | `aura-recovery/src/guardian_setup.choreo` | Initial guardian setup |
-
-### 9.5 Invitation Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| InvitationExchange | `aura-invitation/src/protocol.invitation_exchange.choreo` | Contact/channel invitation |
-| GuardianInvitation | `aura-invitation/src/protocol.guardian_invitation.choreo` | Guardian invitation |
-| DeviceEnrollment | `aura-invitation/src/protocol.device_enrollment.choreo` | Device enrollment |
-
-### 9.6 Sync Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| EpochRotationProtocol | `aura-sync/src/protocols/epochs.choreo` | Epoch rotation sync |
-
-### 9.7 Runtime Protocols
-
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| SessionCoordination | `aura-agent/src/handlers/sessions/coordination.choreo` | Session creation coordination |
+See [Project Structure](999_project_structure.md) for the protocol inventory with locations and purposes.
 
 ## 10. Runtime Infrastructure
 
@@ -466,25 +167,9 @@ The runtime provides production choreographic execution through manifest-driven 
 
 ### 10.2 Wiring a Choreography
 
-1. Store the protocol in a `.choreo` file next to the Rust module that loads it.
-2. Use `choreography!(include_str!("..."))` to generate the protocol module, VM artifacts, and composition metadata.
-3. Open the session with `open_manifest_vm_session_admitted(...)` from the runtime bridge or service layer.
-4. Provide decision sources for `provide_message` and `select_branch` through the VM host bridge.
+Wiring a choreography involves storing the protocol in a `.choreo` file, generating artifacts via `choreography!`, opening an admitted VM session, and providing decision sources through the host bridge.
 
-### 10.3 Decision Sourcing
-
-Generated runners call `provide_message` for outbound payloads and `select_branch` for choice decisions. These are sourced from runtime state:
-
-| Source Type | Examples |
-|-------------|----------|
-| Params | Consensus parameters, invitation payloads |
-| Journal facts | Local state, authority commitments |
-| Service state | Ceremony proposals, channel state |
-| UI/Policy | Accept/reject decisions, commit/abort choices |
-
-### 10.4 Integration Features
-
-The runtime provides guard chain integration (CapGuard → FlowGuard → JournalCoupler), transport effects for message passing, manifest-driven admission, determinism policy enforcement, typed link and delegation checks, and session lifecycle management with metrics.
+See [Choreography Development Guide](803_choreography_guide.md) for the wiring procedure.
 
 ### 10.5 Output and Flow Policy Integration Points
 

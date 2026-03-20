@@ -247,14 +247,9 @@ The test validates protocol correctness without requiring network infrastructure
 
 ## Understanding System Invariants
 
-As you develop protocols, be aware of Aura's system invariants:
+System invariants are defined in [System Architecture](001_system_architecture.md) and [Theoretical Model](002_theoretical_model.md). Key invariants include Charge-Before-Send, CRDT Convergence, Context Isolation, and Secure Channel Lifecycle.
 
-- **Charge-Before-Send**: All messages pass through the guard chain, which evaluates over a prepared `GuardSnapshot` and emits `EffectCommand` items that the interpreter executes before any transport send
-- **CRDT Convergence**: Identical facts always produce identical state
-- **Context Isolation**: Information stays within relational context boundaries
-- **Secure Channel Lifecycle**: Channels are epoch-bound and follow strict state transitions
-
-See [Project Structure](999_project_structure.md#invariant-traceability) for details. When developing, ensure your protocols respect these invariants to maintain system integrity.
+See [Project Structure](999_project_structure.md#invariant-traceability) for traceability details. When developing, ensure your protocols respect these invariants to maintain system integrity.
 
 ## Next Steps
 

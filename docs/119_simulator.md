@@ -8,6 +8,12 @@ The `aura-simulator` crate occupies Layer 6 in the Aura architecture. It enables
 
 The crate provides four capabilities. It offers specialized effect handlers for simulation control. It includes a middleware system for fault injection. It supports TOML-based scenario definitions. It integrates with Quint for model-based testing.
 
+## Simulation Modes
+
+The simulator provides two execution modes. TOML scenarios are human-written declarative test scripts that specify operations, assertions, and fault injection. Quint actions are model-generated traces from formal specifications that exercise state-space coverage.
+
+Simulation is an alternate runtime substrate for testing and verification. It does not replace the harness, which executes real frontends. Shared semantic contracts live in `aura-app` and are consumed by both simulation and harness execution.
+
 ## Handler-Based Architecture
 
 The simulator composes effect handlers rather than wrapping them in a central engine. Each simulated participant uses its own handler instances. This approach aligns with Aura's stateless effect architecture.

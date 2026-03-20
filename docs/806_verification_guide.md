@@ -340,25 +340,7 @@ Call `aura_quint::upstream_telltale_lean_bridge_schema_version()` to get the ups
 
 ### 5) `aura-testkit` Lean verification API migration (March 5, 2026)
 
-As of March 5, 2026, legacy Lean verification compatibility types were removed from `aura_testkit::verification` and `aura_testkit::verification::lean_oracle`.
-
-Use the canonical full-fidelity types and methods.
-
-| Legacy Type | Canonical Type |
-|-------------|----------------|
-| `Fact` | `LeanFact` |
-| `ComparePolicy` | `LeanComparePolicy` |
-| `TimeStamp` | `LeanCompareTimeStamp` (compare payloads) or `LeanTimeStamp` (journal facts) |
-| `Ordering` | `LeanTimestampOrdering` |
-| `FlowChargeInput`/`FlowChargeResult` | `LeanFlowChargeInput`/`LeanFlowChargeResult` |
-| `TimestampCompareInput`/`TimestampCompareResult` | `LeanTimestampCompareInput`/`LeanTimestampCompareResult` |
-
-| Legacy Method | Canonical Method |
-|---------------|------------------|
-| `verify_merge` | `verify_journal_merge` |
-| `verify_reduce` | `verify_journal_reduce` |
-| `verify_charge` | `verify_flow_charge` |
-| `verify_compare` | `verify_timestamp_compare` |
+The canonical Lean API types are specified in [Formal Verification Reference](120_verification.md).
 
 Import Lean verification payload types from `aura_testkit::verification` which re-exports from `lean_types`. Construct structured journals with `LeanJournal` and `LeanNamespace`. Update tests to compare `LeanTimestampOrdering` values directly.
 
@@ -386,16 +368,7 @@ Inspect output at `artifacts/telltale-parity/report.json`.
 
 ### Data Contract
 
-`aura-quint` defines a versioned interchange schema for bridge workflows.
-
-| Type | Purpose |
-|------|---------|
-| `BridgeBundleV1` | Top-level bundle with `schema_version = "aura.lean-quint-bridge.v1"` |
-| `SessionTypeInterchangeV1` | Session graph exchange |
-| `PropertyInterchangeV1` | Quint, Telltale, and Lean property exchange |
-| `ProofCertificateV1` | Proof or model-check evidence |
-
-Use this schema as the canonical data contract when exporting Quint sessions to Telltale formats or importing Telltale and Lean properties into Quint harnesses.
+The bridge data contract is specified in [Formal Verification Reference](120_verification.md).
 
 ### Export Workflow
 
@@ -538,105 +511,7 @@ Formal and model checks should reference the same canonical names listed in the 
 
 ## Quint-Lean Correspondence
 
-This section maps Quint model invariants to Lean theorem proofs, providing traceability between model checking and formal proofs.
-
-### Types Correspondence
-
-| Quint Type | Lean Type | Rust Type |
-|------------|-----------|-----------|
-| `ConsensusId` | `Aura.Domain.Consensus.Types.ConsensusId` | `consensus::types::ConsensusId` |
-| `ResultId` | `Aura.Domain.Consensus.Types.ResultId` | `consensus::types::ResultId` |
-| `PrestateHash` | `Aura.Domain.Consensus.Types.PrestateHash` | `consensus::types::PrestateHash` |
-| `AuthorityId` | `Aura.Domain.Consensus.Types.AuthorityId` | `core::AuthorityId` |
-| `ShareData` | `Aura.Domain.Consensus.Types.ShareData` | `consensus::types::SignatureShare` |
-| `ThresholdSignature` | `Aura.Domain.Consensus.Types.ThresholdSignature` | `consensus::types::ThresholdSignature` |
-| `CommitFact` | `Aura.Domain.Consensus.Types.CommitFact` | `consensus::types::CommitFact` |
-| `WitnessVote` | `Aura.Domain.Consensus.Types.WitnessVote` | `consensus::types::WitnessVote` |
-| `Evidence` | `Aura.Domain.Consensus.Types.Evidence` | `consensus::types::Evidence` |
-
-### Invariant-Theorem Correspondence
-
-#### Agreement Properties
-
-| Quint Invariant | Lean Theorem | Status |
-|-----------------|--------------|--------|
-| `InvariantUniqueCommitPerInstance` | `Aura.Proofs.Consensus.Agreement.agreement` | proven |
-| `InvariantUniqueCommitPerInstance` | `Aura.Proofs.Consensus.Agreement.unique_commit` | proven |
-| - | `Aura.Proofs.Consensus.Agreement.commit_determinism` | proven |
-
-#### Validity Properties
-
-| Quint Invariant | Lean Theorem | Status |
-|-----------------|--------------|--------|
-| `InvariantCommitRequiresThreshold` | `Aura.Proofs.Consensus.Validity.commit_has_threshold` | proven |
-| `InvariantSignatureBindsToCommitFact` | `Aura.Proofs.Consensus.Validity.validity` | proven |
-| - | `Aura.Proofs.Consensus.Validity.distinct_signers` | proven |
-| - | `Aura.Proofs.Consensus.Validity.prestate_binding_unique` | proven |
-| - | `Aura.Proofs.Consensus.Validity.honest_participation` | proven |
-| - | `Aura.Proofs.Consensus.Validity.threshold_unforgeability` | axiom |
-
-#### FROST Integration Properties
-
-| Quint Invariant | Lean Theorem | Status |
-|-----------------|--------------|--------|
-| `InvariantSignatureThreshold` | `Aura.Proofs.Consensus.Frost.aggregation_threshold` | proven |
-| - | `Aura.Proofs.Consensus.Frost.share_session_consistency` | proven |
-| - | `Aura.Proofs.Consensus.Frost.share_result_consistency` | proven |
-| - | `Aura.Proofs.Consensus.Frost.distinct_signers` | proven |
-| - | `Aura.Proofs.Consensus.Frost.share_binding` | proven |
-
-#### Evidence CRDT Properties
-
-| Quint Invariant | Lean Theorem | Status |
-|-----------------|--------------|--------|
-| - | `Aura.Proofs.Consensus.Evidence.merge_comm_votes` | proven |
-| - | `Aura.Proofs.Consensus.Evidence.merge_assoc_votes` | proven |
-| - | `Aura.Proofs.Consensus.Evidence.merge_idem` | proven |
-| - | `Aura.Proofs.Consensus.Evidence.merge_preserves_commit` | proven |
-| - | `Aura.Proofs.Consensus.Evidence.commit_monotonic` | proven |
-
-#### Equivocation Detection Properties
-
-| Quint Invariant | Lean Theorem | Status |
-|-----------------|--------------|--------|
-| `InvariantEquivocationDetected` | `Aura.Proofs.Consensus.Equivocation.detection_soundness` | proven |
-| `InvariantEquivocationDetected` | `Aura.Proofs.Consensus.Equivocation.detection_completeness` | proven |
-| `InvariantEquivocatorsExcluded` | `Aura.Proofs.Consensus.Equivocation.exclusion_correctness` | proven |
-| `InvariantHonestMajorityCanCommit` | `Aura.Proofs.Consensus.Equivocation.honest_never_detected` | proven |
-| - | `Aura.Proofs.Consensus.Equivocation.verified_proof_sound` | proven |
-
-#### Byzantine Tolerance (Adversary Module)
-
-| Quint Invariant | Lean Theorem | Status |
-|-----------------|--------------|--------|
-| `InvariantByzantineThreshold` | `Aura.Proofs.Consensus.Adversary.adversaryClaims.byzantine_cannot_forge` | claim |
-| `InvariantEquivocationDetected` | `Aura.Proofs.Consensus.Adversary.adversaryClaims.equivocation_detectable` | claim |
-| `InvariantHonestMajorityCanCommit` | `Aura.Proofs.Consensus.Adversary.adversaryClaims.honest_majority_sufficient` | claim |
-| `InvariantEquivocatorsExcluded` | `Aura.Proofs.Consensus.Adversary.adversaryClaims.equivocators_excluded` | claim |
-| `InvariantCompromisedNoncesExcluded` | - | Quint only |
-
-#### Liveness Properties
-
-| Quint Property | Lean Support | Notes |
-|----------------|--------------|-------|
-| `InvariantProgressUnderSynchrony` | `Aura.Proofs.Consensus.Liveness.livenessClaims.terminationUnderSynchrony` | axiom |
-| `InvariantByzantineTolerance` | `byzantine_threshold` | axiom |
-| `FastPathProgressCheck` | `Aura.Proofs.Consensus.Liveness.livenessClaims.fastPathBound` | axiom |
-| `SlowPathProgressCheck` | `Aura.Proofs.Consensus.Liveness.livenessClaims.fallbackBound` | axiom |
-| `NoDeadlock` | `Aura.Proofs.Consensus.Liveness.livenessClaims.noDeadlock` | axiom |
-| `InvariantRetryBound` | - | Quint model checking only |
-
-#### Module Correspondence
-
-| Lean Module | Quint File | What It Proves |
-|-------------|------------|----------------|
-| `Proofs.ContextIsolation` | `authorization.qnt`, `leakage.qnt` | Context separation and bridge authorization |
-| `Proofs.Consensus.Agreement` | `consensus/core.qnt` | Agreement safety (unique commits) |
-| `Proofs.Consensus.Evidence` | `consensus/core.qnt` | CRDT semilattice properties |
-| `Proofs.Consensus.Frost` | `consensus/frost.qnt` | Threshold signature correctness |
-| `Proofs.Consensus.Liveness` | `consensus/liveness.qnt` | Synchrony model axioms |
-| `Proofs.Consensus.Adversary` | `consensus/adversary.qnt` | Byzantine tolerance bounds |
-| `Proofs.Consensus.Equivocation` | `consensus/adversary.qnt` | Detection soundness/completeness |
+The Quint-Lean correspondence mapping is maintained in [Formal Verification Reference](120_verification.md).
 
 ## Related Documentation
 

@@ -113,238 +113,25 @@ Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
 
 By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `116_maintenance.md`, ensuring long-term accountability.
 
-## 8. Privacy-by-Design Patterns
+## 9. Privacy-by-Design Patterns
 
-The `aura-transport` crate demonstrates privacy-by-design principles where privacy mechanisms are integrated into core types rather than added as external concerns. This section extracts key patterns from `aura-transport` for use across the codebase.
+Privacy-by-design is enforced through context isolation, fixed-size envelopes, and flow budgets as defined in sections 1-7. All messages are scoped to a `ContextId` or `RelationshipId` with no cross-context routing. Capability hints are blinded before network transmission. The guard chain ensures unauthorized and over-budget sends produce no network traffic or timing side channels.
 
-### 8.1 Core Principles
+See [Effects and Handlers Guide](802_effects_guide.md) for privacy-aware implementation patterns.
 
-Privacy-by-design integration:
-- Privacy mechanisms built into core types (Envelope, FrameHeader, TransportConfig)
-- Privacy levels as first-class configuration, not bolt-on features
-- Relationship scoping embedded in message routing
-- Capability blinding at the envelope level
+## 10. Sync Status and Delivery Tracking
 
-Minimal metadata exposure:
-- Frame headers contain only essential routing information
-- Capability hints are blinded before transmission
-- Selection criteria hide detailed capability requirements
-- Peer selection uses privacy-preserving scoring
+The system exposes sync status for Category A (optimistic) operations through `Propagation` state (Local, Syncing, Complete, Failed) and `Acknowledgment` records per peer. Delivery status is derived from consistency metadata, not stored directly. Read receipts are semantic (user viewed the message) and distinct from transport-level delivery acknowledgments.
 
-Context isolation:
-- All messages scoped to RelationshipId or ContextId
-- No cross-context message routing
-- Connection state partitioned by context
-- Context changes trigger re-keying
+Category B operations use proposal/approval state. Category C operations use ceremony completion status. Lifecycle modes (A1/A2/A3) apply within these categories: A1/A2 updates are usable immediately but provisional until A3 consensus finalization.
 
-### 8.2 Privacy-Aware Envelope Usage
+See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions. See [Effects and Handlers Guide](802_effects_guide.md) for delivery tracking patterns.
 
-The `Envelope` type provides three privacy levels:
-
-```rust
-// Clear transmission (no privacy protection)
-let envelope = Envelope::new(payload);
-
-// Relationship-scoped transmission
-let envelope = Envelope::new_scoped(
-    payload,
-    relationship_id,
-    None, // Optional capability hint
-);
-
-// Fully blinded transmission
-let envelope = Envelope::new_blinded(
-    payload,
-    blinded_metadata,
-);
-```
-
-Pattern: Always use `new_scoped()` for relationship communication. Only use `new()` for public announcements. Use `new_blinded()` when metadata exposure must be minimized.
-
-### 8.3 Privacy-Preserving Peer Selection
-
-Peer selection must not reveal capability requirements or relationship structure:
-
-```rust
-let criteria = PrivacyAwareSelectionCriteria::for_relationship(relationship_id)
-    .require_capability("threshold_signing") // Will be blinded
-    .min_reliability(ReliabilityLevel::High)
-    .prefer_privacy_features(true);
-
-let selection = criteria.select_peers(&available_peers);
-```
-
-Pattern:
-- Selection criteria blinded before network transmission
-- Selection scores computed without revealing weights
-- Rejected candidates not logged or exposed
-- Selection reasons use generic categories, not specific capabilities
-
-### 8.4 Common Privacy Pitfalls
-
-Avoid:
-- Logging detailed capability requirements
-- Exposing relationship membership in error messages
-- Reusing connection state across contexts
-- Sending capability names in clear text
-- Correlating message sizes with content types
-
-Do:
-- Use generic error messages ("authorization failed" not "missing capability: admin")
-- Pad messages to fixed sizes when possible
-- Rotate connection identifiers on epoch changes
-- Blind capability hints before network transmission
-- Use privacy-preserving selection scoring
-
-### 8.5 Testing Privacy Properties
-
-When testing transport code, verify:
-
-1. **Context Isolation**: Messages sent in context A cannot be received in context B
-2. **Metadata Minimization**: Only essential headers exposed, no capability details
-3. **Selection Privacy**: Peer selection does not leak candidate set or ranking criteria
-4. **Re-keying**: Context epoch changes trigger channel teardown and fresh establishment
-5. **No Side Channels**: Timing, message size, error messages do not leak sensitive information
-
-See `crates/aura-transport/src/types/tests.rs` and `crates/aura-transport/src/peers/tests.rs` for examples.
-
-### 8.6 Integration with Guard Chain
-
-Transport privacy integrates with the guard chain:
-
-1. **CapGuard**: Evaluates blinded capability hints without exposing requirements
-2. **FlowGuard**: Charges budget before transmission (no side channels on failure)
-3. **LeakageTracker**: Accounts for metadata exposure in frame headers
-4. **JournalCoupler**: Records minimal send facts (no capability details)
-
-The combination ensures that:
-- Unauthorized sends produce no network traffic
-- Over-budget sends fail silently (no timing side channel)
-- Metadata leakage tracked against context budget
-- Fact commits reveal only necessary information
-
-## 9. Sync Status and Delivery Tracking
-
-Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress. See [Operation Categories](109_operation_categories.md) for the full consistency metadata type definitions.
-
-### 9.1 Propagation Status
-
-Propagation status tracks journal fact sync via anti-entropy:
-
-```rust
-use aura_core::domain::Propagation;
-
-pub enum Propagation {
-    /// Fact committed locally, not yet synced
-    Local,
-
-    /// Fact synced to some peers
-    Syncing { peers_reached: u16, peers_known: u16 },
-
-    /// Fact synced to all known peers
-    Complete,
-
-    /// Sync failed, will retry
-    Failed { retry_at: PhysicalTime, retry_count: u32, error: String },
-}
-```
-
-Anti-entropy provides callbacks via `SyncProgressEvent` to track progress:
-- `Started` - sync session began
-- `DigestExchanged` - digest comparison complete
-- `Pulling` / `Pushing` - fact transfer in progress
-- `PeerCompleted` - sync finished with one peer
-- `AllCompleted` - all peers synced
-
-### 9.2 Acknowledgment Protocol
-
-For facts with `ack_tracked = true`, the transport layer implements the ack protocol:
-
-Transmission envelope:
-```rust
-pub struct FactEnvelope {
-    pub fact: Fact,
-    pub ack_requested: bool,  // Set when fact.ack_tracked = true
-}
-```
-
-FactAck response:
-```rust
-pub struct FactAck {
-    pub fact_id: String,
-    pub peer: AuthorityId,
-    pub acked_at: PhysicalTime,
-}
-```
-
-Protocol flow:
-1. Sender marks fact as `ack_tracked` when committing
-2. Transport includes `ack_requested: true` in envelope
-3. Receiver processes fact and sends `FactAck` response
-4. Sender records ack in journal's ack table
-5. `Acknowledgment` records are queryable for delivery status
-
-### 9.3 Message Delivery Status
-
-Message delivery derives from consistency metadata:
-
-```rust
-use aura_core::domain::{Propagation, Acknowledgment, OptimisticStatus};
-
-// Delivery status is derived, not stored directly
-let is_sending = matches!(status.propagation, Propagation::Local);
-let is_sent = matches!(status.propagation, Propagation::Complete);
-let is_delivered = status.acknowledgment
-    .map(|ack| expected_peers.iter().all(|p| ack.contains(p)))
-    .unwrap_or(false);
-```
-
-Status progression: `Sending (◐) → Sent (✓) → Delivered (✓✓) → Read (✓✓ blue)`
-
-Read receipts are semantic (user viewed) and distinct from delivery (device received). They use `ChatFact::MessageRead` rather than the acknowledgment system.
-
-### 9.4 UI Status Indicators
-
-Status indicators provide user feedback:
-
-```
-Symbol  Meaning              Color    Animation
-─────────────────────────────────────────────────
-  ✓     Confirmed/Sent       Green    None
-  ✓✓    Delivered            Green    None
-  ✓✓    Read (blue)          Blue     None
-  ◐     Syncing/Sending      Blue     Pulsing
-  ◌     Pending              Gray     None
-  ⚠     Unconfirmed          Yellow   None
-  ✗     Failed               Red      None
-```
-
-For messages:
-- Single checkmark (✓) = sent to at least one peer
-- Double checkmark (✓✓) = delivered to recipient
-- Blue double checkmark = recipient read the message
-
-### 9.4 Integration with Operation Categories
-
-Sync status applies to Category A operations only:
-- Send message → delivery status tracking
-- Create channel → sync status to context members
-- Update topic → sync status to channel members
-- Block contact → local only (no sync needed for privacy)
-
-Category B and C operations have different confirmation models:
-- Category B uses proposal/approval state
-- Category C uses ceremony completion status
-
-Lifecycle modes (A1/A2/A3) apply within these categories: A1/A2 updates are usable immediately but must be treated as provisional until A3 consensus finalization. Soft-safe A2 should publish convergence certificates and reversion facts so UI and transport can surface any reversion risk during the soft window.
-
-See [Consensus - Operation Categories](108_consensus.md#17-operation-categories) for categorization details.
-
-## 10. Anti-Entropy Sync Protocol
+## 11. Anti-Entropy Sync Protocol
 
 Anti-entropy implements journal synchronization between peers. The protocol exchanges digests, plans reconciliation, and transfers operations.
 
-### 10.1 Sync Phases
+### 11.1 Sync Phases
 
 1. **Load Local State**: Read local `Journal` (facts + caps) and the local operation log.
 2. **Compute Digest**: Compute `JournalDigest` for local state.
@@ -353,7 +140,7 @@ Anti-entropy implements journal synchronization between peers. The protocol exch
 5. **Operation Transfer**: Pull or push operations in batches.
 6. **Merge + Persist**: Convert applied ops to journal delta, merge with local journal, persist once per round.
 
-### 10.2 Digest Format
+### 11.2 Digest Format
 
 ```rust
 pub struct JournalDigest {
@@ -367,7 +154,7 @@ pub struct JournalDigest {
 
 The `operation_count` is the number of operations in the local op log. The `last_epoch` is the max parent_epoch observed. The `operation_hash` is computed by streaming op fingerprints in deterministic order. The `fact_hash` and `caps_hash` use canonical serialization (DAG-CBOR) then hash.
 
-### 10.3 Reconciliation Actions
+### 11.3 Reconciliation Actions
 
 | Digest Comparison | Action |
 |-------------------|--------|
@@ -376,29 +163,15 @@ The `operation_count` is the number of operations in the local op log. The `last
 | RemoteBehind | Push ops |
 | Diverged | Push + pull |
 
-### 10.4 Retry Behavior
+Retry behavior follows `AntiEntropyConfig.retry_policy` with exponential backoff. Failures are reported with structured phase context attributable to a specific phase and peer.
 
-Anti-entropy can be retried according to `AntiEntropyConfig.retry_policy`. The default policy is exponential backoff with a bounded max attempt count.
+See [Choreography Development Guide](803_choreography_guide.md) for anti-entropy implementation.
 
-### 10.5 Failure Semantics
-
-Failures are reported with structured phase context:
-
-- `SyncPhase::LoadLocalState`
-- `SyncPhase::ComputeDigest`
-- `SyncPhase::DigestExchange`
-- `SyncPhase::PlanRequest`
-- `SyncPhase::ReceiveOperations`
-- `SyncPhase::MergeJournal`
-- `SyncPhase::PersistJournal`
-
-This makes failures attributable to a specific phase and peer.
-
-## 11. Protocol Version Negotiation
+## 12. Protocol Version Negotiation
 
 All choreographic protocols participate in version negotiation during connection establishment.
 
-### 11.1 Version Handshake Flow
+### 12.1 Version Handshake Flow
 
 ```
 Initiator                    Responder
@@ -412,16 +185,16 @@ Initiator                    Responder
 [Use negotiated version or disconnect]
 ```
 
-The handler is located at `aura-protocol/src/handlers/version_handshake.rs`.
+See [Choreography Development Guide](803_choreography_guide.md) for version handshake implementation.
 
-### 11.2 Handshake Outcomes
+### 12.2 Handshake Outcomes
 
 | Outcome | Response Contents |
 |---------|-------------------|
 | Compatible | `negotiated_version` (min of both peers), shared `capabilities` |
 | Incompatible | `reason`, peer version, optional `upgrade_url` |
 
-### 11.3 Protocol Capabilities
+### 12.3 Protocol Capabilities
 
 | Capability | Min Version | Description |
 |------------|-------------|-------------|
@@ -429,7 +202,7 @@ The handler is located at `aura-protocol/src/handlers/version_handshake.rs`.
 | `version_handshake` | 1.0.0 | Protocol version negotiation |
 | `fact_journal` | 1.0.0 | Fact-based journal sync |
 
-## 12. Summary
+## 13. Summary
 
 The transport, guard chain, and information flow architecture enforces strict control over message transmission. Secure channels bind communication to contexts. Guard chains enforce authorization, budget, and journal updates. Flow budgets and receipts regulate data usage. Leakage budgets reduce metadata exposure. Privacy-by-design patterns ensure minimal metadata exposure and context isolation. All operations remain private to the context and reveal no structural information.
 

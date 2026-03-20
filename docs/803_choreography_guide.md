@@ -21,10 +21,7 @@ This pipeline applies to all Layer 4/5 choreographies and all Category C ceremon
 
 ### Phase 1: Classification and Facts
 
-Classify the operation using [Operation Categories](109_operation_categories.md):
-- **Category A**: Local operations, no coordination
-- **Category B**: Optimistic CRDT operations, eventual consistency
-- **Category C**: Ceremonies requiring threshold agreement
+Operation categories (A, B, C) are defined in [Operation Categories](109_operation_categories.md). The category determines coordination requirements and affects protocol design choices (local vs. CRDT vs. ceremony).
 
 Define fact types with schema versioning:
 
@@ -360,35 +357,9 @@ pub async fn execute_with_circuit_breaker<T>(
 
 ## 6. Guard Chain Integration
 
-The guard chain enforces authorization, flow budgets, and journal commits. See [Authorization](106_authorization.md) for the full specification.
+The guard chain specification is defined in [Authorization](106_authorization.md). See [System Internals Guide](807_system_internals_guide.md) for the three-phase implementation pattern.
 
-### Guard Chain Pattern
-
-Guards are pure: evaluation runs synchronously over a prepared `GuardSnapshot`:
-
-```rust
-// Phase 1: Authorization via Biscuit + policy (async, cached)
-let token = effects.verify_biscuit(&request.token).await?;
-
-// Phase 2: Prepare snapshot and evaluate guards (sync)
-let snapshot = GuardSnapshot {
-    capabilities: token.capabilities(),
-    flow_budget: current_budget,
-    ..Default::default()
-};
-let commands = guard_chain.evaluate(&snapshot, &request)?;
-
-// Phase 3: Execute commands (async)
-for command in commands {
-    interpreter.execute(command).await?;
-}
-```
-
-No transport observable occurs until the interpreter executes commands in order.
-
-### Security Annotations
-
-Choreography annotations compile to guard chain commands:
+When integrating guards into choreographies, use the annotation syntax on choreography messages. The annotations compile to guard chain commands that execute before transport sends:
 
 - `guard_capability`: Creates capability check before send
 - `flow_cost`: Charges flow budget

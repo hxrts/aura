@@ -146,12 +146,7 @@ impl AuraAgent {
 
 ### Core + Orchestrator Rule
 
-Layer 4 crates (guards, protocol, amp, anti-entropy) split their logic into two parts:
-
-- **Pure core**: Guard evaluation, reconciliation, channel reduction, and policy computation. These modules take snapshots and return typed results. No I/O, no long-lived state.
-- **Effectful orchestrator**: Applies the core's output by executing effect commands, driving retries, and managing transport. Lives in executor or coordinator modules.
-
-This rule keeps the decision logic testable and deterministic while confining I/O to well-defined interpreter boundaries. See [Guard Chain Internals](#1-guard-chain-internals) for the concrete three-phase pattern.
+The Core + Orchestrator Rule is defined in [System Architecture](001_system_architecture.md). Layer 4 crates split logic into pure core modules and effectful orchestrator modules.
 
 ## 3. Type Reference
 
@@ -184,27 +179,7 @@ Lifecycle order:
 
 ### TimeStamp Domains
 
-`TimeStamp` in `aura-core` is the only time type for new facts and public APIs.
-
-| Domain | Effect Trait | Primary Use |
-|--------|--------------|-------------|
-| `PhysicalClock` | `PhysicalTimeEffects` | Wall time: cooldowns, receipts, liveness |
-| `LogicalClock` | `LogicalClockEffects` | Causal ordering: CRDT merge, happens-before |
-| `OrderClock` | `OrderClockEffects` | Deterministic ordering without timing leakage |
-| `Range` | `PhysicalTimeEffects` + policy | Validity windows with bounded skew |
-| `ProvenancedTime` | `TimeComparison` | Attested timestamps for consensus |
-
-**Guidelines**:
-- Use effect traits for all time reads (no `SystemTime::now()`)
-- Use the narrowest domain that satisfies the requirement
-- Compare mixed domains with `TimeStamp::compare(policy)`
-- Persist `TimeStamp` values directly in facts
-
-**Anti-patterns**:
-- Mixing clock domains in one sort path without explicit policy
-- Using `PhysicalClock` for privacy-sensitive ordering
-- Using UUID or insertion order as time proxy
-- Exposing `SystemTime` or chrono types in interfaces
+The time domain system is specified in [Effect System](103_effect_system.md). See that document for domain definitions, effect trait mappings, and usage constraints.
 
 ### Capability System Layering
 
@@ -358,25 +333,7 @@ Workflow operations in `aura-app` use `WorkflowError` (`aura-app::workflows::err
 
 ## 7. Instrumentation Contract
 
-Runtime instrumentation in `aura-agent` is structured and consistent across services. All long-lived services emit events from the following families:
-
-**Required event families**:
-- Runtime startup/shutdown
-- Service lifecycle transition
-- Task spawn/completion/failure/abort
-- Session claim/release/failure
-- Ingress accepted/rejected/dropped
-- Delegation start/commit/rollback/reject
-- Link boundary route/reject
-- Concurrency profile select/fallback
-- Invariant violation
-
-**Required fields** (where applicable):
-- `service`, `task`, `session_id`, `fragment_key`
-- `owner`, `from_owner`, `to_owner`
-- `profile`, `error_kind`, `correlation_id`
-
-These families and fields ensure that runtime behavior is reconstructible from structured logs. Envelope admission, delegation witnesses, and fallback decisions must all be visible in instrumentation output.
+The instrumentation contract is specified in [Runtime](104_runtime.md). All long-lived services must emit the required event families defined there.
 
 ## Related Documentation
 

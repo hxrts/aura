@@ -10,66 +10,75 @@ The default correctness lane is the real runtime with real TUI or web surfaces. 
 
 ## 2. Execution Lanes
 
-The harness has two execution lanes.
+The harness defines two execution lanes:
 
-- The shared semantic lane submits typed intent commands and waits on typed semantic contracts.
-- The frontend-conformance lane validates renderer-specific wiring such as PTY keys, DOM selectors, focus movement, and control bindings.
+- **Shared semantic lane**: submits typed intent commands and waits on typed semantic contracts.
+- **Frontend-conformance lane**: validates renderer-specific wiring such as PTY keys, DOM selectors, focus movement, and control bindings.
 
-Shared scenarios must run in the shared semantic lane. That lane must not issue raw UI requests such as `SendKeys`, `SendKey`, `ClickButton`, `FillInput`, or `FillField`. Frontend-conformance coverage may use those mechanics on purpose.
+See [Testing Guide](804_testing_guide.md) for lane selection and execution details.
 
 ## 3. Scenario Sources
 
-The scenario source of truth is `aura-app::scenario_contract`. Inventoried harness scenarios load and execute as semantic definitions. Shared scenarios keep typed semantic steps and do not carry mirrored frontend-conformance execution step graphs.
+The scenario source of truth is `aura-app::scenario_contract`. Scenario taxonomy:
 
-Frontend-conformance scenarios may still use typed `UiAction` mechanics such as key presses, text input, and modal dismissal. They are semantic files too. Renderer-specific intent belongs in the scenario definition, not in a second file format.
+- **Shared semantic scenarios**: typed semantic steps, no `execution_mode` declaration, no renderer-specific mechanics.
+- **Frontend-conformance scenarios**: typed `UiAction` mechanics (key presses, text input, modal dismissal), must declare `execution_mode` explicitly.
+- **Compatibility fixtures**: quarantined renderer-mechanic coverage only, must declare `execution_mode = "compatibility"` or `execution_mode = "agent"`.
 
-Semantic scenarios must not declare `execution_mode`. Compatibility-only executor fixtures must declare `execution_mode = "compatibility"` or `execution_mode = "agent"` explicitly. The harness no longer treats a missing mode as an implicit compatibility fallback.
+Inventoried scenarios are classified in `scenarios/harness_inventory.toml` as shared, TUI conformance, or web conformance.
 
-Compatibility-only fixtures are renderer-mechanic coverage only. They must not encode product semantic intents such as account creation, contact acceptance, channel joins, or chat sends as compatibility actions.
-
-The remaining compatibility fixture surface is intentionally small. It is for frontend-conformance mechanics such as launch, send, wait, parity, clipboard, and fault-delay coverage. It is not a general-purpose second scenario language.
-
-Shared scenario governance depends on `scenarios/harness_inventory.toml`. The inventory classifies scenarios as shared, TUI conformance, or web conformance. Governance checks use that classification directly to enforce lane policy.
+See [Testing Guide](804_testing_guide.md) for scenario authoring and governance.
 
 ## 4. Backend Model
 
-All backends implement `InstanceBackend`. That trait covers lifecycle, health checks, snapshots, log tails, and basic input. `RawUiBackend` adds renderer-driven actions for conformance coverage.
+The harness defines the following backend interfaces:
 
-`LocalPtyBackend` and `PlaywrightBrowserBackend` also implement `SharedSemanticBackend`. They expose `shared_projection()`, `submit_semantic_command()`, and projection-event waits. Shared commands enter the real frontend update path instead of a harness-only shortcut.
+- **`InstanceBackend`**: lifecycle, health checks, snapshots, log tails, and basic input.
+- **`RawUiBackend`**: renderer-driven actions for conformance coverage.
+- **`SharedSemanticBackend`**: `shared_projection()`, `submit_semantic_command()`, and projection-event waits. Implemented by `LocalPtyBackend` and `PlaywrightBrowserBackend`.
+- **`SshTunnelBackend`**: orchestration-only (SSH security defaults and tunnel setup).
 
-`SshTunnelBackend` is orchestration-only. It validates SSH security defaults and tunnel setup. It does not implement the raw UI or shared semantic contracts.
+See [Testing Guide](804_testing_guide.md) for backend implementation.
 
 ## 5. Observation Model
 
-`UiSnapshot` is the authoritative observation surface for parity-critical flows. Each snapshot carries `ProjectionRevision`, quiescence state, selections, lists, operations, toasts, and runtime events. Browser observation also carries render-heartbeat data through the browser bridge.
+`UiSnapshot` is the authoritative observation surface for parity-critical flows. Observation contracts:
 
-Parity-critical waits must bind to typed contracts. Those contracts include readiness, screen or modal visibility, runtime events, quiescence, operation handles, and strictly newer projections. Raw text matching and raw DOM scraping are diagnostics only.
+- Snapshots carry `ProjectionRevision`, quiescence state, selections, lists, operations, toasts, and runtime events.
+- Parity-critical waits bind to typed contracts (readiness, visibility, events, quiescence, operation handles, strictly newer projections). Raw text matching and DOM scraping are diagnostics only.
+- Observation paths are side-effect free. Reads do not repair state or retry hidden actions.
 
-Observation paths must be side-effect free. Reads must not repair state or retry hidden actions. Recovery remains explicit and separate from observation.
+See [Testing Guide](804_testing_guide.md) for observation patterns.
 
 ## 6. Semantic Command Plane
 
-Shared commands are typed `IntentAction` requests. Examples include account creation, device enrollment, contact invitations, channel membership, and chat sends. Each command returns a typed response with submission metadata and an operation handle when the contract defines one.
+Shared commands are typed `IntentAction` requests (account creation, device enrollment, contact invitations, channel membership, chat sends). Contracts:
 
-The executor records projection baselines before command submission. Post-action waits require a strictly newer authoritative projection or another declared barrier. This rule prevents stale snapshots from satisfying success-path assertions.
+- Each command returns a typed response with submission metadata and an optional operation handle.
+- Post-action waits require a strictly newer authoritative projection or another declared barrier.
+- Unsupported semantic commands fail closed; no silent fallback to renderer-specific behavior.
 
-Unsupported semantic commands must fail closed. The harness must not silently fall back to renderer-specific behavior in the shared semantic lane.
+See [Testing Guide](804_testing_guide.md) for semantic command usage.
 
 ## 7. Scenario Execution
 
-`ScenarioExecutor` enforces per-step budgets and an optional global budget. It records canonical trace events, state transitions, and step metrics. It also enforces shared-flow preconditions for account, contact, channel, and messaging phases.
+`ScenarioExecutor` enforces per-step budgets and an optional global budget. Contracts:
 
-Shared scenarios must declare convergence barriers before the next typed intent when the flow requires one. Governance validates those barriers against typed expectations. This keeps shared execution aligned with runtime events and authoritative state changes.
+- Shared scenarios must declare convergence barriers before the next typed intent when the flow requires one.
+- The executor records canonical trace events, state transitions, and step metrics.
+- Frontend-conformance scenarios produce traces and diagnostics but are not the primary parity oracle for shared business flows.
 
-The executor also runs frontend-conformance scenarios through the semantic step model. Those runs still produce traces and diagnostics. They are not the primary parity oracle for shared business flows.
+See [Testing Guide](804_testing_guide.md) for scenario execution details.
 
 ## 8. Determinism And Replay
 
-Run configuration validation is config-first. Invalid run files, scenario files, capability mismatches, storage collisions, SSH policy violations, and browser runtime gaps fail before execution starts.
+Determinism contracts:
 
-Determinism comes from `build_seed_bundle()`. The harness derives a run seed, scenario seed, fault seed, and per-instance seeds from the run configuration. The event stream uses monotonically increasing event identifiers.
+- Configuration validation is config-first: invalid inputs fail before execution starts.
+- Determinism derives from `build_seed_bundle()` (run seed, scenario seed, fault seed, per-instance seeds). Event streams use monotonically increasing identifiers.
+- Replay bundles store run config, tool API version, action log, routing metadata, and seed bundle. Deterministic shared flows preserve semantic trace shape under identical inputs.
 
-Replay bundles store the run config, tool API version, tool action log, routing metadata, and seed bundle. Replay checks response shape compatibility and reruns the recorded actions against a fresh coordinator. Deterministic shared flows are expected to preserve semantic trace shape under identical inputs.
+See [Testing Guide](804_testing_guide.md) for determinism and replay details.
 
 ## 9. Runtime Substrate
 

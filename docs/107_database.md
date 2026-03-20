@@ -313,117 +313,9 @@ pub enum QueryError {
 
 ## 4. Concrete Query Examples
 
-### 4.1 ChannelsQuery
+Concrete queries (such as `ChannelsQuery` and `MessagesQuery`) implement the `Query` trait by compiling to Datalog programs, declaring required Biscuit capabilities, specifying fact predicate dependencies for invalidation, and parsing typed results from Datalog bindings.
 
-```rust
-#[derive(Clone, Default)]
-pub struct ChannelsQuery {
-    pub channel_type: Option<String>,
-}
-
-impl Query for ChannelsQuery {
-    type Result = Vec<Channel>;
-
-    fn to_datalog(&self) -> DatalogProgram {
-        DatalogProgram::new(vec![
-            DatalogRule::new(DatalogFact::new(
-                "channel",
-                vec![
-                    DatalogValue::var("id"),
-                    DatalogValue::var("name"),
-                    DatalogValue::var("type"),
-                ],
-            ))
-            .when(DatalogFact::new(
-                "channel_fact",
-                vec![
-                    DatalogValue::var("id"),
-                    DatalogValue::var("name"),
-                    DatalogValue::var("type"),
-                ],
-            )),
-        ])
-        .with_goal("channel($id, $name, $type)")
-    }
-
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::list("channels")]
-    }
-
-    fn dependencies(&self) -> Vec<FactPredicate> {
-        vec![FactPredicate::named("channel_fact")]
-    }
-
-    fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        bindings.rows.iter().map(|row| {
-            Ok(Channel {
-                id: row.get_string("id")
-                    .ok_or(QueryParseError::MissingField { field: "id".into() })?
-                    .to_string(),
-                name: row.get_string("name")
-                    .ok_or(QueryParseError::MissingField { field: "name".into() })?
-                    .to_string(),
-                channel_type: row.get_string("type").map(String::from),
-            })
-        }).collect()
-    }
-}
-```
-
-### 4.2 MessagesQuery
-
-```rust
-#[derive(Clone)]
-pub struct MessagesQuery {
-    pub channel_id: String,
-    pub limit: Option<usize>,
-}
-
-impl Query for MessagesQuery {
-    type Result = Vec<Message>;
-
-    fn to_datalog(&self) -> DatalogProgram {
-        DatalogProgram::new(vec![
-            DatalogRule::new(DatalogFact::new(
-                "message",
-                vec![
-                    DatalogValue::var("id"),
-                    DatalogValue::var("content"),
-                    DatalogValue::var("sender"),
-                    DatalogValue::var("timestamp"),
-                ],
-            ))
-            .when(DatalogFact::new(
-                "message_fact",
-                vec![
-                    DatalogValue::String(self.channel_id.clone()),
-                    DatalogValue::var("id"),
-                    DatalogValue::var("content"),
-                    DatalogValue::var("sender"),
-                    DatalogValue::var("timestamp"),
-                ],
-            )),
-        ])
-        .with_goal("message($id, $content, $sender, $timestamp)")
-    }
-
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("messages")
-            .with_constraint("channel", &self.channel_id)]
-    }
-
-    fn dependencies(&self) -> Vec<FactPredicate> {
-        vec![FactPredicate::with_args(
-            "message_fact",
-            vec![("channel_id", &self.channel_id)],
-        )]
-    }
-
-    fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        // Parse message rows...
-    }
-}
-```
+See [Effects and Handlers Guide](802_effects_guide.md) for query implementation examples.
 
 ## 5. Indexing Layer
 
@@ -551,46 +443,11 @@ Aura Consensus is not linearizable by default. Each consensus instance independe
 
 Agreement modes are orthogonal to the coordination matrix: A1 (provisional) and A2 (soft-safe) may provide immediate usability, but any durable shared database state must be A3 (consensus-finalized) with prestate binding. Soft-safe windows should be bounded with convergence certificates and explicit reversion facts.
 
-BFT-DKG integration: When key material is required (K3), the database must bind operations to a consensus‑finalized `DkgTranscriptCommit`. This ensures the transaction prestate and the cryptographic prestate are aligned.
+BFT-DKG integration: When key material is required (K3), the database must bind operations to a consensus-finalized `DkgTranscriptCommit`. This ensures the transaction prestate and the cryptographic prestate are aligned.
 
-### 7.3 Mutation Receipts
+`MutationReceipt` indicates whether a mutation completed immediately (monotone/CRDT) or was submitted to consensus.
 
-`MutationReceipt` indicates how a mutation was coordinated:
-
-```rust
-pub enum MutationReceipt {
-    /// Monotone operation completed immediately via CRDT merge
-    Immediate {
-        fact_ids: Vec<FactId>,
-        timestamp: PhysicalTime,
-    },
-    /// Non-monotone operation submitted to consensus
-    Consensus {
-        consensus_id: ConsensusId,
-        prestate_hash: Hash32,
-        submit_latency: Duration,
-    },
-}
-```
-
-Usage pattern:
-
-```rust
-let receipt = effects.mutate(operation).await?;
-match receipt {
-    MutationReceipt::Immediate { fact_ids, .. } => {
-        // Facts are immediately visible
-        println!("{} facts created", fact_ids.len());
-    }
-    MutationReceipt::Consensus { consensus_id, .. } => {
-        // Wait for consensus completion before querying
-        let result = effects.query_with_isolation(
-            &MyQuery::default(),
-            QueryIsolation::read_committed(consensus_id),
-        ).await?;
-    }
-}
-```
+See [Choreography Development Guide](803_choreography_guide.md) for mutation receipt patterns and BFT-DKG transaction integration.
 
 ## 8. Temporal Database Model
 
@@ -627,127 +484,11 @@ pub enum Finality {
 
 ### 8.2 Fact Operations
 
-```rust
-pub enum FactOp {
-    /// Assert a new fact
-    Assert { content: FactContent, scope: Option<ScopeId> },
+Fact operations are classified by monotonicity. `Assert` and `Checkpoint` are monotonic (no coordination required). `Retract` and `EpochBump` are non-monotonic (may require consensus). The `FactEffects` trait provides the write interface, supporting single operations, atomic transactions, finality waiting, and temporal queries.
 
-    /// Mark a specific fact as retracted
-    Retract { target: FactId, reason: RetractReason },
+The hybrid transaction model uses direct `apply_op()` for simple monotonic operations and explicit `Transaction` grouping for atomic multi-operation batches. Temporal queries support as-of, since, and history range modes. Per-scope finality configuration controls default and minimum finality levels with optional per-content overrides.
 
-    /// Invalidate all facts in scope before new epoch
-    EpochBump { scope: ScopeId, new_epoch: Epoch, checkpoint: Option<Hash32> },
-
-    /// Create a queryable snapshot
-    Checkpoint { scope: ScopeId, state_hash: Hash32, supersedes: Vec<FactId> },
-}
-```
-
-Monotonic vs non-monotonic:
-- `Assert` and `Checkpoint` are monotonic (no coordination required)
-- `Retract` and `EpochBump` are non-monotonic (may require consensus)
-
-### 8.3 FactEffects Trait
-
-The write interface for the temporal database:
-
-```rust
-#[async_trait]
-pub trait FactEffects: Send + Sync {
-    /// Apply a single fact operation
-    async fn apply_op(&self, op: FactOp, scope: &ScopeId) -> Result<FactReceipt, FactError>;
-
-    /// Apply a transaction atomically
-    async fn apply_transaction(&self, tx: Transaction) -> Result<TransactionReceipt, FactError>;
-
-    /// Wait for finality level
-    async fn wait_for_finality(&self, fact_id: FactId, target: Finality) -> Result<Finality, FactError>;
-
-    /// Configure scope finality requirements
-    async fn configure_scope(&self, config: ScopeFinalityConfig) -> Result<(), FactError>;
-
-    /// Query with temporal constraints
-    async fn query_temporal(&self, scope: &ScopeId, temporal: TemporalQuery)
-        -> Result<Vec<TemporalFact>, FactError>;
-}
-```
-
-### 8.4 Transactions
-
-For atomic operations, facts can be grouped:
-
-```rust
-let tx = Transaction::new(ScopeId::authority("abc"))
-    .with_op(FactOp::assert(content1))
-    .with_op(FactOp::assert(content2))
-    .with_op(FactOp::retract(old_id, RetractReason::Superseded { by: new_id }))
-    .with_finality(Finality::Checkpointed);
-
-let receipt = effects.apply_transaction(tx).await?;
-```
-
-Hybrid transaction model:
-- Simple monotonic operations: Direct `apply_op()` (no transaction overhead)
-- Atomic operations: Explicit `Transaction` grouping when needed
-
-### 8.5 Temporal Queries
-
-Query facts with respect to time:
-
-```rust
-pub enum TemporalQuery {
-    /// Database state at a point in time
-    AsOf(TemporalPoint),
-    /// Changes since a point in time (delta)
-    Since(TemporalPoint),
-    /// Full history over a time range
-    History { from: TemporalPoint, to: TemporalPoint },
-}
-
-pub enum TemporalPoint {
-    Physical(PhysicalTime),         // Wall-clock time
-    Order(OrderTime),               // Opaque order token
-    AfterTransaction(TransactionId), // After specific transaction
-    AtEpoch { scope: ScopeId, epoch: Epoch }, // At scope epoch
-    Now,                            // Current state
-}
-```
-
-Usage:
-
-```rust
-// Query current state
-let facts = effects.query_temporal(&scope, TemporalQuery::current()).await?;
-
-// Time-travel query
-let historical = effects.query_temporal(
-    &scope,
-    TemporalQuery::as_of(TemporalPoint::Physical(past_time)),
-).await?;
-
-// Get changes since last sync
-let delta = effects.query_temporal(
-    &scope,
-    TemporalQuery::since(TemporalPoint::AfterTransaction(last_tx_id)),
-).await?;
-```
-
-### 8.6 Finality Configuration
-
-Per-scope finality with operation override:
-
-```rust
-let config = ScopeFinalityConfig::new(ScopeId::parse("authority:abc/payments")?)
-    .with_default(Finality::Checkpointed)      // Default for this scope
-    .with_minimum(Finality::replicated(2))      // Minimum required
-    .with_cascade(true)                         // Inherit to child scopes
-    .with_override(ContentFinalityOverride::new(
-        "high_value_transfer",
-        Finality::consensus(ConsensusId([0; 32])), // Require consensus for transfers
-    ));
-
-effects.configure_scope(config).await?;
-```
+See [Effects and Handlers Guide](802_effects_guide.md) for temporal query patterns and finality configuration.
 
 ## 9. Consistency Metadata
 

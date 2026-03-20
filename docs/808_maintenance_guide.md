@@ -6,11 +6,7 @@ For the maintenance architecture specification, see [Distributed Maintenance Arc
 
 ## Maintenance Philosophy
 
-The maintenance system is built on three key principles:
-
-1. **Coordinated Operations** - Threshold approval is used where the chosen maintenance scope actually has a quorum or authority set that can approve
-2. **Epoch Fencing** - Hard fork upgrades may use identity epochs for safe coordination, but only inside scopes that own that fence
-3. **Journal-Based Facts** - All maintenance events are replicated through the journal CRDT
+Maintenance architectural principles are defined in [Distributed Maintenance Architecture](116_maintenance.md).
 
 The system supports snapshots for garbage collection, cache management, and both soft and hard fork upgrades.
 
@@ -20,21 +16,7 @@ The maintenance service publishes events to the journal as facts. These events a
 
 ### Event Types
 
-The system defines several event families:
-
-`SnapshotProposed` marks the beginning of a snapshot operation. It contains the proposal identifier, proposer authority, target epoch, and state digest of the candidate snapshot.
-
-`SnapshotCompleted` records a successful snapshot. It includes the accepted proposal identifier, finalized snapshot payload, participating authorities, and threshold signature attesting to the snapshot.
-
-`CacheInvalidated` signals cache invalidation. It specifies which cache keys must be refreshed and the earliest identity epoch the cache entry remains valid for.
-
-`ReleaseDistribution` facts announce release declarations, build certificates, and artifact availability.
-
-`ReleasePolicy` facts announce discovery, sharing, and activation policy publications.
-
-`UpgradeExecution` facts announce scoped staging, residency changes, transition changes, cutover results, partition outcomes, and rollback execution.
-
-`AdminReplacement` announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.
+Maintenance event types are defined in [Distributed Maintenance Architecture](116_maintenance.md).
 
 ## Snapshot Protocol
 
@@ -194,9 +176,7 @@ There is no network-wide authoritative cutover phase for the whole Aura network.
 
 ### Upgrade Types
 
-Soft fork upgrades are compatibility-preserving. Old and new code can interoperate while one scope is in `ReleaseResidency::Coexisting`.
-
-Hard fork upgrades are scope-bound incompatibility transitions. They reject incompatible new sessions after local cutover and require explicit in-flight handling for old sessions. A hard fork may use threshold approval or epoch fencing, but only if the chosen scope actually owns that mechanism.
+The upgrade classification (soft fork vs hard fork) is defined in [Distributed Maintenance Architecture](116_maintenance.md).
 
 ### Basic Upgrade Operation
 

@@ -62,36 +62,27 @@ This isolation keeps the guard chain deterministic and side-channel free.
 
 ## Biscuit Token Workflow
 
-Biscuit tokens provide cryptographically verifiable, attenuated delegation chains. The typical workflow creates root authority via `TokenAuthority::new(authority_id)`. Issue tokens via `authority.create_token(recipient_authority_id)`. Attenuate for delegation via `BiscuitTokenManager::attenuate_read()`. Authorize via `BiscuitAuthorizationBridge::authorize(&token, operation, &resource_scope)`.
+Biscuit tokens guarantee cryptographically verifiable, attenuated delegation chains. Each token carries a signature chain that prevents forgery and supports offline verification without contacting the issuer. Attenuation is monotone: each delegation step can only reduce authority, never widen it. Epoch rotation provides revocation by invalidating old tokens.
 
-```mermaid
-flowchart TB
-    A[Root Authority Token] -->|append caveats| B[Device Token<br/>read + write]
-    B -->|check operation = read| C[Read-Only Token]
-    C -->|check resource starts_with public/| D[Public Read-Only Token]
-```
-
-This diagram shows token attenuation. Each block appends restrictions to the chain. Attenuation preserves the cryptographic signature chain while reducing authority.
-
-Biscuit tokens are secure through cryptographic signature chains that prevent forgery. They support offline verification without contacting the issuer. Epoch rotation provides revocation by invalidating old tokens.
+See [Effects and Handlers Guide](802_effects_guide.md) for Biscuit workflow implementation.
 
 ## Guard Chain Integration
 
-Biscuit authorization integrates with the guard chain in three phases. Cryptographic verification calls `bridge.authorize(token, operation, resource_scope)` to perform Datalog evaluation. Guard evaluation prepares a `GuardSnapshot` asynchronously and then calls `guards.evaluate(&snapshot, &request)` synchronously. Effect execution interprets the `EffectCommand` items from the guard outcome.
+Biscuit authorization integrates with the guard chain through three phases: cryptographic verification, synchronous guard evaluation over a prepared `GuardSnapshot`, and effect command interpretation. If any phase fails, the operation returns an error without observable side effects.
 
-If any phase fails, the operation returns an error without observable side effects.
+See [Effects and Handlers Guide](802_effects_guide.md) for guard chain integration patterns.
 
 ## Authorization Scenarios
 
-Biscuit tokens handle all authorization scenarios through cryptographic verification. Local device operations use device tokens with full capabilities. Cross-authority delegation uses attenuated tokens with resource restrictions. Policy enforcement integrates sovereign policy into Datalog evaluation.
+All authorization scenarios -- local device operations, cross-authority delegation, API access control, guardian recovery, storage, and relaying -- are handled through Biscuit token attenuation and sovereign policy integration. Token scope and restrictions vary by scenario but follow the same meet-monotone evaluation path.
 
-API access control uses scoped tokens with operation restrictions. Guardian recovery uses guardian tokens with recovery capabilities. Storage operations use storage-scoped tokens with path restrictions. Relaying and forwarding use context tokens with relay permissions.
+See [Effects and Handlers Guide](802_effects_guide.md) for authorization scenario patterns.
 
 ## Performance and Caching
 
-Biscuit token authorization has predictable performance characteristics. Signature verification requires O(chain length) cryptographic operations. Authorization evaluation takes O(facts × rules) time for Datalog evaluation. Attenuation costs O(1) to append blocks.
+Authorization results are cached per authority, token hash, and resource scope with epoch-based invalidation. Cache entries invalidate on epoch rotation or policy update. Signature verification scales with chain length; Datalog evaluation scales with facts times rules; attenuation is constant-cost.
 
-Token results are cacheable with epoch-based invalidation. Cache authorization results per authority, token hash, and resource scope. Invalidate cache on epoch rotation or policy update.
+See [Distributed Maintenance Guide](808_maintenance_guide.md) for cache configuration.
 
 ## Security Model
 

@@ -85,33 +85,23 @@ Callers select the domain appropriate to their semantics. Guards and transport u
 
 Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`. Total ordering across domains must use `OrderTime` or consensus sequencing. Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations.
 
-### Timeout And Backoff Guidance
+## Time Domain System
 
-Wall clock time is a local choice in Aura. It is appropriate for:
+The unified `TimeStamp` type provides five domains for different use cases.
 
-- local owner deadlines
-- retry and backoff policy
-- expiration and cooldowns
-- coordination with external systems
+| Domain | Effect Trait | Primary Use |
+|--------|-------------|-------------|
+| `PhysicalClock` | `PhysicalTimeEffects` | Wall time, cooldowns, receipts, liveness |
+| `LogicalClock` | `LogicalClockEffects` | Causal ordering, CRDT merge, happens-before |
+| `OrderClock` | `OrderClockEffects` | Deterministic ordering without timing leakage |
+| `Range` | `PhysicalTimeEffects` + policy | Validity windows with bounded skew |
+| `ProvenancedTime` | `TimeComparison` | Attested timestamps for consensus |
 
-Wall clock time is not, by itself, distributed semantic truth.
+Application code accesses time exclusively through effect traits. Direct `SystemTime::now()` calls are forbidden outside effect implementations. Cross-domain comparisons require explicit `TimeStamp::compare(policy)`. `OrderClock` must not leak timing information.
 
-Rules:
+### Timeout And Backoff Contract
 
-- use `PhysicalTimeEffects` for local timeout budgeting and retry policy
-- use logical, order, or provenanced time when the concern is semantic
-  ordering, causality, or attestation
-- do not treat a local timeout as proof of protocol completion, causal order,
-  or consensus finality
-- nested workflows should consume remaining timeout budget rather than stacking
-  unrelated per-stage wall-clock literals
-- parity-critical timeout handling should surface typed timeout failure instead
-  of silent hangs or ad hoc `tokio::time::timeout` wrappers at call sites
-
-The shared timeout/backoff vocabulary lives in `aura-core::time::timeout` and
-should be preferred over duplicated timeout arithmetic or raw sleep loops.
-Parity-critical workflow APIs should take `OperationTimeoutBudget` or narrower
-budget/policy types rather than raw `Duration`.
+Timeout and backoff behavior is part of the ownership model. Each parity-critical async path must identify a deadline owner, retry policy owner, and terminal consequence. See [Effects and Handlers Guide](802_effects_guide.md) for timeout patterns and [Ownership Model](122_ownership_model.md) for timeout ownership rules.
 
 ## Threshold Signing
 
@@ -123,23 +113,15 @@ Key components include `ThresholdSigningEffects` for async signing operations, l
 
 ## When to Create Effect Traits
 
-Create new effect traits when abstracting OS or external system integration. Use them when defining domain-specific operations that multiple implementations might provide. They isolate side effects for testing and simulation. They enable deterministic simulation of complex behaviors.
-
-Follow YAGNI principles. Defer abstraction when only one implementation exists. Avoid abstractions that add complexity without clear benefit. Do not abstract without concrete need.
-
-Application-specific effect traits should remain in their application layer. Do not move `CliEffects` or `ConfigEffects` from `aura-terminal` to `aura-core` when only one implementation exists. The `aura-core` crate provides infrastructure effects. Application layers compose these into domain-specific abstractions.
+New effect traits are warranted when multiple crates need the same async capability and the operation involves OS integration or external state. Convenience wrappers belong in composite extension traits rather than new base traits. See [Effects and Handlers Guide](802_effects_guide.md) for trait design guidance.
 
 ## Database Effects
 
-Database operations use existing effect traits rather than a dedicated `DatabaseEffects` layer. `JournalEffects` in `aura-core` provides fact insertion for monotone operations. Non-monotone operations use `aura-consensus` protocols driven by session types and the guard chain.
-
-Reactive queries are handled via `QueryEffects` and `ReactiveEffects`. The coordination pattern follows two orthogonal dimensions described in [Database Architecture](107_database.md). Authority scope determines single versus cross-authority operations. Agreement level determines monotone versus consensus operations.
+Database operations use existing `StorageEffects`, `JournalEffects`, and `AuthorizationEffects` rather than a dedicated `DatabaseEffects` trait. See [Database Architecture](107_database.md) for query patterns.
 
 ## Handler Design
 
-Effect handlers implement effect traits. Stateless handlers execute operations without internal state. Stateful handlers coordinate multiple effects or maintain internal caches. Typed handlers implement concrete effect traits. Type-erased handlers allow dynamic dispatch through the effect executor.
-
-Handlers do not store global state. All required inputs flow through method parameters. This avoids hidden dependencies and enables deterministic testing.
+Handlers are stateless per-request processors. They do not store global state. The handler taxonomy includes stateless infrastructure handlers, application handlers, typed composite handlers, and type-erased composite handlers. See [Effects and Handlers Guide](802_effects_guide.md) for implementation patterns.
 
 ## Unified Encrypted Storage
 
@@ -244,7 +226,7 @@ Effect boundaries determine native and WASM conformance parity. Protocol code mu
 
 The pure transition core requires identical outputs given the same input stream. No hidden state may affect observable behavior. All state must flow through explicit effect calls. Non-determinism is permitted only through explicit algebraic effects. Time comes from time traits. Randomness comes from `RandomEffects`. Storage comes from `StorageEffects`.
 
-Conformance lanes compare logical steps rather than wall-clock timing. Tests must not depend on execution speed. Time-dependent behavior uses simulated time through effect handlers. Conformance artifacts use canonical encoding with deterministic field ordering.
+Conformance lanes compare logical steps rather than wall-clock timing. Time-dependent behavior uses simulated time through effect handlers. Conformance artifacts use canonical encoding with deterministic field ordering. See [Testing Guide](804_testing_guide.md) for conformance testing patterns.
 
 ## Session-Local VM Bridge Effects
 
@@ -265,12 +247,7 @@ The runtime must also distinguish owner identity from owner capability:
 
 Both checks matter for effect routing, especially across delegation boundaries.
 
-Parity-critical ownership boundaries should declare that split explicitly through `aura-macros` rather than comments or naming convention alone:
-- `#[semantic_owner(..., category = "move_owned")]` for move-owned workflow owners
-- `#[actor_owned(..., category = "actor_owned")]` for long-lived async domains
-- `#[capability_boundary(category = "capability_gated", ...)]` for mint/publication helpers
-
-See `crates/aura-agent/ARCHITECTURE.md` for the complete ownership model.
+See [System Internals Guide](807_system_internals_guide.md) for VM bridge implementation patterns and `crates/aura-agent/ARCHITECTURE.md` for the complete ownership model.
 
 ## Layer Placement
 

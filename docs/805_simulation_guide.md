@@ -12,19 +12,13 @@ See [Simulation Infrastructure Reference](119_simulator.md) for the complete arc
 
 ## Simulation vs Harness
 
-Simulation is a first-class alternate runtime substrate, not the primary one. Use the real-runtime harness by default when validating product behavior through the TUI or webapp. Use simulation when you need deterministic virtual time, controlled network faults, scheduler control, or MBT and trace replay under constrained distributed conditions. Promote high-value simulation findings back into real-runtime harness coverage when the flow is user-visible or integration-sensitive.
+The simulation architecture is specified in [Simulation Infrastructure Reference](119_simulator.md). The harness architecture is specified in [User Flow Harness](121_user_flow_harness.md).
 
-This separation keeps responsibilities clean. The harness executes real frontends and gathers semantic observations. The simulator provides controlled runtime conditions when explicitly selected. Quint and related verification tooling generate traces and invariants.
-
-The shared semantic contracts for UI state and scenario execution live in `aura-app`. Simulation should integrate through those contracts rather than introducing a parallel frontend-driving format.
+Use the real-runtime harness by default when validating product behavior through the TUI or webapp. Use simulation when you need deterministic virtual time, controlled network faults, scheduler control, or MBT and trace replay under constrained distributed conditions. Promote high-value simulation findings back into real-runtime harness coverage when the flow is user-visible or integration-sensitive.
 
 ## Two Simulation Systems
 
-Aura provides two complementary simulation systems.
-
-TOML scenarios suit human-written integration tests. They provide readable scenario definitions with named phases and fault injection. Use them for end-to-end protocol testing.
-
-Quint actions suit model-based testing. They enable generative state space exploration driven by formal specifications. Use them for conformance testing against Quint models.
+The two simulation systems (TOML scenarios and Quint actions) are specified in [Simulation Infrastructure Reference](119_simulator.md).
 
 | Use Case | System |
 |----------|--------|
@@ -232,11 +226,7 @@ Environment variables (prefixed per-crate, e.g., `AURA_SYNC_*`) allow per-proces
 
 ### Guard Chain Integration
 
-Feature crates assume the guard chain is active when running protocols:
-
-```
-CapGuard → FlowGuard → LeakageTracker → JournalCoupler → Transport
-```
+The guard chain sequence is specified in [Authorization](106_authorization.md).
 
 For simulation, capability checks rely on Biscuit tokens evaluated by `AuthorizationEffects`. Guard evaluators must be provided by the runtime before sync operations. Validation occurs before sending or applying any protocol data.
 

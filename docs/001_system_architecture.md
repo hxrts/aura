@@ -506,6 +506,10 @@ Effect traits are defined only in `aura-core`. Infrastructure handlers live in `
 
 For practical guidance on effects and handlers, see [Effects Guide](802_effects_guide.md). For choreography development, see [Choreography Guide](803_choreography_guide.md). For complete crate breakdown and dependency graph, see [Project Structure](999_project_structure.md).
 
+### 9.3 Core and orchestrator split
+
+Layer 4 crates split logic into two parts. Pure core modules handle guard evaluation, reconciliation, channel reduction, and policy computation. These modules take snapshots and return typed results without I/O or long-lived state. Effectful orchestrator modules apply the core output by executing effect commands, driving retries, and managing transport. This split keeps decision logic testable and deterministic while confining I/O to interpreter boundaries.
+
 ## 10. Security Model
 
 Aura's security model eliminates single points of trust. No central server holds keys or can read messages. Trust is distributed across devices and social relationships.

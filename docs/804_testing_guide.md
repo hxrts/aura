@@ -57,14 +57,7 @@ Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::n
 
 ### Shared UX Contract And Determinism
 
-For parity-critical shared flows, `aura-app::ui_contract` is the authoritative contract surface. It owns:
-
-- canonical screen, modal, control, field, list, and operation identifiers
-- focus and selection semantics
-- shared-flow support and coverage metadata
-- `UiSnapshot`, `RenderHeartbeat`, and typed runtime-event shapes
-
-The web shell and the TUI must consume that contract rather than deriving local IDs, local focus semantics, or ad hoc flow metadata.
+The shared UX contract is defined in [CLI and Terminal User Interface](117_user_interface.md). The `aura-app::ui_contract` module is the canonical authority for parity-critical UI identity, readiness semantics, and typed observation payloads.
 
 For parity-critical shared-flow execution:
 
@@ -76,35 +69,7 @@ For parity-critical shared-flow execution:
 
 ### Shared Semantic Ownership Model
 
-Parity-critical shared semantic flows must use one explicit ownership category. Do not mix categories casually inside the same flow.
-
-- `Pure`
-  - deterministic reducers, validators, typed domain transitions, and value
-    transformations
-  - no long-lived async ownership
-  - no ambient mutable state
-- `MoveOwned`
-  - exclusive right-to-act surfaces such as operation handles, owner tokens, and
-    consumed handoff records
-  - use when stale-owner invalidation or transfer of authority is the hard
-    problem
-  - ownership transfer should consume the old right to act rather than mutate a
-    shared owner field in place
-- `ActorOwned`
-  - long-lived mutable async state with lifecycle, supervision, and
-    multi-caller contention
-  - use for readiness coordinators, command ingress loops, runtime-facing
-    lifecycle coordinators, and other state that must stay under one live owner
-- `Observed`
-  - projections, snapshots, render state, and harness observation surfaces
-  - read-only and downstream of authoritative ownership
-
-Use the categories this way:
-
-- use actors for who runs long-lived mutable async state
-- use move semantics for who is allowed to act and how ownership is transferred
-- keep pure domain/state transitions free of actor state
-- keep observed surfaces unable to author semantic truth
+Parity-critical shared semantic flows must use one explicit ownership category. Do not mix categories casually inside the same flow. The four ownership categories (`Pure`, `MoveOwned`, `ActorOwned`, `Observed`) are defined in [Ownership Model](122_ownership_model.md).
 
 For shared semantic flows, the default expectation is:
 
@@ -267,16 +232,7 @@ Do not use this table to justify ambient shared ownership. If a subsystem needs 
 
 ### Release And Update Matrix Expectations
 
-OTA and module release/update validation must follow the same semantic-lane contract as other parity-critical shared flows.
-
-For planned coverage in [Flow Coverage](997_flow_coverage.md), each release row must define:
-
-- typed command/control surfaces for publication, staging, cutover, health
-  confirmation, rollback, and promotion-state transitions
-- typed lifecycle evidence for publication, artifact availability,
-  verification, staging, compatibility blocking, cutover, health, and rollback
-- a designated primary harness lane, which is expected to be the shared
-  semantic lane for lifecycle validation
+OTA and module release/update validation must follow the same semantic-lane contract as other parity-critical shared flows. The OTA contract requirements (typed command/control surfaces, scoped activation lifecycle, and rollback semantics) are defined in [Distributed Maintenance Architecture](116_maintenance.md). Each release row in [Flow Coverage](997_flow_coverage.md) must map to those typed lifecycle surfaces.
 
 Frontend-conformance coverage may validate release-screen wiring, but it does not satisfy OTA/module lifecycle validation on its own.
 
