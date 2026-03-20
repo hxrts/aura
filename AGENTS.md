@@ -15,6 +15,16 @@ Aura is a threshold identity and encrypted storage platform using threshold cryp
 - **Per-crate architecture docs**: each crate root has an `ARCHITECTURE.md` that explains the crate's purpose, boundaries, invariants, and key integration points; read it before making non-trivial changes in that crate
 - **Scratch**: `work/` is non-authoritative and may be removed
 
+### Documentation Layers
+
+Three documentation layers serve distinct purposes.
+
+The 100-series docs (`docs/1xx_*.md`) are architectural specifications. They define system contracts, invariants, behavioral guarantees, type definitions, and protocol specifications. They describe what the system is and what it guarantees. They do not contain implementation patterns, coding instructions, or step-by-step guidance.
+
+The 800-series docs (`docs/8xx_*.md`) are developer guides. They contain implementation patterns, usage examples, decision frameworks, coding instructions, and operational workflows. They describe how to build with and operate the system. They reference 100-series specs for the underlying contracts but do not redefine them.
+
+Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, dependencies, invariants, ownership inventory, and testing strategy. They follow a normalized template and cross-reference both 100-series specs and 800-series guides where appropriate. Read the relevant `ARCHITECTURE.md` before making changes in a crate.
+
 ## Development Commands
 
 **Required**: Nix with flakes enabled. Run `nix develop` first.
