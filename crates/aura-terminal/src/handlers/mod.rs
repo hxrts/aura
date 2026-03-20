@@ -217,7 +217,7 @@ impl CliHandler {
         output.render();
 
         // Add budget information using shared handlers
-        let current_budget = budget::get_current_budget(&self.app_core).await;
+        let current_budget = aura_app::ui::workflows::budget::get_current_budget(&self.app_core).await;
         let budget_status = budget::format_budget_status(&current_budget);
 
         println!();

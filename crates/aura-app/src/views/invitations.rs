@@ -173,16 +173,6 @@ impl InvitationsState {
             .find(|inv| inv.id == id)
     }
 
-    /// Get a pending invitation by ID.
-    pub fn pending_by_id(&self, id: &str) -> Option<&Invitation> {
-        self.pending.iter().find(|inv| inv.id == id)
-    }
-
-    /// Get a sent invitation by ID.
-    pub fn sent_by_id(&self, id: &str) -> Option<&Invitation> {
-        self.sent.iter().find(|inv| inv.id == id)
-    }
-
     /// Count pending received invitations (filtered by status).
     pub fn pending_received_count(&self) -> usize {
         self.pending

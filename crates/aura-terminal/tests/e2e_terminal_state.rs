@@ -9,7 +9,6 @@
     clippy::clone_on_copy,
     clippy::if_same_then_else
 )]
-#![allow(deprecated)]
 //! TUI End-to-End Integration Tests
 //!
 //! This module contains:
@@ -38,6 +37,23 @@ use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::screens::{ChatCreateState, InvitationCodeState, InvitationImportState};
 use aura_terminal::tui::types::{Contact, ContactStatus};
 
+fn build_io_context(
+    app_core: aura_terminal::tui::context::InitializedAppCore,
+    has_existing_account: bool,
+    base_path: std::path::PathBuf,
+    device_id: impl Into<String>,
+    mode: aura_terminal::handlers::tui::TuiMode,
+) -> aura_terminal::tui::context::IoContext {
+    aura_terminal::tui::context::IoContext::builder()
+        .with_app_core(app_core)
+        .with_base_path(base_path)
+        .with_device_id(device_id.into())
+        .with_mode(mode)
+        .with_existing_account(has_existing_account)
+        .build()
+        .expect("e2e_terminal_state: builder should have all required fields")
+}
+
 /// Test the complete account creation callback flow
 /// This tests the IoContext::create_account() method directly, which is what the
 /// UI callback invokes when the user presses Enter in the account setup modal.
@@ -51,7 +67,7 @@ async fn test_account_creation_callback_flow() {
         RealSecureStorageHandler,
     };
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use std::sync::Arc;
 
     // Create a unique test directory
@@ -70,7 +86,7 @@ async fn test_account_creation_callback_flow() {
         .await
         .expect("Failed to init signals");
     // STEP 2: Create IoContext with no existing account
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false, // No existing account
         test_dir.clone(),
@@ -186,7 +202,7 @@ async fn test_device_id_determinism() {
         RealSecureStorageHandler,
     };
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use std::sync::Arc;
 
     println!("\n=== Device ID Determinism Test ===\n");
@@ -232,7 +248,7 @@ async fn test_device_id_determinism() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -262,7 +278,7 @@ async fn test_device_id_determinism() {
         .await
         .expect("Failed to init signals");
 
-    let ctx2 = IoContext::with_account_status(
+    let ctx2 = build_io_context(
         initialized_app_core2.clone(),
         false,
         test_dir.clone(),
@@ -296,7 +312,7 @@ async fn test_device_id_determinism() {
         .await
         .expect("Failed to init signals");
     let different_device_id = "demo:bob-new-device"; // Different device!
-    let ctx3 = IoContext::with_account_status(
+    let ctx3 = build_io_context(
         initialized_app_core3.clone(),
         false,
         test_dir.clone(),
@@ -356,7 +372,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         RealSecureStorageHandler,
     };
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use std::sync::Arc;
 
     println!("\n=== Guardian Recovery: Cryptographic Identity Test ===\n");
@@ -404,7 +420,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -444,7 +460,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     let initialized_app_core_wrong = InitializedAppCore::new(app_core_wrong.clone())
         .await
         .expect("Failed to init signals");
-    let ctx_wrong = IoContext::with_account_status(
+    let ctx_wrong = build_io_context(
         initialized_app_core_wrong.clone(),
         false,
         test_dir.clone(),
@@ -506,7 +522,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     let initialized_app_core_recovered = InitializedAppCore::new(app_core_recovered.clone())
         .await
         .expect("Failed to init signals");
-    let ctx_recovered = IoContext::with_account_status(
+    let ctx_recovered = build_io_context(
         initialized_app_core_recovered.clone(),
         false,
         test_dir.clone(),
@@ -854,7 +870,7 @@ async fn test_moderation_commands_dispatch() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -872,7 +888,7 @@ async fn test_moderation_commands_dispatch() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -952,7 +968,7 @@ async fn test_peer_discovery_commands() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -970,7 +986,7 @@ async fn test_peer_discovery_commands() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -1040,7 +1056,7 @@ async fn test_lan_peer_invitation_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -1058,7 +1074,7 @@ async fn test_lan_peer_invitation_flow() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -1174,7 +1190,7 @@ async fn test_threshold_configuration_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::screens::ThresholdState;
     use aura_testkit::MockRuntimeBridge;
@@ -1299,7 +1315,7 @@ async fn test_threshold_configuration_flow() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -1354,7 +1370,7 @@ async fn test_home_messaging_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_testkit::MockRuntimeBridge;
     use std::sync::Arc;
@@ -1376,7 +1392,7 @@ async fn test_home_messaging_flow() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -1489,7 +1505,7 @@ async fn test_set_context_flow() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -1508,7 +1524,7 @@ async fn test_set_context_flow() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -1632,7 +1648,7 @@ async fn test_moderator_role_flow() {
     use aura_app::AppCore;
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -1651,7 +1667,7 @@ async fn test_moderator_role_flow() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -1859,7 +1875,7 @@ async fn test_neighborhood_navigation_flow() {
     use aura_app::AppCore;
     use aura_core::types::identifiers::ChannelId;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -1879,7 +1895,7 @@ async fn test_neighborhood_navigation_flow() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -2235,7 +2251,7 @@ async fn test_retry_message_command() {
 #[tokio::test]
 async fn test_channel_mode_operations() {
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_terminal::tui::types::ChannelMode;
 
@@ -2325,7 +2341,7 @@ async fn test_channel_mode_operations() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -2757,7 +2773,7 @@ async fn test_authorization_checking() {
     use async_lock::RwLock;
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::{CommandAuthorizationLevel, EffectCommand};
     use std::sync::Arc;
 
@@ -2845,7 +2861,7 @@ async fn test_authorization_checking() {
         .await
         .expect("Failed to init signals");
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -2972,7 +2988,7 @@ async fn test_account_backup_restore_flow() {
     use aura_app::AppCore;
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::handlers::tui::{export_account_backup, import_account_backup};
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
@@ -2996,7 +3012,7 @@ async fn test_account_backup_restore_flow() {
     let initialized_app_core_a = InitializedAppCore::new(app_core_a.clone())
         .await
         .expect("Failed to init signals");
-    let ctx_a = IoContext::with_account_status(
+    let ctx_a = build_io_context(
         initialized_app_core_a.clone(),
         false,
         test_dir_a.clone(),
@@ -3062,7 +3078,7 @@ async fn test_account_backup_restore_flow() {
     let initialized_app_core_b = InitializedAppCore::new(app_core_b.clone())
         .await
         .expect("Failed to init signals");
-    let ctx_b = IoContext::with_account_status(
+    let ctx_b = build_io_context(
         initialized_app_core_b.clone(),
         true, // has_account = true since we imported
         test_dir_b.clone(),
@@ -3149,7 +3165,7 @@ async fn test_device_management() {
     use aura_app::AppCore;
     use aura_core::types::identifiers::AuthorityId;
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
     use aura_testkit::MockRuntimeBridge;
     use std::sync::Arc;
@@ -3171,7 +3187,7 @@ async fn test_device_management() {
         .expect("Failed to init signals");
     let device_id = "test-device-mgmt-123";
 
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
@@ -3266,7 +3282,7 @@ async fn test_snapshot_data_accuracy() {
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
-    use aura_terminal::tui::context::{InitializedAppCore, IoContext};
+    use aura_terminal::tui::context::InitializedAppCore;
     use std::sync::Arc;
 
     println!("\n=== Snapshot Data Accuracy E2E Test ===\n");
@@ -3296,7 +3312,7 @@ async fn test_snapshot_data_accuracy() {
     app_core.write().await.set_authority(authority_id);
 
     // Create IoContext
-    let ctx = IoContext::with_account_status(
+    let ctx = build_io_context(
         initialized_app_core.clone(),
         true, // has_account
         test_dir.clone(),

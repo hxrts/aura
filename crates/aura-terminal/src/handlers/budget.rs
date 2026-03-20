@@ -36,13 +36,6 @@
 
 use aura_app::ui::prelude::*;
 
-// Re-export workflow functions for backward compatibility
-// Business logic is now in aura_app::ui::workflows::budget
-pub use aura_app::ui::workflows::budget::{
-    can_add_member, can_join_neighborhood, can_pin_content, get_budget_breakdown,
-    get_current_budget, update_budget,
-};
-
 /// Format budget status as a human-readable string
 ///
 /// Returns a multi-line summary suitable for CLI output or TUI display.

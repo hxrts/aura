@@ -373,67 +373,6 @@ impl IoContext {
         }
     }
 
-    /// Create a new IoContext with explicit account status.
-    ///
-    /// # Deprecated
-    ///
-    /// Use `IoContext::builder()` instead for more flexible construction.
-    #[doc(hidden)]
-    #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
-    #[must_use]
-    pub fn with_account_status(
-        app_core: InitializedAppCore,
-        has_existing_account: bool,
-        base_path: PathBuf,
-        device_id_str: String,
-        mode: TuiMode,
-    ) -> Self {
-        match IoContext::builder()
-            .with_app_core(app_core)
-            .with_base_path(base_path)
-            .with_device_id(device_id_str)
-            .with_mode(mode)
-            .with_existing_account(has_existing_account)
-            .build()
-        {
-            Ok(ctx) => ctx,
-            Err(err) => panic!("IoContext::with_account_status: {err}"),
-        }
-    }
-
-    cfg_if! {
-        if #[cfg(feature = "development")] {
-            /// Create a new IoContext with demo hints for development mode.
-            ///
-            /// # Deprecated
-            ///
-            /// Use `IoContext::builder()` instead for more flexible construction.
-            #[doc(hidden)]
-            #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
-            pub fn with_demo_hints(
-                app_core: InitializedAppCore,
-                hints: crate::demo::DemoHints,
-                has_existing_account: bool,
-                base_path: PathBuf,
-                device_id_str: String,
-                mode: TuiMode,
-            ) -> Self {
-                match IoContext::builder()
-                    .with_app_core(app_core)
-                    .with_base_path(base_path)
-                    .with_device_id(device_id_str)
-                    .with_mode(mode)
-                    .with_existing_account(has_existing_account)
-                    .with_demo_hints(hints)
-                    .build()
-                {
-                    Ok(ctx) => ctx,
-                    Err(err) => panic!("IoContext::with_demo_hints: {err}"),
-                }
-            }
-        }
-    }
-
     /// Create an IoContext with default configuration (for testing).
     ///
     /// **Note**: This method cannot be called inside a tokio runtime.
