@@ -152,7 +152,10 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
     // Start the ceremony via the same path used by Settings → Add device.
     let start = env
         .ctx_a
-        .start_device_enrollment("Laptop", aura_core::AuthorityId::new_from_entropy([2u8; 32]))
+        .start_device_enrollment(
+            "Laptop",
+            aura_core::AuthorityId::new_from_entropy([2u8; 32]),
+        )
         .await
         .expect("start_device_enrollment should succeed");
 

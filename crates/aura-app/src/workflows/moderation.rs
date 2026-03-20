@@ -6,12 +6,12 @@
 //! These operations delegate to the RuntimeBridge to commit moderation facts.
 //! UI state is updated by reactive views driven from the journal.
 
+use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
     workflow_retry_policy,
 };
-use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
@@ -225,12 +225,7 @@ async fn resolve_scope(
                 .amp_list_channel_participants(context_id, fallback.id)
                 .await
                 .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
-            (
-                context_id,
-                fallback.id,
-                fallback.can_moderate(),
-                peers,
-            )
+            (context_id, fallback.id, fallback.can_moderate(), peers)
         } else {
             return Err(AuraError::permission_denied(
                 "Moderation requires a valid home context and moderator privileges",
@@ -271,7 +266,12 @@ async fn resolve_scope_by_channel_id(
                             let best_peers = runtime
                                 .amp_list_channel_participants(best_context, best_id)
                                 .await
-                                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
+                                .map_err(|e| {
+                                    super::error::runtime_call(
+                                        "list moderation scope participants",
+                                        e,
+                                    )
+                                })?;
                             return Ok(ModerationScope {
                                 context_id: best_context,
                                 home_id: best_id,
@@ -837,8 +837,12 @@ mod tests {
     #[tokio::test]
     async fn resolve_scope_uses_named_channel_context_before_fallback_home() {
         let config = AppConfig::default();
-        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([8u8; 32])));
-        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime.clone()).unwrap()));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
+            [8u8; 32],
+        )));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime.clone()).unwrap(),
+        ));
         {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();
@@ -890,7 +894,9 @@ mod tests {
     #[tokio::test]
     async fn resolve_scope_by_channel_id_rejects_unknown_channel_scope() {
         let config = AppConfig::default();
-        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([9u8; 32])));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
+            [9u8; 32],
+        )));
         let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime).unwrap()));
         {
             let core = app_core.read().await;

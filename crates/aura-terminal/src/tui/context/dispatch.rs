@@ -15,6 +15,7 @@ use async_lock::RwLock;
 
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::{TerminalError, TerminalResult};
+use crate::tui::components::copy_to_clipboard;
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
@@ -378,6 +379,7 @@ impl DispatchHelper {
                 pending_epoch: _,
                 device_id: _,
             } => {
+                let _ = copy_to_clipboard(&enrollment_code);
                 self.toasts
                     .success(
                         "device-enrollment",

@@ -57,8 +57,8 @@ async fn test_ctx_with_runtime(
     has_existing_account: bool,
 ) -> (Arc<RwLock<AppCore>>, IoContext, tempfile::TempDir) {
     let runtime = Arc::new(MockRuntimeBridge::new());
-    let app_core =
-        AppCore::with_runtime(AppConfig::default(), runtime).expect("Failed to create test AppCore");
+    let app_core = AppCore::with_runtime(AppConfig::default(), runtime)
+        .expect("Failed to create test AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let app_core = InitializedAppCore::new(app_core)
         .await

@@ -11,6 +11,7 @@
 #![deny(clippy::print_stderr)]
 
 use std::env;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -88,6 +89,8 @@ pub use aura_app::ui::types::{
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
 const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json";
+const PREPARED_DEVICE_ENROLLMENT_INVITEE_AUTHORITY_FILENAME: &str =
+    ".harness-device-enrollment-invitee-authority";
 static TUI_TRACING_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
 
 fn tui_tracing_tasks() -> &'static UiTaskOwner {
@@ -306,6 +309,30 @@ async fn load_selected_runtime_identity(
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(|e| AuraError::internal(format!("Invalid selected runtime identity data: {e}")))
+}
+
+fn load_prepared_device_enrollment_invitee_authority(
+    base_path: &Path,
+) -> Result<Option<AuthorityId>, AuraError> {
+    let path = base_path.join(PREPARED_DEVICE_ENROLLMENT_INVITEE_AUTHORITY_FILENAME);
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(AuraError::internal(format!(
+                "Failed to read prepared device enrollment invitee authority: {error}"
+            )));
+        }
+    };
+    let authority = raw.trim();
+    if authority.is_empty() {
+        return Ok(None);
+    }
+    authority.parse::<AuthorityId>().map(Some).map_err(|error| {
+        AuraError::internal(format!(
+            "Invalid prepared device enrollment invitee authority: {error}"
+        ))
+    })
 }
 
 async fn persist_selected_runtime_identity(
@@ -841,6 +868,8 @@ async fn handle_tui_launch(
             journal_path: None,
         };
         let selected_runtime_identity = load_selected_runtime_identity(storage.as_ref()).await?;
+        let prepared_invitee_authority =
+            load_prepared_device_enrollment_invitee_authority(&base_path)?;
         let device_id = selected_runtime_identity
             .as_ref()
             .map(|identity| identity.device_id)
@@ -1165,21 +1194,121 @@ async fn handle_tui_launch(
                 app_core
             }
             AccountLoadResult::NotFound => {
-                let waiting_event = BootstrapEvent::new(
-                    BootstrapSurface::Tui,
-                    BootstrapEventKind::ShellAwaitingAccount,
-                );
-                tracing::info!(event = %waiting_event, path = %base_path.display());
-                stdio.println(format_args!("No existing account - will show setup modal"));
-                let app_core =
-                    Arc::new(RwLock::new(AppCore::new(app_config).map_err(|e| {
-                        AuraError::internal(format!("Failed to create AppCore: {e}"))
-                    })?));
-                let app_core = InitializedAppCore::new(app_core).await?;
-                stdio.println(format_args!(
-                    "AppCore initialized (bootstrap shell without runtime)"
-                ));
-                app_core
+                if let Some(runtime_authority) = selected_runtime_identity
+                    .as_ref()
+                    .map(|identity| identity.authority_id)
+                    .or(prepared_invitee_authority)
+                {
+                    let context = default_context_id_for_authority(runtime_authority);
+                    stdio.println(format_args!(
+                        "No existing account - binding provisional runtime authority {runtime_authority}"
+                    ));
+
+                    let mut agent_config = AgentConfig {
+                        device_id: device_id.clone(),
+                        storage: StorageConfig {
+                            base_path: base_path.clone(),
+                            ..StorageConfig::default()
+                        },
+                        network: NetworkConfig {
+                            bind_address: bind_address.unwrap_or("0.0.0.0:0").to_string(),
+                            ..NetworkConfig::default()
+                        },
+                        ..AgentConfig::default()
+                    };
+                    harness_lan_discovery_override(&mut agent_config);
+
+                    let execution_mode = match mode {
+                        TuiMode::Production => aura_core::effects::ExecutionMode::Production,
+                        TuiMode::Demo { seed } => {
+                            aura_core::effects::ExecutionMode::Simulation { seed }
+                        }
+                    };
+                    let effect_ctx = EffectContext::new(runtime_authority, context, execution_mode);
+                    let sync_config = SyncManagerConfig {
+                        auto_sync_interval: Duration::from_secs(2),
+                        ..SyncManagerConfig::default()
+                    };
+
+                    let agent = match mode {
+                        TuiMode::Production => AgentBuilder::new()
+                            .with_config(agent_config)
+                            .with_authority(runtime_authority)
+                            .with_sync_config(sync_config.clone())
+                            .with_rendezvous()
+                            .build_production(&effect_ctx)
+                            .await
+                            .map_err(|e| {
+                                AuraError::internal(format!(
+                                    "Failed to create provisional runtime agent: {e}"
+                                ))
+                            })?,
+                        TuiMode::Demo { seed } => AgentBuilder::new()
+                            .with_config(agent_config)
+                            .with_authority(runtime_authority)
+                            .with_sync_config(sync_config.clone())
+                            .build_simulation_async(seed, &effect_ctx)
+                            .await
+                            .map_err(|e| {
+                                AuraError::internal(format!(
+                                    "Failed to create provisional simulation agent: {e}"
+                                ))
+                            })?,
+                    };
+
+                    let agent = Arc::new(agent);
+                    let app_core =
+                        AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
+                            .map_err(|e| {
+                                AuraError::internal(format!("Failed to create AppCore: {e}"))
+                            })?;
+                    let app_core = Arc::new(RwLock::new(app_core));
+                    let app_core = InitializedAppCore::new(app_core).await?;
+
+                    let ceremony_agent = agent.clone();
+                    startup_tasks.spawn(async move {
+                        let mut interval =
+                            tokio::time::interval(tokio::time::Duration::from_millis(500));
+                        loop {
+                            interval.tick().await;
+                            if let Err(e) = ceremony_agent.process_ceremony_acceptances().await {
+                                tracing::debug!("Error processing ceremony acceptances: {}", e);
+                            }
+                        }
+                    });
+
+                    if let Err(e) =
+                        aura_app::ui::workflows::settings::refresh_settings_from_runtime(
+                            app_core.raw(),
+                        )
+                        .await
+                    {
+                        stdio.eprintln(format_args!(
+                            "Warning: Failed to refresh provisional settings: {e}"
+                        ));
+                    }
+
+                    stdio.println(format_args!(
+                        "AppCore initialized (bootstrap shell with provisional runtime)"
+                    ));
+                    app_core
+                } else {
+                    let waiting_event = BootstrapEvent::new(
+                        BootstrapSurface::Tui,
+                        BootstrapEventKind::ShellAwaitingAccount,
+                    );
+                    tracing::info!(event = %waiting_event, path = %base_path.display());
+                    stdio.println(format_args!("No existing account - will show setup modal"));
+                    let app_core =
+                        Arc::new(RwLock::new(AppCore::new(app_config).map_err(|e| {
+                            AuraError::internal(format!("Failed to create AppCore: {e}"))
+                        })?));
+                    let app_core = InitializedAppCore::new(app_core).await?;
+                    stdio.println(format_args!(
+                        "AppCore initialized (bootstrap shell without runtime)"
+                    ));
+                    app_core
+                }
             }
         };
 

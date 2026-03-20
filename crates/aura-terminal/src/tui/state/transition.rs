@@ -62,8 +62,8 @@ mod tests {
     use super::*;
     use crate::tui::screens::Screen;
     use crate::tui::state::commands::DispatchCommand;
-    use crate::tui::state::views::ChatFocus;
     use crate::tui::state::modal_queue::QueuedModal;
+    use crate::tui::state::views::ChatFocus;
     use aura_core::effects::terminal::events;
 
     #[test]

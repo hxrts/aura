@@ -104,6 +104,7 @@ export type DriverMethod =
   | 'get_authority_id'
   | 'reload_page'
   | 'recover_ui_state'
+  | 'stage_runtime_identity'
   | 'restart_page_session'
   | 'tail_log'
   | 'inject_message'

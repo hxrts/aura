@@ -321,14 +321,15 @@ pub(crate) fn apply_harness_command(
             state.neighborhood.selected_home = selected_index;
             Ok(Vec::new())
         }
-        HarnessUiCommand::StartDeviceEnrollment { device_name } => {
+        HarnessUiCommand::StartDeviceEnrollment {
+            device_name,
+            invitee_authority_id,
+        } => {
             select_settings_section(state, SettingsSection::Devices);
-            let invitee_authority_id = state
-                .settings
-                .demo_mobile_authority_id
+            let invitee_authority_id = invitee_authority_id
                 .parse::<aura_core::AuthorityId>()
                 .map_err(|error| {
-                    format!("invalid or missing demo mobile authority id in settings state: {error}")
+                    format!("invalid invitee authority id in harness command: {error}")
                 })?;
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name: device_name,

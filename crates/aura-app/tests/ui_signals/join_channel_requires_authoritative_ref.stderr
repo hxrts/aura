@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui_signals/join_channel_requires_authoritative_ref.rs:8:72
+  |
+8 |     let _ = aura_app::ui::workflows::messaging::join_channel(app_core, channel_id).await;
+  |             ------------------------------------------------           ^^^^^^^^^^ expected `AuthoritativeChannelRef`, found `ChannelId`
+  |             |
+  |             arguments to this function are incorrect
+  |
+note: function defined here
+ --> src/workflows/messaging.rs
+  |
+  | pub async fn join_channel(
+  |              ^^^^^^^^^^^^

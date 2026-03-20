@@ -296,13 +296,7 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
     violations
 }
 
-fn scan_item(
-    mode: LintMode,
-    file: &Path,
-    source: &str,
-    item: &Item,
-    violations: &mut Vec<String>,
-) {
+fn scan_item(mode: LintMode, file: &Path, source: &str, item: &Item, violations: &mut Vec<String>) {
     match item {
         Item::Fn(item_fn) => {
             if has_cfg_test_attr(&item_fn.attrs) {
@@ -464,7 +458,8 @@ fn scan_function(
         | LintMode::WorkflowNoFallbackDefaults
         | LintMode::WorkflowNoViewDerivedReadiness
         | LintMode::WorkflowNoViewDerivedRecipientResolution => {
-            file.to_string_lossy().contains("crates/aura-app/src/workflows/")
+            file.to_string_lossy()
+                .contains("crates/aura-app/src/workflows/")
                 && !has_marker_attr(attrs, "observed_only")
         }
         LintMode::SemanticOwnerBoundedAwaits => {
@@ -478,7 +473,8 @@ fn scan_function(
         LintMode::SemanticOwnerNoSpawn => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerProofSuccess => semantic_owner_declares_proof(attrs),
         LintMode::WorkflowProofBearingSuccess => {
-            file.to_string_lossy().contains("crates/aura-app/src/workflows/")
+            file.to_string_lossy()
+                .contains("crates/aura-app/src/workflows/")
                 && !file
                     .file_name()
                     .is_some_and(|name| name == "semantic_facts.rs")
@@ -488,9 +484,9 @@ fn scan_function(
             has_marker_attr(attrs, "semantic_owner")
                 || has_marker_attr(attrs, "best_effort_boundary")
         }
-        LintMode::AuthoritativeRefNoReresolution => {
-            file.to_string_lossy().contains("crates/aura-app/src/workflows/")
-        }
+        LintMode::AuthoritativeRefNoReresolution => file
+            .to_string_lossy()
+            .contains("crates/aura-app/src/workflows/"),
         LintMode::ActorOwnedTaskSpawn
         | LintMode::AsyncSessionOwnership
         | LintMode::FrontendSemanticHandoffBoundary
@@ -622,7 +618,10 @@ impl OwnershipVisitor<'_> {
                 )
             }),
             LintMode::WorkflowNoFallbackDefaults => tags.iter().any(|tag| {
-                matches!(tag.as_str(), "first-run-default" | "deprecated-legacy-bridge")
+                matches!(
+                    tag.as_str(),
+                    "first-run-default" | "deprecated-legacy-bridge"
+                )
             }),
             LintMode::WorkflowNoViewDerivedReadiness
             | LintMode::WorkflowNoViewDerivedRecipientResolution => {
@@ -821,8 +820,7 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     .function_ownership_tags
                     .iter()
                     .any(|tag| tag == "authoritative-ref-only")
-                    && (method_name.contains("_or_fallback")
-                        || method_name.contains("fallback"))
+                    && (method_name.contains("_or_fallback") || method_name.contains("fallback"))
                 {
                     self.push_violation(
                         node.span(),
@@ -1913,11 +1911,8 @@ fn scan_time_domain_usage(file: &Path, syntax: &File) -> Vec<String> {
                     segments.as_slice(),
                     [.., "SystemTime", "now"] | [.., "Instant", "now"]
                 );
-                if matches!(
-                    path.as_str(),
-                    "tokio::time::timeout"
-                        | "tokio::time::sleep"
-                ) || direct_clock_now
+                if matches!(path.as_str(), "tokio::time::timeout" | "tokio::time::sleep")
+                    || direct_clock_now
                 {
                     self.push_violation(
                         node.span(),

@@ -879,10 +879,19 @@ impl QueryEffects for QueryHandler {
         let signal: Signal<Q::Result> = Signal::new(signal_name.as_str());
 
         // Get the signal stream
-        let stream = self
-            .reactive
-            .subscribe(&signal)
-            .expect("query subscription requires a registered reactive signal");
+        let stream = match self.reactive.subscribe(&signal) {
+            Ok(stream) => stream,
+            Err(error) => {
+                tracing::error!(
+                    signal_id = %signal.id(),
+                    query_id = %query.query_id(),
+                    error = %error,
+                    "query subscription requested before the reactive signal was registered"
+                );
+                let (_tx, receiver) = broadcast::channel(1);
+                aura_core::effects::reactive::SignalStream::new(receiver, signal.id().clone())
+            }
+        };
 
         // Create subscription with query dependencies tracked
         QuerySubscription::new(stream, query.query_id())

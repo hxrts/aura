@@ -84,6 +84,10 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 - **Shared user-flow contributor sync**: when shared UX policy scripts change, keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
+- **Authoritative-ref discipline**: once parity-critical code has
+  authoritative context, later APIs must require the strongest typed reference;
+  raw-id re-resolution, `resolve_*` downgrade, and `*_or_fallback` repair are
+  forbidden on that path
 - **Frontend ownership discipline**: parity-critical frontend submission uses only the sanctioned `LocalTerminalOperationOwner` / `WorkflowHandoffOperationOwner` path; browser/TUI task ownership uses only `WebTaskOwner` / `UiTaskOwner`; readiness refresh remains private to `aura-app::workflows`
 - **Shared semantic lifecycle ownership**: `aura-app::workflows` owns authoritative parity-critical semantic lifecycle publication after handoff; `aura-terminal`, `aura-web`, and `aura-harness` submit and observe but do not keep parallel terminal publication paths
 - **Frontend/app facade boundary**: frontend parity-critical imports go through `aura_app::ui` and `aura_app::ui::workflows`; do not reach into crate-root `aura_app::workflows` or private semantic helper modules
@@ -306,6 +310,10 @@ Rules:
 - canonical ownership/runtime primitives for parity-critical code come from
   `aura-core::ownership` through the explicit `actor_owned`, `move_owned`, and
   `capability_gated` surfaces
+- parity-critical APIs must accept the strongest available typed input; raw ids
+  may identify but may not authorize once authoritative context exists
+- authoritative workflow/runtime slices must not call fallback helpers or
+  re-resolve context from weaker ids after handoff
 - parity-critical boundaries must use the `aura-macros` declaration layer:
   `#[semantic_owner(..., category = "move_owned")]`,
   `#[actor_owned(..., category = "actor_owned")]`,

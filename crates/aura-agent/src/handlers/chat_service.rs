@@ -252,22 +252,20 @@ impl ChatServiceApi {
             .load_committed_facts(self.effects.authority_id())
             .await
             .map_err(|e| AgentError::effects(format!("moderation fact load failed: {e}")))?;
-        let sender_is_banned =
-            is_user_banned(
-                &committed_facts,
-                &context_id,
-                &authority_id,
-                now.ts_ms,
-                channel_id.as_ref(),
-            );
-        let sender_is_muted =
-            is_user_muted(
-                &committed_facts,
-                &context_id,
-                &authority_id,
-                now.ts_ms,
-                channel_id.as_ref(),
-            );
+        let sender_is_banned = is_user_banned(
+            &committed_facts,
+            &context_id,
+            &authority_id,
+            now.ts_ms,
+            channel_id.as_ref(),
+        );
+        let sender_is_muted = is_user_muted(
+            &committed_facts,
+            &context_id,
+            &authority_id,
+            now.ts_ms,
+            channel_id.as_ref(),
+        );
 
         Ok(GuardSnapshot::new(
             authority_id,
@@ -414,7 +412,9 @@ impl ChatServiceApi {
         .await
         .map_err(|e| AgentError::effects(format!("AMP channel creation failed: {e}")))?;
 
-        let snapshot = self.build_snapshot(creator_id, context_id, Some(channel_id)).await?;
+        let snapshot = self
+            .build_snapshot(creator_id, context_id, Some(channel_id))
+            .await?;
         let outcome =
             self.facts
                 .prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);

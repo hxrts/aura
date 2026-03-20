@@ -2173,6 +2173,7 @@ async function restartPageSession(session, reason) {
   return startPage({
     instance_id: options.instanceId,
     app_url: options.appUrl,
+    scenario_seed: options.scenarioSeed,
     data_dir: options.dataDir,
     headless: options.headless,
     artifact_dir: options.artifactDir,
@@ -2180,7 +2181,9 @@ async function restartPageSession(session, reason) {
     harness_ready_timeout_ms: options.harnessReadyTimeoutMs,
     start_max_attempts: options.startMaxAttempts,
     start_retry_backoff_ms: options.startRetryBackoffMs,
-    require_semantic_ready: reason !== "create_account_bootstrap",
+    require_semantic_ready:
+      reason !== "create_account_bootstrap" &&
+      reason !== "stage_runtime_identity_bootstrap",
   });
 }
 
@@ -2698,6 +2701,61 @@ async function recoverUiState(params) {
   return recovered;
 }
 
+async function stageRuntimeIdentity(params) {
+  const instanceId = normalizeInstanceId(params);
+  const session = getSession(instanceId);
+  const runtimeIdentityJson = String(params?.runtime_identity_json ?? "").trim();
+  if (!runtimeIdentityJson) {
+    throw new Error("runtime_identity_json is required");
+  }
+
+  const storageDetails = await session.page.evaluate(
+    ({ serializedIdentity }) => {
+      const sanitizeStorageSegment = (raw) =>
+        String(raw ?? "")
+          .split("")
+          .map((ch) => (/^[A-Za-z0-9]$/.test(ch) ? ch.toLowerCase() : "_"))
+          .join("");
+      const query = String(window.location.search ?? "").replace(/^\?/, "");
+      let prefix = "aura_";
+      for (const pair of query.split("&")) {
+        const [key, value] = pair.split("=", 2);
+        if (key === "__aura_harness_instance" && value) {
+          const sanitized = sanitizeStorageSegment(value);
+          if (sanitized.length > 0) {
+            prefix = `aura_${sanitized}_`;
+            break;
+          }
+        }
+      }
+      const storageKey = `${prefix}selected_runtime_identity`;
+      window.localStorage?.setItem(storageKey, serializedIdentity);
+      return { storageKey, payload: serializedIdentity };
+    },
+    { serializedIdentity: runtimeIdentityJson },
+  );
+
+  const rebootstrapResult = await session.page.evaluate(async () => {
+    const requestRebootstrap = window.__AURA_HARNESS__?.request_rebootstrap;
+    if (typeof requestRebootstrap !== "function") {
+      return { ok: false, reason: "request_rebootstrap_missing" };
+    }
+    await requestRebootstrap();
+    return { ok: true };
+  });
+  if (!rebootstrapResult?.ok) {
+    throw new Error(
+      `stage_runtime_identity_rebootstrap_failed:${rebootstrapResult?.reason ?? "unknown"}`,
+    );
+  }
+
+  return {
+    status: "staged",
+    runtime_identity_json: runtimeIdentityJson,
+    storage_key: storageDetails?.storageKey ?? null,
+  };
+}
+
 async function domSnapshot(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
@@ -2920,7 +2978,8 @@ async function submitSemanticCommand(params) {
     `[driver] submit_semantic_command preflight instance=${instanceId}`,
   );
   const bridgeType = await session.page.evaluate(() => {
-    const bridgeType = typeof window.__AURA_HARNESS__?.submit_semantic_command;
+    const bridgeType =
+      typeof window.__AURA_HARNESS__?.__submit_semantic_command_raw;
     console.log(
       `[driver-page] submit_semantic_command preflight type=${bridgeType}`,
     );
@@ -2929,74 +2988,40 @@ async function submitSemanticCommand(params) {
   console.error(
     `[driver] submit_semantic_command bridge_type instance=${instanceId} type=${bridgeType}`,
   );
-  const commandId = `semantic_${instanceId}_${Date.now()}_${Math.random()
-    .toString(36)
-    .slice(2)}`;
-  const enqueuePayloadJson = JSON.stringify({
-    command_id: commandId,
-    request_json: requestJson,
-  });
   console.error(
-    `[driver] submit_semantic_command enqueue_start instance=${instanceId} command_id=${commandId}`,
+    `[driver] submit_semantic_command invoke_start instance=${instanceId}`,
   );
-  await session.page.evaluate(
-    (payloadJson) => {
-      window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ = payloadJson;
-      return true;
+  const response = await session.page.evaluate(
+    async ({ serializedRequest, timeoutMs }) => {
+      console.log("[driver-page] submit_semantic_command invoke_start");
+      const harness = window.__AURA_HARNESS__;
+      if (
+        !harness ||
+        typeof harness.__submit_semantic_command_raw !== "function"
+      ) {
+        throw new Error(
+          "window.__AURA_HARNESS__.__submit_semantic_command_raw is unavailable",
+        );
+      }
+      const timeout = new Promise((_, reject) => {
+        window.setTimeout(() => {
+          const semanticDebug = window.__AURA_SEMANTIC_DEBUG__ ?? null;
+          reject(
+            new Error(
+              `browser semantic bridge timed out debug=${JSON.stringify(semanticDebug)}`,
+            ),
+          );
+        }, timeoutMs);
+      });
+      const result = await Promise.race([
+        harness.__submit_semantic_command_raw(serializedRequest),
+        timeout,
+      ]);
+      console.log("[driver-page] submit_semantic_command invoke_done");
+      return result;
     },
-    enqueuePayloadJson,
+    { serializedRequest: requestJson, timeoutMs: 10000 },
   );
-  console.error(
-    `[driver] submit_semantic_command enqueue_done instance=${instanceId} command_id=${commandId}`,
-  );
-  console.error(
-    `[driver] submit_semantic_command enqueued instance=${instanceId} command_id=${commandId}`,
-  );
-  const timeoutMs = requestTimeoutMs("submit_semantic_command", params);
-  const start = Date.now();
-  let lastHeartbeatAt = 0;
-  let responseValue = null;
-  await delay(750);
-  while (Date.now() - start < timeoutMs) {
-    const pushedStatus =
-      session.semanticResultCache &&
-      typeof session.semanticResultCache === "object"
-        ? session.semanticResultCache[commandId] ?? null
-        : null;
-    if (pushedStatus) {
-      responseValue = pushedStatus;
-      break;
-    }
-    if (Date.now() - lastHeartbeatAt >= 2000) {
-      console.error(
-        `[driver] submit_semantic_command waiting instance=${instanceId} command_id=${commandId} result_pushed=no`,
-      );
-      lastHeartbeatAt = Date.now();
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  if (!responseValue) {
-    throw new Error(
-      `semantic command queue timed out for ${commandId}; result_pushed=no`,
-    );
-  }
-  await session.page.evaluate((id) => {
-    if (window.__AURA_DRIVER_SEMANTIC_RESULTS__) {
-      delete window.__AURA_DRIVER_SEMANTIC_RESULTS__[id];
-    }
-  }, commandId);
-  if (session.semanticResultCache && typeof session.semanticResultCache === "object") {
-    delete session.semanticResultCache[commandId];
-  }
-  if (!responseValue || typeof responseValue !== "object") {
-    throw new Error(
-      `semantic command queue returned invalid envelope for ${commandId}`,
-    );
-  }
-  if (!responseValue.ok) {
-    throw new Error(String(responseValue.error ?? "semantic command failed"));
-  }
-  const response = responseValue.result;
   console.error(
     `[driver] submit_semantic_command resolved instance=${instanceId}`,
   );
@@ -3214,6 +3239,9 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
       break;
     case "recover_ui_state":
       result = await recoverUiState(params);
+      break;
+    case "stage_runtime_identity":
+      result = await stageRuntimeIdentity(params);
       break;
     case "restart_page_session":
       result = await restartPageSession(

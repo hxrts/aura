@@ -44,8 +44,8 @@ impl<'a> InvitationChannelHandler<'a> {
             context_id: invitation.context_id,
             channel_id: home_id,
         };
-        let payload = serde_json::to_vec(&acceptance)
-            .map_err(|e| AgentError::internal(e.to_string()))?;
+        let payload =
+            serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
 
         let mut metadata = HashMap::new();
         metadata.insert(

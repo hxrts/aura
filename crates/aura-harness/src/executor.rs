@@ -1021,6 +1021,27 @@ fn execute_semantic_step(
                 context.vars.insert(name.clone(), value);
                 Ok(())
             }
+            aura_app::scenario_contract::VariableAction::PrepareDeviceEnrollmentInviteeAuthority {
+                name,
+            } => {
+                let instance_id = resolve_required_semantic_instance(step)?;
+                let payload = dispatch_payload_in_lane(
+                    tool_api,
+                    ExecutionLane::SharedSemantic,
+                    ToolRequest::PrepareDeviceEnrollmentInviteeAuthority { instance_id },
+                )?;
+                let authority_id = payload
+                    .get("authority_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "step {} prepare_device_enrollment_invitee_authority missing authority_id",
+                            step.id
+                        )
+                    })?;
+                context.vars.insert(name.clone(), authority_id.to_string());
+                Ok(())
+            }
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { name } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
                 let payload = dispatch_payload_in_lane(
@@ -1211,7 +1232,7 @@ fn execute_semantic_step(
                     *modal_id,
                 ),
                 aura_app::scenario_contract::Expectation::RuntimeEventOccurred { kind, .. } => {
-                    wait_for_runtime_event(
+                    let matched_snapshot = wait_for_runtime_event_snapshot(
                         &base_step,
                         tool_api,
                         context,
@@ -1224,10 +1245,9 @@ fn execute_semantic_step(
                         ..
                     } = expectation
                     {
-                        let snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
                         match kind {
                             RuntimeEventKind::InvitationCodeReady => {
-                                let code = snapshot
+                                let code = matched_snapshot
                                     .runtime_events
                                     .iter()
                                     .rev()
@@ -1249,7 +1269,7 @@ fn execute_semantic_step(
                                 context.vars.insert(var.clone(), code);
                             }
                             RuntimeEventKind::DeviceEnrollmentCodeReady => {
-                                let code = snapshot
+                                let code = matched_snapshot
                                     .runtime_events
                                     .iter()
                                     .rev()
@@ -1259,6 +1279,15 @@ fn execute_semantic_step(
                                             ..
                                         } => Some(code.clone()),
                                         _ => None,
+                                    })
+                                    .or_else(|| {
+                                        read_clipboard_value(
+                                            tool_api,
+                                            &instance_id,
+                                            &step.id,
+                                            1_000,
+                                        )
+                                        .ok()
                                     })
                                     .ok_or_else(|| {
                                         anyhow!(
@@ -1446,6 +1475,7 @@ fn execute_semantic_intent(
         IntentAction::StartDeviceEnrollment {
             device_name: _,
             code_name: _,
+            invitee_authority_id: _,
         } => {
             let response = submit_shared_intent(
                 &metadata_step,
@@ -1491,43 +1521,40 @@ fn execute_semantic_intent(
                 Instant::now() + Duration::from_millis(timeout_ms.min(10_000));
             let mut snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
             remember_snapshot_bindings(context, &instance_id, &snapshot);
-            let device_id = match resolve_authoritative_removable_device_id(
-                context,
-                &instance_id,
-                &snapshot,
-            ) {
-                Ok(device_id) => device_id,
-                Err(_) => {
-                    let mut wait_step = semantic_wait_step(&metadata_step);
-                    wait_step.list_id = Some(ListId::Devices);
-                    wait_step.count = Some(2);
-                    wait_for_semantic_state(
-                        &wait_step,
-                        tool_api,
-                        context,
-                        &instance_id,
-                        timeout_ms.min(10_000),
-                    )?;
-
-                    loop {
-                        snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-                        remember_snapshot_bindings(context, &instance_id, &snapshot);
-                        match resolve_authoritative_removable_device_id(
+            let device_id =
+                match resolve_authoritative_removable_device_id(context, &instance_id, &snapshot) {
+                    Ok(device_id) => device_id,
+                    Err(_) => {
+                        let mut wait_step = semantic_wait_step(&metadata_step);
+                        wait_step.list_id = Some(ListId::Devices);
+                        wait_step.count = Some(2);
+                        wait_for_semantic_state(
+                            &wait_step,
+                            tool_api,
                             context,
                             &instance_id,
-                            &snapshot,
-                        ) {
-                            Ok(device_id) => break device_id,
-                            Err(error) => {
-                                if Instant::now() >= resolution_deadline {
-                                    return Err(error);
+                            timeout_ms.min(10_000),
+                        )?;
+
+                        loop {
+                            snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
+                            remember_snapshot_bindings(context, &instance_id, &snapshot);
+                            match resolve_authoritative_removable_device_id(
+                                context,
+                                &instance_id,
+                                &snapshot,
+                            ) {
+                                Ok(device_id) => break device_id,
+                                Err(error) => {
+                                    if Instant::now() >= resolution_deadline {
+                                        return Err(error);
+                                    }
+                                    blocking_sleep(Duration::from_millis(100));
                                 }
-                                blocking_sleep(Duration::from_millis(100));
                             }
                         }
                     }
-                }
-            };
+                };
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1656,12 +1683,14 @@ fn execute_semantic_intent(
             context
                 .current_channel_name
                 .insert(instance_id.clone(), channel_name.clone());
-            if let Some(channel_id) = capture_authoritative_channel_id(
-                tool_api,
-                &instance_id,
-                channel_name,
-            )?
-            .or_else(|| capture_unique_shared_channel_id(tool_api, &instance_id).ok().flatten())
+            if let Some(channel_id) =
+                capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?.or_else(
+                    || {
+                        capture_unique_shared_channel_id(tool_api, &instance_id)
+                            .ok()
+                            .flatten()
+                    },
+                )
             {
                 context
                     .channel_name_by_id
@@ -1865,9 +1894,11 @@ fn resolve_intent_templates(
         IntentAction::StartDeviceEnrollment {
             device_name,
             code_name,
+            invitee_authority_id,
         } => IntentAction::StartDeviceEnrollment {
             device_name: resolve_template(device_name, context)?,
             code_name: code_name.clone(),
+            invitee_authority_id: resolve_template(invitee_authority_id, context)?,
         },
         IntentAction::ImportDeviceEnrollmentCode { code } => {
             IntentAction::ImportDeviceEnrollmentCode {
@@ -2195,6 +2226,9 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
         },
         SemanticAction::Variables(variable) => match variable {
             aura_app::scenario_contract::VariableAction::Set { .. } => "set_var",
+            aura_app::scenario_contract::VariableAction::PrepareDeviceEnrollmentInviteeAuthority {
+                ..
+            } => "prepare_device_enrollment_invitee_authority",
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { .. } => {
                 "capture_current_authority_id"
             }
@@ -2754,17 +2788,17 @@ fn wait_for_modal(
     wait_for_semantic_state(&wait_step, tool_api, context, instance_id, timeout_ms)
 }
 
-fn wait_for_runtime_event(
+fn wait_for_runtime_event_snapshot(
     step: &CompatibilityStep,
     tool_api: &mut ToolApi,
     context: &mut ScenarioContext,
     instance_id: &str,
     timeout_ms: u64,
     runtime_event_kind: RuntimeEventKind,
-) -> Result<()> {
+) -> Result<UiSnapshot> {
     let mut wait_step = semantic_wait_step(step);
     wait_step.runtime_event_kind = Some(runtime_event_kind);
-    wait_for_semantic_state(&wait_step, tool_api, context, instance_id, timeout_ms)
+    wait_for_semantic_state_snapshot(&wait_step, tool_api, context, instance_id, timeout_ms)
 }
 
 fn wait_for_operation_handle_state(
@@ -2961,7 +2995,11 @@ fn remember_snapshot_bindings(
     instance_id: &str,
     snapshot: &UiSnapshot,
 ) {
-    let Some(devices) = snapshot.lists.iter().find(|list| list.id == ListId::Devices) else {
+    let Some(devices) = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Devices)
+    else {
         return;
     };
     if let Some(device_id) = devices
@@ -2993,7 +3031,11 @@ fn capture_semantic_wait_success_bindings(
     if !step.count.is_some_and(|count| count > 1) {
         return;
     }
-    let Some(devices) = snapshot.lists.iter().find(|list| list.id == ListId::Devices) else {
+    let Some(devices) = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Devices)
+    else {
         return;
     };
     if let Some(device_id) = devices
@@ -3712,6 +3754,16 @@ fn wait_for_semantic_state(
     instance_id: &str,
     timeout_ms: u64,
 ) -> Result<()> {
+    wait_for_semantic_state_snapshot(step, tool_api, context, instance_id, timeout_ms).map(|_| ())
+}
+
+fn wait_for_semantic_state_snapshot(
+    step: &CompatibilityStep,
+    tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    timeout_ms: u64,
+) -> Result<UiSnapshot> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
     let supports_ui_snapshot = tool_api.supports_ui_snapshot(instance_id).unwrap_or(false);
@@ -3727,10 +3779,10 @@ fn wait_for_semantic_state(
     {
         capture_semantic_wait_success_bindings(step, context, instance_id, &last_snapshot);
         context.pending_projection_baseline.remove(instance_id);
-        return Ok(());
+        return Ok(last_snapshot);
     }
     if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
-        return Ok(());
+        return Ok(last_snapshot);
     }
     loop {
         if Instant::now() >= deadline {
@@ -3776,11 +3828,11 @@ fn wait_for_semantic_state(
         {
             capture_semantic_wait_success_bindings(step, context, instance_id, &snapshot);
             context.pending_projection_baseline.remove(instance_id);
-            return Ok(());
+            return Ok(snapshot);
         }
         if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
             context.pending_projection_baseline.remove(instance_id);
-            return Ok(());
+            return Ok(snapshot);
         }
         consume_projection_baseline(context, instance_id, &snapshot);
         last_snapshot = snapshot;
@@ -3792,7 +3844,7 @@ fn wait_for_semantic_state(
             .is_some_and(|screen| message_contains_screen_text(step, screen))
     {
         context.pending_projection_baseline.remove(instance_id);
-        return Ok(());
+        return Ok(last_snapshot);
     }
     bail!(
         "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?} diagnostic_screen={:?}",
@@ -4449,11 +4501,10 @@ mod tests {
             actor: Some(ActorId("bob".to_string())),
             timeout_ms: Some(4000),
         };
-        let wait_step =
-            action_precondition_wait_step(
-                &step,
-                &IntentAction::RemoveSelectedDevice { device_id: None }.contract(),
-            );
+        let wait_step = action_precondition_wait_step(
+            &step,
+            &IntentAction::RemoveSelectedDevice { device_id: None }.contract(),
+        );
 
         assert!(matches!(wait_step.action, CompatibilityAction::WaitFor));
         assert_eq!(wait_step.screen_id, Some(ScreenId::Settings));
@@ -5392,6 +5443,7 @@ mod tests {
         let start_device_contract = IntentAction::StartDeviceEnrollment {
             device_name: "phone".to_string(),
             code_name: "device_code".to_string(),
+            invitee_authority_id: "authority:peer".to_string(),
         }
         .contract();
         assert!(ensure_wait_contract_declared(

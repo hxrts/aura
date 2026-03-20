@@ -473,7 +473,13 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError> {
-        if let Some(context) = self.amp_channel_contexts.read().await.get(&channel).copied() {
+        if let Some(context) = self
+            .amp_channel_contexts
+            .read()
+            .await
+            .get(&channel)
+            .copied()
+        {
             return Ok(Some(context));
         }
         let facts = self.facts.read().await;

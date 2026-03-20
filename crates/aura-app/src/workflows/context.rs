@@ -70,9 +70,7 @@ fn resolution_from_home(
 }
 
 #[aura_macros::authoritative_source(kind = "app_core")]
-async fn authoritative_active_home_selection(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Option<ChannelId> {
+async fn authoritative_active_home_selection(app_core: &Arc<RwLock<AppCore>>) -> Option<ChannelId> {
     let core = app_core.read().await;
     core.active_home_selection()
 }
@@ -541,7 +539,9 @@ pub async fn create_home(
         Err(error) => return fail_create_home(&owner, error.to_string()).await,
     };
 
-    owner.publish_success_with(prove_home_created(app_core, home_id).await?).await?;
+    owner
+        .publish_success_with(prove_home_created(app_core, home_id).await?)
+        .await?;
     Ok(home_id)
 }
 

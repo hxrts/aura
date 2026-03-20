@@ -14,7 +14,7 @@ cfg_if! {
         mod task_owner;
         mod web_clipboard;
 
-        use async_lock::RwLock;
+        use async_lock::{Mutex, RwLock};
         use aura_agent::AgentBuilder;
         use aura_app::{AppConfig, AppCore};
         use aura_app::ui::workflows::account as account_workflows;
@@ -38,11 +38,6 @@ cfg_if! {
         use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
         use error::{log_web_error, WebUiError, WebUiOperation};
-        use futures::{
-            channel::{mpsc, oneshot},
-            StreamExt,
-        };
-        use js_sys::Promise;
         use std::cell::Cell;
         use std::rc::Rc;
         use std::sync::Arc;
@@ -933,13 +928,7 @@ cfg_if! {
             let bootstrap_epoch = use_signal(|| 0_u64);
             let committed_bootstrap = use_signal(|| Option::<BootstrapState>::None);
             let bootstrap_error = use_signal(|| Option::<WebUiError>::None);
-            let rebootstrap_requests = use_hook(|| {
-                let (tx, rx) = mpsc::channel::<oneshot::Sender<Result<(), WebUiError>>>(4);
-                (
-                    tx,
-                    Rc::new(std::cell::RefCell::new(Some(rx))),
-                )
-            });
+            let rebootstrap_lock = use_hook(|| Arc::new(Mutex::new(())));
 
             use_effect(|| {
                 if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -948,18 +937,18 @@ cfg_if! {
             });
 
             use_effect(move || {
-                if !bootstrap_started.get() {
-                    bootstrap_started.set(true);
-                    let mut rebootstrap_rx = rebootstrap_requests
-                        .1
-                        .borrow_mut()
-                        .take()
-                        .expect("rebootstrap receiver should initialize once");
-                    let mut bootstrap_epoch = bootstrap_epoch;
-                    let mut committed_bootstrap = committed_bootstrap;
-                    let mut bootstrap_error = bootstrap_error;
-                    shared_web_task_owner().spawn_local_cancellable(async move {
-                        while let Some(completion_tx) = rebootstrap_rx.next().await {
+                let trigger: Arc<dyn Fn() -> js_sys::Promise> = Arc::new({
+                    let rebootstrap_lock = rebootstrap_lock.clone();
+                    let bootstrap_epoch = bootstrap_epoch;
+                    let committed_bootstrap = committed_bootstrap;
+                    let bootstrap_error = bootstrap_error;
+                    move || {
+                        let rebootstrap_lock = rebootstrap_lock.clone();
+                        let mut bootstrap_epoch = bootstrap_epoch;
+                        let mut committed_bootstrap = committed_bootstrap;
+                        let mut bootstrap_error = bootstrap_error;
+                        future_to_promise(async move {
+                            let _guard = rebootstrap_lock.lock().await;
                             let epoch = bootstrap_epoch() + 1;
                             web_sys::console::log_1(
                                 &format!("[web-bootstrap] trigger start epoch={epoch}").into(),
@@ -969,26 +958,15 @@ cfg_if! {
                             web_sys::console::log_1(
                                 &format!("[web-bootstrap] runner start epoch={epoch}").into(),
                             );
-                            let result = bootstrap_controller().await;
-                            if bootstrap_epoch() != epoch {
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "[web-bootstrap] runner superseded epoch={epoch};current={}",
-                                        bootstrap_epoch()
-                                    )
-                                    .into(),
-                                );
-                                let _ = completion_tx.send(Ok(()));
-                                continue;
-                            }
-                            match result {
+                            match bootstrap_controller().await {
                                 Ok(state) => {
                                     web_sys::console::log_1(
                                         &format!("[web-bootstrap] runner ok epoch={epoch}").into(),
                                     );
                                     bootstrap_error.set(None);
                                     committed_bootstrap.set(Some(state));
-                                    let _ = completion_tx.send(Ok(()));
+                                    web_sys::console::log_1(&"[web-bootstrap] trigger done".into());
+                                    Ok(JsValue::UNDEFINED)
                                 }
                                 Err(error) => {
                                     web_sys::console::error_1(
@@ -1003,57 +981,30 @@ cfg_if! {
                                     } else {
                                         log_web_error("error", &error);
                                     }
-                                    let _ = completion_tx.send(Err(error));
-                                }
-                            }
-                        }
-                    });
-
-                    let (completion_tx, _completion_rx) =
-                        oneshot::channel::<Result<(), WebUiError>>();
-                    if rebootstrap_requests.0.clone().try_send(completion_tx).is_err() {
-                        web_sys::console::error_1(
-                            &"[web-bootstrap] failed to enqueue initial bootstrap request".into(),
-                        );
-                    }
-                }
-
-                let trigger: Arc<dyn Fn() -> js_sys::Promise> = Arc::new({
-                    let rebootstrap_tx = rebootstrap_requests.0.clone();
-                    move || {
-                        let (completion_tx, completion_rx) =
-                            oneshot::channel::<Result<(), WebUiError>>();
-                        if rebootstrap_tx.clone().try_send(completion_tx).is_err() {
-                            return Promise::reject(&JsValue::from_str(
-                                "rebootstrap request queue is unavailable or full",
-                            ));
-                        }
-
-                        future_to_promise(async move {
-                            match completion_rx.await {
-                                Ok(Ok(())) => {
-                                    web_sys::console::log_1(&"[web-bootstrap] trigger done".into());
-                                    Ok(JsValue::UNDEFINED)
-                                }
-                                Ok(Err(error)) => {
-                                    web_sys::console::error_1(
-                                        &format!(
-                                            "[web-bootstrap] trigger failed error={}",
-                                            error.user_message()
-                                        )
-                                        .into(),
-                                    );
                                     Err(JsValue::from_str(&error.user_message()))
                                 }
-                                Err(_) => Err(JsValue::from_str(
-                                    "bootstrap completion channel dropped unexpectedly",
-                                )),
                             }
                         })
                     }
                 });
 
-                harness_bridge::set_rebootstrap_trigger(trigger);
+                harness_bridge::set_rebootstrap_trigger(trigger.clone());
+
+                if !bootstrap_started.get() {
+                    bootstrap_started.set(true);
+                    let trigger = trigger.clone();
+                    shared_web_task_owner().spawn_local(async move {
+                        if let Err(error) = wasm_bindgen_futures::JsFuture::from(trigger()).await {
+                            web_sys::console::error_1(
+                                &format!(
+                                    "[web-bootstrap] initial bootstrap request failed: {:?}",
+                                    error
+                                )
+                                .into(),
+                            );
+                        }
+                    });
+                }
             });
 
             if let Some(state) = committed_bootstrap() {

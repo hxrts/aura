@@ -101,7 +101,9 @@ pub enum WorkflowError {
     MissingAuthoritativeContext { channel: String },
 
     /// Authoritative participant lookup failed.
-    #[error("Authoritative participant lookup for channel {channel} in context {context}: {source}")]
+    #[error(
+        "Authoritative participant lookup for channel {channel} in context {context}: {source}"
+    )]
     AuthoritativeParticipantsLookup {
         channel: String,
         context: String,

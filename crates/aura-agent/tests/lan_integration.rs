@@ -389,12 +389,11 @@ async fn accept_pending_channel_invitation(
                         if home_id.parse::<ChannelId>().ok() == Some(channel_id)
                 )
             }) {
-                let invitation =
-                    invitation_workflow::resolve_pending_invitation_handle(
-                        app,
-                        invitation.invitation_id.as_str(),
-                    )
-                    .await?;
+                let invitation = invitation_workflow::resolve_pending_invitation_handle(
+                    app,
+                    invitation.invitation_id.as_str(),
+                )
+                .await?;
                 invitation_workflow::accept_invitation(app, invitation).await?;
                 return Ok(true);
             }
@@ -452,7 +451,8 @@ async fn setup_lan_group_channel_pair(
         None,
     )
     .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
+    let invite_code =
+        invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
     let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
     invitation_workflow::accept_invitation(&app_b, imported).await?;
 
@@ -502,8 +502,10 @@ async fn setup_lan_group_channel_pair(
     })
     .await?;
     let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
-    let channel_a = messaging_workflow::resolve_authoritative_channel_ref(&app_a, channel_id).await?;
-    let channel_b = messaging_workflow::resolve_authoritative_channel_ref(&app_b, channel_id).await?;
+    let channel_a =
+        messaging_workflow::resolve_authoritative_channel_ref(&app_a, channel_id).await?;
+    let channel_b =
+        messaging_workflow::resolve_authoritative_channel_ref(&app_b, channel_id).await?;
     messaging_workflow::join_channel(&app_a, channel_a).await?;
     messaging_workflow::join_channel(&app_b, channel_b).await?;
 
@@ -645,7 +647,8 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         None,
     )
     .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
+    let invite_code =
+        invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
 
     // Bob imports and accepts the invite code.
     let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
@@ -818,7 +821,8 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
         None,
     )
     .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
+    let invite_code =
+        invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
 
     let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
     invitation_workflow::accept_invitation(&app_b, imported).await?;

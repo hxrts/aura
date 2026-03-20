@@ -6,9 +6,9 @@
 use super::error::runtime_call;
 use crate::views::contacts::ReadReceiptPolicy;
 use crate::workflows::context::default_relational_context;
+use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::require_runtime;
-use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;

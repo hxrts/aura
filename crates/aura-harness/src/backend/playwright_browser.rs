@@ -10,6 +10,8 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
 use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse};
+use aura_app::ui::types::BootstrapRuntimeIdentity;
+use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -725,6 +727,28 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
             Ok(authority_id)
+        })
+    }
+
+    fn stage_runtime_identity(&mut self, authority_id: &str, device_id: &str) -> Result<()> {
+        let authority_id = authority_id
+            .parse::<AuthorityId>()
+            .with_context(|| format!("invalid authority id for runtime staging: {authority_id}"))?;
+        let device_id = device_id
+            .parse::<DeviceId>()
+            .with_context(|| format!("invalid device id for runtime staging: {device_id}"))?;
+        let runtime_identity_json =
+            serde_json::to_string(&BootstrapRuntimeIdentity::new(authority_id, device_id))
+                .context("failed to encode staged runtime identity")?;
+        self.with_session(|session| {
+            session.rpc_call(
+                "stage_runtime_identity",
+                json!({
+                    "instance_id": self.config.id,
+                    "runtime_identity_json": runtime_identity_json,
+                }),
+            )?;
+            Ok(())
         })
     }
 

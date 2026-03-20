@@ -713,10 +713,7 @@ impl InvitationHandler {
                 self.execute_guardian_invitation_principal(effects.clone(), &invitation)
                     .await?;
             }
-            InvitationType::DeviceEnrollment { .. } => {
-                self.execute_device_enrollment_initiator(effects.clone(), &invitation)
-                    .await?;
-            }
+            InvitationType::DeviceEnrollment { .. } => {}
             InvitationType::Channel { .. } => {}
         }
 
@@ -2108,7 +2105,7 @@ impl InvitationHandler {
     /// 1. Initiator sends DeviceEnrollmentRequest to Invitee
     /// 2. Invitee responds with DeviceEnrollmentAccept
     /// 3. Initiator sends DeviceEnrollmentConfirm
-    async fn execute_device_enrollment_initiator(
+    pub(crate) async fn execute_device_enrollment_initiator(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,

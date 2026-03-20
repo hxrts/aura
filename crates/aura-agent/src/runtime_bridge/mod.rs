@@ -860,11 +860,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         if let Ok(invitation_service) = self.agent.invitations() {
             let local_authority = self.agent.authority_id();
             for invitation in invitation_service
-                .list_cached_matching(|inv| inv.status == aura_invitation::InvitationStatus::Accepted)
+                .list_cached_matching(|inv| {
+                    inv.status == aura_invitation::InvitationStatus::Accepted
+                })
                 .await
             {
-                if invitation.sender_id != local_authority
-                {
+                if invitation.sender_id != local_authority {
                     continue;
                 }
                 let aura_invitation::InvitationType::Channel { home_id, .. } =
@@ -899,15 +900,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "failed to load committed facts for moderation status: {error}"
                 ))
             })?;
-        let homes: HomesState = self
-            .reactive_handler()
-            .read(&*HOMES_SIGNAL)
-            .await
-            .map_err(|error| {
-                IntentError::internal_error(format!(
-                    "failed to read authoritative homes signal for moderation status: {error}"
-                ))
-            })?;
+        let homes: HomesState =
+            self.reactive_handler()
+                .read(&*HOMES_SIGNAL)
+                .await
+                .map_err(|error| {
+                    IntentError::internal_error(format!(
+                        "failed to read authoritative homes signal for moderation status: {error}"
+                    ))
+                })?;
         let candidates = collect_authoritative_moderation_homes(&homes, context_id, channel_id);
         let roster_known = candidates.iter().any(|home| !home.members.is_empty());
         let is_member = candidates

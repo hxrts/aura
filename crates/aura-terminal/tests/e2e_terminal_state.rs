@@ -2688,7 +2688,10 @@ async fn test_context_sensitive_help() {
         chat_categories.contains("Navigation"),
         "Navigation commands should still be present"
     );
-    assert!(chat_categories.contains("Chat"), "Chat commands should be present");
+    assert!(
+        chat_categories.contains("Chat"),
+        "Chat commands should be present"
+    );
     assert!(
         chat_categories.contains("Slash Commands"),
         "Chat context should include slash commands"

@@ -516,9 +516,10 @@ impl Parse for SemanticOwnerAttr {
             } else if meta.path.is_ident("proof") {
                 proof = Some(expect_type_value(&meta, "proof")?);
             } else if meta.path.is_ident("authoritative_inputs") {
-                authoritative_inputs = Some(parse_optional_list_literal(
-                    &expect_string_literal(&meta, "authoritative_inputs")?,
-                )?);
+                authoritative_inputs = Some(parse_optional_list_literal(&expect_string_literal(
+                    &meta,
+                    "authoritative_inputs",
+                )?)?);
             } else if meta.path.is_ident("depends_on") {
                 depends_on = Some(parse_optional_list_literal(&expect_string_literal(
                     &meta,

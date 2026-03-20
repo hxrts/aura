@@ -98,12 +98,30 @@ If `aura-app` coordinates a parity-critical operation across async boundaries, o
 | Invitation/channel/delivery readiness derivation rules | `Pure` + coordinator-consumed `ActorOwned` inputs | readiness coordinators in `aura-app::workflows::*` | workflow/coordinator modules only | frontends, harness |
 | Opaque handles / owner-token / handoff surfaces | `MoveOwned` | current token/record holder through sanctioned APIs | contract/workflow transfer APIs | render/projection layers, harness diagnostics |
 
+Strict authoritative-ref rule for parity-critical workflows:
+
+- once a workflow has authoritative context, later helpers must consume the
+  strongest available typed input such as `Authoritative*Ref`
+- raw identifiers may reference but may not authorize
+- parity-critical helpers may not re-resolve context, ownership, or readiness
+  from weaker ids after authoritative handoff
+- fallback/default helpers such as `*_or_fallback` are forbidden on
+  parity-critical paths
+
 ### Capability-Gated Points
 
 - Authoritative semantic lifecycle publication in `src/workflows/semantic_facts.rs`.
 - Authoritative readiness publication and replacement in `src/workflows/semantic_facts.rs`.
 - Workflow-owned semantic operation phase/failure publication in `src/workflows/messaging.rs`, `src/workflows/invitation.rs`, and related parity-critical workflow modules.
 - Opaque shared command-plane and lifecycle surfaces in `src/ui_contract.rs` and `src/scenario_contract.rs`.
+
+Authoritative resolution is an explicit pre-step, not an implicit helper side
+effect. Public parity-critical workflow APIs should either:
+
+- resolve a strong typed reference once at the boundary, or
+- require that strong typed reference directly
+
+They must not accept raw ids and silently derive stronger truth internally.
 
 ## Testing
 

@@ -1,0 +1,15 @@
+error[E0603]: function `wait_for_runtime_channel_state` is private
+ --> tests/ui_signals/runtime_channel_wait_helper_private.rs:2:49
+  |
+2 |     let _ = aura_app::ui::workflows::messaging::wait_for_runtime_channel_state;
+  |                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ private function
+  |
+note: the function `wait_for_runtime_channel_state` is defined here
+ --> src/workflows/messaging.rs
+  |
+  | / pub(in crate::workflows) async fn wait_for_runtime_channel_state(
+  | |     app_core: &Arc<RwLock<AppCore>>,
+  | |     runtime: &Arc<dyn RuntimeBridge>,
+  | |     channel: AuthoritativeChannelRef,
+  | | ) -> Result<(), AuraError> {
+  | |__________________________^

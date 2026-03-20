@@ -407,7 +407,6 @@ impl HomeState {
         self.pinned_metadata.remove(message_id);
         had_entry
     }
-
 }
 
 // =============================================================================

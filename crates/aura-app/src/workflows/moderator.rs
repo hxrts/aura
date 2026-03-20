@@ -159,7 +159,8 @@ async fn resolve_scope(
                 .ok_or_else(|| AuraError::permission_denied(context_id.to_string()))?
         }
     } else {
-        homes.current_home()
+        homes
+            .current_home()
             .map(|home| (home.id, home.clone()))
             .ok_or_else(|| {
                 AuraError::permission_denied("Moderator operation requires an active home scope")
@@ -406,8 +407,8 @@ pub async fn revoke_moderator_resolved(
         .await
         .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
     let actor = runtime.authority_id();
-    let fact = HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms)
-        .to_generic();
+    let fact =
+        HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
 
     runtime
         .commit_relational_facts(std::slice::from_ref(&fact))
@@ -465,11 +466,11 @@ mod tests {
     use super::*;
     use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::signal_defs::{register_app_signals, HOMES_SIGNAL, HOMES_SIGNAL_NAME};
-    use crate::workflows::signals::emit_signal;
     use crate::views::{
         home::{HomeRole, HomeState, HomesState},
         Contact, ContactsState,
     };
+    use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
     use aura_core::crypto::hash::hash;
 
@@ -503,8 +504,12 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_scope_prefers_admin_home_for_context() {
         let config = AppConfig::default();
-        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([7u8; 32])));
-        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime.clone()).unwrap()));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
+            [7u8; 32],
+        )));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime.clone()).unwrap(),
+        ));
         {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();
@@ -517,8 +522,13 @@ mod tests {
         let placeholder_id = ChannelId::from_bytes(hash(b"scope-prefers-admin-placeholder"));
 
         let mut homes = HomesState::default();
-        let mut placeholder =
-            HomeState::new(placeholder_id, Some("placeholder".to_string()), peer, 0, context_id);
+        let mut placeholder = HomeState::new(
+            placeholder_id,
+            Some("placeholder".to_string()),
+            peer,
+            0,
+            context_id,
+        );
         placeholder.my_role = HomeRole::Participant;
         homes.add_home(placeholder);
         homes.add_home(HomeState::new(
@@ -588,8 +598,12 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_scope_prefers_named_channel_context_over_current_home() {
         let config = AppConfig::default();
-        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([8u8; 32])));
-        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime.clone()).unwrap()));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
+            [8u8; 32],
+        )));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime.clone()).unwrap(),
+        ));
         {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();
@@ -639,7 +653,9 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_scope_by_channel_id_rejects_unknown_channel_scope() {
         let config = AppConfig::default();
-        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([9u8; 32])));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
+            [9u8; 32],
+        )));
         let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime).unwrap()));
         {
             let core = app_core.read().await;

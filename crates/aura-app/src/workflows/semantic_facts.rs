@@ -276,10 +276,8 @@ impl SemanticWorkflowOwner {
         causality: Option<SemanticOperationCausality>,
         status: SemanticOperationStatus,
     ) {
-        *self.last_terminal_status.lock().await = Some(WorkflowTerminalStatus {
-            causality,
-            status,
-        });
+        *self.last_terminal_status.lock().await =
+            Some(WorkflowTerminalStatus { causality, status });
     }
 
     pub(in crate::workflows) async fn terminal_status(&self) -> Option<WorkflowTerminalStatus> {
@@ -340,7 +338,9 @@ impl SemanticWorkflowOwner {
             SemanticOperationPhase::Succeeded | SemanticOperationPhase::Cancelled
         )
         .then(|| WorkflowTerminalStatus {
-            causality: publication.as_ref().and_then(|publication| publication.causality),
+            causality: publication
+                .as_ref()
+                .and_then(|publication| publication.causality),
             status: if phase == SemanticOperationPhase::Cancelled {
                 SemanticOperationStatus::cancelled(self.kind)
             } else {
@@ -395,7 +395,9 @@ impl SemanticWorkflowOwner {
             }
         };
         let terminal_status = WorkflowTerminalStatus {
-            causality: publication.as_ref().and_then(|publication| publication.causality),
+            causality: publication
+                .as_ref()
+                .and_then(|publication| publication.causality),
             status: SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded),
         };
         if let Some(publication) = publication {
@@ -440,7 +442,9 @@ impl SemanticWorkflowOwner {
             }
         };
         let terminal_status = WorkflowTerminalStatus {
-            causality: publication.as_ref().and_then(|publication| publication.causality),
+            causality: publication
+                .as_ref()
+                .and_then(|publication| publication.causality),
             status: SemanticOperationStatus::failed(self.kind, error.clone()),
         };
         if let Some(publication) = publication {
@@ -654,7 +658,9 @@ pub(in crate::workflows) fn issue_device_enrollment_started_proof(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
 )]
-pub(in crate::workflows) fn issue_message_committed_proof(message_id: impl Into<String>) -> MessageCommittedProof {
+pub(in crate::workflows) fn issue_message_committed_proof(
+    message_id: impl Into<String>,
+) -> MessageCommittedProof {
     let _ = semantic_postcondition_proof_capability();
     MessageCommittedProof {
         message_id: message_id.into(),

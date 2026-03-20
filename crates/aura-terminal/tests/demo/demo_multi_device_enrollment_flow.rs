@@ -150,7 +150,10 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
     // Enroll device B.
     let start_b = env
         .ctx_a
-        .start_device_enrollment("Laptop", aura_core::AuthorityId::new_from_entropy([2u8; 32]))
+        .start_device_enrollment(
+            "Laptop",
+            aura_core::AuthorityId::new_from_entropy([2u8; 32]),
+        )
         .await
         .expect("start_device_enrollment should succeed");
 

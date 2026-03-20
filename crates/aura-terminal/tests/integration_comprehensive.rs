@@ -809,7 +809,10 @@ mod modals {
         // '?' opens help modal from any screen
         tui.send_char('?');
         assert!(tui.has_modal());
-        assert!(matches!(tui.current_modal(), Some(QueuedModal::Help { .. })));
+        assert!(matches!(
+            tui.current_modal(),
+            Some(QueuedModal::Help { .. })
+        ));
 
         // Set up scroll max for navigation to work
         tui.state.help.scroll_max = 50;
@@ -1036,7 +1039,10 @@ mod global_behavior {
             tui.send_char('?');
 
             assert!(tui.has_modal(), "? should open help from {screen:?}");
-            assert!(matches!(tui.current_modal(), Some(QueuedModal::Help { .. })));
+            assert!(matches!(
+                tui.current_modal(),
+                Some(QueuedModal::Help { .. })
+            ));
 
             // Clean up for next iteration
             tui.send_escape();

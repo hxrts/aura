@@ -6,6 +6,7 @@
 //! - Inserting relational facts (checkpoints, bumps, policies)
 //! - Channel state reduction via journal queries
 
+use crate::{ChannelMembershipFact, ChannelParticipantEvent};
 use aura_core::effects::{JournalEffects, OrderClockEffects};
 use aura_core::hash::hash;
 use aura_core::time::{OrderTime, TimeStamp};
@@ -15,7 +16,6 @@ use aura_journal::{
     fact::{Fact, FactContent, JournalNamespace, RelationalFact},
     reduce_context, ChannelEpochState, DomainFact, FactJournal, ProtocolRelationalFact,
 };
-use crate::{ChannelMembershipFact, ChannelParticipantEvent};
 
 // ============================================================================
 // AmpJournalEffects Trait

@@ -85,10 +85,13 @@ pub(super) fn handle_settings_add_device_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                let invitee_authority_id =
-                    match parse_authority_id(state, modal_state.invitee_authority(), "device enrollment invitee") {
-                        Some(id) => id,
-                        None => return,
+                let invitee_authority_id = match parse_authority_id(
+                    state,
+                    modal_state.invitee_authority(),
+                    "device enrollment invitee",
+                ) {
+                    Some(id) => id,
+                    None => return,
                 };
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                     name: modal_state.name,

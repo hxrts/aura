@@ -197,7 +197,8 @@ fn materialize_bind_address(
             if used_ports.insert(candidate) {
                 return Ok(format!("{host}:{candidate}"));
             }
-            candidate = ISOLATED_PORT_MIN + ((candidate + 1 - ISOLATED_PORT_MIN) % ISOLATED_PORT_SPAN);
+            candidate =
+                ISOLATED_PORT_MIN + ((candidate + 1 - ISOLATED_PORT_MIN) % ISOLATED_PORT_SPAN);
         }
         bail!("unable to allocate isolated port for {bind_address}");
     }

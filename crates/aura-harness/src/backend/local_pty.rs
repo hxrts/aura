@@ -1335,11 +1335,16 @@ impl RawUiBackend for LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
-    fn submit_start_device_enrollment(&mut self, device_name: &str) -> Result<SubmittedAction<()>> {
+    fn submit_start_device_enrollment(
+        &mut self,
+        device_name: &str,
+        invitee_authority_id: &str,
+    ) -> Result<SubmittedAction<()>> {
         let previous_operation =
             observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
         self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {
             device_name: device_name.to_string(),
+            invitee_authority_id: invitee_authority_id.to_string(),
         })?;
         let handle = wait_for_operation_submission(
             self,
@@ -1408,8 +1413,13 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     value: SemanticCommandValue::None,
                 })
             }
-            IntentAction::StartDeviceEnrollment { device_name, .. } => {
-                let submitted = self.submit_start_device_enrollment(&device_name)?;
+            IntentAction::StartDeviceEnrollment {
+                device_name,
+                invitee_authority_id,
+                ..
+            } => {
+                let submitted =
+                    self.submit_start_device_enrollment(&device_name, &invitee_authority_id)?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
@@ -2086,11 +2096,9 @@ mod tests {
         );
         assert!(source
             .contains("self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {"));
-        assert!(
-            source.contains(
-                "self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice { device_id })?;"
-            )
-        );
+        assert!(source.contains(
+            "self.send_harness_command(&HarnessUiCommand::RemoveSelectedDevice { device_id })?;"
+        ));
         assert!(source.contains(
             "self.send_harness_command(&HarnessUiCommand::SwitchAuthority { authority_id })?;"
         ));

@@ -157,7 +157,10 @@ async fn regression_demo_mode_mobile_device_enrollment_should_start() {
     // The bug causes this to fail with "Internal error: Failed to start devi..."
     let result = env
         .ctx
-        .start_device_enrollment("Mobile", aura_core::AuthorityId::new_from_entropy([9u8; 32]))
+        .start_device_enrollment(
+            "Mobile",
+            aura_core::AuthorityId::new_from_entropy([9u8; 32]),
+        )
         .await;
 
     match result {
@@ -210,7 +213,10 @@ async fn demo_mode_sequential_device_enrollments() {
     // First enrollment
     let result1 = env
         .ctx
-        .start_device_enrollment("Mobile", aura_core::AuthorityId::new_from_entropy([10u8; 32]))
+        .start_device_enrollment(
+            "Mobile",
+            aura_core::AuthorityId::new_from_entropy([10u8; 32]),
+        )
         .await;
     assert!(
         result1.is_ok(),
@@ -224,7 +230,10 @@ async fn demo_mode_sequential_device_enrollments() {
     // Second enrollment (should supersede the first if not completed)
     let result2 = env
         .ctx
-        .start_device_enrollment("Tablet", aura_core::AuthorityId::new_from_entropy([11u8; 32]))
+        .start_device_enrollment(
+            "Tablet",
+            aura_core::AuthorityId::new_from_entropy([11u8; 32]),
+        )
         .await;
     assert!(
         result2.is_ok(),
@@ -312,7 +321,10 @@ async fn demo_mode_enrollment_immediately_after_account_creation() {
     // Don't refresh settings - try enrollment immediately
     // This is a more aggressive test of the initialization sequence
     let result = ctx
-        .start_device_enrollment("Mobile", aura_core::AuthorityId::new_from_entropy([12u8; 32]))
+        .start_device_enrollment(
+            "Mobile",
+            aura_core::AuthorityId::new_from_entropy([12u8; 32]),
+        )
         .await;
 
     // Clean up

@@ -636,6 +636,7 @@ pub enum IntentAction {
     StartDeviceEnrollment {
         device_name: String,
         code_name: String,
+        invitee_authority_id: String,
     },
     ImportDeviceEnrollmentCode {
         code: String,
@@ -1298,6 +1299,9 @@ pub enum VariableAction {
         name: String,
         value: String,
     },
+    PrepareDeviceEnrollmentInviteeAuthority {
+        name: String,
+    },
     CaptureCurrentAuthorityId {
         name: String,
     },
@@ -1399,6 +1403,7 @@ pub struct SemanticScenarioFileStep {
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
     pub peer_actor: Option<ActorId>,
+    pub invitee_authority_id: Option<String>,
     pub confirmation: Option<ConfirmationState>,
     pub section: Option<SettingsSection>,
     pub name: Option<String>,
@@ -1454,6 +1459,7 @@ pub enum SemanticActionKind {
     RuntimeEventOccurred,
     OperationStateIs,
     ParityWithActor,
+    PrepareDeviceEnrollmentInviteeAuthority,
     CaptureCurrentAuthorityId,
     CaptureSelection,
     SetVar,
@@ -1540,6 +1546,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Intent(IntentAction::StartDeviceEnrollment {
                     device_name: required(value.value, "value", value.action)?,
                     code_name: required(value.name, "name", value.action)?,
+                    invitee_authority_id: required(
+                        value.invitee_authority_id,
+                        "invitee_authority_id",
+                        value.action,
+                    )?,
                 })
             }
             SemanticActionKind::ImportDeviceEnrollmentCode => {
@@ -1693,6 +1704,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     actor: required(value.peer_actor, "peer_actor", value.action)?,
                 })
             }
+            SemanticActionKind::PrepareDeviceEnrollmentInviteeAuthority => {
+                ScenarioAction::Variables(VariableAction::PrepareDeviceEnrollmentInviteeAuthority {
+                    name: required(value.name, "name", value.action)?,
+                })
+            }
             SemanticActionKind::CaptureCurrentAuthorityId => {
                 ScenarioAction::Variables(VariableAction::CaptureCurrentAuthorityId {
                     name: required(value.name, "name", value.action)?,
@@ -1773,6 +1789,7 @@ mod tests {
                     operation_state: None,
                     confirmation: None,
                     peer_actor: None,
+                    invitee_authority_id: None,
                     section: None,
                     name: None,
                     regex: None,
@@ -1802,6 +1819,7 @@ mod tests {
                     operation_state: None,
                     confirmation: None,
                     peer_actor: None,
+                    invitee_authority_id: None,
                     section: None,
                     name: None,
                     regex: None,
@@ -1855,6 +1873,7 @@ mod tests {
             operation_state: None,
             confirmation: None,
             peer_actor: None,
+            invitee_authority_id: None,
             section: None,
             name: None,
             regex: None,
@@ -1900,6 +1919,7 @@ mod tests {
             operation_id: None,
             operation_state: None,
             peer_actor: Some(super::ActorId("tui".to_string())),
+            invitee_authority_id: None,
             confirmation: None,
             section: None,
             name: None,
@@ -1943,6 +1963,7 @@ mod tests {
                 operation_id: None,
                 operation_state: None,
                 peer_actor: None,
+                invitee_authority_id: None,
                 confirmation: None,
                 section: None,
                 name: None,
@@ -2036,6 +2057,7 @@ mod tests {
             IntentAction::StartDeviceEnrollment {
                 device_name: "phone".to_string(),
                 code_name: "device_code".to_string(),
+                invitee_authority_id: "authority:peer".to_string(),
             },
             IntentAction::ImportDeviceEnrollmentCode {
                 code: "invite-code".to_string(),
@@ -2096,6 +2118,7 @@ mod tests {
             IntentAction::StartDeviceEnrollment {
                 device_name: "phone".to_string(),
                 code_name: "device_code".to_string(),
+                invitee_authority_id: "authority:peer".to_string(),
             },
             IntentAction::ImportDeviceEnrollmentCode {
                 code: "invite-code".to_string(),
@@ -2155,6 +2178,7 @@ mod tests {
             IntentAction::StartDeviceEnrollment {
                 device_name: "phone".to_string(),
                 code_name: "device_code".to_string(),
+                invitee_authority_id: "authority:peer".to_string(),
             },
             IntentAction::ImportDeviceEnrollmentCode {
                 code: "invite-code".to_string(),
@@ -2339,6 +2363,7 @@ mod tests {
             IntentAction::StartDeviceEnrollment {
                 device_name: "mobile".to_string(),
                 code_name: "device_code".to_string(),
+                invitee_authority_id: "authority:peer".to_string(),
             },
             IntentAction::RemoveSelectedDevice { device_id: None },
             IntentAction::CreateContactInvitation {

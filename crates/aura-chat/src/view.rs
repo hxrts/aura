@@ -404,7 +404,8 @@ impl ViewDeltaReducer for ChatViewReducer {
                 name,
                 topic,
                 member_count,
-                member_ids: member_ids.map(|ids| ids.into_iter().map(|id| id.to_string()).collect()),
+                member_ids: member_ids
+                    .map(|ids| ids.into_iter().map(|id| id.to_string()).collect()),
             }),
             ChatFact::MessageSentSealed {
                 channel_id,

@@ -138,7 +138,8 @@ impl ContactsCallbacks {
                                     send_ui_update_reliable(
                                         &tx,
                                         UiUpdate::ToastAdded(ToastMessage::error(
-                                            "invitation", error,
+                                            "invitation",
+                                            error,
                                         )),
                                     )
                                     .await;

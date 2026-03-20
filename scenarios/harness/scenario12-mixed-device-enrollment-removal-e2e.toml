@@ -44,6 +44,13 @@ screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
+id = "bob-prepare-device-enrollment-invitee-authority"
+action = "prepare_device_enrollment_invitee_authority"
+actor = "bob"
+name = "bob_authority_id"
+timeout_ms = 3000
+
+[[steps]]
 id = "alice-create-account"
 action = "create_account"
 actor = "alice"
@@ -84,6 +91,7 @@ action = "start_device_enrollment"
 actor = "alice"
 value = "BobApp"
 name = "device_code"
+invitee_authority_id = "${bob_authority_id}"
 timeout_ms = 120000
 
 [[steps]]

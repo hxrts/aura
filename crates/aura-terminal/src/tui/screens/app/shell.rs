@@ -965,13 +965,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Invitations subscription: SharedInvitations for notification action dispatch
     // =========================================================================
-    let shared_invitations =
-        use_invitations_subscription(
-            &mut hooks,
-            &app_ctx,
-            update_tx_holder.clone(),
-            projection_export_version.clone(),
-        );
+    let shared_invitations = use_invitations_subscription(
+        &mut hooks,
+        &app_ctx,
+        update_tx_holder.clone(),
+        projection_export_version.clone(),
+    );
     use_authoritative_semantic_facts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
@@ -982,21 +981,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         &app_ctx,
         projection_export_version.clone(),
     );
-    let shared_neighborhood_home_meta =
-        use_neighborhood_home_meta_subscription(
-            &mut hooks,
-            &app_ctx,
-            projection_export_version.clone(),
-        );
-
-    // =========================================================================
-    // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
-    // =========================================================================
-    let shared_pending_requests = use_pending_requests_subscription(
+    let shared_neighborhood_home_meta = use_neighborhood_home_meta_subscription(
         &mut hooks,
         &app_ctx,
         projection_export_version.clone(),
     );
+
+    // =========================================================================
+    // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
+    // =========================================================================
+    let shared_pending_requests =
+        use_pending_requests_subscription(&mut hooks, &app_ctx, projection_export_version.clone());
 
     // =========================================================================
     // Notifications subscription: keep notification count in sync for navigation
@@ -1447,6 +1442,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             pending_epoch: _,
                             device_id: _,
                         } => {
+                            let _ = copy_to_clipboard(&enrollment_code);
                             tui.with_mut(|state| {
                                 state.settings.last_device_enrollment_code =
                                     enrollment_code.clone();

@@ -16,7 +16,9 @@ pub(super) async fn authoritative_home_moderation_status(
         let core = app_core.read().await;
         core.runtime().cloned()
     }
-    .ok_or_else(|| AuraError::permission_denied("authoritative moderation status requires runtime"))?;
+    .ok_or_else(|| {
+        AuraError::permission_denied("authoritative moderation status requires runtime")
+    })?;
 
     runtime
         .moderation_status(context_id, channel_id, authority_id, timestamp_ms)
@@ -44,9 +46,14 @@ pub(super) async fn enforce_home_moderation_for_sender(
     sender_id: AuthorityId,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let status =
-        authoritative_home_moderation_status(app_core, context_id, channel_id, sender_id, timestamp_ms)
-            .await?;
+    let status = authoritative_home_moderation_status(
+        app_core,
+        context_id,
+        channel_id,
+        sender_id,
+        timestamp_ms,
+    )
+    .await?;
 
     if status.is_banned {
         return Err(AuraError::permission_denied(
@@ -99,27 +106,25 @@ mod tests {
         let context_id = ContextId::new_from_entropy([93u8; 32]);
         let channel_id = ChannelId::from_bytes([94u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
-        runtime
-            .set_moderation_status(
-                context_id,
-                channel_id,
-                target,
-                crate::runtime_bridge::AuthoritativeModerationStatus {
-                    is_banned: true,
-                    is_muted: true,
-                    roster_known: true,
-                    is_member: false,
-                },
-            );
+        runtime.set_moderation_status(
+            context_id,
+            channel_id,
+            target,
+            crate::runtime_bridge::AuthoritativeModerationStatus {
+                is_banned: true,
+                is_muted: true,
+                roster_known: true,
+                is_member: false,
+            },
+        );
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
         ));
 
-        let status = authoritative_home_moderation_status(
-            &app_core, context_id, channel_id, target, 1_000,
-        )
-        .await
-        .expect("runtime-backed moderation status should resolve");
+        let status =
+            authoritative_home_moderation_status(&app_core, context_id, channel_id, target, 1_000)
+                .await
+                .expect("runtime-backed moderation status should resolve");
 
         assert!(status.is_banned);
         assert!(status.is_muted);

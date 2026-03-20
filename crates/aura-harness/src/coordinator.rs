@@ -15,8 +15,10 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
+use aura_app::ui::workflows::ids;
+use aura_core::{hash::hash, AuthorityId};
 use tokio::time::Instant;
 
 use crate::backend::{
@@ -892,6 +894,113 @@ impl HarnessCoordinator {
                 "source": if authority_id.is_some() { "backend" } else { "unavailable" }
             }),
         );
+        Ok(authority_id)
+    }
+
+    pub fn prepare_device_enrollment_invitee_authority(
+        &mut self,
+        instance_id: &str,
+    ) -> Result<String> {
+        let mode = self
+            .instance_modes
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        let data_dir = self
+            .instance_data_dirs
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
+        let authority_path = data_dir.join(".harness-device-enrollment-invitee-authority");
+        if let Ok(raw) = fs::read_to_string(&authority_path) {
+            let authority_id = raw.trim();
+            if !authority_id.is_empty() && authority_id.parse::<AuthorityId>().is_ok() {
+                self.events.push(
+                    "observation",
+                    "prepare_device_enrollment_invitee_authority",
+                    Some(instance_id.to_string()),
+                    serde_json::json!({
+                        "source": authority_path.display().to_string(),
+                        "mode": "reused",
+                        "authority_id": authority_id,
+                    }),
+                );
+                return Ok(authority_id.to_string());
+            }
+        }
+
+        let seed = format!(
+            "harness-device-enrollment-invitee:{}:{}",
+            instance_id,
+            data_dir.display()
+        );
+        let authority_id = AuthorityId::new_from_entropy(hash(seed.as_bytes())).to_string();
+        let provisional_device_id = ids::device_id(&format!("{seed}:device")).to_string();
+        fs::create_dir_all(data_dir).with_context(|| {
+            format!(
+                "failed to create data dir for prepared invitee authority {}",
+                data_dir.display()
+            )
+        })?;
+        fs::write(&authority_path, format!("{authority_id}\n")).with_context(|| {
+            format!(
+                "failed to persist prepared invitee authority {}",
+                authority_path.display()
+            )
+        })?;
+        self.events.push(
+            "observation",
+            "prepare_device_enrollment_invitee_authority",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "source": authority_path.display().to_string(),
+                "mode": "created",
+                "authority_id": authority_id,
+            }),
+        );
+
+        match mode {
+            InstanceMode::Local => {
+                self.restart(instance_id)?;
+                self.wait_for_backend_health(instance_id, BACKEND_HEALTH_TIMEOUT)?;
+                self.backends
+                    .get(instance_id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
+                    .as_trait()
+                    .wait_until_ready(BACKEND_READY_TIMEOUT)?;
+                self.events.push(
+                    "lifecycle",
+                    "prepare_device_enrollment_invitee_authority_ready",
+                    Some(instance_id.to_string()),
+                    serde_json::json!({
+                        "authority_id": authority_id,
+                        "timeout_ms": BACKEND_READY_TIMEOUT.as_millis()
+                    }),
+                );
+            }
+            InstanceMode::Browser => {
+                self.backends
+                    .get_mut(instance_id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
+                    .as_trait_mut()
+                    .stage_runtime_identity(&authority_id, &provisional_device_id)?;
+                self.wait_for_backend_health(instance_id, BACKEND_HEALTH_TIMEOUT)?;
+                self.backends
+                    .get(instance_id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
+                    .as_trait()
+                    .wait_until_ready(BACKEND_READY_TIMEOUT)?;
+                self.events.push(
+                    "lifecycle",
+                    "prepare_device_enrollment_invitee_authority_ready",
+                    Some(instance_id.to_string()),
+                    serde_json::json!({
+                        "authority_id": authority_id,
+                        "device_id": provisional_device_id,
+                        "timeout_ms": BACKEND_READY_TIMEOUT.as_millis()
+                    }),
+                );
+            }
+            InstanceMode::Ssh => {}
+        }
         Ok(authority_id)
     }
 

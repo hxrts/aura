@@ -23,8 +23,10 @@ use crate::views::{
     neighborhood::NeighborhoodState,
     recovery::RecoveryState,
 };
+use crate::workflows::parse::{
+    parse_authority_id as parse_workflow_authority_id, parse_context_id,
+};
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::parse::{parse_authority_id as parse_workflow_authority_id, parse_context_id};
 use crate::AppCore;
 use aura_core::AuraError;
 
@@ -112,10 +114,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
             ..
         } => {
             let channel_id = parse_channel_id(&channel_id)?;
-            let context_id = context_id
-                .as_deref()
-                .map(parse_context_id)
-                .transpose()?;
+            let context_id = context_id.as_deref().map(parse_context_id).transpose()?;
             let channel_type = if is_dm {
                 ChannelType::DirectMessage
             } else {
@@ -174,10 +173,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
             member_ids,
         } => {
             let channel_id = parse_channel_id(&channel_id)?;
-            let context_id = context_id
-                .as_deref()
-                .map(parse_context_id)
-                .transpose()?;
+            let context_id = context_id.as_deref().map(parse_context_id).transpose()?;
             let member_ids = member_ids
                 .map(|ids| {
                     ids.into_iter()
@@ -185,9 +181,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .transpose()?;
-            let canonical_name = name
-                .clone()
-                .unwrap_or_else(|| channel_id.to_string());
+            let canonical_name = name.clone().unwrap_or_else(|| channel_id.to_string());
 
             if let Some(channel) = state.channel_mut(&channel_id) {
                 if let Some(context_id) = context_id {

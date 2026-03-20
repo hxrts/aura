@@ -17,9 +17,9 @@ use crate::signal_defs::{
     NETWORK_STATUS_SIGNAL_NAME, SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL_NAME,
 };
+use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::runtime::workflow_best_effort;
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;

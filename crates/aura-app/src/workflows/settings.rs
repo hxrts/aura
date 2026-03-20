@@ -3,16 +3,16 @@
 //! This module contains settings operations that are portable across all frontends.
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
+use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::channel_ref::ChannelSelector;
 use crate::{
     signal_defs::{
-        AuthorityInfo, DeviceInfo, SettingsState, HOMES_SIGNAL, HOMES_SIGNAL_NAME,
-        RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
+        AuthorityInfo, DeviceInfo, SettingsState, HOMES_SIGNAL, HOMES_SIGNAL_NAME, RECOVERY_SIGNAL,
+        RECOVERY_SIGNAL_NAME, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
     },
-    views::{HomesState, RecoveryState},
     thresholds::normalize_recovery_threshold,
+    views::{HomesState, RecoveryState},
     AppCore,
 };
 use async_lock::RwLock;
@@ -179,7 +179,9 @@ pub async fn set_channel_mode(
                 let resolved = runtime
                     .resolve_authoritative_channel_ids_by_name(&channel_name)
                     .await
-                    .map_err(|e| super::error::runtime_call("resolve channel for mode update", e))?;
+                    .map_err(|e| {
+                        super::error::runtime_call("resolve channel for mode update", e)
+                    })?;
                 match resolved.as_slice() {
                     [] => return Err(AuraError::not_found(channel_name.clone())),
                     [channel_id] => *channel_id,
@@ -300,10 +302,8 @@ mod tests {
     use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::signal_defs::register_app_signals;
     use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
+    use crate::views::home::HomeState;
     use crate::workflows::signals::{emit_signal, read_signal};
-    use crate::views::{
-        home::HomeState,
-    };
     use crate::AppConfig;
     use aura_core::{crypto::hash::hash, AuthorityId, ChannelId, ContextId};
 
@@ -404,7 +404,8 @@ mod tests {
         emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
             .await
             .unwrap();
-        runtime.set_authoritative_channel_name_matches(&target_channel_name, vec![target_channel_id]);
+        runtime
+            .set_authoritative_channel_name_matches(&target_channel_name, vec![target_channel_id]);
 
         let error = set_channel_mode(&app_core, target_channel_name, "+m".to_string())
             .await

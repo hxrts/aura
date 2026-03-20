@@ -1,7 +1,9 @@
 use super::*;
-use crate::workflows::error::{self, WorkflowError};
-use crate::views::chat::{is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id};
+use crate::views::chat::{
+    is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
+};
 use crate::workflows::channel_ref::ChannelSelector;
+use crate::workflows::error::{self, WorkflowError};
 
 pub(super) fn parse_channel_ref(channel: &str) -> Result<ChannelSelector, AuraError> {
     ChannelSelector::parse(channel)

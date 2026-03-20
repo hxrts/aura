@@ -1121,7 +1121,10 @@ impl OfflineRuntimeBridge {
     #[cfg(test)]
     /// Configure the pending invitation snapshot returned by the offline bridge.
     pub fn set_pending_invitations(&self, invitations: Vec<InvitationInfo>) {
-        *self.pending_invitations.lock().expect("pending invitations mutex") = Some(invitations);
+        *self
+            .pending_invitations
+            .lock()
+            .expect("pending invitations mutex") = Some(invitations);
     }
 
     #[cfg(test)]
@@ -1158,10 +1161,7 @@ impl OfflineRuntimeBridge {
         self.authoritative_channel_name_matches
             .lock()
             .expect("authoritative channel name matches mutex")
-            .insert(
-                channel_name.into().trim().to_ascii_lowercase(),
-                channel_ids,
-            );
+            .insert(channel_name.into().trim().to_ascii_lowercase(), channel_ids);
     }
 
     #[cfg(test)]
@@ -1752,9 +1752,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
                     .cloned()
                     .collect()
             })
-            .ok_or_else(|| {
-                IntentError::no_agent("pending invitations unavailable in offline mode")
-            })
+            .ok_or_else(|| IntentError::no_agent("pending invitations unavailable in offline mode"))
     }
 
     async fn import_invitation(&self, _code: &str) -> Result<InvitationInfo, IntentError> {
@@ -1932,13 +1930,11 @@ mod tests {
                 .expect("configured AMP context query should succeed"),
             Some(context)
         );
-        assert!(
-            bridge
-                .amp_list_channel_participants(context, channel)
-                .await
-                .expect("configured AMP participants query should succeed")
-                .is_empty()
-        );
+        assert!(bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect("configured AMP participants query should succeed")
+            .is_empty());
         let status = bridge
             .moderation_status(context, channel, authority, 1_000)
             .await

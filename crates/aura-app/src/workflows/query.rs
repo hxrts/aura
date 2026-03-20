@@ -4,8 +4,8 @@
 //! These are read-only operations that query contact and channel state.
 
 use crate::workflows::channel_ref::ChannelRef;
-use crate::workflows::parse::parse_authority_id;
 use crate::workflows::observed_snapshot::{observed_chat_snapshot, observed_contacts_snapshot};
+use crate::workflows::parse::parse_authority_id;
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};

@@ -131,6 +131,12 @@ pub trait InstanceBackend {
     fn wait_until_ready(&self, _timeout: Duration) -> Result<()> {
         Ok(())
     }
+    fn stage_runtime_identity(&mut self, _authority_id: &str, _device_id: &str) -> Result<()> {
+        bail!(
+            "runtime identity staging is not supported by backend {}",
+            self.backend_kind()
+        )
+    }
     fn restart(&mut self) -> Result<()> {
         self.stop()?;
         self.start()

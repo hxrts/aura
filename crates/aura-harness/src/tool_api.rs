@@ -139,6 +139,9 @@ pub enum ToolRequest {
     ReadClipboard {
         instance_id: String,
     },
+    PrepareDeviceEnrollmentInviteeAuthority {
+        instance_id: String,
+    },
     GetAuthorityId {
         instance_id: String,
     },
@@ -411,6 +414,15 @@ impl ToolApi {
                 .coordinator
                 .read_clipboard(&instance_id)
                 .map(|text| serde_json::json!({ "text": text })),
+            ToolRequest::PrepareDeviceEnrollmentInviteeAuthority { instance_id } => self
+                .coordinator
+                .prepare_device_enrollment_invitee_authority(&instance_id)
+                .map(|authority_id| {
+                    serde_json::json!({
+                        "authority_id": authority_id,
+                        "source": "prepared_invitee_authority"
+                    })
+                }),
             ToolRequest::GetAuthorityId { instance_id } => self
                 .coordinator
                 .get_authority_id(&instance_id)

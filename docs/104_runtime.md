@@ -108,6 +108,22 @@ In practice this means:
 - timeout policy belongs to owner/coordinator code, not UI observation layers
 - reducing timeout duration in tests or harness mode is acceptable; changing what timeout means is not
 - runtime-facing workflow/task boundaries should carry `OperationTimeoutBudget`, `OwnedShutdownToken`, and `OwnedTaskSpawner` rather than raw `Duration`, raw cancellation traits, or ad hoc spawn helpers
+- parity-critical runtime waits should consume strong typed authoritative
+  references once context is known; they must not re-derive ownership or
+  context from weaker ids inside later readiness/wait helpers
+
+### Runtime Authority Discipline
+
+Runtime-owned coordinators follow the same authority rule as app workflows:
+
+- resolve authoritative typed input once at the boundary
+- carry that typed input through later parity-critical readiness, retry, and
+  terminal steps
+- do not re-resolve context from raw ids after authoritative handoff
+- do not keep fallback/default repair helpers on parity-critical paths
+
+If a later step needs context, the API should require the strong typed
+reference rather than accepting a raw identifier and looking it up again.
 
 ## Guard Chain Execution
 

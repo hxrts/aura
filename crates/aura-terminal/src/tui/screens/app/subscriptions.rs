@@ -1352,12 +1352,12 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 #[cfg(test)]
 mod tests {
     use super::scoped_channel_snapshot;
+    use crate::tui::types::Device;
     use aura_app::ui::types::{
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     };
     use aura_core::crypto::hash::hash;
     use aura_core::types::identifiers::{AuthorityId, ChannelId};
-    use crate::tui::types::Device;
     use std::path::Path;
 
     fn test_channel_id(seed: &str) -> ChannelId {

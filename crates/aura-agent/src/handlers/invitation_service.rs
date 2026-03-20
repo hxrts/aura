@@ -113,6 +113,45 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_device_enrollment_initiator(&self, invitation: &Invitation) {
+        if invitation.receiver_id == invitation.sender_id {
+            return;
+        }
+
+        let invitation = invitation.clone();
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.device_enrollment.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let sender_id = invitation.sender_id;
+        let receiver_id = invitation.receiver_id;
+        let fut = async move {
+            if let Err(error) = handler
+                .execute_device_enrollment_initiator(effects, &invitation)
+                .await
+            {
+                tracing::error!(
+                    invitation_id = %invitation_id,
+                    sender_id = %sender_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "device enrollment initiator choreography failed"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = tasks.spawn_local_named("device_enrollment_initiator", fut);
+            } else {
+                let _task_handle = tasks.spawn_named("device_enrollment_initiator", fut);
+            }
+        }
+    }
+
     fn spawn_deferred_invitation_delivery(
         &self,
         invitation: &Invitation,
@@ -459,9 +498,9 @@ impl InvitationServiceApi {
         baseline_tree_ops: Vec<Vec<u8>>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let invitation = self
+        let prepared = self
             .handler
-            .create_invitation(
+            .prepare_invitation_with_context(
                 self.effects.clone(),
                 receiver_id,
                 InvitationType::DeviceEnrollment {
@@ -477,9 +516,13 @@ impl InvitationServiceApi {
                     baseline_tree_ops,
                 },
                 None,
+                None,
                 expires_in_ms,
             )
             .await?;
+        let invitation = prepared.invitation;
+        self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
+        self.spawn_device_enrollment_initiator(&invitation);
         Ok(invitation)
     }
 

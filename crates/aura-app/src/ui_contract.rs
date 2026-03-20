@@ -92,6 +92,7 @@ pub enum HarnessUiCommand {
     },
     StartDeviceEnrollment {
         device_name: String,
+        invitee_authority_id: String,
     },
     ImportDeviceEnrollmentCode {
         code: String,

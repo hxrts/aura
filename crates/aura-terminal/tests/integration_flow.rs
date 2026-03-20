@@ -92,13 +92,12 @@ impl TestAgent {
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-        let runtime_authority =
-            AuthorityId::new_from_entropy(aura_core::crypto::hash::hash(
-                format!("flow-runtime:{name}:{unique_id}").as_bytes(),
-            ));
+        let runtime_authority = AuthorityId::new_from_entropy(aura_core::crypto::hash::hash(
+            format!("flow-runtime:{name}:{unique_id}").as_bytes(),
+        ));
         let runtime = Arc::new(MockRuntimeBridge::with_authority(runtime_authority));
-        let app_core = AppCore::with_runtime(AppConfig::default(), runtime)
-            .expect("Failed to create AppCore");
+        let app_core =
+            AppCore::with_runtime(AppConfig::default(), runtime).expect("Failed to create AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let initialized_app_core = InitializedAppCore::new(app_core.clone())
             .await

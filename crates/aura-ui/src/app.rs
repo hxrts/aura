@@ -44,6 +44,7 @@ use aura_app::ui::workflows::{
 use aura_app::ui_contract::{bridged_operation_statuses, ChannelFactKey, RuntimeFact};
 use aura_app::views::chat::{is_note_to_self_channel_name, NOTE_TO_SELF_CHANNEL_NAME};
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::ChannelId;
 use dioxus::dioxus_core::schedule_update;
@@ -53,6 +54,7 @@ use dioxus_shadcn::components::empty::{Empty, EmptyDescription, EmptyHeader, Emp
 use dioxus_shadcn::components::scroll_area::{ScrollArea, ScrollAreaViewport};
 use dioxus_shadcn::components::toast::{use_toast, ToastOptions, ToastPosition, ToastProvider};
 use dioxus_shadcn::theme::{themes, use_theme, ColorScheme, ThemeProvider};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1055,6 +1057,21 @@ fn harness_log(line: &str) {
     tracing::info!("{line}");
 }
 
+fn next_device_enrollment_invitee_authority_id(
+    controller: &UiController,
+    device_name: &str,
+) -> AuthorityId {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let seed = format!(
+        "ui-add-device:{}:{}:{}",
+        controller.authority_id(),
+        device_name,
+        seq
+    );
+    AuthorityId::new_from_entropy(hash(seed.as_bytes()))
+}
+
 fn removable_device_for_modal(
     runtime: &SettingsRuntimeView,
     model: &UiModel,
@@ -1143,11 +1160,13 @@ fn submit_runtime_modal_action(
 
                     let app_core = controller.app_core().clone();
                     let rerender_for_start = rerender.clone();
+                    let invitee_authority_id =
+                        next_device_enrollment_invitee_authority_id(&controller, &name);
                     spawn(async move {
                         match ceremony_workflows::start_device_enrollment_ceremony(
                             &app_core,
                             name.clone(),
-                            None,
+                            invitee_authority_id,
                         )
                         .await
                         {

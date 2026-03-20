@@ -465,6 +465,9 @@ Enforcement split:
   boundary classification.
 - `trybuild` compile-fail suites in `aura-core` and `aura-app` prove that
   forbidden ownership/publication patterns do not compile.
+- Parity-critical APIs must require the strongest available typed input.
+  Once authoritative context exists, raw-id helper calls, `resolve_*`
+  re-resolution, and `*_or_fallback` repair paths are ownership violations.
 - Rust-native lint binaries in `aura-macros` provide syntax-level fences for:
   - proof-bound semantic owners using plain `Succeeded` publication instead of
     proof-bearing success
@@ -477,6 +480,8 @@ Enforcement split:
     rather than advisory comments
   - raw spawn / raw task-handle escape hatches
   - frontend semantic handoff bypasses
+  - authoritative-ref downgrade via raw-id re-resolution inside
+    authoritative-only workflow slices
   - raw timeout/time-domain usage in protected modules
 - Thin shell wrappers under `scripts/check/` remain only as CI glue or where
   the invariant is inherently integration-level rather than compile-time.
@@ -526,6 +531,10 @@ When adding or modifying a parity-critical path, ask these questions:
 - What authoritative postcondition does `Succeeded` actually guarantee?
 - Does success require a typed proof witness, and where is that proof minted?
 - Where does local submission ownership end and canonical workflow ownership begin?
+- Once authoritative context exists, which strong typed reference carries it
+  through the rest of the flow?
+- Could any later helper silently downgrade from that strong reference back to
+  raw-id lookup, fallback, or re-resolution?
 - Which awaits are terminally required, and which are best-effort only?
 - Is any later parity-critical step relying on hidden best-effort follow-up?
 - What bounded budget owns each required wait and retry?

@@ -346,12 +346,10 @@ fn select_authoritative_pending_home_invitation(
     invitations: &[InvitationInfo],
     our_authority: AuthorityId,
 ) -> Option<&InvitationInfo> {
-    let pending = invitations
-        .iter()
-        .filter(|invitation| {
-            invitation.status == crate::runtime_bridge::InvitationBridgeStatus::Pending
-                && is_authoritative_pending_home_or_channel_invitation(invitation, our_authority)
-        });
+    let pending = invitations.iter().filter(|invitation| {
+        invitation.status == crate::runtime_bridge::InvitationBridgeStatus::Pending
+            && is_authoritative_pending_home_or_channel_invitation(invitation, our_authority)
+    });
 
     pending
         .clone()
@@ -693,10 +691,14 @@ async fn reconcile_channel_invitation_acceptance(
     pending_runtime_invitation: Option<&InvitationInfo>,
     accepted_invitation: Option<&crate::views::invitations::Invitation>,
     channel_id: ChannelId,
-    sender_id: AuthorityId,
     context_hint: Option<ContextId>,
     channel_name_hint: Option<&str>,
 ) -> Result<(), AcceptInvitationError> {
+    let accepted_channel = AcceptedChannelInvitationTarget {
+        channel_id,
+        context_hint,
+        channel_name_hint: channel_name_hint.map(ToOwned::to_owned),
+    };
     let stage_tracker = new_channel_invitation_stage_tracker("reconcile_channel_invitation:start");
     let reconcile_budget = match workflow_timeout_budget(
         runtime,
@@ -716,15 +718,7 @@ async fn reconcile_channel_invitation_acceptance(
     };
 
     let reconcile_result = execute_with_runtime_timeout_budget(runtime, &reconcile_budget, || {
-        reconcile_accepted_channel_invitation(
-            app_core,
-            runtime,
-            channel_id,
-            sender_id,
-            context_hint,
-            channel_name_hint,
-            &stage_tracker,
-        )
+        reconcile_accepted_channel_invitation(app_core, runtime, &accepted_channel, &stage_tracker)
     })
     .await;
 
@@ -748,6 +742,12 @@ async fn reconcile_channel_invitation_acceptance(
             Err(AcceptInvitationError::AcceptFailed { detail })
         }
     }
+}
+
+struct AcceptedChannelInvitationTarget {
+    channel_id: ChannelId,
+    context_hint: Option<ContextId>,
+    channel_name_hint: Option<String>,
 }
 
 async fn list_pending_invitations_with_timeout(
@@ -1144,16 +1144,14 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
 async fn reconcile_accepted_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    channel_id: ChannelId,
-    _sender_id: AuthorityId,
-    context_hint: Option<ContextId>,
-    channel_name_hint: Option<&str>,
+    accepted_channel: &AcceptedChannelInvitationTarget,
     stage_tracker: &ChannelInvitationStageTracker,
 ) -> Result<(), AuraError> {
     const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
     const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
 
-    let mut authoritative_context = context_hint;
+    let channel_id = accepted_channel.channel_id;
+    let mut authoritative_context = accepted_channel.context_hint;
     if authoritative_context.is_none() {
         update_accept_reconcile_stage(
             stage_tracker,
@@ -1199,7 +1197,7 @@ async fn reconcile_accepted_channel_invitation(
         app_core,
         runtime,
         authoritative_channel,
-        channel_name_hint,
+        accepted_channel.channel_name_hint.as_deref(),
         stage_tracker,
     )
     .await
@@ -1252,7 +1250,9 @@ async fn reconcile_accepted_channel_invitation_authoritative(
             .await
         {
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-                return Err(super::error::runtime_call("accept channel invitation join", error).into());
+                return Err(
+                    super::error::runtime_call("accept channel invitation join", error).into(),
+                );
             }
         }
     }
@@ -1260,8 +1260,12 @@ async fn reconcile_accepted_channel_invitation_authoritative(
         stage_tracker,
         "reconcile_channel_invitation:wait_for_runtime_channel_state",
     );
-    crate::workflows::messaging::wait_for_runtime_channel_state(app_core, runtime, authoritative_channel)
-        .await?;
+    crate::workflows::messaging::wait_for_runtime_channel_state(
+        app_core,
+        runtime,
+        authoritative_channel,
+    )
+    .await?;
     update_accept_reconcile_stage(
         stage_tracker,
         "reconcile_channel_invitation:refresh_channel_membership_readiness",
@@ -1280,10 +1284,7 @@ async fn reconcile_accepted_channel_invitation_authoritative(
 async fn reconcile_accepted_channel_invitation(
     _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    _channel_id: ChannelId,
-    _sender_id: AuthorityId,
-    _context_hint: Option<ContextId>,
-    _channel_name_hint: Option<&str>,
+    _accepted_channel: &AcceptedChannelInvitationTarget,
     _stage_tracker: &ChannelInvitationStageTracker,
 ) -> Result<(), AuraError> {
     converge_runtime(runtime).await;
@@ -1839,41 +1840,30 @@ async fn accept_invitation_id_owned(
             .await?;
             return Ok(());
         }
-    } else if let Some((channel_id, sender_id, context_hint, channel_name_hint)) =
-        pending_runtime_invitation
-            .as_ref()
-            .and_then(|invitation| match &invitation.invitation_type {
-                InvitationBridgeType::Channel {
-                    home_id,
-                    context_id,
-                    nickname_suggestion,
-                } => home_id.parse::<ChannelId>().ok().map(|channel_id| {
-                    (
-                        channel_id,
-                        invitation.sender_id,
-                        *context_id,
-                        nickname_suggestion.as_deref(),
-                    )
-                }),
-                _ => None,
+    } else if let Some((channel_id, context_hint, channel_name_hint)) = pending_runtime_invitation
+        .as_ref()
+        .and_then(|invitation| match &invitation.invitation_type {
+            InvitationBridgeType::Channel {
+                home_id,
+                context_id,
+                nickname_suggestion,
+            } => home_id
+                .parse::<ChannelId>()
+                .ok()
+                .map(|channel_id| (channel_id, *context_id, nickname_suggestion.as_deref())),
+            _ => None,
+        })
+        .or_else(|| {
+            accepted_invitation.as_ref().and_then(|invitation| {
+                if invitation.invitation_type == crate::views::invitations::InvitationType::Chat {
+                    invitation
+                        .home_id
+                        .map(|channel_id| (channel_id, None, invitation.home_name.as_deref()))
+                } else {
+                    None
+                }
             })
-            .or_else(|| {
-                accepted_invitation.as_ref().and_then(|invitation| {
-                    if invitation.invitation_type == crate::views::invitations::InvitationType::Chat
-                    {
-                        invitation.home_id.map(|channel_id| {
-                            (
-                                channel_id,
-                                invitation.from_id,
-                                None,
-                                invitation.home_name.as_deref(),
-                            )
-                        })
-                    } else {
-                        None
-                    }
-                })
-            })
+        })
     {
         if let Err(error) = reconcile_channel_invitation_acceptance(
             app_core,
@@ -1881,7 +1871,6 @@ async fn accept_invitation_id_owned(
             pending_runtime_invitation.as_ref(),
             accepted_invitation.as_ref(),
             channel_id,
-            sender_id,
             context_hint,
             channel_name_hint,
         )
@@ -2085,7 +2074,6 @@ async fn accept_imported_invitation_owned(
                 Some(invitation),
                 None,
                 channel_id,
-                invitation.sender_id,
                 *context_id,
                 nickname_suggestion.as_deref(),
             )
@@ -2170,62 +2158,61 @@ pub async fn accept_device_enrollment_invitation(
     let expected_min_devices = 2_usize;
     let policy = device_enrollment_accept_retry_policy()?;
     let invitation_id = invitation.invitation_id.clone();
-    let enrollment_result =
-        execute_with_runtime_retry_budget(&runtime, &policy, |attempt| {
+    let enrollment_result = execute_with_runtime_retry_budget(&runtime, &policy, |attempt| {
         let runtime = Arc::clone(&runtime);
         let invitation_id = invitation_id.clone();
         async move {
-        #[cfg(not(feature = "instrumented"))]
-        let _ = (attempt, &invitation_id);
-        if let Err(_error) = runtime.process_ceremony_messages().await {
+            #[cfg(not(feature = "instrumented"))]
+            let _ = (attempt, &invitation_id);
+            if let Err(_error) = runtime.process_ceremony_messages().await {
+                #[cfg(feature = "instrumented")]
+                tracing::info!(
+                    invitation_id = %invitation_id,
+                    attempt,
+                    error = %_error,
+                    "device enrollment process_ceremony_messages failed during convergence"
+                );
+            }
+            converge_runtime(&runtime).await;
+            settings::refresh_settings_from_runtime(app_core).await?;
+
+            let runtime_device_count = runtime
+                .try_list_devices()
+                .await
+                .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
+                .len();
+            let settings_device_count = settings::get_settings(app_core).await?.devices.len();
             #[cfg(feature = "instrumented")]
             tracing::info!(
                 invitation_id = %invitation_id,
                 attempt,
-                error = %_error,
-                "device enrollment process_ceremony_messages failed during convergence"
+                runtime_device_count,
+                settings_device_count,
+                expected_min_devices,
+                "device enrollment convergence poll"
             );
-        }
-        converge_runtime(&runtime).await;
-        settings::refresh_settings_from_runtime(app_core).await?;
-
-        let runtime_device_count = runtime
-            .try_list_devices()
-            .await
-            .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
-            .len();
-        let settings_device_count = settings::get_settings(app_core).await?.devices.len();
-        #[cfg(feature = "instrumented")]
-        tracing::info!(
-            invitation_id = %invitation_id,
-            attempt,
-            runtime_device_count,
-            settings_device_count,
-            expected_min_devices,
-            "device enrollment convergence poll"
-        );
-        if runtime_device_count >= expected_min_devices
-            || settings_device_count >= expected_min_devices
-        {
-            settings::refresh_settings_from_runtime(app_core).await?;
-            if let Err(_error) =
-                ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
+            if runtime_device_count >= expected_min_devices
+                || settings_device_count >= expected_min_devices
             {
-                #[cfg(feature = "instrumented")]
-                tracing::warn!(
-                    error = %_error,
-                    invitation_id = %invitation_id,
-                    "device enrollment acceptance completed without reachable peers"
-                );
+                settings::refresh_settings_from_runtime(app_core).await?;
+                if let Err(_error) =
+                    ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
+                {
+                    #[cfg(feature = "instrumented")]
+                    tracing::warn!(
+                        error = %_error,
+                        invitation_id = %invitation_id,
+                        "device enrollment acceptance completed without reachable peers"
+                    );
+                }
+                return Ok(());
             }
-            return Ok(());
+            Err(AuraError::from(super::error::WorkflowError::Precondition(
+                "device enrollment acceptance not yet converged",
+            )))
         }
-        Err(AuraError::from(super::error::WorkflowError::Precondition(
-            "device enrollment acceptance not yet converged",
-        )))
-        }
-        })
-        .await;
+    })
+    .await;
     match enrollment_result {
         Ok(()) => {
             owner
@@ -2862,21 +2849,20 @@ mod tests {
     async fn test_refresh_authoritative_invitation_readiness_tracks_pending_home_invitations() {
         let authority = AuthorityId::new_from_entropy([40u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
-        runtime
-            .set_pending_invitations(vec![InvitationInfo {
-                invitation_id: InvitationId::new("pending-home"),
-                sender_id: AuthorityId::new_from_entropy([41u8; 32]),
-                receiver_id: authority,
-                invitation_type: InvitationBridgeType::Channel {
-                    home_id: ChannelId::from_bytes([42u8; 32]).to_string(),
-                    context_id: None,
-                    nickname_suggestion: Some("shared".to_string()),
-                },
-                status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
-                created_at_ms: 1,
-                expires_at_ms: None,
-                message: None,
-            }]);
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("pending-home"),
+            sender_id: AuthorityId::new_from_entropy([41u8; 32]),
+            receiver_id: authority,
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: ChannelId::from_bytes([42u8; 32]).to_string(),
+                context_id: None,
+                nickname_suggestion: Some("shared".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(config, runtime.clone()).unwrap(),
@@ -2914,21 +2900,20 @@ mod tests {
     ) {
         let authority = AuthorityId::new_from_entropy([73u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
-        runtime
-            .set_pending_invitations(vec![InvitationInfo {
-                invitation_id: InvitationId::new("sent-channel-pending"),
-                sender_id: authority,
-                receiver_id: AuthorityId::new_from_entropy([74u8; 32]),
-                invitation_type: InvitationBridgeType::Channel {
-                    home_id: ChannelId::from_bytes([75u8; 32]).to_string(),
-                    context_id: None,
-                    nickname_suggestion: Some("shared".to_string()),
-                },
-                status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
-                created_at_ms: 1,
-                expires_at_ms: None,
-                message: None,
-            }]);
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("sent-channel-pending"),
+            sender_id: authority,
+            receiver_id: AuthorityId::new_from_entropy([74u8; 32]),
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: ChannelId::from_bytes([75u8; 32]).to_string(),
+                context_id: None,
+                nickname_suggestion: Some("shared".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
         ));
@@ -3044,7 +3029,9 @@ mod tests {
     #[tokio::test]
     async fn channel_reconcile_materialization_preserves_terminal_success() {
         let our_authority = AuthorityId::new_from_entropy([81u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority));
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime_bridge.clone()).unwrap(),
@@ -3062,7 +3049,11 @@ mod tests {
         let instance_id = OperationInstanceId("invitation-accept-reconcile-1".to_string());
 
         runtime.set_amp_channel_context(channel_id, context_id);
-        runtime.set_amp_channel_participants(context_id, channel_id, vec![our_authority, sender_id]);
+        runtime.set_amp_channel_participants(
+            context_id,
+            channel_id,
+            vec![our_authority, sender_id],
+        );
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         apply_authoritative_membership_projection(
@@ -3095,7 +3086,6 @@ mod tests {
             None,
             None,
             channel_id,
-            sender_id,
             Some(context_id),
             Some("shared-parity-lab"),
         )
@@ -3109,11 +3099,13 @@ mod tests {
             &instance_id,
             SemanticOperationKind::AcceptPendingChannelInvitation,
             |facts| {
-                facts.iter().any(|fact| matches!(
-                    fact,
-                    AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
-                        if channel.id.as_deref() == Some(channel_id.to_string().as_str())
-                ))
+                facts.iter().any(|fact| {
+                    matches!(
+                        fact,
+                        AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                            if channel.id.as_deref() == Some(channel_id.to_string().as_str())
+                    )
+                })
             },
         );
     }
@@ -3136,14 +3128,12 @@ mod tests {
         }
 
         let channel_id = ChannelId::from_bytes([86u8; 32]);
-        let sender_id = AuthorityId::new_from_entropy([87u8; 32]);
         let error = reconcile_channel_invitation_acceptance(
             &app_core,
             &runtime,
             None,
             None,
             channel_id,
-            sender_id,
             None,
             Some("shared-parity-lab"),
         )
@@ -3156,7 +3146,9 @@ mod tests {
     #[tokio::test]
     async fn channel_reconcile_uses_known_authoritative_context_without_reresolving_it() {
         let our_authority = AuthorityId::new_from_entropy([88u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority));
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime_bridge.clone()).unwrap(),
@@ -3170,8 +3162,6 @@ mod tests {
 
         let channel_id = ChannelId::from_bytes([89u8; 32]);
         let context_id = ContextId::new_from_entropy([90u8; 32]);
-        let sender_id = AuthorityId::new_from_entropy([91u8; 32]);
-
         runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
 
         reconcile_channel_invitation_acceptance(
@@ -3180,7 +3170,6 @@ mod tests {
             None,
             None,
             channel_id,
-            sender_id,
             Some(context_id),
             Some("shared-parity-lab"),
         )
@@ -3191,7 +3180,9 @@ mod tests {
     #[tokio::test]
     async fn accept_pending_home_invitation_with_terminal_status_returns_direct_failure_status() {
         let our_authority = AuthorityId::new_from_entropy([111u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority));
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
         ));
@@ -3224,45 +3215,49 @@ mod tests {
         let our_authority = AuthorityId::new_from_entropy([64u8; 32]);
         let sender = AuthorityId::new_from_entropy([65u8; 32]);
         let channel_id = ChannelId::from_bytes([66u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority));
-        runtime
-            .set_pending_invitations(vec![
-                InvitationInfo {
-                    invitation_id: InvitationId::new("sent-channel"),
-                    sender_id: our_authority,
-                    receiver_id: sender,
-                    invitation_type: InvitationBridgeType::Channel {
-                        home_id: channel_id.to_string(),
-                        context_id: None,
-                        nickname_suggestion: Some("shared".to_string()),
-                    },
-                    status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
-                    created_at_ms: 1,
-                    expires_at_ms: None,
-                    message: Some("sent".to_string()),
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_pending_invitations(vec![
+            InvitationInfo {
+                invitation_id: InvitationId::new("sent-channel"),
+                sender_id: our_authority,
+                receiver_id: sender,
+                invitation_type: InvitationBridgeType::Channel {
+                    home_id: channel_id.to_string(),
+                    context_id: None,
+                    nickname_suggestion: Some("shared".to_string()),
                 },
-                InvitationInfo {
-                    invitation_id: InvitationId::new("received-channel"),
-                    sender_id: sender,
-                    receiver_id: our_authority,
-                    invitation_type: InvitationBridgeType::Channel {
-                        home_id: channel_id.to_string(),
-                        context_id: None,
-                        nickname_suggestion: Some("shared".to_string()),
-                    },
-                    status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
-                    created_at_ms: 2,
-                    expires_at_ms: None,
-                    message: Some("join".to_string()),
+                status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+                created_at_ms: 1,
+                expires_at_ms: None,
+                message: Some("sent".to_string()),
+            },
+            InvitationInfo {
+                invitation_id: InvitationId::new("received-channel"),
+                sender_id: sender,
+                receiver_id: our_authority,
+                invitation_type: InvitationBridgeType::Channel {
+                    home_id: channel_id.to_string(),
+                    context_id: None,
+                    nickname_suggestion: Some("shared".to_string()),
                 },
-            ]);
+                status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+                created_at_ms: 2,
+                expires_at_ms: None,
+                message: Some("join".to_string()),
+            },
+        ]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
 
         let invitation = authoritative_pending_home_or_channel_invitation(&runtime)
             .await
             .expect("authoritative pending invitation should resolve")
             .expect("pending invitation should exist");
-        assert_eq!(invitation.invitation_id, InvitationId::new("received-channel"));
+        assert_eq!(
+            invitation.invitation_id,
+            InvitationId::new("received-channel")
+        );
         assert_eq!(invitation.sender_id, sender);
         assert_eq!(invitation.receiver_id, our_authority);
     }
@@ -3271,28 +3266,27 @@ mod tests {
     async fn authoritative_pending_home_invitation_ignores_contact_style_pending_invites() {
         let our_authority = AuthorityId::new_from_entropy([67u8; 32]);
         let sender = AuthorityId::new_from_entropy([68u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority));
-        runtime
-            .set_pending_invitations(vec![InvitationInfo {
-                invitation_id: InvitationId::new("contact-style-home"),
-                sender_id: sender,
-                receiver_id: our_authority,
-                invitation_type: InvitationBridgeType::Contact {
-                    nickname: Some("Alice".to_string()),
-                },
-                status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
-                created_at_ms: 1,
-                expires_at_ms: None,
-                message: None,
-            }]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("contact-style-home"),
+            sender_id: sender,
+            receiver_id: our_authority,
+            invitation_type: InvitationBridgeType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
 
-        assert!(
-            authoritative_pending_home_or_channel_invitation(&runtime)
-                .await
-                .expect("authoritative pending lookup should succeed")
-                .is_none()
-        );
+        assert!(authoritative_pending_home_or_channel_invitation(&runtime)
+            .await
+            .expect("authoritative pending lookup should succeed")
+            .is_none());
     }
 
     #[test]

@@ -25,7 +25,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen_futures::{future_to_promise, JsFuture};
 
 use crate::task_owner::shared_web_task_owner;
 
@@ -273,21 +273,33 @@ async fn submit_semantic_command(
                 web_sys::console::log_1(
                     &format!("[web-harness] create_account staged nickname={account_name}").into(),
                 );
-                update_semantic_debug("create_account_rebootstrap_start", Some(&account_name));
-                let account_name_for_rebootstrap = account_name.clone();
+                update_semantic_debug("create_account_rebootstrap_scheduled", Some(&account_name));
+                let rebootstrap_account_name = account_name.clone();
                 shared_web_task_owner().spawn_local(async move {
+                    update_semantic_debug(
+                        "create_account_rebootstrap_start",
+                        Some(&rebootstrap_account_name),
+                    );
                     match request_rebootstrap().await {
                         Ok(()) => update_semantic_debug(
                             "create_account_rebootstrap_done",
-                            Some(&account_name_for_rebootstrap),
+                            Some(&rebootstrap_account_name),
                         ),
-                        Err(error) => update_semantic_debug(
-                            "create_account_rebootstrap_error",
-                            Some(&format!("{}: {error:?}", account_name_for_rebootstrap)),
-                        ),
+                        Err(error) => {
+                            update_semantic_debug(
+                                "create_account_rebootstrap_error",
+                                Some(&format!("{}: {error:?}", rebootstrap_account_name)),
+                            );
+                            web_sys::console::error_1(
+                                &format!(
+                                    "[web-harness] create_account rebootstrap error nickname={} error={error:?}",
+                                    rebootstrap_account_name
+                                )
+                                .into(),
+                            );
+                        }
                     }
                 });
-                update_semantic_debug("create_account_rebootstrap_enqueued", Some(&account_name));
             }
             update_semantic_debug("create_account_return", Some(&account_name));
             Ok(SemanticCommandResponse::accepted_without_value())
@@ -317,7 +329,11 @@ async fn submit_semantic_command(
                 created.context_id.map(|context_id| context_id.to_string()),
             ))
         }
-        IntentAction::StartDeviceEnrollment { device_name, .. } => {
+        IntentAction::StartDeviceEnrollment {
+            device_name,
+            invitee_authority_id,
+            ..
+        } => {
             let controller_for_screen = controller.clone();
             schedule_browser_ui_mutation(move || {
                 controller_for_screen.set_screen(ScreenId::Settings);
@@ -325,10 +341,16 @@ async fn submit_semantic_command(
                     .set_settings_section(browser_settings_section(SettingsSection::Devices));
             })
             .await?;
+            let invitee_authority_id =
+                invitee_authority_id
+                    .parse::<AuthorityId>()
+                    .map_err(|error| {
+                        JsValue::from_str(&format!("invalid invitee authority id: {error}"))
+                    })?;
             let start = ceremony_workflows::start_device_enrollment_ceremony(
                 &controller.app_core(),
                 device_name.clone(),
-                None,
+                invitee_authority_id,
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
@@ -798,6 +820,19 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
     )?;
     send_key.forget();
 
+    let request_rebootstrap_fn = Closure::wrap(Box::new(move || -> js_sys::Promise {
+        future_to_promise(async move {
+            request_rebootstrap().await?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }) as Box<dyn FnMut() -> js_sys::Promise>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("request_rebootstrap"),
+        request_rebootstrap_fn.as_ref().unchecked_ref(),
+    )?;
+    request_rebootstrap_fn.forget();
+
     let navigate_screen = Closure::wrap(Box::new(move |screen: JsValue| -> JsValue {
         let Some(screen_name) = screen.as_string() else {
             return JsValue::FALSE;
@@ -906,50 +941,42 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
 
     let submit_semantic_command_raw =
         Closure::wrap(Box::new(move |request_json: String| -> js_sys::Promise {
-            Promise::new(&mut |resolve, reject| {
-                let resolve = resolve.clone();
-                let reject = reject.clone();
-                let request_json = request_json.clone();
-                shared_web_task_owner().spawn_local(async move {
-                    update_semantic_debug("raw_entry", None);
-                    web_sys::console::log_1(&"[web-harness] submit_semantic_command entry".into());
-                    let outcome: Result<JsValue, JsValue> = async {
-                        let controller = current_controller()?;
-                        let request =
-                            from_str::<SemanticCommandRequest>(&request_json).map_err(|error| {
-                                JsValue::from_str(&format!(
-                                    "invalid semantic command request: {error}"
-                                ))
-                            })?;
-                        update_semantic_debug("raw_parsed", Some(&format!("{:?}", request.intent)));
-                        web_sys::console::log_1(
-                            &format!(
-                                "[web-harness] submit_semantic_command intent={:?}",
-                                request.intent
-                            )
-                            .into(),
-                        );
-                        let _ = JsFuture::from(Promise::resolve(&JsValue::UNDEFINED)).await;
-                        let response = submit_semantic_command(controller, request).await?;
-                        to_value(&response).map_err(|error| {
-                            JsValue::from_str(&format!(
-                                "failed to encode semantic command response: {error}"
-                            ))
-                        })
-                    }
-                    .await;
+            future_to_promise(async move {
+                update_semantic_debug("raw_entry", None);
+                web_sys::console::log_1(&"[web-harness] submit_semantic_command entry".into());
+                let outcome: Result<JsValue, JsValue> = async {
+                    let controller = current_controller()?;
+                    let request =
+                        from_str::<SemanticCommandRequest>(&request_json).map_err(|error| {
+                            JsValue::from_str(&format!("invalid semantic command request: {error}"))
+                        })?;
+                    update_semantic_debug("raw_parsed", Some(&format!("{:?}", request.intent)));
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-harness] submit_semantic_command intent={:?}",
+                            request.intent
+                        )
+                        .into(),
+                    );
+                    let response = submit_semantic_command(controller, request).await?;
+                    to_value(&response).map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "failed to encode semantic command response: {error}"
+                        ))
+                    })
+                }
+                .await;
 
-                    match outcome {
-                        Ok(value) => {
-                            update_semantic_debug("raw_resolved", None);
-                            let _ = resolve.call1(&JsValue::UNDEFINED, &value);
-                        }
-                        Err(error) => {
-                            update_semantic_debug("raw_rejected", error.as_string().as_deref());
-                            let _ = reject.call1(&JsValue::UNDEFINED, &error);
-                        }
+                match outcome {
+                    Ok(value) => {
+                        update_semantic_debug("raw_resolved", None);
+                        Ok(value)
                     }
-                });
+                    Err(error) => {
+                        update_semantic_debug("raw_rejected", error.as_string().as_deref());
+                        Err(error)
+                    }
+                }
             })
         }) as Box<dyn FnMut(String) -> js_sys::Promise>);
     Reflect::set(

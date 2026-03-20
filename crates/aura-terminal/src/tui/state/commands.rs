@@ -147,9 +147,7 @@ pub enum TuiCommand {
     Dispatch(DispatchCommand),
 
     /// Harness-only follow-up that removes the targeted or currently visible non-current device.
-    HarnessRemoveVisibleDevice {
-        device_id: Option<String>,
-    },
+    HarnessRemoveVisibleDevice { device_id: Option<String> },
 
     /// Request a re-render
     Render,
