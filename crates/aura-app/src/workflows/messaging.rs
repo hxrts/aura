@@ -29,7 +29,7 @@ use crate::workflows::semantic_facts::{
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
-use crate::workflows::signals::{emit_signal, read_signal, read_signal_or_default};
+use crate::workflows::signals::{read_signal, read_signal_or_default};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::{reduce_chat_fact_observed, update_chat_projection_observed};
 use crate::{
@@ -37,13 +37,10 @@ use crate::{
     runtime_bridge::{InvitationBridgeType, InvitationInfo, RuntimeBridge},
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
-    views::{
-        chat::{
-            is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id,
-            Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
-            NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC,
-        },
-        home::{HomeMember, HomeRole, HomeState},
+    views::chat::{
+        is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id, Channel,
+        ChannelType, ChatState, Message, MessageDeliveryStatus, NOTE_TO_SELF_CHANNEL_NAME,
+        NOTE_TO_SELF_CHANNEL_TOPIC,
     },
     AppCore,
 };
@@ -62,7 +59,6 @@ use aura_core::{
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
-use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -387,11 +383,6 @@ async fn messaging_backend(app_core: &Arc<RwLock<AppCore>>) -> MessagingBackend 
     } else {
         MessagingBackend::LocalOnly
     }
-}
-
-fn send_operation_requires_delivery_readiness(channel: Option<&Channel>) -> bool {
-    channel
-        .is_some_and(|channel| !channel.is_dm && !channel.name.eq_ignore_ascii_case("note to self"))
 }
 
 fn authoritative_send_readiness_for_channel(
@@ -1045,7 +1036,14 @@ pub(crate) async fn context_id_for_channel(
 
 #[cfg(test)]
 fn join_error_is_not_found(error: &AuraError) -> bool {
-    validation::join_error_is_not_found(error)
+    if matches!(error, AuraError::NotFound { .. }) {
+        return true;
+    }
+
+    let lowered = error.to_string().to_ascii_lowercase();
+    lowered.contains("not found")
+        || lowered.contains("unknown channel")
+        || lowered.contains("no such channel")
 }
 
 fn intent_error_is_not_found(error: &IntentError) -> bool {
@@ -1550,10 +1548,8 @@ pub async fn create_channel_with_authoritative_binding(
         .collect::<Result<Vec<_>, AuraError>>()?;
     let mut channel_id = ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
     let mut channel_context: Option<ContextId> = None;
-    let mut channel_owner: Option<AuthorityId> = None;
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
-        channel_owner = Some(runtime.authority_id());
         let (context_id, _is_home_context) =
             current_home_context_or_authority_default(app_core, runtime.authority_id()).await?;
         channel_context = Some(context_id);
@@ -3450,7 +3446,6 @@ mod tests {
     async fn test_authoritative_recipient_resolution_ignores_projection_members_without_runtime_participants(
     ) {
         let local = AuthorityId::new_from_entropy([101u8; 32]);
-        let projected_peer = AuthorityId::new_from_entropy([102u8; 32]);
         let context_id = ContextId::new_from_entropy([103u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"authoritative-recipient-runtime-empty"));
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
@@ -3471,7 +3466,6 @@ mod tests {
     #[tokio::test]
     async fn test_authoritative_recipient_resolution_fails_explicitly_without_runtime_context() {
         let local = AuthorityId::new_from_entropy([104u8; 32]);
-        let projected_peer = AuthorityId::new_from_entropy([105u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"authoritative-recipient-no-runtime"));
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
         let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;

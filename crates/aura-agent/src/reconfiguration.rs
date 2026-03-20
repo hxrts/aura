@@ -94,6 +94,7 @@ impl ReconfigurationController {
     }
 
     /// Append/replace one authority footprint.
+    #[cfg(test)]
     pub(crate) fn set_footprint(&mut self, authority: AuthorityId, footprint: SessionFootprint) {
         self.footprints.insert(authority, footprint);
     }
@@ -121,6 +122,7 @@ impl ReconfigurationController {
     }
 
     /// Read delegation receipts in insertion order.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn delegation_log(&self) -> &[DelegationReceipt] {
         &self.delegation_log

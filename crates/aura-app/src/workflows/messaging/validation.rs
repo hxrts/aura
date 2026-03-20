@@ -26,17 +26,6 @@ pub(super) async fn authoritative_home_moderation_status(
         })
 }
 
-pub(super) fn join_error_is_not_found(error: &AuraError) -> bool {
-    if matches!(error, AuraError::NotFound { .. }) {
-        return true;
-    }
-
-    let lowered = error.to_string().to_ascii_lowercase();
-    lowered.contains("not found")
-        || lowered.contains("unknown channel")
-        || lowered.contains("no such channel")
-}
-
 pub(super) fn intent_error_is_not_found(error: &IntentError) -> bool {
     if matches!(error, IntentError::ContextNotFound { .. }) {
         return true;

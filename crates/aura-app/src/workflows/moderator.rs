@@ -134,6 +134,7 @@ fn best_home_for_context(
         })
 }
 
+#[cfg(test)]
 async fn resolve_scope(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<&str>,

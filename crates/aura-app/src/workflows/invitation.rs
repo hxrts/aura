@@ -372,18 +372,6 @@ async fn authoritative_pending_home_or_channel_invitation(
     .cloned())
 }
 
-async fn publish_invitation_operation_status(
-    app_core: &Arc<RwLock<AppCore>>,
-    operation_id: OperationId,
-    instance_id: Option<OperationInstanceId>,
-    deadline: Option<TimeoutBudget>,
-    kind: SemanticOperationKind,
-    phase: SemanticOperationPhase,
-) -> Result<(), AuraError> {
-    let owner = SemanticWorkflowOwner::new(app_core, operation_id, instance_id, kind);
-    publish_invitation_owner_status(&owner, deadline, phase).await
-}
-
 async fn publish_invitation_owner_status(
     owner: &SemanticWorkflowOwner,
     deadline: Option<TimeoutBudget>,
@@ -1157,7 +1145,7 @@ async fn reconcile_accepted_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     channel_id: ChannelId,
-    sender_id: AuthorityId,
+    _sender_id: AuthorityId,
     context_hint: Option<ContextId>,
     channel_name_hint: Option<&str>,
     stage_tracker: &ChannelInvitationStageTracker,

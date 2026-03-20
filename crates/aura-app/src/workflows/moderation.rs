@@ -152,6 +152,7 @@ async fn resolve_channel_id(
     }
 }
 
+#[cfg(test)]
 async fn resolve_scope(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<&str>,

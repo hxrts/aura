@@ -517,19 +517,17 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         u32::try_from(value).unwrap_or(u32::MAX)
     }
 
-    let (chat, contacts, homes, authority_id) = {
+    let (chat, authority_id) = {
         let core = controller.app_core().read().await;
         let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
         let snapshot = core.snapshot();
         let local_chat = snapshot.chat;
-        let contacts = snapshot.contacts;
-        let homes = snapshot.homes;
         let mut merged = merge_chat_state(signal_chat, local_chat);
         let authority_id = core.authority().cloned();
         if let Some(authority_id) = authority_id {
             merged.ensure_note_to_self_channel(authority_id);
         }
-        (merged, contacts, homes, authority_id)
+        (merged, authority_id)
     };
     let selected_name = controller
         .ui_model()
