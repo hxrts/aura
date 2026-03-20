@@ -254,7 +254,7 @@ AMP provides patterns for reliable asynchronous messaging. Messages may arrive o
 
 ### 6.4 Anti-entropy
 
-Peers use anti-entropy to converge journal state after network partitions. Each peer periodically exchanges fact digests with its neighbors, identifies gaps, and selectively transfers missing facts. Because journals are CRDTs, merging facts from any peer is safe regardless of ordering. This process runs continuously in the background without coordination or agreement and ensures that connected peers eventually share the same fact set.
+Journal state converges through anti-entropy after network partitions. Each peer periodically exchanges fact digests with its neighbors, identifies gaps, and selectively transfers missing facts. Because journals are CRDTs, merging facts from any peer is safe regardless of ordering. This process runs continuously in the background without coordination or agreement and ensures that connected peers eventually share the same fact set.
 
 ## 7. Runtime and Ownership
 
