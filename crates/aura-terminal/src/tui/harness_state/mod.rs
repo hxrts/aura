@@ -270,7 +270,8 @@ mod tests {
         assert_eq!(state.settings.section, SettingsSection::Devices);
         assert!(matches!(
             followup.as_slice(),
-            [TuiCommand::HarnessRemoveVisibleDevice { device_id: None }]
+            [TuiCommand::HarnessRemoveVisibleDevice { device_id: Some(device_id) }]
+                if device_id == "device:removable"
         ));
     }
 
@@ -296,7 +297,8 @@ mod tests {
 
         assert!(matches!(
             followup.as_slice(),
-            [TuiCommand::HarnessRemoveVisibleDevice { device_id: None }]
+            [TuiCommand::HarnessRemoveVisibleDevice { device_id: Some(device_id) }]
+                if device_id == "device:removable"
         ));
     }
 
@@ -736,10 +738,7 @@ mod tests {
                         },
                     receipt,
                 } => {
-                    receipt.complete(HarnessUiCommandReceipt::Accepted {
-                        operation: None,
-                        value: None,
-                    });
+                    receipt.complete(HarnessUiCommandReceipt::Accepted { value: None });
                 }
                 other => panic!("unexpected harness command submission: {other:?}"),
             }
@@ -772,13 +771,7 @@ mod tests {
                 .unwrap_or_else(|error| {
                     panic!("failed to decode harness command receipt: {error}")
                 });
-            assert_eq!(
-                receipt,
-                HarnessUiCommandReceipt::Accepted {
-                    operation: None,
-                    value: None,
-                }
-            );
+            assert_eq!(receipt, HarnessUiCommandReceipt::Accepted { value: None });
         };
 
         let (_, ()) = tokio::join!(apply_task, client_task);

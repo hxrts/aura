@@ -459,18 +459,22 @@ impl HarnessCoordinator {
             .ok_or_else(|| anyhow!("missing bind_address for instance {instance_id}"))
     }
 
-    pub fn screen(&self, instance_id: &str) -> Result<String> {
-        self.screen_with_source(instance_id, ScreenSource::Default)
+    pub fn diagnostic_screen(&self, instance_id: &str) -> Result<String> {
+        self.diagnostic_screen_with_source(instance_id, ScreenSource::Default)
     }
 
-    pub fn screen_with_source(&self, instance_id: &str, source: ScreenSource) -> Result<String> {
+    pub fn diagnostic_screen_with_source(
+        &self,
+        instance_id: &str,
+        source: ScreenSource,
+    ) -> Result<String> {
         let backend = self
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
         match source {
-            ScreenSource::Default => backend.as_trait().snapshot(),
-            ScreenSource::Dom => backend.as_trait().snapshot_dom(),
+            ScreenSource::Default => backend.as_trait().diagnostic_screen_snapshot(),
+            ScreenSource::Dom => backend.as_trait().diagnostic_dom_snapshot(),
         }
     }
 
@@ -722,16 +726,21 @@ impl HarnessCoordinator {
             .submit_semantic_command(request)
     }
 
-    pub fn wait_for(
+    pub fn wait_for_diagnostic_screen(
         &mut self,
         instance_id: &str,
         pattern: &str,
         timeout_ms: u64,
     ) -> Result<String> {
-        self.wait_for_with_source(instance_id, pattern, timeout_ms, ScreenSource::Default)
+        self.wait_for_diagnostic_screen_with_source(
+            instance_id,
+            pattern,
+            timeout_ms,
+            ScreenSource::Default,
+        )
     }
 
-    pub fn wait_for_with_source(
+    pub fn wait_for_diagnostic_screen_with_source(
         &mut self,
         instance_id: &str,
         pattern: &str,
@@ -745,7 +754,7 @@ impl HarnessCoordinator {
                 .get(instance_id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
                 .as_trait()
-                .wait_for_dom_patterns(&patterns, timeout_ms)
+                .wait_for_diagnostic_dom_patterns(&patterns, timeout_ms)
             {
                 let screen = result?;
                 self.events.push(
@@ -772,7 +781,7 @@ impl HarnessCoordinator {
             if Instant::now() >= deadline {
                 break;
             }
-            let screen = self.screen_with_source(instance_id, source)?;
+            let screen = self.diagnostic_screen_with_source(instance_id, source)?;
             let normalized = normalize_screen(&screen);
             if wait_pattern_matches(&normalized, pattern) {
                 self.events.push(
@@ -817,7 +826,7 @@ impl HarnessCoordinator {
         )
     }
 
-    pub fn wait_for_selector(
+    pub fn wait_for_diagnostic_target(
         &mut self,
         instance_id: &str,
         selector: &str,
@@ -827,7 +836,10 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        if let Some(result) = backend.as_trait().wait_for_target(selector, timeout_ms) {
+        if let Some(result) = backend
+            .as_trait()
+            .wait_for_diagnostic_target(selector, timeout_ms)
+        {
             let screen = result?;
             self.events.push(
                 "observation",

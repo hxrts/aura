@@ -47,6 +47,11 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
 - The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.
+- Shared semantic execution must not keep a duplicate lifecycle graph, phase cache, or heuristic identifier repair path for accounts, contacts, channels, or messaging state.
+- Parity-critical create/join/accept shared-channel flows must receive canonical operation handles and channel bindings from the authoritative submission/receipt path; post-hoc polling repair is forbidden.
+- Raw renderer capture is diagnostic-only and is exposed through explicitly named `diagnostic_*` observation surfaces; typed `UiSnapshot` / `UiSnapshotEvent` remain the only authoritative shared-semantic observation plane.
+- Time-bounded loops in shared semantic code are allowed only for infrastructure readiness, transport, or bounded observation waits whose owner is explicit; ownership transfer itself must not depend on settle windows or heuristic polling.
+- Do not add backwards-compatibility, migration, fallback, or legacy code paths for removed shared-semantic harness behavior. Delete obsolete paths instead.
 
 ### InvariantHarnessDeterministicReplayInputs
 
@@ -139,6 +144,9 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - Shared semantic command-plane submission and handle propagation must consume the authoritative `aura-app` contract rather than inventing harness-local semantic ownership.
 - Readiness waits and projection reads may track timeout/trace metadata locally, but may not mutate or repair product semantic truth.
 - Frontend-conformance helpers are explicitly quarantined from the shared semantic lane and may not bypass typed command/observation surfaces.
+- Weak identifiers may help diagnostics, but they may not be upgraded into authoritative channel/context bindings after handoff.
+- Diagnostic screen and DOM captures may support failure attribution, but they may not satisfy shared-semantic success conditions or repair missing authoritative state.
+- Remaining wall-clock bounds in shared semantic code must name their owner and infrastructure reason; they must not implement semantic migration or legacy fallback behavior.
 
 ### Verification Hooks
 
@@ -149,6 +157,12 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - `just ci-timeout-policy`
 - `just ci-semantic-owner-awaits`
 - `just ci-best-effort-side-effects`
+
+## Contributor Guidance
+
+- Treat `SharedSemanticBackend` plus `UiSnapshot` / `UiSnapshotEvent` as the primary shared-semantic contract. If you need raw screen or DOM data, the API and variable names must say `diagnostic`.
+- When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
+- If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 
 ## Testing
 

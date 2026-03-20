@@ -15,10 +15,9 @@ use aura_app::scenario_contract::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
 };
 use aura_app::ui::contract::{
-    ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, OperationId,
-    OperationState, ScreenId, UiReadiness, UiSnapshot,
+    ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, OperationState,
+    ScreenId, UiReadiness, UiSnapshot,
 };
-use aura_app::ui_contract::RuntimeFact;
 use nix::errno::Errno;
 use nix::sys::signal;
 use nix::unistd::Pid;
@@ -27,9 +26,8 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    latest_invitation_code, observe_operation, wait_for_operation_submission, ChannelBinding,
-    ContactInvitationCode, InstanceBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
-    UiOperationHandle, UiSnapshotEvent,
+    latest_invitation_code, ChannelBinding, ContactInvitationCode, InstanceBackend, RawUiBackend,
+    SharedSemanticBackend, SubmittedAction, UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -45,82 +43,107 @@ enum BackendState {
 const PLACEHOLDER_HOME_ID: &str =
     "channel:0000000000000000000000000000000000000000000000000000000000000000";
 
-fn select_home_and_channel(backend: &mut LocalPtyBackend, channel_id: &str) -> Result<()> {
-    let snapshot = backend.ui_snapshot()?;
-    let home_visible = snapshot
-        .lists
+fn selected_channel_binding(snapshot: &UiSnapshot) -> Option<ChannelBinding> {
+    snapshot
+        .selections
         .iter()
-        .find(|list| list.id == ListId::Homes)
-        .is_some_and(|list| list.items.iter().any(|item| item.id == channel_id));
-    if home_visible {
-        backend.send_harness_command(&HarnessUiCommand::SelectHome {
-            home_id: channel_id.to_string(),
-        })?;
-    }
-    backend.send_harness_command(&HarnessUiCommand::SelectChannel {
-        channel_id: channel_id.to_string(),
-    })?;
-    Ok(())
+        .find(|selection| selection.list == ListId::Channels)
+        .map(|selection| ChannelBinding {
+            channel_id: selection.item_id.clone(),
+            context_id: None,
+        })
 }
 
-fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
-    let mut candidates = snapshot
-        .runtime_events
-        .iter()
-        .filter_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady {
-                channel,
-                member_count: Some(member_count),
-            } if *member_count > 1
-                && channel
-                    .name
-                    .as_deref()
-                    .map(|name| !name.eq_ignore_ascii_case("note to self"))
-                    .unwrap_or(true) =>
-            {
-                channel.id.clone()
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    candidates.sort();
-    candidates.dedup();
-    if let [channel_id] = candidates.as_slice() {
-        return Some(channel_id.clone());
-    }
+fn into_ui_operation_handle(
+    handle: aura_app::ui_contract::HarnessUiOperationHandle,
+) -> UiOperationHandle {
+    UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
+}
 
-    let note_to_self_id = snapshot
-        .runtime_events
-        .iter()
-        .find_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady { channel, .. }
-                if channel
-                    .name
-                    .as_deref()
-                    .map(|name| name.eq_ignore_ascii_case("note to self"))
-                    .unwrap_or(false) =>
-            {
-                channel.id.clone()
-            }
-            _ => None,
-        });
-    let mut listed_candidates = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Channels)
-        .map(|list| {
-            list.items
-                .iter()
-                .map(|item| item.id.clone())
-                .filter(|item_id| note_to_self_id.as_deref() != Some(item_id.as_str()))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    listed_candidates.sort();
-    listed_candidates.dedup();
-    match listed_candidates.as_slice() {
-        [channel_id] => Some(channel_id.clone()),
-        _ => None,
+fn require_ui_operation_handle(
+    receipt: HarnessUiCommandReceipt,
+    operation_name: &str,
+) -> Result<UiOperationHandle> {
+    match receipt {
+        HarnessUiCommandReceipt::AcceptedWithOperation { operation, .. } => {
+            Ok(into_ui_operation_handle(operation))
+        }
+        HarnessUiCommandReceipt::Accepted { .. } => {
+            anyhow::bail!("{operation_name} accepted without a canonical ui operation handle")
+        }
+        HarnessUiCommandReceipt::Rejected { reason } => {
+            anyhow::bail!("{operation_name} rejected: {reason}")
+        }
+    }
+}
+
+fn require_channel_binding_submission(
+    receipt: HarnessUiCommandReceipt,
+    operation_name: &str,
+) -> Result<SubmittedAction<ChannelBinding>> {
+    match receipt {
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation,
+            value:
+                Some(SemanticCommandValue::ChannelBinding {
+                    channel_id,
+                    context_id,
+                }),
+        } => Ok(SubmittedAction::with_ui_operation(
+            ChannelBinding {
+                channel_id,
+                context_id,
+            },
+            into_ui_operation_handle(operation),
+        )),
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation,
+            value: None,
+        } => {
+            let handle = into_ui_operation_handle(operation);
+            anyhow::bail!(
+                "{operation_name} did not return an authoritative channel binding payload for {}:{}",
+                handle.id().0,
+                handle.instance_id().0
+            );
+        }
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation: _,
+            value: Some(SemanticCommandValue::None),
+        } => anyhow::bail!(
+            "{operation_name} returned an explicit empty semantic payload"
+        ),
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation: _,
+            value: Some(SemanticCommandValue::ContactInvitationCode { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned an unexpected contact invitation payload"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value:
+                Some(SemanticCommandValue::ChannelBinding {
+                    channel_id: _,
+                    context_id: _,
+                }),
+        } => anyhow::bail!(
+            "{operation_name} accepted without exact operation handle"
+        ),
+        HarnessUiCommandReceipt::Accepted { value: None } => anyhow::bail!(
+            "{operation_name} accepted without exact operation handle or authoritative channel binding payload"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::None),
+        } => anyhow::bail!(
+            "{operation_name} returned an explicit empty semantic payload without a canonical operation handle"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::ContactInvitationCode { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned an unexpected contact invitation payload without a canonical operation handle"
+        ),
+        HarnessUiCommandReceipt::Rejected { reason } => {
+            anyhow::bail!("{operation_name} rejected: {reason}")
+        }
     }
 }
 
@@ -501,21 +524,12 @@ impl LocalPtyBackend {
                             | ErrorKind::ConnectionReset
                     ) =>
                 {
-                    if self
-                        .session
-                        .as_ref()
-                        .and_then(|session| session.reader_thread.as_ref())
-                        .is_some_and(|thread| thread.is_finished())
-                    {
-                        let screen = self.snapshot().unwrap_or_default();
-                        let log_tail = self.tail_log(40).unwrap_or_default().join("\n");
-                        return Err(anyhow::anyhow!(
-                            "local PTY instance {} exited before the harness command plane became ready; socket={} screen={:?} log_tail={}",
-                            self.config.id,
-                            socket_path.display(),
-                            screen,
-                            log_tail
-                        ));
+                    if let Some(session) = self.session.as_ref() {
+                        if let Err(liveness_error) =
+                            self.ensure_session_alive(session, "the harness command plane became ready")
+                        {
+                            return Err(liveness_error);
+                        }
                     }
                     if Instant::now() >= deadline {
                         return Err(anyhow::anyhow!(
@@ -541,12 +555,12 @@ impl LocalPtyBackend {
     fn send_harness_command(
         &mut self,
         command: &HarnessUiCommand,
-    ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>> {
+    ) -> Result<HarnessUiCommandReceipt> {
         match self.send_harness_command_receipt(command)? {
-            HarnessUiCommandReceipt::Accepted { operation, .. } => Ok(operation),
             HarnessUiCommandReceipt::Rejected { reason } => {
                 anyhow::bail!("TUI harness command rejected: {reason}")
             }
+            receipt => Ok(receipt),
         }
     }
 }
@@ -760,7 +774,7 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(())
     }
 
-    fn snapshot(&self) -> Result<String> {
+    fn diagnostic_screen_snapshot(&self) -> Result<String> {
         let session = self
             .session
             .as_ref()
@@ -988,6 +1002,25 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(text)
     }
 
+    fn authority_id(&mut self) -> Result<Option<String>> {
+        let snapshot = self.ui_snapshot()?;
+        if let Some(selection) = snapshot
+            .selections
+            .iter()
+            .find(|selection| selection.list == ListId::Authorities)
+        {
+            return Ok(Some(selection.item_id.clone()));
+        }
+
+        let authority_id = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Authorities)
+            .and_then(|list| list.items.iter().find(|item| item.selected))
+            .map(|item| item.id.clone());
+        Ok(authority_id)
+    }
+
     fn health_check(&self) -> Result<bool> {
         let running = self.state == BackendState::Running && self.session.is_some();
         if !running {
@@ -1031,7 +1064,7 @@ impl InstanceBackend for LocalPtyBackend {
                     .is_some_and(|thread| thread.is_finished())
                     || !Self::child_process_alive(session)
             }) {
-                let screen = self.snapshot().unwrap_or_default();
+                let screen = self.diagnostic_screen_snapshot().unwrap_or_default();
                 let log_tail = self.tail_log(40).unwrap_or_default().join("\n");
                 anyhow::bail!(
                     "local PTY instance {} exited before publishing an authoritative UI snapshot; screen={:?} log_tail={}",
@@ -1286,32 +1319,22 @@ impl LocalPtyBackend {
         device_name: &str,
         invitee_authority_id: &str,
     ) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
-        self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {
-            device_name: device_name.to_string(),
-            invitee_authority_id: invitee_authority_id.to_string(),
-        })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::device_enrollment(),
-            previous_operation,
-            Duration::from_secs(5),
+        let handle = require_ui_operation_handle(
+            self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {
+                device_name: device_name.to_string(),
+                invitee_authority_id: invitee_authority_id.to_string(),
+            })?,
+            "start_device_enrollment",
         )?;
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_import_device_enrollment_code(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::device_enrollment());
-        self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {
-            code: code.to_string(),
-        })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::device_enrollment(),
-            previous_operation,
-            Duration::from_secs(5),
+        let handle = require_ui_operation_handle(
+            self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {
+                code: code.to_string(),
+            })?,
+            "import_device_enrollment_code",
         )?;
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
@@ -1426,7 +1449,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
-                    value: SemanticCommandValue::None,
+                    value: SemanticCommandValue::ChannelBinding {
+                        channel_id: submitted.value.channel_id,
+                        context_id: submitted.value.context_id,
+                    },
                 })
             }
             IntentAction::CreateChannel { channel_name } => {
@@ -1445,7 +1471,10 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
-                    value: SemanticCommandValue::None,
+                    value: SemanticCommandValue::ChannelBinding {
+                        channel_id: submitted.value.channel_id,
+                        context_id: submitted.value.context_id,
+                    },
                 })
             }
             IntentAction::SendChatMessage { message } => {
@@ -1460,22 +1489,12 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::account_create());
-        let receipt_handle = self.send_harness_command(&HarnessUiCommand::CreateAccount {
-            account_name: account_name.to_string(),
-        })?;
-        let handle = match receipt_handle {
-            Some(handle) => {
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
-            }
-            None => wait_for_operation_submission(
-                self,
-                OperationId::account_create(),
-                previous_operation,
-                Duration::from_secs(5),
-            )?,
-        };
+        let handle = require_ui_operation_handle(
+            self.send_harness_command(&HarnessUiCommand::CreateAccount {
+                account_name: account_name.to_string(),
+            })?,
+            "create_account",
+        )?;
         let issue_deadline = Instant::now() + Duration::from_secs(30);
         let mut restarted = false;
         loop {
@@ -1530,16 +1549,11 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::create_home());
-        self.send_harness_command(&HarnessUiCommand::CreateHome {
-            home_name: home_name.to_string(),
-        })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::create_home(),
-            previous_operation,
-            Duration::from_secs(5),
+        let handle = require_ui_operation_handle(
+            self.send_harness_command(&HarnessUiCommand::CreateHome {
+                home_name: home_name.to_string(),
+            })?,
+            "create_home",
         )?;
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
@@ -1570,99 +1584,27 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         channel_name: &str,
     ) -> Result<SubmittedAction<ChannelBinding>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::create_channel());
-        let receipt = self
-            .send_harness_command_receipt(&HarnessUiCommand::CreateChannel {
+        require_channel_binding_submission(
+            self.send_harness_command_receipt(&HarnessUiCommand::CreateChannel {
                 channel_name: channel_name.to_string(),
             })
-            .context("submit_create_channel: create_channel_command")?;
-        match receipt {
-            HarnessUiCommandReceipt::Accepted {
-                operation: Some(handle),
-                value:
-                    Some(SemanticCommandValue::ChannelBinding {
-                        channel_id,
-                        context_id,
-                    }),
-            } => Ok(SubmittedAction::with_ui_operation(
-                ChannelBinding {
-                    channel_id,
-                    context_id,
-                },
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone()),
-            )),
-            HarnessUiCommandReceipt::Accepted {
-                operation: None,
-                value:
-                    Some(SemanticCommandValue::ChannelBinding {
-                        channel_id: _,
-                        context_id: _,
-                    }),
-            } => anyhow::bail!(
-                "submit_create_channel: create_channel accepted without exact operation handle"
-            ),
-            HarnessUiCommandReceipt::Accepted { operation, value: None } => {
-                let handle = match operation {
-                    Some(handle) => {
-                        UiOperationHandle::new(
-                            handle.operation_id().clone(),
-                            handle.instance_id().clone(),
-                        )
-                    }
-                    None => wait_for_operation_submission(
-                        self,
-                        OperationId::create_channel(),
-                        previous_operation,
-                        Duration::from_secs(5),
-                    )?,
-                };
-                anyhow::bail!(
-                    "submit_create_channel: create_channel did not return an authoritative channel binding payload for {} (operation={}:{})",
-                    channel_name,
-                    handle.id().0,
-                    handle.instance_id().0
-                );
-            }
-            HarnessUiCommandReceipt::Accepted {
-                operation: _,
-                value: Some(SemanticCommandValue::None),
-            } => anyhow::bail!(
-                "submit_create_channel: create_channel returned an explicit empty semantic payload"
-            ),
-            HarnessUiCommandReceipt::Accepted {
-                operation: _,
-                value: Some(SemanticCommandValue::ContactInvitationCode { .. }),
-            } => anyhow::bail!(
-                "submit_create_channel: create_channel returned an unexpected contact invitation payload"
-            ),
-            HarnessUiCommandReceipt::Rejected { reason } => {
-                anyhow::bail!("submit_create_channel: create_channel rejected: {reason}")
-            }
-        }
+            .with_context(|| {
+                format!("submit_create_channel: create_channel_command:{channel_name}")
+            })?,
+            "submit_create_channel",
+        )
     }
 
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_create());
-        let receipt_handle =
+        let handle = require_ui_operation_handle(
             self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
                 receiver_authority_id: receiver_authority_id.to_string(),
-            })?;
-        let handle = match receipt_handle {
-            Some(handle) => {
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
-            }
-            None => wait_for_operation_submission(
-                self,
-                OperationId::invitation_create(),
-                previous_operation,
-                Duration::from_secs(5),
-            )?,
-        };
+            })?,
+            "create_contact_invitation",
+        )?;
         let code_deadline = Instant::now() + Duration::from_secs(5);
         let code = loop {
             let snapshot = self.ui_snapshot()?;
@@ -1699,16 +1641,11 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_accept_contact_invitation(&mut self, code: &str) -> Result<SubmittedAction<()>> {
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::invitation_accept());
-        self.send_harness_command(&HarnessUiCommand::ImportInvitation {
-            code: code.to_string(),
-        })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::invitation_accept(),
-            previous_operation,
-            Duration::from_secs(5),
+        let handle = require_ui_operation_handle(
+            self.send_harness_command(&HarnessUiCommand::ImportInvitation {
+                code: code.to_string(),
+            })?,
+            "accept_contact_invitation",
         )?;
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
@@ -1718,109 +1655,40 @@ impl SharedSemanticBackend for LocalPtyBackend {
         authority_id: &str,
         channel_id: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
-        let snapshot = self.ui_snapshot()?;
-        let previous_operation = observe_operation(&snapshot, &OperationId::invitation_create());
-        let channel_id = channel_id
-            .map(ToOwned::to_owned)
-            .or_else(|| {
-                snapshot
-                    .selections
-                    .iter()
-                    .find(|selection| selection.list == ListId::Channels)
-                    .map(|selection| selection.item_id.clone())
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "submit_invite_actor_to_channel requires an authoritative selected channel"
-                )
-            })?;
-        let receipt_handle =
+        let channel_id = channel_id.map(ToOwned::to_owned).ok_or_else(|| {
+            anyhow::anyhow!(
+                "submit_invite_actor_to_channel requires an authoritative channel binding"
+            )
+        })?;
+        let handle = require_ui_operation_handle(
             self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
                 authority_id: authority_id.to_string(),
                 channel_id,
-            })?;
-        let handle = match receipt_handle {
-            Some(handle) => {
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
-            }
-            None => wait_for_operation_submission(
-                self,
-                OperationId::invitation_create(),
-                previous_operation,
-                Duration::from_secs(5),
-            )?,
-        };
+            })?,
+            "invite_actor_to_channel",
+        )?;
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
-    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        let snapshot = self.ui_snapshot()?;
-        let previous_operation = observe_operation(&snapshot, &OperationId::invitation_accept());
-        let receipt_handle =
-            self.send_harness_command(&HarnessUiCommand::AcceptPendingChannelInvitation)?;
-        let handle = match receipt_handle {
-            Some(handle) => {
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
-            }
-            None => wait_for_operation_submission(
-                self,
-                OperationId::invitation_accept(),
-                previous_operation,
-                Duration::from_secs(5),
-            )?,
-        };
-        Ok(SubmittedAction::with_ui_operation((), handle))
+    fn submit_accept_pending_channel_invitation(
+        &mut self,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
+        require_channel_binding_submission(
+            self.send_harness_command_receipt(&HarnessUiCommand::AcceptPendingChannelInvitation)?,
+            "accept_pending_channel_invitation",
+        )
     }
 
-    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        let prejoin_snapshot = self.ui_snapshot()?;
-        let already_joined_channel_id =
-            prejoin_snapshot
-                .runtime_events
-                .iter()
-                .find_map(|event| match &event.fact {
-                    RuntimeFact::ChannelMembershipReady {
-                        channel,
-                        member_count: Some(member_count),
-                        ..
-                    } if *member_count > 1
-                        && channel
-                            .name
-                            .as_deref()
-                            .map(|name: &str| name.eq_ignore_ascii_case(channel_name))
-                            .unwrap_or(false) =>
-                    {
-                        channel.id.clone()
-                    }
-                    _ => None,
-                });
-        if let Some(channel_id) = already_joined_channel_id {
-            let selected_channel_id = prejoin_snapshot
-                .selections
-                .iter()
-                .find(|selection| selection.list == ListId::Channels)
-                .map(|selection| selection.item_id.clone());
-            if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
-                select_home_and_channel(self, &channel_id)?;
-            }
-        }
-
-        let previous_operation = observe_operation(&prejoin_snapshot, &OperationId::join_channel());
-        let receipt_handle = self.send_harness_command(&HarnessUiCommand::JoinChannel {
-            channel_name: channel_name.to_string(),
-        })?;
-        let handle = match receipt_handle {
-            Some(handle) => {
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
-            }
-            None => wait_for_operation_submission(
-                self,
-                OperationId::join_channel(),
-                previous_operation,
-                Duration::from_secs(5),
-            )?,
-        };
-        Ok(SubmittedAction::with_ui_operation((), handle))
+    fn submit_join_channel(
+        &mut self,
+        channel_name: &str,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
+        require_channel_binding_submission(
+            self.send_harness_command_receipt(&HarnessUiCommand::JoinChannel {
+                channel_name: channel_name.to_string(),
+            })?,
+            "join_channel",
+        )
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
@@ -1832,38 +1700,17 @@ impl SharedSemanticBackend for LocalPtyBackend {
         }
 
         let snapshot = self.ui_snapshot()?;
-        if let Some(channel_id) = unique_shared_channel_candidate(&snapshot) {
-            let selected_channel_id = snapshot
-                .selections
-                .iter()
-                .find(|selection| selection.list == ListId::Channels)
-                .map(|selection| selection.item_id.clone());
-            if selected_channel_id.as_deref() != Some(channel_id.as_str()) {
-                let _ = select_home_and_channel(self, &channel_id);
-            }
-        } else if let Some(channels) = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-        {
-            let selected = channels.items.iter().any(|item| item.selected);
-            if !selected && channels.items.len() == 1 {
-                self.send_harness_command(&HarnessUiCommand::SelectChannel {
-                    channel_id: channels.items[0].id.clone(),
-                })?;
-            }
+        if selected_channel_binding(&snapshot).is_none() {
+            anyhow::bail!(
+                "submit_send_chat_message requires an authoritative selected channel binding"
+            );
         }
 
-        let previous_operation =
-            observe_operation(&self.ui_snapshot()?, &OperationId::send_message());
-        self.send_harness_command(&HarnessUiCommand::SendChatMessage {
-            content: message.to_string(),
-        })?;
-        let handle = wait_for_operation_submission(
-            self,
-            OperationId::send_message(),
-            previous_operation,
-            Duration::from_secs(5),
+        let handle = require_ui_operation_handle(
+            self.send_harness_command(&HarnessUiCommand::SendChatMessage {
+                content: message.to_string(),
+            })?,
+            "send_chat_message",
         )?;
         let first_deadline = Instant::now() + Duration::from_millis(1500);
         loop {
@@ -1947,7 +1794,7 @@ mod tests {
 
         let mut last_screen = String::new();
         crate::timeouts::blocking_wait_until(timeout, POLL_INTERVAL, || {
-            let screen = match backend.snapshot() {
+            let screen = match backend.diagnostic_screen_snapshot() {
                 Ok(screen) => screen,
                 Err(error) => panic!("snapshot failed: {error}"),
             };
@@ -2055,6 +1902,9 @@ mod tests {
     #[test]
     fn local_backend_parity_critical_submissions_require_handles_and_single_issue_path() {
         let source = include_str!("local_pty.rs");
+        let create_account_start = source
+            .find("fn submit_create_account")
+            .unwrap_or_else(|| panic!("missing submit_create_account"));
         let accept_start = source
             .find("fn submit_accept_pending_channel_invitation")
             .unwrap_or_else(|| panic!("missing submit_accept_pending_channel_invitation"));
@@ -2068,6 +1918,7 @@ mod tests {
             .find("}\n}\n\n#[cfg(test)]")
             .map(|offset| send_start + offset)
             .unwrap_or(source.len());
+        let semantic_submission_block = &source[create_account_start..next_fn_after_send];
         let accept_branch = &source[accept_start..join_start];
         let join_branch = &source[join_start..send_start];
         let send_branch = &source[send_start..next_fn_after_send];
@@ -2079,6 +1930,14 @@ mod tests {
         assert!(
             !join_branch.contains("SubmittedAction::without_handle"),
             "join_channel must not short-circuit around canonical owner handles"
+        );
+        assert!(
+            !semantic_submission_block.contains("wait_for_operation_submission("),
+            "shared semantic local PTY submissions must not repair missing handles by polling for likely operation instances"
+        );
+        assert!(
+            source.contains("fn require_ui_operation_handle("),
+            "shared semantic local PTY submissions must use one strict receipt-to-handle conversion path"
         );
         assert_eq!(
             send_branch
@@ -2234,7 +2093,7 @@ mod tests {
             panic!("keys send failed: {error}");
         }
         blocking_sleep(Duration::from_millis(80));
-        let screen = match backend.snapshot() {
+        let screen = match backend.diagnostic_screen_snapshot() {
             Ok(screen) => screen,
             Err(error) => panic!("snapshot failed: {error}"),
         };
@@ -2251,7 +2110,7 @@ mod tests {
             panic!("backend must start: {error}");
         }
         blocking_sleep(Duration::from_millis(50));
-        let screen = match backend.snapshot() {
+        let screen = match backend.diagnostic_screen_snapshot() {
             Ok(screen) => screen,
             Err(error) => panic!("snapshot must succeed: {error}"),
         };
@@ -2274,7 +2133,7 @@ mod tests {
         if let Err(error) = backend.send_keys("freshness-check\n") {
             panic!("send_keys must succeed: {error}");
         }
-        let screen = match backend.snapshot() {
+        let screen = match backend.diagnostic_screen_snapshot() {
             Ok(screen) => screen,
             Err(error) => panic!("snapshot must succeed: {error}"),
         };

@@ -2,6 +2,8 @@ pub mod local_pty;
 pub mod playwright_browser;
 pub mod ssh_tunnel;
 
+use crate::config::{InstanceConfig, InstanceMode};
+use crate::tool_api::ToolKey;
 use anyhow::{anyhow, bail, Result};
 use aura_app::scenario_contract::IntentAction;
 pub use aura_app::scenario_contract::{
@@ -14,11 +16,6 @@ use aura_app::ui::contract::{
 use aura_app::ui_contract::ProjectionRevision;
 use aura_app::ui_contract::RuntimeFact;
 use std::time::Duration;
-use tokio::time::Instant;
-
-use crate::config::{InstanceConfig, InstanceMode};
-use crate::timeouts::blocking_sleep;
-use crate::tool_api::ToolKey;
 
 #[derive(Debug, Clone)]
 pub struct UiSnapshotEvent {
@@ -44,17 +41,21 @@ pub struct ObservedOperation {
 }
 
 pub trait ObservationBackend {
-    fn snapshot(&self) -> Result<String>;
-    fn snapshot_dom(&self) -> Result<String>;
+    fn diagnostic_screen_snapshot(&self) -> Result<String>;
+    fn diagnostic_dom_snapshot(&self) -> Result<String>;
     fn ui_snapshot(&self) -> Result<UiSnapshot>;
     fn wait_for_ui_snapshot_event(
         &self,
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>>;
-    fn wait_for_dom_patterns(&self, patterns: &[String], timeout_ms: u64)
+    fn wait_for_diagnostic_dom_patterns(
+        &self,
+        patterns: &[String],
+        timeout_ms: u64,
+    ) -> Option<Result<String>>;
+    fn wait_for_diagnostic_target(&self, selector: &str, timeout_ms: u64)
         -> Option<Result<String>>;
-    fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>>;
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn read_clipboard(&self) -> Result<String>;
 }
@@ -76,9 +77,9 @@ pub trait InstanceBackend {
     }
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self) -> Result<()>;
-    fn snapshot(&self) -> Result<String>;
-    fn snapshot_dom(&self) -> Result<String> {
-        self.snapshot()
+    fn diagnostic_screen_snapshot(&self) -> Result<String>;
+    fn diagnostic_dom_snapshot(&self) -> Result<String> {
+        self.diagnostic_screen_snapshot()
     }
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
         bail!(
@@ -93,14 +94,18 @@ pub trait InstanceBackend {
     ) -> Option<Result<UiSnapshotEvent>> {
         None
     }
-    fn wait_for_dom_patterns(
+    fn wait_for_diagnostic_dom_patterns(
         &self,
         _patterns: &[String],
         _timeout_ms: u64,
     ) -> Option<Result<String>> {
         None
     }
-    fn wait_for_target(&self, _selector: &str, _timeout_ms: u64) -> Option<Result<String>> {
+    fn wait_for_diagnostic_target(
+        &self,
+        _selector: &str,
+        _timeout_ms: u64,
+    ) -> Option<Result<String>> {
         None
     }
     fn send_keys(&mut self, keys: &str) -> Result<()>;
@@ -145,12 +150,12 @@ pub trait InstanceBackend {
 }
 
 impl<T: InstanceBackend + ?Sized> ObservationBackend for T {
-    fn snapshot(&self) -> Result<String> {
-        InstanceBackend::snapshot(self)
+    fn diagnostic_screen_snapshot(&self) -> Result<String> {
+        InstanceBackend::diagnostic_screen_snapshot(self)
     }
 
-    fn snapshot_dom(&self) -> Result<String> {
-        InstanceBackend::snapshot_dom(self)
+    fn diagnostic_dom_snapshot(&self) -> Result<String> {
+        InstanceBackend::diagnostic_dom_snapshot(self)
     }
 
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
@@ -165,16 +170,20 @@ impl<T: InstanceBackend + ?Sized> ObservationBackend for T {
         InstanceBackend::wait_for_ui_snapshot_event(self, timeout, after_version)
     }
 
-    fn wait_for_dom_patterns(
+    fn wait_for_diagnostic_dom_patterns(
         &self,
         patterns: &[String],
         timeout_ms: u64,
     ) -> Option<Result<String>> {
-        InstanceBackend::wait_for_dom_patterns(self, patterns, timeout_ms)
+        InstanceBackend::wait_for_diagnostic_dom_patterns(self, patterns, timeout_ms)
     }
 
-    fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>> {
-        InstanceBackend::wait_for_target(self, selector, timeout_ms)
+    fn wait_for_diagnostic_target(
+        &self,
+        selector: &str,
+        timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        InstanceBackend::wait_for_diagnostic_target(self, selector, timeout_ms)
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
@@ -304,8 +313,10 @@ pub trait SharedSemanticBackend {
         )
     }
 
-    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit_with_required_handle(
+    fn submit_accept_pending_channel_invitation(
+        &mut self,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
+        expect_semantic_command_channel_binding_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::AcceptPendingChannelInvitation,
             ))?,
@@ -313,8 +324,11 @@ pub trait SharedSemanticBackend {
         )
     }
 
-    fn submit_join_channel(&mut self, channel_name: &str) -> Result<SubmittedAction<()>> {
-        expect_semantic_command_unit_with_required_handle(
+    fn submit_join_channel(
+        &mut self,
+        channel_name: &str,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
+        expect_semantic_command_channel_binding_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(IntentAction::JoinChannel {
                 channel_name: channel_name.to_string(),
             }))?,
@@ -391,6 +405,19 @@ fn expect_semantic_command_channel_binding(
     }
 }
 
+fn expect_semantic_command_channel_binding_with_required_handle(
+    response: SemanticCommandResponse,
+    operation: &str,
+) -> Result<SubmittedAction<ChannelBinding>> {
+    let submitted = expect_semantic_command_channel_binding(response, operation)?;
+    if submitted.handle.ui_operation.is_none() {
+        return Err(anyhow!(
+            "{operation} must expose a canonical ui operation handle with exact instance tracking"
+        ));
+    }
+    Ok(submitted)
+}
+
 #[must_use]
 pub(crate) fn latest_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
     snapshot
@@ -420,30 +447,6 @@ pub(crate) fn observe_operation(
             instance_id: operation.instance_id.clone(),
             state: operation.state,
         })
-}
-
-pub(crate) fn wait_for_operation_submission(
-    backend: &dyn InstanceBackend,
-    operation_id: OperationId,
-    previous: Option<ObservedOperation>,
-    timeout: Duration,
-) -> Result<UiOperationHandle> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        let snapshot = backend.ui_snapshot()?;
-        if let Some(current) = observe_operation(&snapshot, &operation_id) {
-            let changed = previous.as_ref().map_or(true, |previous| {
-                current.instance_id != previous.instance_id || current.state != previous.state
-            });
-            if changed {
-                return Ok(UiOperationHandle::new(operation_id, current.instance_id));
-            }
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for operation submission {operation_id:?}");
-        }
-        blocking_sleep(Duration::from_millis(50));
-    }
 }
 
 fn tool_key_sequence(key: ToolKey) -> &'static str {
@@ -633,11 +636,11 @@ mod tests {
             Ok(())
         }
 
-        fn snapshot(&self) -> Result<String> {
+        fn diagnostic_screen_snapshot(&self) -> Result<String> {
             Ok("snapshot".to_string())
         }
 
-        fn snapshot_dom(&self) -> Result<String> {
+        fn diagnostic_dom_snapshot(&self) -> Result<String> {
             Ok("dom".to_string())
         }
 
@@ -656,7 +659,7 @@ mod tests {
             }))
         }
 
-        fn wait_for_dom_patterns(
+        fn wait_for_diagnostic_dom_patterns(
             &self,
             _patterns: &[String],
             _timeout_ms: u64,
@@ -664,7 +667,11 @@ mod tests {
             Some(Ok("dom-match".to_string()))
         }
 
-        fn wait_for_target(&self, _selector: &str, _timeout_ms: u64) -> Option<Result<String>> {
+        fn wait_for_diagnostic_target(
+            &self,
+            _selector: &str,
+            _timeout_ms: u64,
+        ) -> Option<Result<String>> {
             Some(Ok("target-match".to_string()))
         }
 
@@ -691,9 +698,9 @@ mod tests {
         let backend = ReadOnlyBackend::new();
         let observer: &dyn ObservationBackend = &backend;
 
-        assert_eq!(observer.snapshot()?, "snapshot");
-        assert_eq!(observer.snapshot()?, "snapshot");
-        assert_eq!(observer.snapshot_dom()?, "dom");
+        assert_eq!(observer.diagnostic_screen_snapshot()?, "snapshot");
+        assert_eq!(observer.diagnostic_screen_snapshot()?, "snapshot");
+        assert_eq!(observer.diagnostic_dom_snapshot()?, "dom");
         assert_eq!(observer.ui_snapshot()?.revision.semantic_seq, 7);
         assert_eq!(observer.ui_snapshot()?.revision.semantic_seq, 7);
         assert_eq!(
@@ -705,13 +712,13 @@ mod tests {
         );
         assert_eq!(
             observer
-                .wait_for_dom_patterns(&["chat".to_string()], 1)
+                .wait_for_diagnostic_dom_patterns(&["chat".to_string()], 1)
                 .ok_or_else(|| anyhow::anyhow!("dom result should be present"))??,
             "dom-match"
         );
         assert_eq!(
             observer
-                .wait_for_target("#aura-screen-chat", 1)
+                .wait_for_diagnostic_target("#aura-screen-chat", 1)
                 .ok_or_else(|| anyhow::anyhow!("target result should be present"))??,
             "target-match"
         );
@@ -851,8 +858,9 @@ mod tests {
 
     #[test]
     fn parity_critical_shared_submit_helpers_require_ui_operation_handles() {
-        let mut backend = RecordingSemanticBackend::new()
-            .with_response(Ok(SemanticCommandResponse::accepted_without_value()));
+        let mut backend = RecordingSemanticBackend::new().with_response(Ok(
+            SemanticCommandResponse::accepted_channel_binding("channel:test".to_string(), None),
+        ));
 
         let error = backend
             .submit_join_channel("shared-parity-lab")

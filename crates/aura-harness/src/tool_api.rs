@@ -73,6 +73,51 @@ impl StartupSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticScreenCapture {
+    pub diagnostic_authoritative_screen: String,
+    pub diagnostic_raw_screen: String,
+    pub diagnostic_normalized_screen: String,
+    pub screen_source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_consistency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_view: Option<String>,
+}
+
+impl DiagnosticScreenCapture {
+    fn settled(screen: String, screen_source: ScreenSource) -> Self {
+        let diagnostic_authoritative_screen = authoritative_screen(&screen);
+        let diagnostic_normalized_screen = normalize_screen(&screen);
+        Self {
+            diagnostic_authoritative_screen,
+            diagnostic_raw_screen: screen,
+            diagnostic_normalized_screen,
+            screen_source: format!("{screen_source:?}").to_ascii_lowercase(),
+            capture_consistency: Some("settled".to_string()),
+            matched: None,
+            matched_view: None,
+        }
+    }
+
+    fn matched(screen: String, screen_source: ScreenSource) -> Self {
+        let diagnostic_authoritative_screen = authoritative_screen(&screen);
+        let diagnostic_normalized_screen = normalize_screen(&screen);
+        Self {
+            diagnostic_authoritative_screen,
+            diagnostic_raw_screen: screen,
+            diagnostic_normalized_screen,
+            screen_source: format!("{screen_source:?}").to_ascii_lowercase(),
+            capture_consistency: None,
+            matched: Some(true),
+            matched_view: Some("normalized".to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ToolRequest {
     Negotiate {
@@ -243,6 +288,20 @@ impl ToolApi {
             .submit_semantic_command_via_ui(instance_id, request)
     }
 
+    pub fn prepare_device_enrollment_invitee_authority(
+        &mut self,
+        instance_id: &str,
+    ) -> anyhow::Result<String> {
+        self.coordinator
+            .prepare_device_enrollment_invitee_authority(instance_id)
+    }
+
+    pub fn current_authority_id(&mut self, instance_id: &str) -> anyhow::Result<String> {
+        self.coordinator
+            .get_authority_id(instance_id)?
+            .ok_or_else(|| anyhow::anyhow!("current authority id is unavailable for {instance_id}"))
+    }
+
     pub fn wait_for_ui_snapshot_event(
         &mut self,
         instance_id: &str,
@@ -283,18 +342,10 @@ impl ToolApi {
                 screen_source,
             } => self
                 .coordinator
-                .screen_with_source(&instance_id, screen_source)
-                .map(|screen| {
-                    let authoritative = authoritative_screen(&screen);
-                    let normalized = normalize_screen(&screen);
-                    serde_json::json!({
-                        "screen": &authoritative,
-                        "raw_screen": screen,
-                        "authoritative_screen": &authoritative,
-                        "normalized_screen": normalized,
-                        "capture_consistency": "settled",
-                        "screen_source": format!("{screen_source:?}").to_ascii_lowercase()
-                    })
+                .diagnostic_screen_with_source(&instance_id, screen_source)
+                .and_then(|screen| {
+                    serde_json::to_value(DiagnosticScreenCapture::settled(screen, screen_source))
+                        .map_err(Into::into)
                 }),
             ToolRequest::UiState { instance_id } => self
                 .coordinator
@@ -373,27 +424,18 @@ impl ToolApi {
             } => {
                 let result = if let Some(selector) = selector.as_deref() {
                     self.coordinator
-                        .wait_for_selector(&instance_id, selector, timeout_ms)
+                        .wait_for_diagnostic_target(&instance_id, selector, timeout_ms)
                 } else {
-                    self.coordinator.wait_for_with_source(
+                    self.coordinator.wait_for_diagnostic_screen_with_source(
                         &instance_id,
                         &pattern,
                         timeout_ms,
                         screen_source,
                     )
                 };
-                result.map(|screen| {
-                    let authoritative = authoritative_screen(&screen);
-                    let normalized = normalize_screen(&screen);
-                    serde_json::json!({
-                        "matched": true,
-                        "screen": &authoritative,
-                        "raw_screen": screen,
-                        "authoritative_screen": &authoritative,
-                        "normalized_screen": normalized,
-                        "matched_view": "normalized",
-                        "screen_source": format!("{screen_source:?}").to_ascii_lowercase()
-                    })
+                result.and_then(|screen| {
+                    serde_json::to_value(DiagnosticScreenCapture::matched(screen, screen_source))
+                        .map_err(Into::into)
                 })
             }
             ToolRequest::TailLog { instance_id, lines } => self
@@ -434,43 +476,48 @@ impl ToolApi {
                         }));
                     }
 
-                    self.coordinator.screen(&instance_id).and_then(|screen| {
-                        if let Some(authority_id) = extract_authority_id(&screen) {
-                            return Ok(serde_json::json!({
-                                "authority_id": authority_id,
-                                "source": "screen"
-                            }));
-                        }
-
-                        self.coordinator
-                            .resolve_authority_id_from_local_state(&instance_id)
-                            .map(|authority_id| {
-                                serde_json::json!({
+                    self.coordinator
+                        .diagnostic_screen(&instance_id)
+                        .and_then(|screen| {
+                            if let Some(authority_id) = extract_authority_id(&screen) {
+                                return Ok(serde_json::json!({
                                     "authority_id": authority_id,
-                                    "source": "local_state"
+                                    "source": "screen"
+                                }));
+                            }
+
+                            self.coordinator
+                                .resolve_authority_id_from_local_state(&instance_id)
+                                .map(|authority_id| {
+                                    serde_json::json!({
+                                        "authority_id": authority_id,
+                                        "source": "local_state"
+                                    })
                                 })
-                            })
-                    })
+                        })
                 }),
-            ToolRequest::ListChannels { instance_id } => {
-                self.coordinator.screen(&instance_id).map(|screen| {
+            ToolRequest::ListChannels { instance_id } => self
+                .coordinator
+                .diagnostic_screen(&instance_id)
+                .map(|screen| {
                     let channels = extract_channels(&screen);
                     serde_json::json!({ "channels": channels })
-                })
-            }
-            ToolRequest::CurrentSelection { instance_id } => {
-                self.coordinator.screen(&instance_id).map(|screen| {
+                }),
+            ToolRequest::CurrentSelection { instance_id } => self
+                .coordinator
+                .diagnostic_screen(&instance_id)
+                .map(|screen| {
                     let selection = extract_current_selection(&screen);
                     serde_json::json!({ "selection": selection })
-                })
-            }
-            ToolRequest::ListContacts { instance_id } => {
-                self.coordinator.screen(&instance_id).map(|screen| {
+                }),
+            ToolRequest::ListContacts { instance_id } => self
+                .coordinator
+                .diagnostic_screen(&instance_id)
+                .map(|screen| {
                     let contacts = extract_contacts(&screen);
                     let toast = extract_toast(&screen);
                     serde_json::json!({ "contacts": contacts, "toast": toast })
-                })
-            }
+                }),
             ToolRequest::Restart { instance_id } => self
                 .coordinator
                 .restart(&instance_id)
@@ -510,5 +557,37 @@ impl ToolApi {
 
     pub fn supported_versions() -> &'static [&'static str] {
         &TOOL_API_VERSIONS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_screen_capture_serializes_explicit_diagnostic_field_names() {
+        let payload = serde_json::to_value(DiagnosticScreenCapture::settled(
+            "  Chat  ".to_string(),
+            ScreenSource::Default,
+        ))
+        .unwrap_or_else(|error| panic!("failed to encode diagnostic capture: {error}"));
+        assert!(payload.get("diagnostic_authoritative_screen").is_some());
+        assert!(payload.get("diagnostic_raw_screen").is_some());
+        assert!(payload.get("diagnostic_normalized_screen").is_some());
+        assert!(payload.get("screen").is_none());
+        assert!(payload.get("raw_screen").is_none());
+        assert!(payload.get("authoritative_screen").is_none());
+        assert!(payload.get("normalized_screen").is_none());
+    }
+
+    #[test]
+    fn tool_api_uses_explicit_diagnostic_observation_methods() {
+        let source = include_str!("tool_api.rs");
+        assert!(source.contains(".diagnostic_screen_with_source("));
+        assert!(source.contains(".wait_for_diagnostic_screen_with_source("));
+        assert!(source.contains(".wait_for_diagnostic_target("));
+        assert!(!source.contains(".screen_with_source("));
+        assert!(!source.contains(".wait_for_with_source("));
+        assert!(!source.contains(".wait_for_selector("));
     }
 }

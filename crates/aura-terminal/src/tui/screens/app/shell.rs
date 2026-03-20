@@ -24,7 +24,7 @@ use super::modal_overlays::{
 
 use crate::tui::components::copy_to_clipboard;
 use iocraft::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aura_app::ceremonies::{
@@ -110,10 +110,21 @@ async fn authoritative_settings_devices_for_command(
     shared_devices: &SharedDevices,
 ) -> Vec<Device> {
     let shared = shared_devices.read().clone();
-    let from_signal = {
+    let mut from_signal = {
         let core = app_ctx.app_core.raw().read().await;
         core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
     };
+
+    if from_signal
+        .as_ref()
+        .is_none_or(|settings_state| settings_state.devices.is_empty())
+    {
+        let _ = refresh_settings_from_runtime(app_ctx.app_core.raw()).await;
+        from_signal = {
+            let core = app_ctx.app_core.raw().read().await;
+            core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
+        };
+    }
 
     if let Some(settings_state) = from_signal {
         let devices = settings_state
@@ -126,13 +137,9 @@ async fn authoritative_settings_devices_for_command(
                 last_seen: device.last_seen,
             })
             .collect::<Vec<_>>();
-        // Prefer the richer shared view when the UI has already rendered more devices
-        // than the latest signal read exposes. This keeps harness actions aligned with
-        // the last authoritative projection the user actually saw.
-        if shared.len() > devices.len() && !shared.is_empty() {
-            return shared;
+        if !devices.is_empty() {
+            *shared_devices.write() = devices.clone();
         }
-        *shared_devices.write() = devices.clone();
         return devices;
     }
 
@@ -231,6 +238,41 @@ impl SelectedChannelBinding {
     }
 }
 
+fn complete_ready_channel_binding_receipts(
+    pending_receipts: &Arc<Mutex<HashMap<String, HarnessCommandReceiptHandle>>>,
+    ready_receipts: &Arc<Mutex<HashSet<String>>>,
+    operation_id: aura_app::ui_contract::OperationId,
+    binding: &SelectedChannelBinding,
+) {
+    let ready_instance_ids = {
+        let mut ready = ready_receipts.lock().unwrap();
+        ready.drain().collect::<Vec<_>>()
+    };
+    if ready_instance_ids.is_empty() {
+        return;
+    }
+    let mut pending = pending_receipts.lock().unwrap();
+    for instance_id in ready_instance_ids {
+        let Some(receipt) = pending.remove(&instance_id) else {
+            continue;
+        };
+        receipt.complete(
+            aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
+                operation: aura_app::ui_contract::HarnessUiOperationHandle::new(
+                    operation_id.clone(),
+                    aura_app::ui_contract::OperationInstanceId(instance_id),
+                ),
+                value: Some(
+                    aura_app::scenario_contract::SemanticCommandValue::ChannelBinding {
+                        channel_id: binding.channel_id.clone(),
+                        context_id: binding.context_id.clone(),
+                    },
+                ),
+            },
+        );
+    }
+}
+
 fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state::ToastLevel {
     match error.category().toast_severity() {
         aura_app::errors::ToastLevel::Info => crate::tui::state::ToastLevel::Info,
@@ -315,7 +357,7 @@ fn execute_harness_followup_command(
     shared_channels: &SharedChannels,
     shared_devices: &SharedDevices,
     shared_messages: &SharedMessages,
-    last_exported_device_ids: &std::sync::Arc<parking_lot::RwLock<Vec<String>>>,
+    last_exported_devices: &std::sync::Arc<parking_lot::RwLock<Vec<Device>>>,
     selected_channel: &std::sync::Arc<parking_lot::RwLock<Option<String>>>,
     selected_channel_binding: &std::sync::Arc<parking_lot::RwLock<Option<SelectedChannelBinding>>>,
 ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>, String> {
@@ -397,8 +439,19 @@ fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("App callbacks are unavailable".to_string());
             };
-            (cb.app.on_import_device_enrollment_during_onboarding)(code);
-            Ok(None)
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = LocalTerminalOperationOwner::submit(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::device_enrollment(),
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+            );
+            let handle = operation.harness_handle();
+            (cb.app.on_import_device_enrollment_during_onboarding)(code, operation);
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
             receiver_id,
@@ -449,9 +502,10 @@ fn execute_harness_followup_command(
                 OperationId::invitation_accept(),
                 SemanticOperationKind::AcceptContactInvitation,
             );
+            let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_import)(code, operation);
-            Ok(None)
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name }) => {
             let Some(cb) = callbacks.as_ref() else {
@@ -633,8 +687,19 @@ fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Settings callbacks are unavailable".to_string());
             };
-            (cb.settings.on_add_device)(name, invitee_authority_id);
-            Ok(None)
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = LocalTerminalOperationOwner::submit(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::device_enrollment(),
+                SemanticOperationKind::StartDeviceEnrollment,
+            );
+            let handle = operation.harness_handle();
+            (cb.settings.on_add_device)(name, invitee_authority_id, operation);
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id }) => {
             let Some(cb) = callbacks.as_ref() else {
@@ -680,7 +745,7 @@ fn execute_harness_followup_command(
         }
         TuiCommand::HarnessRemoveVisibleDevice { device_id } => {
             let current_devices = shared_devices.read().clone();
-            let exported_device_ids = last_exported_device_ids.read().clone();
+            let exported_devices = last_exported_devices.read().clone();
             let Some(device_id) = device_id
                 .or_else(|| {
                     current_devices
@@ -694,14 +759,15 @@ fn execute_harness_followup_command(
                         .flatten()
                 })
                 .or_else(|| {
-                    let current_device_id = current_devices
+                    exported_devices
                         .iter()
-                        .find(|device| device.is_current)
-                        .map(|device| device.id.as_str());
-                    exported_device_ids
-                        .iter()
-                        .find(|device_id| Some(device_id.as_str()) != current_device_id)
-                        .cloned()
+                        .find(|device| !device.is_current)
+                        .map(|device| device.id.clone())
+                        .or_else(|| {
+                            (exported_devices.len() > 1)
+                                .then(|| exported_devices.last().map(|device| device.id.clone()))
+                                .flatten()
+                        })
                 })
             else {
                 return Err(format!(
@@ -711,7 +777,11 @@ fn execute_harness_followup_command(
                         .map(|device| format!("{}:current={}", device.id, device.is_current))
                         .collect::<Vec<_>>()
                         .join(","),
-                    exported_device_ids.join(",")
+                    exported_devices
+                        .iter()
+                        .map(|device| format!("{}:current={}", device.id, device.is_current))
+                        .collect::<Vec<_>>()
+                        .join(",")
                 ));
             };
             let Some(cb) = callbacks.as_ref() else {
@@ -904,7 +974,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Authority subscription: current authority id for dispatch handlers
     // =========================================================================
-    let shared_authority_id = use_authority_id_subscription(&mut hooks, &app_ctx);
+    let shared_authority_id =
+        use_authority_id_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Shared selected channel identity for subscriptions and dispatch
@@ -918,16 +989,36 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let selected_channel_binding: std::sync::Arc<
         parking_lot::RwLock<Option<SelectedChannelBinding>>,
     > = selected_channel_binding_ref.read().clone();
-    let last_exported_device_ids_ref =
-        hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(Vec::<String>::new())));
-    let last_exported_device_ids: std::sync::Arc<parking_lot::RwLock<Vec<String>>> =
-        last_exported_device_ids_ref.read().clone();
+    let last_exported_devices_ref =
+        hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(Vec::<Device>::new())));
+    let last_exported_devices: std::sync::Arc<parking_lot::RwLock<Vec<Device>>> =
+        last_exported_devices_ref.read().clone();
     let pending_create_channel_receipts_ref = hooks.use_ref(|| {
         Arc::new(Mutex::new(
             HashMap::<String, HarnessCommandReceiptHandle>::new(),
         ))
     });
     let pending_create_channel_receipts = pending_create_channel_receipts_ref.read().clone();
+    let pending_join_channel_receipts_ref = hooks.use_ref(|| {
+        Arc::new(Mutex::new(
+            HashMap::<String, HarnessCommandReceiptHandle>::new(),
+        ))
+    });
+    let pending_join_channel_receipts = pending_join_channel_receipts_ref.read().clone();
+    let ready_join_channel_receipts_ref =
+        hooks.use_ref(|| Arc::new(Mutex::new(HashSet::<String>::new())));
+    let ready_join_channel_receipts = ready_join_channel_receipts_ref.read().clone();
+    let pending_accept_pending_channel_receipts_ref = hooks.use_ref(|| {
+        Arc::new(Mutex::new(
+            HashMap::<String, HarnessCommandReceiptHandle>::new(),
+        ))
+    });
+    let pending_accept_pending_channel_receipts =
+        pending_accept_pending_channel_receipts_ref.read().clone();
+    let ready_accept_pending_channel_receipts_ref =
+        hooks.use_ref(|| Arc::new(Mutex::new(HashSet::<String>::new())));
+    let ready_accept_pending_channel_receipts =
+        ready_accept_pending_channel_receipts_ref.read().clone();
 
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
@@ -1253,12 +1344,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_channels_for_commands = shared_channels.clone();
             let shared_devices_for_commands = shared_devices.clone();
             let shared_messages_for_commands = shared_messages.clone();
-            let last_exported_device_ids_for_commands = last_exported_device_ids.clone();
+            let last_exported_devices_for_commands = last_exported_devices.clone();
             let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
             let selected_channel_binding_for_commands =
                 selected_channel_binding_for_chat_screen.clone();
             let pending_create_channel_receipts_for_commands =
                 pending_create_channel_receipts.clone();
+            let pending_join_channel_receipts_for_commands =
+                pending_join_channel_receipts.clone();
+            let pending_accept_pending_channel_receipts_for_commands =
+                pending_accept_pending_channel_receipts.clone();
             async move {
                 #[allow(clippy::expect_used)]
                 let mut rx = {
@@ -1314,7 +1409,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 &shared_channels_for_commands,
                                 &shared_devices_for_commands,
                                 &shared_messages_for_commands,
-                                &last_exported_device_ids_for_commands,
+                                &last_exported_devices_for_commands,
                                 &tui_selected_for_commands,
                                 &selected_channel_binding_for_commands,
                             )? {
@@ -1353,23 +1448,52 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         submission.command,
                         HarnessUiCommand::CreateChannel { .. }
                     ) && operation_handle.is_some();
-                    if defer_create_channel_receipt {
-                        if let Some(handle) = operation_handle.clone() {
-                            pending_create_channel_receipts_for_commands
-                                .lock()
-                                .unwrap()
-                                .insert(
-                                    handle.instance_id().0.clone(),
-                                    submission.receipt.clone(),
-                                );
-                        }
+                    let defer_join_channel_receipt = matches!(
+                        submission.command,
+                        HarnessUiCommand::JoinChannel { .. }
+                    ) && operation_handle.is_some();
+                    let defer_accept_pending_channel_receipt = matches!(
+                        submission.command,
+                        HarnessUiCommand::AcceptPendingChannelInvitation
+                    ) && operation_handle.is_some();
+                    if defer_create_channel_receipt
+                        || defer_join_channel_receipt
+                        || defer_accept_pending_channel_receipt
+                    {
+                        let Some(handle) = operation_handle.clone() else {
+                            submission.receipt.complete(
+                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                    reason: "semantic command did not expose a canonical ui operation handle with exact instance tracking".to_string(),
+                                },
+                            );
+                            continue;
+                        };
+                        let pending_receipts = if defer_create_channel_receipt {
+                            &pending_create_channel_receipts_for_commands
+                        } else if defer_join_channel_receipt {
+                            &pending_join_channel_receipts_for_commands
+                        } else {
+                            &pending_accept_pending_channel_receipts_for_commands
+                        };
+                        pending_receipts
+                            .lock()
+                            .unwrap()
+                            .insert(handle.instance_id().0.clone(), submission.receipt.clone());
                     } else {
-                        submission.receipt.complete(
-                            aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
-                                operation: operation_handle,
-                                value: None,
-                            },
-                        );
+                        let receipt = match operation_handle {
+                            Some(operation) => {
+                                aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
+                                    operation,
+                                    value: None,
+                                }
+                            }
+                            None => {
+                                aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
+                                    value: None,
+                                }
+                            }
+                        };
+                        submission.receipt.complete(receipt);
                     }
 
                     let export_result = maybe_export_ui_snapshot(
@@ -1407,6 +1531,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let tui_selected_for_updates = tui_selected;
             let selected_channel_binding_for_updates = selected_channel_binding;
             let pending_create_channel_receipts_for_updates = pending_create_channel_receipts;
+            let pending_join_channel_receipts_for_updates = pending_join_channel_receipts;
+            let ready_join_channel_receipts_for_updates = ready_join_channel_receipts;
+            let pending_accept_pending_channel_receipts_for_updates =
+                pending_accept_pending_channel_receipts;
+            let ready_accept_pending_channel_receipts_for_updates =
+                ready_accept_pending_channel_receipts;
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -1456,6 +1586,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::DeviceRemoved { device_id: _ } => {
                             // Settings screen renders from SETTINGS_SIGNAL; no local state update.
+                        }
+                        UiUpdate::AuthoritiesUpdated {
+                            authorities,
+                            current_index,
+                        } => {
+                            tui.with_mut(|state| {
+                                state.authorities = authorities.clone();
+                                state.current_authority_index = current_index
+                                    .min(state.authorities.len().saturating_sub(1));
+                            });
                         }
                         UiUpdate::RuntimeBootstrapFinalized => {
                             let should_clear = tui.read_clone().pending_runtime_bootstrap;
@@ -1847,6 +1987,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     let _ = &channel;
                                 });
                             }
+                            if let Some(binding) =
+                                selected_channel_binding_for_updates.read().clone()
+                            {
+                                complete_ready_channel_binding_receipts(
+                                    &pending_join_channel_receipts_for_updates,
+                                    &ready_join_channel_receipts_for_updates,
+                                    aura_app::ui_contract::OperationId::join_channel(),
+                                    &binding,
+                                );
+                                complete_ready_channel_binding_receipts(
+                                    &pending_accept_pending_channel_receipts_for_updates,
+                                    &ready_accept_pending_channel_receipts_for_updates,
+                                    aura_app::ui_contract::OperationId::invitation_accept(),
+                                    &binding,
+                                );
+                            }
                         }
                         UiUpdate::ChannelCreated {
                             operation_instance_id,
@@ -1894,12 +2050,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         .remove(&instance_id.0)
                                     {
                                     receipt.complete(
-                                        aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
-                                            operation: Some(
-                                                aura_app::ui_contract::HarnessUiOperationHandle::new(
-                                                    aura_app::ui_contract::OperationId::create_channel(),
-                                                    instance_id,
-                                                ),
+                                        aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
+                                            operation: aura_app::ui_contract::HarnessUiOperationHandle::new(
+                                                aura_app::ui_contract::OperationId::create_channel(),
+                                                instance_id,
                                             ),
                                             value: Some(
                                                 aura_app::scenario_contract::SemanticCommandValue::ChannelBinding {
@@ -1979,6 +2133,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.message_scroll = max_scroll;
                                 }
                             });
+                            if let Some(binding) =
+                                selected_channel_binding_for_updates.read().clone()
+                            {
+                                complete_ready_channel_binding_receipts(
+                                    &pending_join_channel_receipts_for_updates,
+                                    &ready_join_channel_receipts_for_updates,
+                                    aura_app::ui_contract::OperationId::join_channel(),
+                                    &binding,
+                                );
+                                complete_ready_channel_binding_receipts(
+                                    &pending_accept_pending_channel_receipts_for_updates,
+                                    &ready_accept_pending_channel_receipts_for_updates,
+                                    aura_app::ui_contract::OperationId::invitation_accept(),
+                                    &binding,
+                                );
+                            }
                         }
                         UiUpdate::TopicSet {
                             channel: _,
@@ -2119,6 +2289,103 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 reason,
                                             },
                                         );
+                                    }
+                                }
+                            }
+                            if let Some(instance_id) = instance_id.clone() {
+                                let is_join_channel = status.kind
+                                    == SemanticOperationKind::JoinChannel
+                                    && operation_id
+                                        == aura_app::ui_contract::OperationId::join_channel();
+                                let is_accept_pending_channel = status.kind
+                                    == SemanticOperationKind::AcceptPendingChannelInvitation
+                                    && operation_id
+                                        == aura_app::ui_contract::OperationId::invitation_accept();
+                                let is_failed_or_cancelled = matches!(
+                                    status.phase,
+                                    aura_app::ui_contract::SemanticOperationPhase::Failed
+                                        | aura_app::ui_contract::SemanticOperationPhase::Cancelled
+                                );
+                                let is_succeeded = matches!(
+                                    status.phase,
+                                    aura_app::ui_contract::SemanticOperationPhase::Succeeded
+                                );
+                                if is_join_channel {
+                                    if is_failed_or_cancelled {
+                                        ready_join_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .remove(&instance_id.0);
+                                        if let Some(receipt) = pending_join_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .remove(&instance_id.0)
+                                        {
+                                            let reason = status
+                                                .error
+                                                .as_ref()
+                                                .and_then(|error| error.detail.clone())
+                                                .unwrap_or_else(|| "join channel failed".to_string());
+                                            receipt.complete(
+                                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                                    reason,
+                                                },
+                                            );
+                                        }
+                                    } else if is_succeeded {
+                                        ready_join_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .insert(instance_id.0.clone());
+                                        if let Some(binding) =
+                                            selected_channel_binding_for_updates.read().clone()
+                                        {
+                                            complete_ready_channel_binding_receipts(
+                                                &pending_join_channel_receipts_for_updates,
+                                                &ready_join_channel_receipts_for_updates,
+                                                aura_app::ui_contract::OperationId::join_channel(),
+                                                &binding,
+                                            );
+                                        }
+                                    }
+                                }
+                                if is_accept_pending_channel {
+                                    if is_failed_or_cancelled {
+                                        ready_accept_pending_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .remove(&instance_id.0);
+                                        if let Some(receipt) = pending_accept_pending_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .remove(&instance_id.0)
+                                        {
+                                            let reason = status
+                                                .error
+                                                .as_ref()
+                                                .and_then(|error| error.detail.clone())
+                                                .unwrap_or_else(|| "accept pending channel invitation failed".to_string());
+                                            receipt.complete(
+                                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                                    reason,
+                                                },
+                                            );
+                                        }
+                                    } else if is_succeeded {
+                                        ready_accept_pending_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .insert(instance_id.0.clone());
+                                        if let Some(binding) =
+                                            selected_channel_binding_for_updates.read().clone()
+                                        {
+                                            complete_ready_channel_binding_receipts(
+                                                &pending_accept_pending_channel_receipts_for_updates,
+                                                &ready_accept_pending_channel_receipts_for_updates,
+                                                aura_app::ui_contract::OperationId::invitation_accept(),
+                                                &binding,
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -2519,10 +2786,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let harness_contacts = shared_contacts.read().clone();
     let harness_channels = shared_channels.read().clone();
     let harness_messages = shared_messages.read().clone();
-    *last_exported_device_ids.write() = harness_devices
-        .iter()
-        .map(|device| device.id.clone())
-        .collect();
+    if !harness_devices.is_empty() {
+        *last_exported_devices.write() = harness_devices.clone();
+    }
     if let Err(error) = maybe_export_ui_snapshot(
         &tui_snapshot,
         TuiSemanticInputs {
@@ -2711,8 +2977,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
                                         code,
                                     } => {
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::device_enrollment(),
+                                            SemanticOperationKind::ImportDeviceEnrollmentCode,
+                                        );
                                         (cb.app.on_import_device_enrollment_during_onboarding)(
                                             code,
+                                            operation,
                                         );
                                     }
                                     DispatchCommand::AddGuardian { contact_id } => {
@@ -3893,7 +4173,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.settings.on_update_mfa)(policy);
                                     }
                                     DispatchCommand::AddDevice { name, invitee_authority_id } => {
-                                        (cb.settings.on_add_device)(name, invitee_authority_id);
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::device_enrollment(),
+                                            SemanticOperationKind::StartDeviceEnrollment,
+                                        );
+                                        (cb.settings.on_add_device)(
+                                            name,
+                                            invitee_authority_id,
+                                            operation,
+                                        );
                                     }
                                     DispatchCommand::RemoveDevice { device_id } => {
                                         (cb.settings.on_remove_device)(device_id);
@@ -3937,7 +4234,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         );
                                     }
                                     DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
-                                        (cb.settings.on_import_device_enrollment_on_mobile)(code);
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::device_enrollment(),
+                                            SemanticOperationKind::ImportDeviceEnrollmentCode,
+                                        );
+                                        (cb.settings.on_import_device_enrollment_on_mobile)(
+                                            code,
+                                            operation,
+                                        );
                                     }
                                     DispatchCommand::OpenAuthorityPicker => {
                                         // Build list of authorities from app-global state

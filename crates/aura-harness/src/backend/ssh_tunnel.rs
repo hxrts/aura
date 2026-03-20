@@ -147,7 +147,7 @@ impl InstanceBackend for SshTunnelBackend {
         Ok(())
     }
 
-    fn snapshot(&self) -> Result<String> {
+    fn diagnostic_screen_snapshot(&self) -> Result<String> {
         bail!("ssh_tunnel snapshot is not implemented yet")
     }
 

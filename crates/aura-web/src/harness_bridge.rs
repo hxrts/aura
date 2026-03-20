@@ -207,23 +207,16 @@ fn selected_channel_id(controller: &UiController) -> Result<ChannelId, JsValue> 
         .iter()
         .find(|selection| selection.list == ListId::Channels)
         .map(|selection| selection.item_id.clone())
-        .or_else(|| {
-            snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Channels)
-                .and_then(|list| {
-                    if list.items.len() == 1 {
-                        list.items.first().map(|item| item.id.clone())
-                    } else {
-                        None
-                    }
-                })
-        })
         .ok_or_else(|| JsValue::from_str("no channel is selected"))?;
     selected
         .parse::<ChannelId>()
         .map_err(|error| JsValue::from_str(&format!("invalid selected channel id: {error}")))
+}
+
+fn selected_channel_binding(
+    controller: &UiController,
+) -> Result<(String, Option<String>), JsValue> {
+    Ok((selected_channel_id(controller)?.to_string(), None))
 }
 
 fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
@@ -581,13 +574,19 @@ async fn submit_semantic_command(
             invitation_workflows::accept_pending_home_invitation(controller.app_core())
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            let (channel_id, context_id) = selected_channel_binding(&controller)?;
+            Ok(SemanticCommandResponse::accepted_channel_binding(
+                channel_id, context_id,
+            ))
         }
         IntentAction::JoinChannel { channel_name } => {
             messaging_workflows::join_channel_by_name(controller.app_core(), &channel_name)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            let (channel_id, context_id) = selected_channel_binding(&controller)?;
+            Ok(SemanticCommandResponse::accepted_channel_binding(
+                channel_id, context_id,
+            ))
         }
         IntentAction::InviteActorToChannel {
             authority_id,
@@ -596,12 +595,14 @@ async fn submit_semantic_command(
             let authority_id = authority_id
                 .parse::<AuthorityId>()
                 .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
-            let channel_id = match channel_id {
-                Some(channel_id) => channel_id
-                    .parse::<ChannelId>()
-                    .map_err(|error| JsValue::from_str(&format!("invalid channel id: {error}")))?,
-                None => selected_channel_id(&controller)?,
-            };
+            let channel_id = channel_id
+                .ok_or_else(|| {
+                    JsValue::from_str(
+                        "invite_actor_to_channel requires an authoritative channel binding",
+                    )
+                })?
+                .parse::<ChannelId>()
+                .map_err(|error| JsValue::from_str(&format!("invalid channel id: {error}")))?;
             messaging_workflows::invite_authority_to_channel(
                 controller.app_core(),
                 authority_id,

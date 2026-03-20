@@ -27,15 +27,14 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
-use crate::backend::observe_operation;
-use crate::backend::UiOperationHandle;
+use crate::backend::{observe_operation, ChannelBinding, UiOperationHandle};
 use crate::config::{
     nav_control_id_for_screen, settings_section_item_id, CompatibilityAction, CompatibilityStep,
     ScenarioConfig, ScreenSource,
 };
 use crate::introspection::ToastLevel;
 use crate::timeouts::blocking_sleep;
-use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
+use crate::tool_api::{DiagnosticScreenCapture, ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
 const CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS: u64 = 5;
@@ -108,53 +107,10 @@ enum ExecutionLane {
 struct ScenarioContext {
     vars: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
-    current_channel_name: BTreeMap<String, String>,
-    current_channel_id: BTreeMap<String, String>,
-    channel_name_by_id: BTreeMap<String, String>,
-    removable_device_id: BTreeMap<String, String>,
+    current_channel_binding: BTreeMap<String, ChannelBinding>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
-    shared_flow_state: BTreeMap<String, SharedFlowState>,
     pending_convergence: BTreeMap<String, Vec<BarrierDeclaration>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum AccountPhase {
-    #[default]
-    New,
-    Ready,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum ContactPhase {
-    #[default]
-    None,
-    InvitationReady,
-    Linked,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum ChannelPhase {
-    #[default]
-    None,
-    InvitationPending,
-    MembershipReady,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum MessagingPhase {
-    #[default]
-    None,
-    Ready,
-    Visible,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct SharedFlowState {
-    account: AccountPhase,
-    contact: ContactPhase,
-    channel: ChannelPhase,
-    messaging: MessagingPhase,
 }
 
 #[derive(Debug, Clone)]
@@ -180,69 +136,6 @@ enum WaitContractRef<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SharedFlowTransition {
-    AccountReady,
-    ContactInvitationReady,
-    ContactLinked,
-    PendingChannelInvitation,
-    ChannelMembershipReady,
-    MessageVisible,
-}
-
-impl SharedFlowState {
-    fn apply(self, transition: SharedFlowTransition) -> Result<Self> {
-        let mut next = self;
-        match transition {
-            SharedFlowTransition::AccountReady => {
-                if !matches!(self.account, AccountPhase::New) {
-                    bail!("account transition AccountReady requires AccountPhase::New");
-                }
-                next.account = AccountPhase::Ready;
-            }
-            SharedFlowTransition::ContactInvitationReady => {
-                if !matches!(self.account, AccountPhase::Ready) {
-                    bail!("contact invitation requires AccountPhase::Ready");
-                }
-                if !matches!(
-                    self.contact,
-                    ContactPhase::None | ContactPhase::InvitationReady
-                ) {
-                    bail!("contact invitation transition requires unlinked contact state");
-                }
-                next.contact = ContactPhase::InvitationReady;
-            }
-            SharedFlowTransition::ContactLinked => {
-                if !matches!(self.account, AccountPhase::Ready) {
-                    bail!("contact link requires AccountPhase::Ready");
-                }
-                next.contact = ContactPhase::Linked;
-            }
-            SharedFlowTransition::PendingChannelInvitation => {
-                if !matches!(self.contact, ContactPhase::Linked) {
-                    bail!("pending channel invitation requires ContactPhase::Linked");
-                }
-                next.channel = ChannelPhase::InvitationPending;
-            }
-            SharedFlowTransition::ChannelMembershipReady => {
-                if !matches!(self.account, AccountPhase::Ready) {
-                    bail!("channel membership requires AccountPhase::Ready");
-                }
-                next.channel = ChannelPhase::MembershipReady;
-                next.messaging = MessagingPhase::Ready;
-            }
-            SharedFlowTransition::MessageVisible => {
-                if !matches!(self.account, AccountPhase::Ready) {
-                    bail!("message visibility requires AccountPhase::Ready");
-                }
-                next.channel = ChannelPhase::MembershipReady;
-                next.messaging = MessagingPhase::Visible;
-            }
-        }
-        Ok(next)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedSemanticBinding {
     CreateAccount,
     CreateHome,
@@ -259,106 +152,14 @@ enum SharedSemanticBinding {
     SendChatMessage,
 }
 
-fn ensure_shared_binding_prerequisites(
-    binding: SharedSemanticBinding,
+fn record_current_channel_binding(
     context: &mut ScenarioContext,
     instance_id: &str,
-) -> Result<()> {
-    let state = *shared_flow_state_mut(context, instance_id);
-    match binding {
-        SharedSemanticBinding::CreateAccount => {
-            if !matches!(state.account, AccountPhase::New) {
-                bail!("create_account requires AccountPhase::New");
-            }
-        }
-        SharedSemanticBinding::CreateContactInvitation
-        | SharedSemanticBinding::AcceptContactInvitation => {
-            if !matches!(state.account, AccountPhase::Ready) {
-                bail!("{binding:?} requires AccountPhase::Ready");
-            }
-        }
-        SharedSemanticBinding::JoinChannel => {
-            if !matches!(state.account, AccountPhase::Ready) {
-                bail!("join_channel requires AccountPhase::Ready");
-            }
-        }
-        SharedSemanticBinding::InviteActorToChannel => {
-            if !matches!(state.contact, ContactPhase::Linked) {
-                bail!("invite_actor_to_channel requires ContactPhase::Linked");
-            }
-            if !matches!(state.channel, ChannelPhase::MembershipReady) {
-                bail!("invite_actor_to_channel requires ChannelPhase::MembershipReady");
-            }
-        }
-        SharedSemanticBinding::AcceptPendingChannelInvitation => {
-            if !matches!(
-                state.channel,
-                ChannelPhase::None
-                    | ChannelPhase::InvitationPending
-                    | ChannelPhase::MembershipReady
-            ) {
-                bail!("accept_pending_channel_invitation requires no completed channel membership");
-            }
-        }
-        SharedSemanticBinding::SendChatMessage => {
-            if !matches!(state.channel, ChannelPhase::MembershipReady) {
-                bail!("send_chat_message requires ChannelPhase::MembershipReady");
-            }
-        }
-        SharedSemanticBinding::CreateHome
-        | SharedSemanticBinding::CreateChannel
-        | SharedSemanticBinding::StartDeviceEnrollment
-        | SharedSemanticBinding::ImportDeviceEnrollmentCode
-        | SharedSemanticBinding::RemoveSelectedDevice
-        | SharedSemanticBinding::SwitchAuthority => {}
-    }
-    Ok(())
-}
-
-fn shared_flow_transition_for_binding(
-    binding: SharedSemanticBinding,
-) -> Option<SharedFlowTransition> {
-    match binding {
-        SharedSemanticBinding::CreateAccount => Some(SharedFlowTransition::AccountReady),
-        SharedSemanticBinding::CreateContactInvitation => {
-            Some(SharedFlowTransition::ContactInvitationReady)
-        }
-        SharedSemanticBinding::AcceptContactInvitation => Some(SharedFlowTransition::ContactLinked),
-        SharedSemanticBinding::CreateChannel => Some(SharedFlowTransition::ChannelMembershipReady),
-        SharedSemanticBinding::StartDeviceEnrollment
-        | SharedSemanticBinding::ImportDeviceEnrollmentCode
-        | SharedSemanticBinding::RemoveSelectedDevice
-        | SharedSemanticBinding::SwitchAuthority
-        | SharedSemanticBinding::JoinChannel
-        | SharedSemanticBinding::InviteActorToChannel
-        | SharedSemanticBinding::AcceptPendingChannelInvitation
-        | SharedSemanticBinding::SendChatMessage
-        | SharedSemanticBinding::CreateHome => None,
-    }
-}
-
-fn record_shared_binding_progress(
-    binding: SharedSemanticBinding,
-    context: &mut ScenarioContext,
-    instance_id: &str,
+    binding: ChannelBinding,
 ) {
-    let state = shared_flow_state_mut(context, instance_id);
-    let Some(transition) = shared_flow_transition_for_binding(binding) else {
-        return;
-    };
-    if let Ok(next) = state.apply(transition) {
-        *state = next;
-    }
-}
-
-fn binding_satisfies_barrier(binding: SharedSemanticBinding, barrier: &BarrierDeclaration) -> bool {
-    matches!(
-        (binding, barrier),
-        (
-            SharedSemanticBinding::JoinChannel,
-            BarrierDeclaration::RuntimeEvent(RuntimeEventKind::ChannelMembershipReady)
-        )
-    )
+    context
+        .current_channel_binding
+        .insert(instance_id.to_string(), binding);
 }
 
 fn ensure_post_operation_convergence_satisfied_for_binding(
@@ -370,15 +171,7 @@ fn ensure_post_operation_convergence_satisfied_for_binding(
     let Some(pending) = context.pending_convergence.get(instance_id) else {
         return Ok(());
     };
-    let remaining: Vec<_> = pending
-        .iter()
-        .filter(|required| !binding_satisfies_barrier(binding, required))
-        .cloned()
-        .collect();
-    if remaining.is_empty() {
-        return Ok(());
-    }
-    bail!("step {step_id} convergence-contract violation for {binding:?}: pending {remaining:?}");
+    bail!("step {step_id} convergence-contract violation for {binding:?}: pending {pending:?}");
 }
 
 fn ensure_post_operation_convergence_satisfied(
@@ -898,7 +691,7 @@ fn execute_compatibility_step(
                         step.timeout_ms.unwrap_or(step_budget_ms),
                     ),
                 )?;
-                record_shared_flow_progress(step, context, &instance_id);
+                record_authoritative_convergence_progress(step, context, &instance_id);
                 return Ok(());
             }
             let selector = match step.selector.as_deref() {
@@ -1025,39 +818,13 @@ fn execute_semantic_step(
                 name,
             } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
-                let payload = dispatch_payload_in_lane(
-                    tool_api,
-                    ExecutionLane::SharedSemantic,
-                    ToolRequest::PrepareDeviceEnrollmentInviteeAuthority { instance_id },
-                )?;
-                let authority_id = payload
-                    .get("authority_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "step {} prepare_device_enrollment_invitee_authority missing authority_id",
-                            step.id
-                        )
-                    })?;
+                let authority_id = tool_api.prepare_device_enrollment_invitee_authority(&instance_id)?;
                 context.vars.insert(name.clone(), authority_id.to_string());
                 Ok(())
             }
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { name } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
-                let payload = dispatch_payload_in_lane(
-                    tool_api,
-                    ExecutionLane::SharedSemantic,
-                    ToolRequest::GetAuthorityId { instance_id },
-                )?;
-                let authority_id = payload
-                    .get("authority_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "step {} capture_current_authority_id missing authority_id",
-                            step.id
-                        )
-                    })?;
+                let authority_id = tool_api.current_authority_id(&instance_id)?;
                 context.vars.insert(name.clone(), authority_id.to_string());
                 Ok(())
             }
@@ -1098,8 +865,9 @@ fn execute_semantic_step(
                         screen_source: ScreenSource::Default,
                     },
                 )?;
+                let capture: DiagnosticScreenCapture = serde_json::from_value(payload)?;
                 let field = screen_field_from_extract_source(*from);
-                let source = screen_field_value(&payload, field);
+                let source = screen_field_value(&capture, field);
                 let regex = Regex::new(&regex_pattern)
                     .map_err(|error| anyhow!("step {} invalid regex: {error}", step.id))?;
                 let captures = regex.captures(source).ok_or_else(|| {
@@ -1328,7 +1096,7 @@ fn execute_semantic_step(
             };
             if result.is_ok() {
                 let progress_step = semantic_progress_step(step, expectation)?;
-                record_shared_flow_progress(&progress_step, context, &instance_id);
+                record_authoritative_convergence_progress(&progress_step, context, &instance_id);
             }
             result
         }
@@ -1424,7 +1192,6 @@ fn execute_semantic_intent(
     let instance_id = resolve_required_semantic_instance(step)?;
     let metadata_step = semantic_metadata_step(step);
     enforce_action_preconditions(step, tool_api, context, &intent, step_budget_ms)?;
-    ensure_shared_binding_prerequisites(binding, context, &instance_id)?;
     ensure_post_operation_convergence_satisfied(step, context, &instance_id)?;
 
     match &intent {
@@ -1446,7 +1213,6 @@ fn execute_semantic_intent(
                 &instance_id,
                 require_semantic_unit_submission(&metadata_step, operation, response)?,
             );
-            record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
         IntentAction::CreateChannel { channel_name } => {
@@ -1457,19 +1223,11 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            let (channel_id, handle) =
+            let (channel_binding, handle) =
                 require_channel_binding_submission(&metadata_step, "create_channel", response)?;
             record_submission_handle(context, &instance_id, handle);
-            context
-                .current_channel_name
-                .insert(instance_id.clone(), channel_name.clone());
-            context
-                .channel_name_by_id
-                .insert(channel_id.clone(), channel_name.clone());
-            context
-                .current_channel_id
-                .insert(instance_id.clone(), channel_id);
-            record_shared_binding_progress(binding, context, &instance_id);
+            let _ = channel_name;
+            record_current_channel_binding(context, &instance_id, channel_binding);
             Ok(())
         }
         IntentAction::StartDeviceEnrollment {
@@ -1512,49 +1270,39 @@ fn execute_semantic_intent(
                     response,
                 )?,
             );
-            record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
         IntentAction::RemoveSelectedDevice { .. } => {
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let resolution_deadline =
-                Instant::now() + Duration::from_millis(timeout_ms.min(10_000));
-            let mut snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-            remember_snapshot_bindings(context, &instance_id, &snapshot);
-            let device_id =
-                match resolve_authoritative_removable_device_id(context, &instance_id, &snapshot) {
-                    Ok(device_id) => device_id,
-                    Err(_) => {
-                        let mut wait_step = semantic_wait_step(&metadata_step);
-                        wait_step.list_id = Some(ListId::Devices);
-                        wait_step.count = Some(2);
-                        wait_for_semantic_state(
-                            &wait_step,
-                            tool_api,
-                            context,
-                            &instance_id,
-                            timeout_ms.min(10_000),
-                        )?;
-
-                        loop {
-                            snapshot = fetch_ui_snapshot(tool_api, &instance_id)?;
-                            remember_snapshot_bindings(context, &instance_id, &snapshot);
-                            match resolve_authoritative_removable_device_id(
-                                context,
-                                &instance_id,
-                                &snapshot,
-                            ) {
-                                Ok(device_id) => break device_id,
-                                Err(error) => {
-                                    if Instant::now() >= resolution_deadline {
-                                        return Err(error);
-                                    }
-                                    blocking_sleep(Duration::from_millis(100));
-                                }
-                            }
-                        }
-                    }
-                };
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms).min(10_000);
+            let mut wait_step = semantic_wait_step(&metadata_step);
+            wait_step.list_id = Some(ListId::Devices);
+            wait_step.count = Some(2);
+            let snapshot = wait_for_semantic_state_snapshot(
+                &wait_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+            )?;
+            let Some(device_id) = removable_device_id_from_snapshot(&snapshot) else {
+                let current_devices = snapshot
+                    .lists
+                    .iter()
+                    .find(|list| list.id == ListId::Devices)
+                    .map(|list| {
+                        list.items
+                            .iter()
+                            .map(|item| format!("{}:current={}", item.id, item.is_current))
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .unwrap_or_default();
+                bail!(
+                    "no removable device was present in the successful device snapshot (instance={} devices={})",
+                    instance_id,
+                    current_devices
+                );
+            };
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1603,7 +1351,6 @@ fn execute_semantic_intent(
             if let Some(code_name) = code_name.as_deref() {
                 context.vars.insert(code_name.to_string(), code);
             }
-            record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
         IntentAction::AcceptContactInvitation { .. } => {
@@ -1660,7 +1407,6 @@ fn execute_semantic_intent(
                     ),
                 )?;
             }
-            record_shared_binding_progress(binding, context, &instance_id);
             Ok(())
         }
         IntentAction::JoinChannel { channel_name } => {
@@ -1671,55 +1417,25 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            record_submission_handle(
-                context,
-                &instance_id,
-                Some(require_semantic_unit_submission_with_exact_handle(
-                    &metadata_step,
-                    "join_channel",
-                    response,
-                )?),
-            );
-            context
-                .current_channel_name
-                .insert(instance_id.clone(), channel_name.clone());
-            if let Some(channel_id) =
-                capture_authoritative_channel_id(tool_api, &instance_id, channel_name)?.or_else(
-                    || {
-                        capture_unique_shared_channel_id(tool_api, &instance_id)
-                            .ok()
-                            .flatten()
-                    },
-                )
-            {
-                context
-                    .channel_name_by_id
-                    .insert(channel_id.clone(), channel_name.clone());
-                context
-                    .current_channel_id
-                    .insert(instance_id.clone(), channel_id);
-            }
+            let (channel_binding, handle) = require_channel_binding_submission_with_exact_handle(
+                &metadata_step,
+                "join_channel",
+                response,
+            )?;
+            record_submission_handle(context, &instance_id, Some(handle));
+            let _ = channel_name;
+            record_current_channel_binding(context, &instance_id, channel_binding);
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let channel_name = context
-                .current_channel_name
+            let explicit_channel_id = context
+                .current_channel_binding
                 .get(&instance_id)
-                .cloned()
+                .map(|binding| binding.channel_id.clone())
                 .ok_or_else(|| {
                     anyhow!(
                         "invite_actor_to_channel requires an authoritative current channel binding"
-                    )
-                })?;
-            let explicit_channel_id = context
-                .current_channel_id
-                .get(&instance_id)
-                .cloned()
-                .or_else(|| capture_authoritative_channel_id(tool_api, &instance_id, &channel_name).ok().flatten())
-                .ok_or_else(|| {
-                    anyhow!(
-                        "invite_actor_to_channel could not resolve authoritative channel id for {channel_name}"
                     )
                 })?;
             let invite_intent = IntentAction::InviteActorToChannel {
@@ -1765,11 +1481,12 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            let operation_handle = require_semantic_unit_submission_with_exact_handle(
-                &metadata_step,
-                "accept_pending_channel_invitation",
-                response,
-            )?;
+            let (channel_binding, operation_handle) =
+                require_channel_binding_submission_with_exact_handle(
+                    &metadata_step,
+                    "accept_pending_channel_invitation",
+                    response,
+                )?;
             record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
             convergence_stage(
                 &metadata_step,
@@ -1783,17 +1500,7 @@ fn execute_semantic_intent(
                     OperationState::Succeeded,
                 ),
             )?;
-            if let Some(channel_id) = capture_unique_shared_channel_id(tool_api, &instance_id)? {
-                if let Some(channel_name) = context.current_channel_name.get(&instance_id).cloned()
-                {
-                    context
-                        .channel_name_by_id
-                        .insert(channel_id.clone(), channel_name);
-                }
-                context
-                    .current_channel_id
-                    .insert(instance_id.clone(), channel_id);
-            }
+            record_current_channel_binding(context, &instance_id, channel_binding);
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
@@ -1930,15 +1637,10 @@ fn resolve_intent_templates(
         }
         IntentAction::JoinChannel { channel_name } => {
             let resolved_channel = resolve_template(channel_name, context)?;
-            let channel_name = if resolved_channel.starts_with("channel:") {
-                context
-                    .channel_name_by_id
-                    .get(&resolved_channel)
-                    .cloned()
-                    .unwrap_or(resolved_channel)
-            } else {
-                resolved_channel
-            };
+            if resolved_channel.starts_with("channel:") {
+                bail!("join_channel requires an authoritative shared channel name, not a channel id template");
+            }
+            let channel_name = resolved_channel;
             IntentAction::JoinChannel { channel_name }
         }
         IntentAction::InviteActorToChannel {
@@ -2957,32 +2659,20 @@ fn screen_field_from_extract_source(value: ExtractSource) -> ScreenField {
 
 fn screen_field_label(value: ScreenField) -> &'static str {
     match value {
-        ScreenField::Screen => "screen",
-        ScreenField::RawScreen => "raw_screen",
-        ScreenField::AuthoritativeScreen => "authoritative_screen",
-        ScreenField::NormalizedScreen => "normalized_screen",
+        ScreenField::Screen => "diagnostic_authoritative_screen",
+        ScreenField::RawScreen => "diagnostic_raw_screen",
+        ScreenField::AuthoritativeScreen => "diagnostic_authoritative_screen",
+        ScreenField::NormalizedScreen => "diagnostic_normalized_screen",
     }
 }
 
-fn screen_field_value(payload: &serde_json::Value, field: ScreenField) -> &str {
-    let fallback = payload
-        .get("screen")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
+fn screen_field_value(capture: &DiagnosticScreenCapture, field: ScreenField) -> &str {
     match field {
-        ScreenField::Screen => fallback,
-        ScreenField::RawScreen => payload
-            .get("raw_screen")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(fallback),
-        ScreenField::AuthoritativeScreen => payload
-            .get("authoritative_screen")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(fallback),
-        ScreenField::NormalizedScreen => payload
-            .get("normalized_screen")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(fallback),
+        ScreenField::Screen | ScreenField::AuthoritativeScreen => {
+            capture.diagnostic_authoritative_screen.as_str()
+        }
+        ScreenField::RawScreen => capture.diagnostic_raw_screen.as_str(),
+        ScreenField::NormalizedScreen => capture.diagnostic_normalized_screen.as_str(),
     }
 }
 
@@ -2995,28 +2685,7 @@ fn remember_snapshot_bindings(
     instance_id: &str,
     snapshot: &UiSnapshot,
 ) {
-    let Some(devices) = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Devices)
-    else {
-        return;
-    };
-    if let Some(device_id) = devices
-        .items
-        .iter()
-        .find(|item| !item.is_current)
-        .map(|item| item.id.clone())
-        .or_else(|| {
-            (devices.items.len() > 1)
-                .then(|| devices.items.last().map(|item| item.id.clone()))
-                .flatten()
-        })
-    {
-        context
-            .removable_device_id
-            .insert(instance_id.to_string(), device_id);
-    }
+    let _ = (context, instance_id, snapshot);
 }
 
 fn capture_semantic_wait_success_bindings(
@@ -3025,42 +2694,11 @@ fn capture_semantic_wait_success_bindings(
     instance_id: &str,
     snapshot: &UiSnapshot,
 ) {
-    if step.list_id != Some(ListId::Devices) {
-        return;
-    }
-    if !step.count.is_some_and(|count| count > 1) {
-        return;
-    }
-    let Some(devices) = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Devices)
-    else {
-        return;
-    };
-    if let Some(device_id) = devices
-        .items
-        .iter()
-        .find(|item| !item.is_current)
-        .map(|item| item.id.clone())
-        .or_else(|| {
-            (devices.items.len() > 1)
-                .then(|| devices.items.last().map(|item| item.id.clone()))
-                .flatten()
-        })
-    {
-        context
-            .removable_device_id
-            .insert(instance_id.to_string(), device_id);
-    }
+    let _ = (step, context, instance_id, snapshot);
 }
 
-fn resolve_authoritative_removable_device_id(
-    context: &ScenarioContext,
-    instance_id: &str,
-    snapshot: &UiSnapshot,
-) -> Result<String> {
-    if let Some(device_id) = snapshot
+fn removable_device_id_from_snapshot(snapshot: &UiSnapshot) -> Option<String> {
+    snapshot
         .lists
         .iter()
         .find(|list| list.id == ListId::Devices)
@@ -3075,30 +2713,6 @@ fn resolve_authoritative_removable_device_id(
                         .flatten()
                 })
         })
-    {
-        return Ok(device_id);
-    }
-    if let Some(device_id) = context.removable_device_id.get(instance_id).cloned() {
-        return Ok(device_id);
-    }
-    let current_devices = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Devices)
-        .map(|list| {
-            list.items
-                .iter()
-                .map(|item| format!("{}:current={}", item.id, item.is_current))
-                .collect::<Vec<_>>()
-                .join(",")
-        })
-        .unwrap_or_default();
-    Err(anyhow!(
-        "no authoritative removable device binding is available (instance={} devices={} remembered={:?})",
-        instance_id,
-        current_devices,
-        context.removable_device_id.get(instance_id)
-    ))
 }
 
 fn fetch_ui_snapshot_in_lane(
@@ -3116,73 +2730,11 @@ fn fetch_ui_snapshot_in_lane(
     serde_json::from_value(payload).map_err(Into::into)
 }
 
-fn resolve_channel_id_for_shared_name(snapshot: &UiSnapshot, channel_name: &str) -> Option<String> {
-    snapshot
-        .runtime_events
-        .iter()
-        .find_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady { channel, .. }
-                if channel
-                    .name
-                    .as_deref()
-                    .is_some_and(|name| name.eq_ignore_ascii_case(channel_name)) =>
-            {
-                channel.id.clone()
-            }
-            _ => None,
-        })
-}
-
-fn unique_authoritative_shared_channel_id(snapshot: &UiSnapshot) -> Option<String> {
-    let mut channel_ids = snapshot
-        .runtime_events
-        .iter()
-        .filter_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady {
-                channel,
-                member_count: Some(member_count),
-            } if *member_count > 1
-                && channel
-                    .name
-                    .as_deref()
-                    .map(|name| !name.eq_ignore_ascii_case("note to self"))
-                    .unwrap_or(true) =>
-            {
-                channel.id.clone()
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    channel_ids.sort();
-    channel_ids.dedup();
-    match channel_ids.as_slice() {
-        [channel_id] => Some(channel_id.clone()),
-        _ => None,
-    }
-}
-
-fn capture_authoritative_channel_id(
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    channel_name: &str,
-) -> Result<Option<String>> {
-    let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    Ok(resolve_channel_id_for_shared_name(&snapshot, channel_name))
-}
-
-fn capture_unique_shared_channel_id(
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-) -> Result<Option<String>> {
-    let snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    Ok(unique_authoritative_shared_channel_id(&snapshot))
-}
-
-fn fetch_screen_text(
+fn fetch_diagnostic_screen_capture(
     tool_api: &mut ToolApi,
     instance_id: &str,
     screen_source: ScreenSource,
-) -> Result<String> {
+) -> Result<DiagnosticScreenCapture> {
     let payload = dispatch_payload(
         tool_api,
         ToolRequest::Screen {
@@ -3190,18 +2742,7 @@ fn fetch_screen_text(
             screen_source,
         },
     )?;
-    Ok(payload
-        .get("authoritative_screen")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            payload
-                .get("normalized_screen")
-                .and_then(serde_json::Value::as_str)
-        })
-        .or_else(|| payload.get("screen").and_then(serde_json::Value::as_str))
-        .map(ToOwned::to_owned)
-        .or_else(|| payload.as_str().map(ToOwned::to_owned))
-        .unwrap_or_else(|| payload.to_string()))
+    serde_json::from_value(payload).map_err(Into::into)
 }
 
 fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> bool {
@@ -3338,44 +2879,24 @@ fn semantic_wait_matches_for_instance(
     let mut non_operation_step = step.clone();
     non_operation_step.operation_id = None;
     non_operation_step.operation_state = None;
-    if non_operation_step.contains.is_none() && non_operation_step.value.is_none() {
-        if let Some(kind) = non_operation_step.runtime_event_kind {
-            if matches!(
-                kind,
+    let needs_channel_runtime_event_match = non_operation_step.contains.is_none()
+        && non_operation_step.value.is_none()
+        && matches!(
+            non_operation_step.runtime_event_kind,
+            Some(
                 RuntimeEventKind::ChannelMembershipReady
                     | RuntimeEventKind::RecipientPeersResolved
                     | RuntimeEventKind::MessageDeliveryReady
-            ) {
-                let mut channel_needles = Vec::new();
-                if let Some(channel_name) = context.current_channel_name.get(instance_id) {
-                    channel_needles.push(channel_name.clone());
-                }
-                if let Some(channel_id) = context.current_channel_id.get(instance_id) {
-                    channel_needles.push(channel_id.clone());
-                }
-                channel_needles.dedup();
-
-                if !channel_needles.is_empty() {
-                    let matched = channel_needles.into_iter().any(|needle| {
-                        let mut candidate_step = non_operation_step.clone();
-                        candidate_step.contains = Some(needle);
-                        semantic_wait_matches(&candidate_step, snapshot)
-                    });
-                    if !matched {
-                        if let Some(channel_id) = unique_authoritative_shared_channel_id(snapshot) {
-                            let mut candidate_step = non_operation_step;
-                            candidate_step.contains = Some(channel_id);
-                            if !semantic_wait_matches(&candidate_step, snapshot) {
-                                return false;
-                            }
-                        } else {
-                            return false;
-                        }
-                    }
-                } else if !semantic_wait_matches(&non_operation_step, snapshot) {
-                    return false;
-                }
-            }
+            )
+        );
+    if needs_channel_runtime_event_match {
+        let Some(channel_binding) = context.current_channel_binding.get(instance_id) else {
+            return false;
+        };
+        let mut candidate_step = non_operation_step;
+        candidate_step.contains = Some(channel_binding.channel_id.clone());
+        if !semantic_wait_matches(&candidate_step, snapshot) {
+            return false;
         }
     } else if !semantic_wait_matches(&non_operation_step, snapshot) {
         return false;
@@ -3551,11 +3072,18 @@ fn require_channel_binding_submission(
     step: &CompatibilityStep,
     operation: &str,
     response: SemanticCommandResponse,
-) -> Result<(String, Option<UiOperationHandle>)> {
+) -> Result<(ChannelBinding, Option<UiOperationHandle>)> {
     match response.value {
-        SemanticCommandValue::ChannelBinding { channel_id, .. } => {
-            Ok((channel_id, response.handle.ui_operation))
-        }
+        SemanticCommandValue::ChannelBinding {
+            channel_id,
+            context_id,
+        } => Ok((
+            ChannelBinding {
+                channel_id,
+                context_id,
+            },
+            response.handle.ui_operation,
+        )),
         SemanticCommandValue::None => bail!(
             "step {} issue stage failed for {}: missing channel binding payload",
             step.id,
@@ -3567,6 +3095,22 @@ fn require_channel_binding_submission(
             operation
         ),
     }
+}
+
+fn require_channel_binding_submission_with_exact_handle(
+    step: &CompatibilityStep,
+    operation: &str,
+    response: SemanticCommandResponse,
+) -> Result<(ChannelBinding, UiOperationHandle)> {
+    let (binding, handle) = require_channel_binding_submission(step, operation, response)?;
+    let handle = handle.ok_or_else(|| {
+        anyhow!(
+            "step {} issue stage failed for {}: missing canonical ui operation handle with exact instance tracking",
+            step.id,
+            operation
+        )
+    })?;
+    Ok((binding, handle))
 }
 
 fn require_contact_invitation_submission(
@@ -3606,16 +3150,6 @@ fn convergence_stage<T>(step: &CompatibilityStep, label: &str, result: Result<T>
             step.action
         )
     })
-}
-
-fn shared_flow_state_mut<'a>(
-    context: &'a mut ScenarioContext,
-    instance_id: &str,
-) -> &'a mut SharedFlowState {
-    context
-        .shared_flow_state
-        .entry(instance_id.to_string())
-        .or_default()
 }
 
 fn pending_convergence_mut<'a>(
@@ -3693,32 +3227,12 @@ fn step_satisfies_barrier(step: &CompatibilityStep, barrier: &BarrierDeclaration
     }
 }
 
-fn record_shared_flow_progress(
+fn record_authoritative_convergence_progress(
     step: &CompatibilityStep,
     context: &mut ScenarioContext,
     instance_id: &str,
 ) {
     clear_satisfied_post_operation_convergence(context, instance_id, step);
-    let state = shared_flow_state_mut(context, instance_id);
-    let transition = match step.action {
-        CompatibilityAction::WaitFor => match step.runtime_event_kind {
-            Some(RuntimeEventKind::ContactLinkReady) => Some(SharedFlowTransition::ContactLinked),
-            Some(RuntimeEventKind::PendingHomeInvitationReady) => {
-                Some(SharedFlowTransition::PendingChannelInvitation)
-            }
-            Some(RuntimeEventKind::ChannelMembershipReady) => {
-                Some(SharedFlowTransition::ChannelMembershipReady)
-            }
-            _ => None,
-        },
-        CompatibilityAction::MessageContains => Some(SharedFlowTransition::MessageVisible),
-        _ => None,
-    };
-    if let Some(transition) = transition {
-        if let Ok(next) = state.apply(transition) {
-            *state = next;
-        }
-    }
 }
 
 fn semantic_modal_name(modal: ModalId) -> &'static str {
@@ -3765,7 +3279,6 @@ fn wait_for_semantic_state_snapshot(
     timeout_ms: u64,
 ) -> Result<UiSnapshot> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
     let supports_ui_snapshot = tool_api.supports_ui_snapshot(instance_id).unwrap_or(false);
     let required_newer_than = context
         .pending_projection_baseline
@@ -3779,9 +3292,6 @@ fn wait_for_semantic_state_snapshot(
     {
         capture_semantic_wait_success_bindings(step, context, instance_id, &last_snapshot);
         context.pending_projection_baseline.remove(instance_id);
-        return Ok(last_snapshot);
-    }
-    if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
         return Ok(last_snapshot);
     }
     loop {
@@ -3830,22 +3340,13 @@ fn wait_for_semantic_state_snapshot(
             context.pending_projection_baseline.remove(instance_id);
             return Ok(snapshot);
         }
-        if message_contains_authoritative_screen(step, tool_api, instance_id, backend_kind)? {
-            context.pending_projection_baseline.remove(instance_id);
-            return Ok(snapshot);
-        }
         consume_projection_baseline(context, instance_id, &snapshot);
         last_snapshot = snapshot;
     }
-    let diagnostic_screen = fetch_screen_text(tool_api, instance_id, ScreenSource::Default).ok();
-    if matches!(step.action, CompatibilityAction::MessageContains)
-        && diagnostic_screen
-            .as_deref()
-            .is_some_and(|screen| message_contains_screen_text(step, screen))
-    {
-        context.pending_projection_baseline.remove(instance_id);
-        return Ok(last_snapshot);
-    }
+    let diagnostic_screen =
+        fetch_diagnostic_screen_capture(tool_api, instance_id, ScreenSource::Default)
+            .ok()
+            .map(|capture| capture.diagnostic_authoritative_screen);
     bail!(
         "step {} semantic wait timed out on instance {} ({}) last_snapshot={:?} diagnostic_screen={:?}",
         step.id,
@@ -3883,29 +3384,6 @@ fn consume_projection_baseline(
     {
         context.pending_projection_baseline.remove(instance_id);
     }
-}
-
-fn message_contains_authoritative_screen(
-    step: &CompatibilityStep,
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    backend_kind: &str,
-) -> Result<bool> {
-    if backend_kind != "local_pty" || !matches!(step.action, CompatibilityAction::MessageContains) {
-        return Ok(false);
-    }
-    let Some(expected_contains) = step.value.as_deref() else {
-        return Ok(false);
-    };
-    diagnostic_screen_contains(tool_api, instance_id, expected_contains)
-}
-
-fn message_contains_screen_text(step: &CompatibilityStep, screen: &str) -> bool {
-    matches!(step.action, CompatibilityAction::MessageContains)
-        && step
-            .value
-            .as_deref()
-            .is_some_and(|expected_contains| screen.contains(expected_contains))
 }
 
 fn is_browser_ui_snapshot_transient(error: &anyhow::Error) -> bool {
@@ -3997,11 +3475,8 @@ fn diagnostic_screen_contains(
             screen_source: ScreenSource::Default,
         },
     )?;
-    let screen = payload
-        .get("authoritative_screen")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| payload.get("screen").and_then(serde_json::Value::as_str))
-        .unwrap_or_default();
+    let capture: DiagnosticScreenCapture = serde_json::from_value(payload)?;
+    let screen = capture.diagnostic_authoritative_screen;
     Ok(screen.contains(needle))
 }
 
@@ -4565,6 +4040,49 @@ mod tests {
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_wait_for_instance_requires_list_count_match() {
+        let step = crate::config::CompatibilityStep {
+            id: "wait-two-devices".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            list_id: Some(ListId::Devices),
+            count: Some(2),
+            ..Default::default()
+        };
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Settings,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: None,
+            },
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: vec![ListSnapshot {
+                id: ListId::Devices,
+                items: vec![ListItemSnapshot {
+                    id: "device:current".to_string(),
+                    selected: false,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: true,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(!semantic_wait_matches_for_instance(
+            &step,
+            &snapshot,
+            &ScenarioContext::default(),
+            "bob"
+        ));
     }
 
     #[test]
@@ -5536,7 +5054,7 @@ mod tests {
     }
 
     #[test]
-    fn join_channel_can_discharge_pending_channel_membership_convergence() {
+    fn next_intent_cannot_discharge_pending_channel_membership_convergence() {
         let mut context = ScenarioContext::default();
         context.pending_convergence.insert(
             "bob".to_string(),
@@ -5544,13 +5062,15 @@ mod tests {
                 RuntimeEventKind::ChannelMembershipReady,
             )],
         );
-        ensure_post_operation_convergence_satisfied_for_binding(
+        let error = ensure_post_operation_convergence_satisfied_for_binding(
             "join-channel",
             SharedSemanticBinding::JoinChannel,
             &context,
             "bob",
         )
-        .unwrap_or_else(|error| panic!("join_channel should satisfy pending convergence: {error}"));
+        .err()
+        .unwrap_or_else(|| panic!("next shared intent must not discharge pending convergence"));
+        assert!(error.to_string().contains("convergence-contract violation"));
     }
 
     #[test]
@@ -5604,30 +5124,27 @@ mod tests {
     }
 
     #[test]
-    fn join_channel_templates_resolve_channel_ids_back_to_shared_names() {
+    fn join_channel_templates_reject_channel_id_templates() {
         let mut context = ScenarioContext::default();
         context.vars.insert(
             "shared_channel_id".to_string(),
             "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76".to_string(),
         );
-        context.channel_name_by_id.insert(
-            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76".to_string(),
-            "shared-parity-lab".to_string(),
-        );
-
-        let resolved = resolve_intent_templates(
+        let error = resolve_intent_templates(
             &IntentAction::JoinChannel {
                 channel_name: "${shared_channel_id}".to_string(),
             },
             &context,
         )
-        .unwrap_or_else(|error| panic!("{error}"));
+        .err()
+        .unwrap_or_else(|| panic!("channel id template must fail"));
 
-        assert!(matches!(
-            resolved,
-            IntentAction::JoinChannel { channel_name }
-                if channel_name == "shared-parity-lab"
-        ));
+        assert!(
+            error
+                .to_string()
+                .contains("join_channel requires an authoritative shared channel name"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]
@@ -5654,15 +5171,51 @@ mod tests {
     #[test]
     fn parity_critical_executor_paths_do_not_fallback_to_runtime_event_waits() {
         let source = include_str!("executor.rs");
+        let production_source = source
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap_or(source);
         let invite_fallback_label = format!("{}{}", "pending_home_", "invitation_ready");
         let accept_fallback_label = format!("{}{}", "invitation_", "accepted");
         assert!(
-            !source.contains(&invite_fallback_label),
+            !production_source.contains(&invite_fallback_label),
             "invite_actor_to_channel must not hide missing terminal publication behind readiness fallback"
         );
         assert!(
-            !source.contains(&accept_fallback_label),
+            !production_source.contains(&accept_fallback_label),
             "accept_pending_channel_invitation must not hide missing terminal publication behind readiness fallback"
+        );
+        for forbidden in [
+            format!("{}{}", "resolve_channel_id_for_", "shared_name("),
+            format!("{}{}", "unique_authoritative_", "shared_channel_id("),
+            format!("{}{}", "capture_authoritative_", "channel_id("),
+            format!("{}{}", "capture_unique_shared_", "channel_id("),
+        ] {
+            assert!(
+                !production_source.contains(&forbidden),
+                "executor shared semantic channel flows must not re-materialize channel ids through {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_semantic_variable_actions_use_typed_authority_helpers() {
+        let source = include_str!("executor.rs");
+        let production_source = source
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap_or(source);
+        assert!(
+            production_source.contains("tool_api.prepare_device_enrollment_invitee_authority("),
+            "shared semantic executor should use the typed invitee-authority helper"
+        );
+        assert!(
+            production_source.contains("tool_api.current_authority_id("),
+            "shared semantic executor should use the typed current-authority helper"
+        );
+        assert!(
+            !production_source.contains(".get(\"authority_id\")"),
+            "shared semantic executor must not field-peek authority_id out of raw JSON payloads"
         );
     }
 
@@ -5692,7 +5245,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_wait_channel_runtime_events_accept_authoritative_name_or_id() {
+    fn semantic_wait_channel_runtime_events_require_authoritative_channel_binding_id() {
         let step = crate::config::CompatibilityStep {
             id: "wait-channel-membership".to_string(),
             action: crate::config::CompatibilityAction::WaitFor,
@@ -5700,12 +5253,14 @@ mod tests {
             ..Default::default()
         };
         let mut context = ScenarioContext::default();
-        context
-            .current_channel_name
-            .insert("bob".to_string(), "shared-parity-lab".to_string());
-        context.current_channel_id.insert(
+        context.current_channel_binding.insert(
             "bob".to_string(),
-            "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76".to_string(),
+            ChannelBinding {
+                channel_id:
+                    "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                        .to_string(),
+                context_id: None,
+            },
         );
 
         let mut snapshot = UiSnapshot::loading(ScreenId::Chat);
@@ -5720,10 +5275,7 @@ mod tests {
                         "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
                             .to_string(),
                     ),
-                    name: Some(
-                        "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
-                            .to_string(),
-                    ),
+                    name: Some("shared-parity-lab".to_string()),
                 },
                 member_count: Some(2),
             },
@@ -5749,11 +5301,11 @@ mod tests {
             let end = tail.find("\nfn ").unwrap_or(tail.len());
             let body = &tail[..end];
             assert!(
-                !body.contains("wait_for_dom_patterns("),
+                !body.contains("wait_for_diagnostic_dom_patterns("),
                 "{helper} must not resolve through DOM pattern fallbacks"
             );
             assert!(
-                !body.contains("snapshot_dom("),
+                !body.contains("diagnostic_dom_snapshot("),
                 "{helper} must not resolve through raw DOM snapshots"
             );
             assert!(
@@ -5777,5 +5329,26 @@ mod tests {
         let end = tail.find("\nfn ").unwrap_or(tail.len());
         let body = &tail[..end];
         assert!(!body.contains("FallbackObservationMode"));
+    }
+
+    #[test]
+    fn diagnostic_capture_paths_do_not_peek_legacy_screen_field_names() {
+        let source = include_str!("executor.rs");
+        assert!(
+            source.contains("DiagnosticScreenCapture"),
+            "diagnostic capture helpers must deserialize an explicit diagnostic capture type"
+        );
+        assert!(
+            !source.contains(".get(\"authoritative_screen\")"),
+            "executor diagnostics must not peek ambiguous authoritative_screen fields"
+        );
+        assert!(
+            !source.contains(".get(\"raw_screen\")"),
+            "executor diagnostics must not peek ambiguous raw_screen fields"
+        );
+        assert!(
+            !source.contains(".get(\"normalized_screen\")"),
+            "executor diagnostics must not peek ambiguous normalized_screen fields"
+        );
     }
 }

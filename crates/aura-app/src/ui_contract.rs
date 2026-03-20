@@ -159,7 +159,10 @@ impl HarnessUiOperationHandle {
 pub enum HarnessUiCommandReceipt {
     Accepted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        operation: Option<HarnessUiOperationHandle>,
+        value: Option<SemanticCommandValue>,
+    },
+    AcceptedWithOperation {
+        operation: HarnessUiOperationHandle,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         value: Option<SemanticCommandValue>,
     },

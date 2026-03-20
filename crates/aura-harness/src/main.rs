@@ -26,7 +26,7 @@ use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
-use aura_harness::tool_api::{ToolApi, ToolRequest};
+use aura_harness::tool_api::{DiagnosticScreenCapture, ToolApi, ToolRequest};
 use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use clap::{Parser, Subcommand};
 
@@ -332,28 +332,30 @@ fn collect_failure_diagnostics(
             instance_id: instance.id.clone(),
             screen_source: ScreenSource::Default,
         });
-        let (authoritative_screen, raw_screen, normalized_screen) = match screen_response {
-            aura_harness::tool_api::ToolResponse::Ok { payload } => {
-                let authoritative = payload
-                    .get("screen")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let raw = payload
-                    .get("raw_screen")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(authoritative.as_str())
-                    .to_string();
-                let normalized = payload
-                    .get("normalized_screen")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(authoritative.as_str())
-                    .to_string();
-                (authoritative, raw, normalized)
-            }
+        let diagnostic_capture = match screen_response {
+            aura_harness::tool_api::ToolResponse::Ok { payload } => serde_json::from_value::<
+                DiagnosticScreenCapture,
+            >(payload)
+            .unwrap_or_else(|error| DiagnosticScreenCapture {
+                diagnostic_authoritative_screen: format!("diagnostic_screen_decode_error: {error}"),
+                diagnostic_raw_screen: String::new(),
+                diagnostic_normalized_screen: String::new(),
+                screen_source: "default".to_string(),
+                capture_consistency: None,
+                matched: None,
+                matched_view: None,
+            }),
             aura_harness::tool_api::ToolResponse::Error { message } => {
                 let error = format!("screen_capture_error: {message}");
-                (error.clone(), error.clone(), error)
+                DiagnosticScreenCapture {
+                    diagnostic_authoritative_screen: error.clone(),
+                    diagnostic_raw_screen: error.clone(),
+                    diagnostic_normalized_screen: error,
+                    screen_source: "default".to_string(),
+                    capture_consistency: None,
+                    matched: None,
+                    matched_view: None,
+                }
             }
         };
 
@@ -386,12 +388,12 @@ fn collect_failure_diagnostics(
                     .get("open_modal")
                     .and_then(serde_json::Value::as_str);
                 let dom_authoritative = dom_capture
-                    .get("authoritative_screen")
+                    .get("diagnostic_authoritative_screen")
                     .and_then(serde_json::Value::as_str);
                 serde_json::json!({
                     "semantic_screen": semantic_screen,
                     "semantic_modal": semantic_modal,
-                    "dom_authoritative_screen": dom_authoritative,
+                    "diagnostic_dom_authoritative_screen": dom_authoritative,
                     "screen_matches_dom": dom_authoritative == Some(semantic_screen),
                 })
             }
@@ -431,9 +433,9 @@ fn collect_failure_diagnostics(
         instances.insert(
             instance.id.clone(),
             serde_json::json!({
-                "screen": authoritative_screen,
-                "raw_screen": raw_screen,
-                "normalized_screen": normalized_screen,
+                "diagnostic_authoritative_screen": diagnostic_capture.diagnostic_authoritative_screen,
+                "diagnostic_raw_screen": diagnostic_capture.diagnostic_raw_screen,
+                "diagnostic_normalized_screen": diagnostic_capture.diagnostic_normalized_screen,
                 "dom_capture": dom_capture,
                 "ui_state": ui_state,
                 "ui_state_error": ui_state_error,

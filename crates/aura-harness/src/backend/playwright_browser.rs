@@ -524,7 +524,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         self.stop_inner()
     }
 
-    fn snapshot(&self) -> Result<String> {
+    fn diagnostic_screen_snapshot(&self) -> Result<String> {
         let payload = self.with_session(|session| {
             session.rpc_call(
                 "snapshot",
@@ -543,7 +543,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         Ok(screen)
     }
 
-    fn snapshot_dom(&self) -> Result<String> {
+    fn diagnostic_dom_snapshot(&self) -> Result<String> {
         let payload = self.with_session(|session| {
             session.rpc_call("dom_snapshot", json!({ "instance_id": self.config.id }))
         })?;
@@ -603,7 +603,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         }))
     }
 
-    fn wait_for_dom_patterns(
+    fn wait_for_diagnostic_dom_patterns(
         &self,
         patterns: &[String],
         timeout_ms: u64,
@@ -628,7 +628,11 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         }))
     }
 
-    fn wait_for_target(&self, selector: &str, timeout_ms: u64) -> Option<Result<String>> {
+    fn wait_for_diagnostic_target(
+        &self,
+        selector: &str,
+        timeout_ms: u64,
+    ) -> Option<Result<String>> {
         Some(self.with_session(|session| {
             let payload = session.rpc_call_with_timeout(
                 "wait_for_selector",
