@@ -130,7 +130,7 @@ Aura organizes social structure into three tiers. Messages are communication con
 
 The social topology shapes routing, relay selection, and governance. Authorities prefer relays operated by trusted peers within their home or neighborhood. Storage allocation is bounded per home, producing natural scarcity that scales with social investment. Local governance is encoded as capability-gated policy facts within each home's journal.
 
-Access levels follow the topology. Full access applies within a home. Partial access applies across 1-hop neighborhood links. Limited access applies at greater distances. See [Social Architecture](115_social_architecture.md) for the complete model.
+Access levels to a home follow the topology. Full access applies within the home. Partial access applies across 1-hop neighborhood links. Limited access applies at greater distances. See [Social Architecture](115_social_architecture.md) for the complete model.
 
 ## 3. Effects and Time
 
