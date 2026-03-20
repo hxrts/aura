@@ -6,7 +6,7 @@ This document gives an intuitive overview of Aura's architecture. It covers the 
 
 Aura distributes identity and trust across devices and social relationships to enable private peer-to-peer communication.
 
-The system operates without dedicated servers. Discovery, availability, and recovery are provided by the web of trust. Peers relay messages for each other based on social relationships. No single party can observe all communication or deny service.
+The system is designed to operate without dedicated servers. Discovery, availability, and recovery are provided by the web of trust. Peers relay messages for one another based on social proximity. Without centralized routing, no single party can observe all traffic or deny service.
 
 Aura separates key generation from agreement. Fast paths provide immediate usability while durable shared state is always consensus-finalized.
 
