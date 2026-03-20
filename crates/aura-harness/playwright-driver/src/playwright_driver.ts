@@ -694,27 +694,82 @@ async function installDomObserver(page, session) {
 }
 
 async function installUiStateObserver(page, session) {
-  await page.exposeFunction("__AURA_DRIVER_PUSH_UI_STATE", (payload) => {
-    storeUiState(session, payload);
-  });
-  await page.exposeFunction(
-    "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT",
-    (payload) => {
-      if (typeof payload === "string") {
-        try {
-          session.renderHeartbeat = normalizeRenderHeartbeat(
-            JSON.parse(payload),
-          );
-        } catch {
-          session.renderHeartbeat = null;
+  if (!session.uiStateBindingsInstalled) {
+    await page.exposeFunction("__AURA_DRIVER_PUSH_UI_STATE", (payload) => {
+      storeUiState(session, payload);
+    });
+    await page.exposeFunction(
+      "__AURA_DRIVER_PUSH_RENDER_HEARTBEAT",
+      (payload) => {
+        if (typeof payload === "string") {
+          try {
+            session.renderHeartbeat = normalizeRenderHeartbeat(
+              JSON.parse(payload),
+            );
+          } catch {
+            session.renderHeartbeat = null;
+          }
+          return;
         }
+        session.renderHeartbeat = normalizeRenderHeartbeat(payload);
+      },
+    );
+    await page.exposeFunction("__AURA_DRIVER_PUSH_CLIPBOARD", (payload) => {
+      session.clipboardCache = String(payload ?? "");
+    });
+    session.uiStateBindingsInstalled = true;
+  }
+  await page.evaluate(() => {
+    if (window.__AURA_DRIVER_UI_STATE_OBSERVER_INSTALLED) {
+      return;
+    }
+
+    window.__AURA_DRIVER_LAST_PUSHED_UI_STATE_JSON__ = null;
+    const pushUiState = () => {
+      let payload = null;
+      if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
+        payload = window.__AURA_UI_STATE_JSON__;
+      } else if (
+        window.__AURA_UI_STATE_CACHE__ &&
+        typeof window.__AURA_UI_STATE_CACHE__ === "object"
+      ) {
+        payload = window.__AURA_UI_STATE_CACHE__;
+      } else if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
+        payload = window.__AURA_HARNESS_OBSERVE__.ui_state();
+      } else if (typeof window.__AURA_UI_STATE__ === "function") {
+        payload = window.__AURA_UI_STATE__();
+      }
+
+      const nextJson =
+        typeof payload === "string"
+          ? payload
+          : payload && typeof payload === "object"
+            ? (() => {
+                try {
+                  return JSON.stringify(payload);
+                } catch {
+                  return null;
+                }
+              })()
+            : null;
+      if (!nextJson || nextJson === window.__AURA_DRIVER_LAST_PUSHED_UI_STATE_JSON__) {
         return;
       }
-      session.renderHeartbeat = normalizeRenderHeartbeat(payload);
-    },
-  );
-  await page.exposeFunction("__AURA_DRIVER_PUSH_CLIPBOARD", (payload) => {
-    session.clipboardCache = String(payload ?? "");
+
+      window.__AURA_DRIVER_LAST_PUSHED_UI_STATE_JSON__ = nextJson;
+      Promise.resolve(window.__AURA_DRIVER_PUSH_UI_STATE?.(nextJson)).catch(() => {});
+    };
+
+    const pump = () => {
+      try {
+        pushUiState();
+      } finally {
+        window.setTimeout(pump, 50);
+      }
+    };
+
+    window.__AURA_DRIVER_UI_STATE_OBSERVER_INSTALLED = true;
+    window.setTimeout(pump, 0);
   });
 }
 
@@ -2072,6 +2127,7 @@ async function startPage(params) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`,
         );
+        await installUiStateObserver(page, session);
         await assertRootStructure({ page }, "startup");
       } catch (error) {
         consoleLog.push(
@@ -2217,31 +2273,40 @@ async function readStructuredUiState(
   console.error(
     `[driver] ui_state structured_read start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`,
   );
+  const pushTimeoutMs =
+    timeoutMs <= 1 ? timeoutMs : Math.max(1, Math.min(timeoutMs - 1, 1500));
+  const currentRevision =
+    session.uiStateCache && typeof session.uiStateCache === "object"
+      ? uiSnapshotRevision(session.uiStateCache)
+      : -1;
+  try {
+    const pushed = await waitForUiStateVersion(
+      session,
+      currentRevision,
+      pushTimeoutMs,
+    );
+    await ensureUiStateRenderConvergence(
+      session,
+      pushed.snapshot,
+      `${reason}:driver_push`,
+    );
+    if (storeResult) {
+      storeUiState(session, pushed.snapshot, `driver_push:${reason}`);
+    }
+    console.error(
+      `[driver] ui_state structured_read pushed instance=${instanceId} reason=${reason} version=${pushed.version}`,
+    );
+    return pushed.snapshot;
+  } catch (error) {
+    console.error(
+      `[driver] ui_state structured_read pushed_unavailable instance=${instanceId} reason=${reason} error=${error?.message ?? String(error)}`,
+    );
+  }
+
+  const fallbackTimeoutMs = Math.max(1, timeoutMs - pushTimeoutMs);
   const payload = await withOperationTimeout(
     `ui_state_structured_${reason}`,
     (async () => {
-      try {
-        await session.page.waitForFunction(
-          () => {
-            if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
-              return true;
-            }
-            if (
-              window.__AURA_UI_STATE_CACHE__ &&
-              typeof window.__AURA_UI_STATE_CACHE__ === "object"
-            ) {
-              return true;
-            }
-            if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
-              return true;
-            }
-            return typeof window.__AURA_UI_STATE__ === "function";
-          },
-          null,
-          { timeout: timeoutMs },
-        );
-      } catch {}
-
       return session.page.evaluate(() => {
         if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
           return window.__AURA_UI_STATE_JSON__;
@@ -2261,7 +2326,7 @@ async function readStructuredUiState(
         return null;
       });
     })(),
-    timeoutMs,
+    fallbackTimeoutMs,
   );
   const parsed = tryParseUiStateValue(payload);
   if (parsed && typeof parsed === "object") {
@@ -2303,7 +2368,8 @@ async function readStructuredUiStateWithNavigationRecovery(
       `structured_navigation_${reason}`,
     );
     await ensureHarnessWithTimeout(session.page, UI_STATE_TIMEOUT_MS);
-    await installHarnessMutationQueue(session.page);
+    await installUiStateObserver(session.page, session);
+    await installHarnessMutationQueue(session.page, session);
     await installDomObserver(session.page, session);
     await assertRootStructure(session, `ui_state_after_navigation_${reason}`);
     return readStructuredUiState(
@@ -3089,7 +3155,8 @@ async function reloadPage(params) {
           session.startOptions?.harnessReadyTimeoutMs ??
             DEFAULT_HARNESS_READY_TIMEOUT_MS,
         );
-        await installHarnessMutationQueue(session.page);
+        await installUiStateObserver(session.page, session);
+        await installHarnessMutationQueue(session.page, session);
         await installDomObserver(session.page, session);
         await uiState({ instance_id: instanceId });
       })(),

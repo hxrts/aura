@@ -25,6 +25,7 @@
 //! 6. **Property Tests** - Invariants via proptest
 
 use aura_core::effects::terminal::{events, TerminalEvent};
+use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state::{
     transition, ChannelInfoModalState, ChatFocus, CreateChannelModalState, CreateChannelStep,
@@ -649,6 +650,7 @@ mod settings_screen {
     #[test]
     fn test_settings_device_management() {
         let mut tui = TestTui::new();
+        let invitee_authority_id = AuthorityId::new_from_entropy([7u8; 32]);
         tui.go_to_screen(Screen::Settings);
 
         // Go to Devices section
@@ -663,14 +665,22 @@ mod settings_screen {
 
         // Type device name
         tui.type_text("My Phone");
+        tui.send_tab();
+        tui.type_text(&invitee_authority_id.to_string());
 
         // Submit
         tui.clear_commands();
         tui.send_enter();
 
-        assert!(tui.has_dispatch(
-            |d| matches!(d, DispatchCommand::AddDevice { name, .. } if name == "My Phone")
-        ));
+        assert!(tui.has_dispatch(|d| {
+            matches!(
+                d,
+                DispatchCommand::AddDevice {
+                    name,
+                    invitee_authority_id: actual_invitee_authority_id,
+                } if name == "My Phone" && *actual_invitee_authority_id == invitee_authority_id
+            )
+        }));
     }
 
     #[test]

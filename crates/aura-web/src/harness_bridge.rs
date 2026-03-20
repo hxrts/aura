@@ -701,6 +701,13 @@ pub fn set_controller(controller: Arc<UiController>) {
     CONTROLLER.with(|slot| {
         *slot.borrow_mut() = Some(controller);
     });
+    LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    PENDING_UI_PUBLISH.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    UI_PUBLISH_RAF_PENDING.with(|slot| slot.set(false));
 }
 
 fn current_controller() -> Result<Arc<UiController>, JsValue> {

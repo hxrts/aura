@@ -987,6 +987,15 @@ cfg_if! {
                 && controller_snapshot.screen != ScreenId::Onboarding;
             let account_ready = bootstrap_account_ready() || controller_account_ready;
 
+            use_effect({
+                let controller = controller.clone();
+                move || {
+                    if harness_mode_enabled() {
+                        harness_bridge::publish_ui_snapshot(&controller.semantic_model_snapshot());
+                    }
+                }
+            });
+
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
                 let app_core = controller.app_core().clone();
