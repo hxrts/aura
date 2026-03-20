@@ -260,11 +260,15 @@ Journal state converges through anti-entropy after network partitions. Each peer
 
 ### 7.1 Ownership model
 
-Aura uses four ownership categories to prevent multiple layers from co-owning the same semantic truth: `Pure` for reducers and validators, `MoveOwned` for handle and session transfer, `ActorOwned` for long-lived mutable runtime state, and `Observed` for projections and UI reads. Parity-critical mutation must be capability-gated. Parity-critical operations must terminate explicitly with typed success, failure, or cancellation.
+Aura uses four ownership categories to prevent multiple layers from co-owning the same semantic truth: `Pure` for reducers and validators, `MoveOwned` for handle and session transfer, `ActorOwned` for long-lived mutable runtime state, and `Observed` for projections and UI reads. Parity-critical mutation must be capability-gated. Parity-critical operations must terminate explicitly with typed success, failure, or cancellation. See [Ownership Model](122_ownership_model.md) for the full contract.
 
-Actor-owned state is managed through a hierarchical task supervisor. Each service owns a rooted task group, child tasks inherit cancellation from parents, and all mutation flows through bounded typed ingress. Session and endpoint transfer uses move-owned capabilities with monotone generation counters that reject stale access. See [Ownership Model](122_ownership_model.md) for the full contract and [Runtime](104_runtime.md) for the structured concurrency model.
+### 7.2 Structured concurrency
 
-### 7.2 Workflow ownership boundary
+Actor-owned state is managed through a hierarchical task supervisor. Each service owns a rooted task group. Child tasks inherit cancellation from parents. Shutdown is hierarchical and parent-driven. All mutation of actor-owned state flows through bounded typed ingress rather than shared mutable access.
+
+Session and endpoint transfer uses move-owned capabilities with monotone generation counters that reject stale access. Delegation atomically transfers the owner record and capability. This separation keeps supervision (who manages the lifecycle) distinct from session ownership (who may act on the state). See [Runtime](104_runtime.md) for the structured concurrency model.
+
+### 7.3 Workflow ownership boundary
 
 The shared semantic workflow layer owns authoritative lifecycle publication for parity-critical operations. Frontend and harness layers may submit commands and observe results, but they do not keep a parallel source of semantic terminal truth after handoff.
 
