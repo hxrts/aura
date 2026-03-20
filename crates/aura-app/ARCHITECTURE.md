@@ -107,6 +107,9 @@ Strict authoritative-ref rule for parity-critical workflows:
   from weaker ids after authoritative handoff
 - fallback/default helpers such as `*_or_fallback` are forbidden on
   parity-critical paths
+- once canonical entity metadata has an owned materialization path, downstream
+  reactive or observed code may not recreate that metadata from weaker facts
+  such as membership-only events or raw ids
 
 ### Capability-Gated Points
 

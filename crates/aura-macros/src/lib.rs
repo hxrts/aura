@@ -299,6 +299,25 @@ pub fn authoritative_source(_attr: TokenStream, item: TokenStream) -> TokenStrea
     item
 }
 
+/// Marker attribute for canonical strong-reference types.
+///
+/// This is currently a no-op at expansion time and exists so repo-local
+/// ownership lints can distinguish canonical owned references/handles from weak
+/// identifier inputs.
+#[proc_macro_attribute]
+pub fn strong_reference(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+/// Marker attribute for weak identifier carrier types.
+///
+/// This is currently a no-op at expansion time and exists so repo-local
+/// ownership lints can model weak-to-strong upgrade boundaries explicitly.
+#[proc_macro_attribute]
+pub fn weak_identifier(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
 /// Marker attribute for helpers that are projection/display-only.
 ///
 /// This is currently a no-op at expansion time and exists so repo-local

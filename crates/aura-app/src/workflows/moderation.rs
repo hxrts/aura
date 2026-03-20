@@ -74,6 +74,7 @@ async fn send_moderation_fact_with_retry(
     })
 }
 
+#[aura_macros::strong_reference(domain = "home_scope")]
 #[derive(Debug, Clone)]
 struct ModerationScope {
     context_id: ContextId,
@@ -104,6 +105,7 @@ async fn emit_homes_state_observed(
     emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
 }
 
+#[cfg(test)]
 fn best_home_for_context(
     homes: &crate::views::home::HomesState,
     context_id: ContextId,
@@ -119,13 +121,6 @@ fn best_home_for_context(
                 home.member_count,
             )
         })
-}
-
-fn parse_channel_id_from_message_id(message_id: &str) -> Option<ChannelId> {
-    let encoded_channel = message_id
-        .strip_prefix("msg-")
-        .and_then(|value| value.split('-').next())?;
-    encoded_channel.parse::<ChannelId>().ok()
 }
 
 async fn resolve_channel_id(
@@ -240,80 +235,11 @@ async fn resolve_scope(
     })
 }
 
-async fn resolve_scope_by_channel_id(
+async fn current_moderation_scope(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<ChannelId>,
 ) -> Result<ModerationScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
     let homes = homes_state_signal_snapshot(app_core).await?;
-
-    if let Some(channel_id) = channel_hint {
-        if let Some(home) = homes.home_state(&channel_id) {
-            let context_id = home
-                .context_id
-                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-            let peers = runtime
-                .amp_list_channel_participants(context_id, channel_id)
-                .await
-                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
-            if let Some(context_id) = home.context_id {
-                if !home.can_moderate() {
-                    if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
-                        if best_home.can_moderate() {
-                            let best_context = best_home
-                                .context_id
-                                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-                            let best_peers = runtime
-                                .amp_list_channel_participants(best_context, best_id)
-                                .await
-                                .map_err(|e| {
-                                    super::error::runtime_call(
-                                        "list moderation scope participants",
-                                        e,
-                                    )
-                                })?;
-                            return Ok(ModerationScope {
-                                context_id: best_context,
-                                home_id: best_id,
-                                can_moderate: best_home.can_moderate(),
-                                peers: best_peers,
-                            });
-                        }
-                    }
-                }
-            }
-            return Ok(ModerationScope {
-                context_id,
-                home_id: channel_id,
-                can_moderate: home.can_moderate(),
-                peers,
-            });
-        }
-
-        let context_id = runtime
-            .resolve_amp_channel_context(channel_id)
-            .await
-            .map_err(|e| super::error::runtime_call("resolve moderation scope context", e))?
-            .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
-
-        if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
-            let best_context = best_home
-                .context_id
-                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-            let peers = runtime
-                .amp_list_channel_participants(best_context, best_id)
-                .await
-                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
-            return Ok(ModerationScope {
-                context_id: best_context,
-                home_id: best_id,
-                can_moderate: best_home.can_moderate(),
-                peers,
-            });
-        }
-
-        return Err(AuraError::permission_denied(context_id.to_string()));
-    }
 
     if let Some(current_home) = homes.current_home() {
         let context_id = current_home
@@ -426,7 +352,12 @@ pub async fn kick_user_resolved(
     reason: Option<&str>,
     kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope_by_channel_id(app_core, Some(channel_id)).await?;
+    let scope = current_moderation_scope(app_core).await?;
+    if scope.home_id != channel_id {
+        return Err(AuraError::invalid(
+            "kick requires the selected home to match the target channel",
+        ));
+    }
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
             "Only moderators with kick capability can kick members",
@@ -481,7 +412,13 @@ pub async fn ban_user_resolved(
     reason: Option<&str>,
     banned_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit moderation scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let scope = current_moderation_scope(app_core).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
             "Only moderators with ban capability can ban members",
@@ -539,7 +476,13 @@ pub async fn unban_user_resolved(
     channel_hint: Option<ChannelId>,
     target_id: aura_core::types::identifiers::AuthorityId,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit moderation scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let scope = current_moderation_scope(app_core).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
             "Only moderators with ban capability can unban members",
@@ -592,7 +535,13 @@ pub async fn mute_user_resolved(
     duration_secs: Option<u64>,
     muted_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit moderation scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let scope = current_moderation_scope(app_core).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
             "Only moderators with mute capability can mute members",
@@ -653,7 +602,13 @@ pub async fn unmute_user_resolved(
     channel_hint: Option<ChannelId>,
     target_id: aura_core::types::identifiers::AuthorityId,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit moderation scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let scope = current_moderation_scope(app_core).await?;
     if !scope.can_moderate {
         return Err(AuraError::permission_denied(
             "Only moderators with mute capability can unmute members",
@@ -684,12 +639,9 @@ pub async fn unmute_user_resolved(
 
 async fn scope_for_message(
     app_core: &Arc<RwLock<AppCore>>,
-    message_id: &str,
+    _message_id: &str,
 ) -> Result<ModerationScope, AuraError> {
-    if let Some(channel_id) = parse_channel_id_from_message_id(message_id) {
-        return resolve_scope_by_channel_id(app_core, Some(channel_id)).await;
-    }
-    resolve_scope_by_channel_id(app_core, None).await
+    current_moderation_scope(app_core).await
 }
 
 /// Pin a message in the current home.
@@ -902,11 +854,9 @@ mod tests {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();
         }
-        let unknown = ChannelId::from_bytes(hash(b"moderation-unknown-scope"));
-
-        let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
+        let error = current_moderation_scope(&app_core)
             .await
-            .expect_err("unknown channel scope must fail");
+            .expect_err("missing active moderation scope must fail");
         assert!(!error.to_string().is_empty());
     }
 }

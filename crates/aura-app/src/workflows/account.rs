@@ -306,6 +306,15 @@ pub async fn has_runtime_account_config(
         .map_err(|e| AuraError::from(super::error::runtime_call("check account config", e)))
 }
 
+/// Returns true when runtime bootstrap has produced an active home context.
+pub async fn has_runtime_bootstrapped_account(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<bool, AuraError> {
+    Ok(crate::workflows::context::current_home_context(app_core)
+        .await
+        .is_ok())
+}
+
 /// Persist first-run account configuration for the current runtime authority.
 pub async fn initialize_runtime_account(
     app_core: &Arc<RwLock<AppCore>>,
@@ -325,7 +334,7 @@ pub async fn reconcile_pending_runtime_account_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     pending_bootstrap: Option<PendingAccountBootstrap>,
 ) -> Result<PendingRuntimeBootstrapResolution, AuraError> {
-    let account_ready = has_runtime_account_config(app_core).await?;
+    let account_ready = has_runtime_bootstrapped_account(app_core).await?;
     match (account_ready, pending_bootstrap) {
         (false, Some(pending_bootstrap)) => {
             initialize_runtime_account(app_core, pending_bootstrap.nickname_suggestion).await?;
@@ -357,7 +366,14 @@ pub async fn finalize_runtime_account_bootstrap(
     let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
         .map_err(|error| AuraError::invalid(error.to_string()))?;
     let home_name = format!("{nickname_suggestion}'s Home");
-    context::create_home(app_core, Some(home_name), None).await?;
+    let authority_id = {
+        let core = app_core.read().await;
+        core.runtime()
+            .map(|runtime| runtime.authority_id())
+            .or_else(|| core.authority().copied())
+    }
+    .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
+    let home_id = context::create_home(app_core, Some(home_name.clone()), None).await?;
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -410,6 +426,7 @@ pub async fn finalize_runtime_account_bootstrap(
 
     settings::refresh_settings_from_runtime(app_core).await?;
     system::refresh_account(app_core).await?;
+    context::ensure_local_home_projection(app_core, home_id, home_name, authority_id).await?;
     Ok(())
 }
 

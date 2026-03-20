@@ -389,12 +389,11 @@ async fn accept_pending_channel_invitation(
                         if home_id.parse::<ChannelId>().ok() == Some(channel_id)
                 )
             }) {
-                let invitation = invitation_workflow::resolve_pending_invitation_handle(
+                let _accepted = invitation_workflow::accept_invitation_by_str(
                     app,
                     invitation.invitation_id.as_str(),
                 )
                 .await?;
-                invitation_workflow::accept_invitation(app, invitation).await?;
                 return Ok(true);
             }
 
@@ -499,10 +498,16 @@ async fn setup_lan_group_channel_pair(
     })
     .await?;
     let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
-    let channel_a =
-        messaging_workflow::resolve_authoritative_channel_ref(&app_a, channel_id).await?;
-    let channel_b =
-        messaging_workflow::resolve_authoritative_channel_ref(&app_b, channel_id).await?;
+    let channel_a = messaging_workflow::authoritative_channel_ref(
+        channel_id,
+        messaging_workflow::require_authoritative_context_id_for_channel(&app_a, channel_id)
+            .await?,
+    );
+    let channel_b = messaging_workflow::authoritative_channel_ref(
+        channel_id,
+        messaging_workflow::require_authoritative_context_id_for_channel(&app_b, channel_id)
+            .await?,
+    );
     messaging_workflow::join_channel(&app_a, channel_a).await?;
     messaging_workflow::join_channel(&app_b, channel_b).await?;
 

@@ -651,6 +651,7 @@ ci-ownership-policy:
     just ci-workflow-no-fallback-defaults
     just ci-workflow-no-view-derived-readiness
     just ci-workflow-no-view-derived-recipient-resolution
+    just ci-weak-to-strong-identifier-upgrade
     just ci-workflow-ownership-tag-ratchet
     just ci-parity-critical-ignored-results
     just ci-best-effort-side-effects
@@ -713,6 +714,9 @@ ci-workflow-no-view-derived-readiness:
 
 ci-workflow-no-view-derived-recipient-resolution:
     bash scripts/check/workflow-no-view-derived-recipient-resolution.sh
+
+ci-weak-to-strong-identifier-upgrade:
+    bash scripts/check/weak-to-strong-identifier-upgrade.sh
 
 ci-workflow-ownership-tag-ratchet:
     bash scripts/check/workflow-ownership-tag-ratchet.sh

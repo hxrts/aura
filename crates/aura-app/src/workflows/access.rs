@@ -18,6 +18,7 @@ use std::sync::Arc;
 const ACCESS_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const ACCESS_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 
+#[aura_macros::strong_reference(domain = "home_scope")]
 #[derive(Debug, Clone)]
 struct AccessScope {
     home_id: ChannelId,
@@ -69,22 +70,13 @@ async fn send_relational_fact_with_retry(
     })
 }
 
-async fn resolve_scope_by_channel_id(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<ChannelId>,
-) -> Result<AccessScope, AuraError> {
-    // OWNERSHIP: observed
+async fn current_access_scope(app_core: &Arc<RwLock<AppCore>>) -> Result<AccessScope, AuraError> {
     let homes = {
         let core = app_core.read().await;
         core.views().get_homes()
     };
 
-    let home_id = if let Some(channel_id) = channel_hint {
-        channel_id
-    } else {
-        crate::workflows::context::current_home_id(app_core).await?
-    };
-
+    let home_id = crate::workflows::context::current_home_id(app_core).await?;
     let home_state = homes
         .home_state(&home_id)
         .cloned()
@@ -145,7 +137,13 @@ pub async fn configure_home_capabilities_resolved(
         ));
     }
 
-    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit home scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let scope = current_access_scope(app_core).await?;
     if !scope.home_state.is_admin() {
         return Err(AuraError::permission_denied(
             "Only moderators can configure home capabilities",
@@ -259,7 +257,13 @@ pub async fn set_access_override_resolved(
         ));
     }
 
-    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit home scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let scope = current_access_scope(app_core).await?;
     if !scope.home_state.is_admin() {
         return Err(AuraError::permission_denied(
             "Only moderators can set access overrides",

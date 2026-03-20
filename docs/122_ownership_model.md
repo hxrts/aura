@@ -40,6 +40,13 @@ In practice, Aura's production `ActorOwned` runtime path is `aura-agent`:
 
 `Observed` code may submit typed commands to owner surfaces. It may not author semantic lifecycle or readiness truth. It may not repair ownership mistakes by mutating product state.
 
+Observed/reactive code also may not synthesize canonical entity metadata from
+weaker signals. If a channel, invitation, or similar parity-critical entity
+requires canonical name/context materialization, one explicit owned path must
+materialize it end to end. Membership events, UI projections, or view-local
+fallbacks may enrich an already-materialized entity, but they may not create
+or repair the canonical entity shape.
+
 ## Capability-Gated Authority
 
 The ownership model builds on Aura's existing capability system. Parity-critical mutation and publication should be capability-gated.
@@ -155,6 +162,8 @@ Anti-patterns to avoid:
 - shared mutable `Arc<Mutex<_>>` state spread across tasks (should be `ActorOwned`)
 - rewriting an owner field in place after delegation (should be `MoveOwned`)
 - reducers that call time/network/storage directly (no longer `Pure`)
+- reactive/view code inventing channel names from raw ids or membership events
+  instead of consuming an owned canonical materialization path
 
 ## Contributor Requirement
 
@@ -233,6 +242,12 @@ Parity-critical reactive consumers must rely on one explicit subscription contra
 - parity-critical owners may not infer replay or lossless history from the reactive layer unless an explicit replay contract exists
 
 This means reactive delivery is a transport for authoritative snapshots, not an alternate owner of semantic truth. Owner code must tolerate "newer snapshot after lag" semantics without silently treating a missed update as "no change."
+
+Reactive/view consumers also may not fabricate canonical entities from partial
+facts. For example, a membership fact may update membership for a known channel,
+but it may not create a channel with `channel_id.to_string()` as a fallback
+name. Canonical entity materialization must come from one owned path that
+already carries the authoritative metadata.
 
 ## Owner Body Rules
 

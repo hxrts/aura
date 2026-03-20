@@ -24,6 +24,7 @@ use super::modal_overlays::{
 
 use crate::tui::components::copy_to_clipboard;
 use iocraft::prelude::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use aura_app::ceremonies::{
@@ -41,7 +42,9 @@ use aura_app::ui::workflows::ceremonies::{
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
-use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
+use aura_app::ui_contract::{
+    HarnessUiCommand, RuntimeEventKind, RuntimeFact, SemanticOperationKind,
+};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::FrostThreshold;
@@ -188,8 +191,9 @@ use crate::tui::props::{
 use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
-    harness_command_channel, ui_update_channel, HarnessCommandReceiver, UiOperation,
-    UiOperationFailure, UiUpdate, UiUpdateReceiver, UiUpdateSender,
+    harness_command_channel, ui_update_channel, HarnessCommandReceiptHandle,
+    HarnessCommandReceiver, UiOperation, UiOperationFailure, UiUpdate, UiUpdateReceiver,
+    UiUpdateSender,
 };
 use std::sync::Mutex;
 
@@ -918,6 +922,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(Vec::<String>::new())));
     let last_exported_device_ids: std::sync::Arc<parking_lot::RwLock<Vec<String>>> =
         last_exported_device_ids_ref.read().clone();
+    let pending_create_channel_receipts_ref = hooks.use_ref(|| {
+        Arc::new(Mutex::new(
+            HashMap::<String, HarnessCommandReceiptHandle>::new(),
+        ))
+    });
+    let pending_create_channel_receipts = pending_create_channel_receipts_ref.read().clone();
 
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
@@ -1247,6 +1257,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
             let selected_channel_binding_for_commands =
                 selected_channel_binding_for_chat_screen.clone();
+            let pending_create_channel_receipts_for_commands =
+                pending_create_channel_receipts.clone();
             async move {
                 #[allow(clippy::expect_used)]
                 let mut rx = {
@@ -1337,11 +1349,28 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let harness_devices = shared_devices_for_commands.read().clone();
                     let harness_channels = shared_channels_for_commands.read().clone();
                     let harness_messages = shared_messages_for_commands.read().clone();
-                    submission.receipt.complete(
-                        aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
-                            operation: operation_handle,
-                        },
-                    );
+                    let defer_create_channel_receipt = matches!(
+                        submission.command,
+                        HarnessUiCommand::CreateChannel { .. }
+                    ) && operation_handle.is_some();
+                    if defer_create_channel_receipt {
+                        if let Some(handle) = operation_handle.clone() {
+                            pending_create_channel_receipts_for_commands
+                                .lock()
+                                .unwrap()
+                                .insert(
+                                    handle.instance_id().0.clone(),
+                                    submission.receipt.clone(),
+                                );
+                        }
+                    } else {
+                        submission.receipt.complete(
+                            aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
+                                operation: operation_handle,
+                                value: None,
+                            },
+                        );
+                    }
 
                     let export_result = maybe_export_ui_snapshot(
                         &updated_state,
@@ -1377,6 +1406,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
             let selected_channel_binding_for_updates = selected_channel_binding;
+            let pending_create_channel_receipts_for_updates = pending_create_channel_receipts;
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -1819,6 +1849,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             }
                         }
                         UiUpdate::ChannelCreated {
+                            operation_instance_id,
                             channel_id,
                             context_id,
                             name,
@@ -1856,6 +1887,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 format!("Created '{name}'."),
                                 crate::tui::state::ToastLevel::Success
                             );
+                            if let Some(instance_id) = operation_instance_id {
+                                    if let Some(receipt) = pending_create_channel_receipts_for_updates
+                                        .lock()
+                                        .unwrap()
+                                        .remove(&instance_id.0)
+                                    {
+                                    receipt.complete(
+                                        aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
+                                            operation: Some(
+                                                aura_app::ui_contract::HarnessUiOperationHandle::new(
+                                                    aura_app::ui_contract::OperationId::create_channel(),
+                                                    instance_id,
+                                                ),
+                                            ),
+                                            value: Some(
+                                                aura_app::scenario_contract::SemanticCommandValue::ChannelBinding {
+                                                    channel_id,
+                                                    context_id,
+                                                },
+                                            ),
+                                        },
+                                    );
+                                }
+                            }
                         }
                         UiUpdate::ChatStateUpdated {
                             channel_count,
@@ -2040,6 +2095,33 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             instance_id,
                             causality,
                         } => {
+                            if operation_id == aura_app::ui_contract::OperationId::create_channel()
+                                && matches!(
+                                    status.phase,
+                                    aura_app::ui_contract::SemanticOperationPhase::Failed
+                                        | aura_app::ui_contract::SemanticOperationPhase::Cancelled
+                                )
+                            {
+                                if let Some(instance_id) = instance_id.clone() {
+                                    if let Some(receipt) =
+                                        pending_create_channel_receipts_for_updates
+                                            .lock()
+                                            .unwrap()
+                                            .remove(&instance_id.0)
+                                    {
+                                        let reason = status
+                                            .error
+                                            .as_ref()
+                                            .and_then(|error| error.detail.clone())
+                                            .unwrap_or_else(|| "create channel failed".to_string());
+                                        receipt.complete(
+                                            aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                                reason,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
                             let failure_message = if matches!(
                                 status.phase,
                                 aura_app::ui_contract::SemanticOperationPhase::Failed

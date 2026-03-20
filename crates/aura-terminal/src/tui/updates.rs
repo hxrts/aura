@@ -264,6 +264,8 @@ pub enum UiUpdate {
 
     /// A new channel was created
     ChannelCreated {
+        /// Exact instance id for the local terminal operation that produced this creation.
+        operation_instance_id: Option<OperationInstanceId>,
         /// Canonical channel identity returned by the workflow/runtime.
         channel_id: String,
         /// Authoritative context identity, if the workflow resolved one.

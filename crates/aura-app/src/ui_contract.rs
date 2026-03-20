@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::scenario_contract::SemanticCommandValue;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenId {
@@ -158,6 +160,8 @@ pub enum HarnessUiCommandReceipt {
     Accepted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         operation: Option<HarnessUiOperationHandle>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<SemanticCommandValue>,
     },
     Rejected {
         reason: String,

@@ -4903,7 +4903,7 @@ fn NotificationsScreen(
                                                     let invitation_id = accept_invitation_id.clone();
                                                     spawn(async move {
                                                         match invitation_workflows::accept_invitation_by_str(&app_core, &invitation_id).await {
-                                                            Ok(()) => controller.complete_runtime_modal_success("Invitation accepted"),
+                                                            Ok(_) => controller.complete_runtime_modal_success("Invitation accepted"),
                                                             Err(error) => controller.runtime_error_toast(error.to_string()),
                                                         }
                                                         tick.set(tick() + 1);

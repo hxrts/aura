@@ -29,7 +29,7 @@ async fn refresh_settings_signal_from_runtime(
         let core = app_core.read().await;
         let authority_id = core
             .runtime()
-            .ok_or_else(|| AuraError::not_found("settings runtime missing"))?
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
             .authority_id()
             .to_string();
         match core.settings_snapshot().await {
@@ -66,9 +66,8 @@ async fn refresh_settings_signal_from_runtime(
             Ok(AuthorityInfo {
                 id: authority.id,
                 nickname_suggestion: authority.nickname_suggestion.ok_or_else(|| {
-                    AuraError::not_found(format!(
-                        "authority {} has no nickname suggestion",
-                        authority.id
+                    AuraError::from(WorkflowError::Precondition(
+                        "authority has no nickname suggestion",
                     ))
                 })?,
                 is_current: authority.is_current,

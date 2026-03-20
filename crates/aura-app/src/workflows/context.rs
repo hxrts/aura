@@ -35,13 +35,12 @@ const MISSING_ACTIVE_HOME_MESSAGE: &str =
 /// Source of active-home resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveHomeSource {
-    /// Home resolved from an explicit caller hint.
-    ExplicitHint,
     /// Home resolved from the currently selected home.
     Selected,
 }
 
 /// Active-home resolution result shared by context-dependent workflows.
+#[aura_macros::strong_reference(domain = "home")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActiveHomeResolution {
     /// Resolved home identifier.
@@ -633,15 +632,8 @@ pub const fn missing_active_home_message() -> &'static str {
 /// Resolve an active home/context without implicit fallback behavior.
 pub async fn resolve_active_home(
     app_core: &Arc<RwLock<AppCore>>,
-    home_hint: Option<ChannelId>,
 ) -> Result<ActiveHomeResolution, AuraError> {
     let homes = homes_state_signal_snapshot(app_core).await?;
-
-    if let Some(home_id) = home_hint {
-        if let Some(home_state) = homes.home_state(&home_id) {
-            return resolution_from_home(home_id, home_state, ActiveHomeSource::ExplicitHint);
-        }
-    }
 
     if let Some(home_id) = authoritative_active_home_selection(app_core).await {
         if let Some(home_state) = homes.home_state(&home_id) {
@@ -658,12 +650,12 @@ pub async fn resolve_active_home(
 
 /// Resolve the active home id.
 pub async fn current_home_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ChannelId, AuraError> {
-    Ok(resolve_active_home(app_core, None).await?.home_id)
+    Ok(resolve_active_home(app_core).await?.home_id)
 }
 
 /// Get current home context id.
 pub async fn current_home_context(app_core: &Arc<RwLock<AppCore>>) -> Result<ContextId, AuraError> {
-    Ok(resolve_active_home(app_core, None).await?.context_id)
+    Ok(resolve_active_home(app_core).await?.context_id)
 }
 
 /// Stable default relational context for an authority when no home-scoped context applies.
@@ -787,7 +779,7 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let resolved = resolve_active_home(&app_core, None).await.unwrap();
+        let resolved = resolve_active_home(&app_core).await.unwrap();
         assert_eq!(resolved.home_id, selected_home);
         assert_eq!(resolved.context_id, selected_ctx);
         assert_eq!(resolved.source, ActiveHomeSource::Selected);
@@ -825,7 +817,7 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let resolved = resolve_active_home(&app_core, None).await.unwrap();
+        let resolved = resolve_active_home(&app_core).await.unwrap();
         assert_eq!(resolved.home_id, selected_home);
         assert_eq!(resolved.context_id, selected_ctx);
         assert_eq!(resolved.source, ActiveHomeSource::Selected);
@@ -863,7 +855,7 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let error = resolve_active_home(&app_core, None).await.unwrap_err();
+        let error = resolve_active_home(&app_core).await.unwrap_err();
         assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
     }
 
@@ -872,7 +864,7 @@ mod tests {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
-        let error = resolve_active_home(&app_core, None).await.unwrap_err();
+        let error = resolve_active_home(&app_core).await.unwrap_err();
         assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
     }
 

@@ -646,6 +646,9 @@ impl ChatCallbacks {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let channel_name = name.clone();
+                let operation_instance_id = operation
+                    .as_ref()
+                    .map(|operation| operation.harness_handle().instance_id().clone());
                 let cmd = EffectCommand::CreateChannel {
                     name,
                     topic,
@@ -661,6 +664,7 @@ impl ChatCallbacks {
                             send_ui_update_required(
                                 &tx,
                                 UiUpdate::ChannelCreated {
+                                    operation_instance_id,
                                     channel_id,
                                     context_id,
                                     name: channel_name,

@@ -587,19 +587,13 @@ impl IoContext {
             nickname = nickname_suggestion,
             "io_context create_account begin"
         );
-        let app_core = self.app_core_raw().clone();
         let (authority_id, _context_id) = self
             .account_files
             .create_account(nickname_suggestion)
             .await?;
-        tracing::info!(%authority_id, "io_context create_account persisted account");
-        {
-            let mut core = app_core.write().await;
-            core.set_authority(authority_id);
-        }
         tracing::info!(
             %authority_id,
-            "io_context create_account staged local authority; runtime bootstrap will occur after restart"
+            "io_context create_account staged bootstrap identity for shell reload"
         );
         Ok(())
     }

@@ -25,6 +25,7 @@ use aura_app::signal_defs::HOMES_SIGNAL;
 use aura_app::views::home::{HomeMember, HomeRole, HomeState, HomesState};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::amp::{ChannelBootstrapPackage, ChannelCreateParams};
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
@@ -237,6 +238,22 @@ struct ChannelInviteDetails {
     home_name: String,
     sender_id: AuthorityId,
     bootstrap: Option<ChannelBootstrapPackage>,
+}
+
+fn require_channel_invitation_name(
+    home_id: ChannelId,
+    nickname_suggestion: Option<String>,
+) -> AgentResult<String> {
+    let Some(home_name) = nickname_suggestion
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(AgentError::invalid(format!(
+            "channel invitation {} missing canonical channel metadata",
+            home_id
+        )));
+    };
+    Ok(home_name)
 }
 
 #[cfg(test)]
@@ -1102,15 +1119,15 @@ impl InvitationHandler {
             .await
     }
 
-    async fn channel_created_fact_exists(
+    async fn channel_created_fact_name(
         &self,
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
         context_id: ContextId,
         channel_id: ChannelId,
-    ) -> bool {
+    ) -> Option<String> {
         let Ok(facts) = effects.load_committed_facts(authority_id).await else {
-            return false;
+            return None;
         };
 
         for fact in facts.into_iter().rev() {
@@ -1126,6 +1143,7 @@ impl InvitationHandler {
             let Some(ChatFact::ChannelCreated {
                 context_id: seen_context,
                 channel_id: seen_channel,
+                name,
                 ..
             }) = ChatFact::from_envelope(&envelope)
             else {
@@ -1133,11 +1151,11 @@ impl InvitationHandler {
             };
 
             if seen_context == context_id && seen_channel == channel_id {
-                return true;
+                return Some(name);
             }
         }
 
-        false
+        None
     }
 
     async fn resolve_channel_context_from_chat_facts(
@@ -1155,8 +1173,6 @@ impl InvitationHandler {
         effects: &AuraEffectSystem,
         invite: &ChannelInviteDetails,
     ) -> AgentResult<()> {
-        use aura_effects::ReactiveEffects;
-
         let reactive = effects.reactive_handler();
         let mut homes: HomesState = match reactive.read(&*HOMES_SIGNAL).await {
             Ok(state) => state,
@@ -1277,9 +1293,7 @@ impl InvitationHandler {
 
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         let mut changed = false;
-        let home_name = nickname_suggestion
-            .clone()
-            .unwrap_or_else(|| home_id.to_string());
+        let home_name = require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
 
         if !homes.has_home(home_id) {
             let mut home = HomeState::new(
@@ -3847,6 +3861,85 @@ mod tests {
         assert_eq!(home.context_id, Some(expected_context));
         assert!(home.member(&receiver_id).is_some());
         assert_eq!(home.my_role, HomeRole::Participant);
+    }
+
+    #[tokio::test]
+    async fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
+        let sender_id = AuthorityId::new_from_entropy([219u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([220u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+
+        let invitation_id = InvitationId::new("inv-materialize-home-raw-name");
+        let home_id = canonical_home_id(16);
+        let expected_context = default_context_id_for_authority(sender_id);
+
+        effects
+            .commit_relational_facts(vec![ChatFact::channel_created_ms(
+                expected_context,
+                home_id,
+                home_id.to_string(),
+                Some(format!("Home channel {}", home_id)),
+                false,
+                1_700_000_000_000,
+                sender_id,
+            )
+            .to_generic()])
+            .await
+            .unwrap();
+
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: invitation_id.clone(),
+            sender_id,
+            context_id: None,
+            invitation_type: InvitationType::Channel {
+                home_id,
+                nickname_suggestion: Some("Maple House".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Join Maple House".to_string()),
+        };
+
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .await
+            .unwrap();
+
+        handler
+            .accept_invitation(effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let committed = effects.load_committed_facts(receiver_id).await.unwrap();
+        let found_named_update = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                return false;
+            }
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelUpdated {
+                    context_id,
+                    channel_id,
+                    name: Some(name),
+                    ..
+                }) if context_id == expected_context
+                    && channel_id == home_id
+                    && name == "Maple House"
+            )
+        });
+        assert!(
+            found_named_update,
+            "accepted invitation should correct preexisting raw-id channel metadata"
+        );
     }
 
     #[tokio::test]

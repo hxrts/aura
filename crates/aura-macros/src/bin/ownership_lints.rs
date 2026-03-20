@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
@@ -9,7 +10,7 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
     AttrStyle, Block, Expr, ExprAwait, ExprCall, ExprGroup, ExprMethodCall, ExprParen, ExprPath,
-    ExprReference, File, ImplItem, ImplItemFn, Item, ItemFn, ItemMod, ItemStruct, Local,
+    ExprReference, File, FnArg, ImplItem, ImplItemFn, Item, ItemFn, ItemMod, ItemStruct, Local,
     MetaNameValue, Pat, ReturnType, Token, Type, Visibility,
 };
 
@@ -37,6 +38,7 @@ enum LintMode {
     TimeoutPolicyBoundary,
     TimeDomainUsage,
     AuthoritativeRefNoReresolution,
+    WeakToStrongIdentifierUpgrade,
 }
 
 impl LintMode {
@@ -66,6 +68,7 @@ impl LintMode {
             "timeout-policy-boundary" => Ok(Self::TimeoutPolicyBoundary),
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
             "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
+            "weak-to-strong-identifier-upgrade" => Ok(Self::WeakToStrongIdentifierUpgrade),
             other => Err(format!("unknown lint mode: {other}")),
         }
     }
@@ -96,9 +99,18 @@ impl LintMode {
             Self::TimeoutPolicyBoundary => "timeout-policy-boundary",
             Self::TimeDomainUsage => "time-domain-usage",
             Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
+            Self::WeakToStrongIdentifierUpgrade => "weak-to-strong-identifier-upgrade",
         }
     }
 }
+
+struct ParsedRustFile {
+    path: PathBuf,
+    source: String,
+    syntax: File,
+}
+
+type StrongReferenceRegistry = HashMap<String, String>;
 
 fn main() {
     if let Err(error) = run() {
@@ -125,13 +137,30 @@ fn run() -> Result<(), String> {
     rust_files.sort();
     rust_files.dedup();
 
-    let mut violations = Vec::new();
+    let mut parsed_files = Vec::new();
     for file in &rust_files {
         let source = fs::read_to_string(file)
             .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
         let syntax = syn::parse_file(&source)
             .map_err(|error| format!("failed to parse {}: {error}", file.display()))?;
-        violations.extend(scan_file(mode, file, &source, &syntax));
+        parsed_files.push(ParsedRustFile {
+            path: file.clone(),
+            source,
+            syntax,
+        });
+    }
+
+    let strong_references = collect_strong_reference_registry(&parsed_files);
+
+    let mut violations = Vec::new();
+    for file in &parsed_files {
+        violations.extend(scan_file(
+            mode,
+            &file.path,
+            &file.source,
+            &file.syntax,
+            &strong_references,
+        ));
     }
 
     if !violations.is_empty() {
@@ -218,6 +247,10 @@ fn run() -> Result<(), String> {
                 "authoritative-ref-only functions still downgrade back to resolver or fallback helpers"
                     .to_string()
             }
+            LintMode::WeakToStrongIdentifierUpgrade => {
+                "weak identifiers still upgrade directly into canonical strong references or owned handles"
+                    .to_string()
+            }
         });
     }
 
@@ -253,7 +286,13 @@ fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     Ok(())
 }
 
-fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<String> {
+fn scan_file(
+    mode: LintMode,
+    file: &Path,
+    source: &str,
+    syntax: &File,
+    strong_references: &StrongReferenceRegistry,
+) -> Vec<String> {
     match mode {
         LintMode::ActorOwnedTaskSpawn => return scan_actor_owned_task_spawn(file, syntax),
         LintMode::AsyncSessionOwnership => return scan_async_session_ownership(file, source),
@@ -275,6 +314,9 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         LintMode::TimeoutPolicyBoundary => return scan_timeout_policy_boundary(file, syntax),
         LintMode::TimeDomainUsage => return scan_time_domain_usage(file, syntax),
         LintMode::AuthoritativeRefNoReresolution => {}
+        LintMode::WeakToStrongIdentifierUpgrade => {
+            return scan_weak_to_strong_identifier_upgrade(file, syntax, strong_references);
+        }
         LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
         | LintMode::WorkflowNoFallbackDefaults
@@ -294,6 +336,301 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         scan_item(mode, file, source, item, &mut violations);
     }
     violations
+}
+
+fn collect_strong_reference_registry(files: &[ParsedRustFile]) -> StrongReferenceRegistry {
+    let mut registry = StrongReferenceRegistry::new();
+    for file in files {
+        collect_strong_reference_items(&file.syntax.items, &mut registry);
+    }
+    registry
+}
+
+fn collect_strong_reference_items(items: &[Item], registry: &mut StrongReferenceRegistry) {
+    for item in items {
+        match item {
+            Item::Struct(item_struct) => {
+                if let Some(domain) = strong_reference_domain(&item_struct.attrs) {
+                    registry.insert(item_struct.ident.to_string(), domain);
+                }
+            }
+            Item::Enum(item_enum) => {
+                if let Some(domain) = strong_reference_domain(&item_enum.attrs) {
+                    registry.insert(item_enum.ident.to_string(), domain);
+                }
+            }
+            Item::Mod(item_mod) => {
+                if let Some((_, nested)) = &item_mod.content {
+                    collect_strong_reference_items(nested, registry);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn strong_reference_domain(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        let segment = attr.path().segments.last()?;
+        if segment.ident != "strong_reference" {
+            return None;
+        }
+        let metas = attr
+            .parse_args_with(
+                syn::punctuated::Punctuated::<MetaNameValue, Token![,]>::parse_terminated,
+            )
+            .ok()?;
+        metas.into_iter().find_map(|meta| {
+            if !meta.path.is_ident("domain") {
+                return None;
+            }
+            match meta.value {
+                Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(value),
+                    ..
+                }) => Some(value.value()),
+                _ => None,
+            }
+        })
+    })
+}
+
+fn scan_weak_to_strong_identifier_upgrade(
+    file: &Path,
+    syntax: &File,
+    strong_references: &StrongReferenceRegistry,
+) -> Vec<String> {
+    if !file.to_string_lossy().contains("crates/") {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    for item in &syntax.items {
+        scan_weak_to_strong_item(file, item, strong_references, &mut violations);
+    }
+    violations
+}
+
+fn scan_weak_to_strong_item(
+    file: &Path,
+    item: &Item,
+    strong_references: &StrongReferenceRegistry,
+    violations: &mut Vec<String>,
+) {
+    match item {
+        Item::Fn(item_fn) => {
+            if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
+                return;
+            }
+            scan_weak_to_strong_signature(
+                file,
+                &item_fn.sig.ident.to_string(),
+                item_fn.sig.ident.span().start().line,
+                &item_fn.sig.inputs,
+                &item_fn.sig.output,
+                strong_references,
+                violations,
+            );
+        }
+        Item::Impl(item_impl) => {
+            for impl_item in &item_impl.items {
+                if let ImplItem::Fn(item_fn) = impl_item {
+                    if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
+                        continue;
+                    }
+                    scan_weak_to_strong_signature(
+                        file,
+                        &item_fn.sig.ident.to_string(),
+                        item_fn.sig.ident.span().start().line,
+                        &item_fn.sig.inputs,
+                        &item_fn.sig.output,
+                        strong_references,
+                        violations,
+                    );
+                }
+            }
+        }
+        Item::Mod(item_mod) => {
+            if let Some((_, nested)) = &item_mod.content {
+                for nested_item in nested {
+                    scan_weak_to_strong_item(file, nested_item, strong_references, violations);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scan_weak_to_strong_signature(
+    file: &Path,
+    function_name: &str,
+    line: usize,
+    inputs: &syn::punctuated::Punctuated<FnArg, Token![,]>,
+    output: &ReturnType,
+    strong_references: &StrongReferenceRegistry,
+    violations: &mut Vec<String>,
+) {
+    if !is_upgrade_shaped_function(function_name) {
+        return;
+    }
+
+    let Some(domain) = strong_reference_return_domain(output, strong_references) else {
+        return;
+    };
+
+    let weak_params = inputs
+        .iter()
+        .filter_map(|arg| weak_identifier_parameter(arg, &domain))
+        .collect::<Vec<_>>();
+    if weak_params.is_empty() {
+        return;
+    }
+
+    violations.push(format!(
+        "{}:{}: function `{}` upgrades weak {} input(s) [{}] into strong `{}` truth",
+        file.display(),
+        line,
+        function_name,
+        domain,
+        weak_params.join(", "),
+        domain
+    ));
+}
+
+fn is_upgrade_shaped_function(function_name: &str) -> bool {
+    function_name.starts_with("resolve_")
+        || function_name.contains("_by_id")
+        || function_name.starts_with("current_")
+}
+
+fn strong_reference_return_domain(
+    output: &ReturnType,
+    strong_references: &StrongReferenceRegistry,
+) -> Option<String> {
+    match output {
+        ReturnType::Default => None,
+        ReturnType::Type(_, ty) => strong_reference_domain_for_type(ty, strong_references),
+    }
+}
+
+fn strong_reference_domain_for_type(
+    ty: &Type,
+    strong_references: &StrongReferenceRegistry,
+) -> Option<String> {
+    match ty {
+        Type::Path(type_path) => {
+            let segment = type_path.path.segments.last()?;
+            let ident = segment.ident.to_string();
+            if let Some(domain) = strong_references.get(&ident) {
+                return Some(domain.clone());
+            }
+            match &segment.arguments {
+                syn::PathArguments::AngleBracketed(arguments) => {
+                    arguments.args.iter().find_map(|arg| match arg {
+                        syn::GenericArgument::Type(inner) => {
+                            strong_reference_domain_for_type(inner, strong_references)
+                        }
+                        _ => None,
+                    })
+                }
+                _ => None,
+            }
+        }
+        Type::Reference(reference) => {
+            strong_reference_domain_for_type(&reference.elem, strong_references)
+        }
+        Type::Paren(paren) => strong_reference_domain_for_type(&paren.elem, strong_references),
+        Type::Group(group) => strong_reference_domain_for_type(&group.elem, strong_references),
+        _ => None,
+    }
+}
+
+fn weak_identifier_parameter(arg: &FnArg, domain: &str) -> Option<String> {
+    let FnArg::Typed(pat_type) = arg else {
+        return None;
+    };
+    let param_name = typed_pat_name(pat_type)?;
+    if !is_weak_identifier_for_domain(domain, &param_name, &pat_type.ty) {
+        return None;
+    }
+    Some(format!("{param_name}: {}", pat_type.ty.to_token_stream()))
+}
+
+fn typed_pat_name(pat_type: &syn::PatType) -> Option<String> {
+    match pat_type.pat.as_ref() {
+        Pat::Ident(ident) => Some(ident.ident.to_string()),
+        _ => None,
+    }
+}
+
+fn is_weak_identifier_for_domain(domain: &str, param_name: &str, ty: &Type) -> bool {
+    match domain {
+        "channel" => {
+            param_name.contains("channel")
+                && (type_mentions_ident(ty, "ChannelId") || type_is_string_like(ty))
+        }
+        "invitation" => {
+            param_name.contains("invitation")
+                && (type_mentions_ident(ty, "InvitationId") || type_is_string_like(ty))
+        }
+        "ceremony" => {
+            param_name.contains("ceremony")
+                && (type_mentions_ident(ty, "CeremonyId") || type_is_string_like(ty))
+        }
+        "home" => {
+            param_name.contains("home")
+                && (type_mentions_ident(ty, "ChannelId") || type_mentions_ident(ty, "HomeId"))
+        }
+        "home_scope" => {
+            (param_name.contains("channel")
+                || param_name.contains("home")
+                || param_name.contains("hint"))
+                && (type_mentions_ident(ty, "ChannelId")
+                    || type_mentions_ident(ty, "HomeId")
+                    || type_is_string_like(ty))
+        }
+        _ => false,
+    }
+}
+
+fn type_mentions_ident(ty: &Type, expected: &str) -> bool {
+    match ty {
+        Type::Path(type_path) => type_path.path.segments.iter().any(|segment| {
+            segment.ident == expected
+                || match &segment.arguments {
+                    syn::PathArguments::AngleBracketed(arguments) => {
+                        arguments.args.iter().any(|arg| match arg {
+                            syn::GenericArgument::Type(inner) => {
+                                type_mentions_ident(inner, expected)
+                            }
+                            _ => false,
+                        })
+                    }
+                    _ => false,
+                }
+        }),
+        Type::Reference(reference) => type_mentions_ident(&reference.elem, expected),
+        Type::Paren(paren) => type_mentions_ident(&paren.elem, expected),
+        Type::Group(group) => type_mentions_ident(&group.elem, expected),
+        _ => false,
+    }
+}
+
+fn type_is_string_like(ty: &Type) -> bool {
+    match ty {
+        Type::Path(type_path) => type_path
+            .path
+            .segments
+            .last()
+            .is_some_and(|segment| segment.ident == "String"),
+        Type::Reference(reference) => match reference.elem.as_ref() {
+            Type::Path(type_path) => type_path.path.is_ident("str"),
+            _ => false,
+        },
+        Type::Paren(paren) => type_is_string_like(&paren.elem),
+        Type::Group(group) => type_is_string_like(&group.elem),
+        _ => false,
+    }
 }
 
 fn scan_item(mode: LintMode, file: &Path, source: &str, item: &Item, violations: &mut Vec<String>) {
@@ -491,6 +828,7 @@ fn scan_function(
         LintMode::AuthoritativeRefNoReresolution => file
             .to_string_lossy()
             .contains("crates/aura-app/src/workflows/"),
+        LintMode::WeakToStrongIdentifierUpgrade => false,
         LintMode::ActorOwnedTaskSpawn
         | LintMode::AsyncSessionOwnership
         | LintMode::FrontendSemanticHandoffBoundary
@@ -541,6 +879,17 @@ fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
         matches!(attr.style, AttrStyle::Outer)
             && attr.path().is_ident("cfg")
             && attr.to_token_stream().to_string().contains("test")
+    })
+}
+
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        matches!(attr.style, AttrStyle::Outer)
+            && attr
+                .path()
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "test")
     })
 }
 
@@ -1132,7 +1481,8 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::HarnessRecoveryOwnership
             | LintMode::TimeoutPolicyBoundary
             | LintMode::TimeDomainUsage
-            | LintMode::AuthoritativeRefNoReresolution => {}
+            | LintMode::AuthoritativeRefNoReresolution
+            | LintMode::WeakToStrongIdentifierUpgrade => {}
         }
 
         visit::visit_expr_await(self, node);
@@ -1702,6 +2052,7 @@ fn scan_harness_readiness_ownership(file: &Path, source: &str) -> Vec<String> {
         &[],
     );
     violations.extend(scan_browser_shell_mutation_snapshot_boundary(file, source));
+    violations.extend(scan_agent_channel_metadata_ownership(file, source));
     violations
 }
 
@@ -1764,6 +2115,25 @@ fn scan_browser_shell_mutation_snapshot_boundary(file: &Path, source: &str) -> V
     }
 
     violations
+}
+
+fn scan_agent_channel_metadata_ownership(file: &Path, source: &str) -> Vec<String> {
+    if !file_matches_suffix(
+        file,
+        &["crates/aura-agent/src/reactive/app_signal_views.rs"],
+    ) {
+        return Vec::new();
+    }
+
+    source_line_violations(
+        file,
+        source,
+        &[
+            "name.unwrap_or_else(|| channel_id.to_string())",
+            "name: channel_id.to_string()",
+        ],
+        &[],
+    )
 }
 
 fn scan_frontend_semantic_handoff_boundary(file: &Path, syntax: &File) -> Vec<String> {

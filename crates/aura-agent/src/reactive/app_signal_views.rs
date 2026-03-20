@@ -103,11 +103,10 @@ impl InvitationsSignalView {
                 ..
             } => (
                 Some(*home_id),
-                Some(
-                    nickname_suggestion
-                        .clone()
-                        .unwrap_or_else(|| home_id.to_string()),
-                ),
+                nickname_suggestion
+                    .clone()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
             ),
             _ => (None, None),
         }
@@ -1163,10 +1162,18 @@ impl ReactiveView for ChatSignalView {
                                     }
                                     channel.last_activity = updated_at.ts_ms;
                                 } else {
+                                    let Some(name) = name else {
+                                        tracing::debug!(
+                                            channel_id = %channel_id,
+                                            context_id = %context_id,
+                                            "ignoring ChannelUpdated without canonical name for unknown channel"
+                                        );
+                                        continue;
+                                    };
                                     state.upsert_channel(Channel {
                                         id: channel_id,
                                         context_id: Some(context_id),
-                                        name: name.unwrap_or_else(|| channel_id.to_string()),
+                                        name,
                                         topic,
                                         channel_type: ChannelType::Home,
                                         unread_count: 0,
@@ -1405,21 +1412,12 @@ impl ReactiveView for ChatSignalView {
                                         .remove(&channel_id);
                                 }
                                 if state.channel(&channel_id).is_none() {
-                                    state.upsert_channel(Channel {
-                                        id: channel_id,
-                                        context_id: None,
-                                        name: channel_id.to_string(),
-                                        topic: None,
-                                        channel_type: ChannelType::Home,
-                                        unread_count: 0,
-                                        is_dm: false,
-                                        member_ids: Vec::new(),
-                                        member_count: 0,
-                                        last_message: None,
-                                        last_message_time: None,
-                                        last_activity: 0,
-                                        last_finalized_epoch: 0,
-                                    });
+                                    tracing::debug!(
+                                        channel_id = %channel_id,
+                                        participant = %participant,
+                                        "ignoring ChannelParticipantEvent::Joined without canonical channel metadata"
+                                    );
+                                    continue;
                                 }
                                 if let Some(channel) = state.channel_mut(&channel_id) {
                                     if participant != self.own_authority
@@ -1484,7 +1482,10 @@ impl ReactiveView for ChatSignalView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL};
+    use crate::runtime::effects::AuraEffectSystem;
+    use crate::AgentConfig;
+    use aura_app::signal_defs::{register_app_signals, CHAT_SIGNAL, HOMES_SIGNAL};
+    use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -1764,5 +1765,39 @@ mod tests {
             .find_map(|(_, home)| (home.context_id == Some(unknown_context)).then_some(home))
             .expect("unknown context home should still exist");
         assert!(!home_state.mute_list.contains_key(&target));
+    }
+
+    #[tokio::test]
+    async fn chat_signal_view_ignores_membership_join_without_canonical_channel_metadata() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([31u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                own_authority,
+            )
+            .unwrap(),
+        );
+        let view = ChatSignalView::new(own_authority, reactive.clone(), effects);
+        let context_id = ContextId::new_from_entropy([32u8; 32]);
+        let channel_id = ChannelId::from_bytes([33u8; 32]);
+        let peer = AuthorityId::new_from_entropy([34u8; 32]);
+        let membership = ChannelMembershipFact::new(
+            context_id,
+            channel_id,
+            peer,
+            ChannelParticipantEvent::Joined,
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+        )
+        .to_generic();
+
+        view.update(&[fact_from_relational(membership)]).await;
+
+        let chat: ChatState = reactive.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+        assert!(
+            chat.channel(&channel_id).is_none(),
+            "membership-only facts must not fabricate channel projection without canonical metadata"
+        );
     }
 }

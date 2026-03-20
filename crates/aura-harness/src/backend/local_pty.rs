@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
@@ -45,15 +44,6 @@ enum BackendState {
 
 const PLACEHOLDER_HOME_ID: &str =
     "channel:0000000000000000000000000000000000000000000000000000000000000000";
-
-fn snapshot_has_real_home(snapshot: &UiSnapshot) -> bool {
-    snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Homes)
-        .map(|list| list.items.iter().any(|item| item.id != PLACEHOLDER_HOME_ID))
-        .unwrap_or(false)
-}
 
 fn select_home_and_channel(backend: &mut LocalPtyBackend, channel_id: &str) -> Result<()> {
     let snapshot = backend.ui_snapshot()?;
@@ -132,82 +122,6 @@ fn unique_shared_channel_candidate(snapshot: &UiSnapshot) -> Option<String> {
         [channel_id] => Some(channel_id.clone()),
         _ => None,
     }
-}
-
-fn authoritative_channel_binding(
-    snapshot: &UiSnapshot,
-    channel_name: &str,
-) -> Option<ChannelBinding> {
-    snapshot
-        .runtime_events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.fact {
-            RuntimeFact::ChannelMembershipReady { channel, .. }
-                if channel
-                    .name
-                    .as_deref()
-                    .map(|name| name.eq_ignore_ascii_case(channel_name))
-                    .unwrap_or(false) =>
-            {
-                channel.id.as_ref().map(|channel_id| ChannelBinding {
-                    channel_id: channel_id.clone(),
-                    context_id: None,
-                })
-            }
-            _ => None,
-        })
-}
-
-fn materialized_channel_binding(
-    snapshot: &UiSnapshot,
-    previous_channel_ids: &BTreeSet<String>,
-) -> Option<ChannelBinding> {
-    let channels = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Channels)?;
-    let mut new_channel_ids = channels
-        .items
-        .iter()
-        .filter(|item| !previous_channel_ids.contains(&item.id))
-        .map(|item| item.id.clone())
-        .collect::<Vec<_>>();
-    new_channel_ids.sort();
-    new_channel_ids.dedup();
-    match new_channel_ids.as_slice() {
-        [channel_id] => Some(ChannelBinding {
-            channel_id: channel_id.clone(),
-            context_id: None,
-        }),
-        _ => None,
-    }
-}
-
-fn selected_new_channel_binding(
-    snapshot: &UiSnapshot,
-    previous_channel_ids: &BTreeSet<String>,
-) -> Option<ChannelBinding> {
-    let selected_channel_id = snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Channels)
-        .map(|selection| selection.item_id.clone())?;
-    if previous_channel_ids.contains(&selected_channel_id) {
-        return None;
-    }
-    let channel_exists = snapshot
-        .lists
-        .iter()
-        .find(|list| list.id == ListId::Channels)
-        .is_some_and(|list| list.items.iter().any(|item| item.id == selected_channel_id));
-    if !channel_exists {
-        return None;
-    }
-    Some(ChannelBinding {
-        channel_id: selected_channel_id,
-        context_id: None,
-    })
 }
 
 struct RunningSession {
@@ -503,10 +417,10 @@ impl LocalPtyBackend {
         Ok(())
     }
 
-    fn send_harness_command(
+    fn send_harness_command_receipt(
         &mut self,
         command: &HarnessUiCommand,
-    ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>> {
+    ) -> Result<HarnessUiCommandReceipt> {
         let socket_path = Self::absolutize_path(self.command_socket_path());
         let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -514,9 +428,7 @@ impl LocalPtyBackend {
         loop {
             match UnixStream::connect(&socket_path) {
                 Ok(mut stream) => {
-                    let command_result: Result<
-                        Option<aura_app::ui_contract::HarnessUiOperationHandle>,
-                    > = (|| {
+                    let command_result: Result<HarnessUiCommandReceipt> = (|| {
                         stream
                             .write_all(&payload)
                             .context("failed to write harness UI command")?;
@@ -550,16 +462,11 @@ impl LocalPtyBackend {
                                     .context("failed to decode harness UI command receipt")
                             }
                         })?;
-                        match receipt {
-                            HarnessUiCommandReceipt::Accepted { operation } => Ok(operation),
-                            HarnessUiCommandReceipt::Rejected { reason } => {
-                                anyhow::bail!("TUI harness command rejected: {reason}")
-                            }
-                        }
+                        Ok(receipt)
                     })();
 
                     match command_result {
-                        Ok(operation) => return Ok(operation),
+                        Ok(receipt) => return Ok(receipt),
                         Err(error)
                             if error
                                 .downcast_ref::<std::io::Error>()
@@ -627,6 +534,18 @@ impl LocalPtyBackend {
                         )
                     });
                 }
+            }
+        }
+    }
+
+    fn send_harness_command(
+        &mut self,
+        command: &HarnessUiCommand,
+    ) -> Result<Option<aura_app::ui_contract::HarnessUiOperationHandle>> {
+        match self.send_harness_command_receipt(command)? {
+            HarnessUiCommandReceipt::Accepted { operation, .. } => Ok(operation),
+            HarnessUiCommandReceipt::Rejected { reason } => {
+                anyhow::bail!("TUI harness command rejected: {reason}")
             }
         }
     }
@@ -1557,31 +1476,54 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Duration::from_secs(5),
             )?,
         };
-        let issue_deadline = Instant::now() + Duration::from_secs(5);
+        let issue_deadline = Instant::now() + Duration::from_secs(30);
+        let mut restarted = false;
         loop {
             let snapshot = self.ui_snapshot()?;
-            if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
-                == Some(aura_app::ui::contract::OperationState::Failed)
-            {
-                anyhow::bail!("submit_create_account: account creation failed");
+            let visible_home_id = snapshot
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Homes)
+                .and_then(|list| {
+                    list.items
+                        .iter()
+                        .find(|item| item.id != PLACEHOLDER_HOME_ID)
+                        .map(|item| item.id.clone())
+                });
+            let operation_state =
+                snapshot.operation_state_for_instance(handle.id(), handle.instance_id());
+            if operation_state == Some(aura_app::ui::contract::OperationState::Failed) {
+                let latest_toast = snapshot
+                    .toasts
+                    .last()
+                    .map(|toast| toast.message.clone())
+                    .unwrap_or_default();
+                let log_tail = self.tail_log(20).unwrap_or_default().join("\n");
+                anyhow::bail!(
+                    "submit_create_account: account creation failed; screen={:?}; latest_toast={:?}; log_tail={}",
+                    snapshot.screen,
+                    latest_toast,
+                    log_tail
+                );
             }
-            if snapshot
-                .operation_state_for_instance(handle.id(), handle.instance_id())
-                .is_some_and(|state| {
-                    matches!(
-                        state,
-                        aura_app::ui::contract::OperationState::Submitting
-                            | aura_app::ui::contract::OperationState::Succeeded
-                    )
-                })
-            {
+            if snapshot.screen != ScreenId::Onboarding && snapshot.readiness == UiReadiness::Ready {
+                if let Some(home_id) = visible_home_id {
+                    self.send_harness_command(&HarnessUiCommand::SelectHome { home_id })?;
+                }
                 return Ok(SubmittedAction::with_ui_operation((), handle));
             }
-            if snapshot.screen != ScreenId::Onboarding || snapshot_has_real_home(&snapshot) {
-                return Ok(SubmittedAction::with_ui_operation((), handle));
+            if !restarted
+                && operation_state == Some(aura_app::ui::contract::OperationState::Succeeded)
+            {
+                self.stop()?;
+                self.start()?;
+                restarted = true;
+                continue;
             }
             if Instant::now() >= issue_deadline {
-                anyhow::bail!("submit_create_account: account creation did not issue");
+                anyhow::bail!(
+                    "submit_create_account: account creation did not materialize a real home after restart handoff"
+                );
             }
             blocking_sleep(Duration::from_millis(100));
         }
@@ -1628,59 +1570,75 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         channel_name: &str,
     ) -> Result<SubmittedAction<ChannelBinding>> {
-        let previous_snapshot = self.ui_snapshot()?;
         let previous_operation =
-            observe_operation(&previous_snapshot, &OperationId::create_channel());
-        let previous_channel_ids = previous_snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Channels)
-            .map(|list| {
-                list.items
-                    .iter()
-                    .map(|item| item.id.clone())
-                    .collect::<BTreeSet<_>>()
-            })
-            .unwrap_or_default();
-        let receipt_handle = self
-            .send_harness_command(&HarnessUiCommand::CreateChannel {
+            observe_operation(&self.ui_snapshot()?, &OperationId::create_channel());
+        let receipt = self
+            .send_harness_command_receipt(&HarnessUiCommand::CreateChannel {
                 channel_name: channel_name.to_string(),
             })
             .context("submit_create_channel: create_channel_command")?;
-        let handle = match receipt_handle {
-            Some(handle) => {
-                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone())
-            }
-            None => wait_for_operation_submission(
-                self,
-                OperationId::create_channel(),
-                previous_operation,
-                Duration::from_secs(5),
-            )?,
-        };
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            if let Some(binding) = authoritative_channel_binding(&snapshot, channel_name) {
-                return Ok(SubmittedAction::with_ui_operation(binding, handle));
-            }
-            if let Some(binding) = selected_new_channel_binding(&snapshot, &previous_channel_ids) {
-                return Ok(SubmittedAction::with_ui_operation(binding, handle));
-            }
-            if let Some(binding) = materialized_channel_binding(&snapshot, &previous_channel_ids) {
-                return Ok(SubmittedAction::with_ui_operation(binding, handle));
-            }
-            if snapshot.operation_state_for_instance(handle.id(), handle.instance_id())
-                == Some(OperationState::Failed)
-            {
-                anyhow::bail!("submit_create_channel: create_channel failed");
-            }
-            if Instant::now() >= deadline {
+        match receipt {
+            HarnessUiCommandReceipt::Accepted {
+                operation: Some(handle),
+                value:
+                    Some(SemanticCommandValue::ChannelBinding {
+                        channel_id,
+                        context_id,
+                    }),
+            } => Ok(SubmittedAction::with_ui_operation(
+                ChannelBinding {
+                    channel_id,
+                    context_id,
+                },
+                UiOperationHandle::new(handle.operation_id().clone(), handle.instance_id().clone()),
+            )),
+            HarnessUiCommandReceipt::Accepted {
+                operation: None,
+                value:
+                    Some(SemanticCommandValue::ChannelBinding {
+                        channel_id: _,
+                        context_id: _,
+                    }),
+            } => anyhow::bail!(
+                "submit_create_channel: create_channel accepted without exact operation handle"
+            ),
+            HarnessUiCommandReceipt::Accepted { operation, value: None } => {
+                let handle = match operation {
+                    Some(handle) => {
+                        UiOperationHandle::new(
+                            handle.operation_id().clone(),
+                            handle.instance_id().clone(),
+                        )
+                    }
+                    None => wait_for_operation_submission(
+                        self,
+                        OperationId::create_channel(),
+                        previous_operation,
+                        Duration::from_secs(5),
+                    )?,
+                };
                 anyhow::bail!(
-                    "submit_create_channel did not publish an authoritative channel binding for {channel_name}"
+                    "submit_create_channel: create_channel did not return an authoritative channel binding payload for {} (operation={}:{})",
+                    channel_name,
+                    handle.id().0,
+                    handle.instance_id().0
                 );
             }
-            blocking_sleep(Duration::from_millis(80));
+            HarnessUiCommandReceipt::Accepted {
+                operation: _,
+                value: Some(SemanticCommandValue::None),
+            } => anyhow::bail!(
+                "submit_create_channel: create_channel returned an explicit empty semantic payload"
+            ),
+            HarnessUiCommandReceipt::Accepted {
+                operation: _,
+                value: Some(SemanticCommandValue::ContactInvitationCode { .. }),
+            } => anyhow::bail!(
+                "submit_create_channel: create_channel returned an unexpected contact invitation payload"
+            ),
+            HarnessUiCommandReceipt::Rejected { reason } => {
+                anyhow::bail!("submit_create_channel: create_channel rejected: {reason}")
+            }
         }
     }
 
@@ -1954,49 +1912,6 @@ mod tests {
         root
     }
 
-    fn snapshot_with_channels(channel_ids: &[(&str, bool)]) -> UiSnapshot {
-        UiSnapshot {
-            screen: ScreenId::Chat,
-            focused_control: None,
-            open_modal: None,
-            readiness: UiReadiness::Ready,
-            revision: aura_app::ui_contract::ProjectionRevision {
-                semantic_seq: 1,
-                render_seq: Some(1),
-            },
-            quiescence: aura_app::ui_contract::QuiescenceSnapshot {
-                state: aura_app::ui_contract::QuiescenceState::Settled,
-                reason_codes: Vec::new(),
-            },
-            selections: channel_ids
-                .iter()
-                .find_map(|(id, selected)| {
-                    selected.then(|| aura_app::ui_contract::SelectionSnapshot {
-                        list: ListId::Channels,
-                        item_id: (*id).to_string(),
-                    })
-                })
-                .into_iter()
-                .collect(),
-            lists: vec![aura_app::ui_contract::ListSnapshot {
-                id: ListId::Channels,
-                items: channel_ids
-                    .iter()
-                    .map(|(id, selected)| aura_app::ui_contract::ListItemSnapshot {
-                        id: (*id).to_string(),
-                        selected: *selected,
-                        confirmation: aura_app::ui_contract::ConfirmationState::PendingLocal,
-                        is_current: false,
-                    })
-                    .collect(),
-            }],
-            messages: Vec::new(),
-            operations: Vec::new(),
-            toasts: Vec::new(),
-            runtime_events: Vec::new(),
-        }
-    }
-
     fn test_config() -> InstanceConfig {
         InstanceConfig {
             id: "local-test".to_string(),
@@ -2077,53 +1992,6 @@ mod tests {
         if let Err(error) = backend.stop() {
             panic!("backend must stop: {error}");
         }
-    }
-
-    #[test]
-    fn materialized_channel_binding_uses_unique_new_channel_id() {
-        let snapshot = snapshot_with_channels(&[
-            ("channel:note-to-self", false),
-            ("channel:shared-parity-lab", true),
-        ]);
-        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
-        let binding = materialized_channel_binding(&snapshot, &previous)
-            .unwrap_or_else(|| panic!("expected new materialized channel binding"));
-        assert_eq!(binding.channel_id, "channel:shared-parity-lab");
-        assert_eq!(binding.context_id, None);
-    }
-
-    #[test]
-    fn materialized_channel_binding_rejects_ambiguous_channel_delta() {
-        let snapshot = snapshot_with_channels(&[
-            ("channel:note-to-self", false),
-            ("channel:shared-a", false),
-            ("channel:shared-b", true),
-        ]);
-        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
-        assert!(materialized_channel_binding(&snapshot, &previous).is_none());
-    }
-
-    #[test]
-    fn selected_new_channel_binding_uses_selected_new_channel_id() {
-        let snapshot = snapshot_with_channels(&[
-            ("channel:note-to-self", false),
-            ("channel:shared-parity-lab", true),
-        ]);
-        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
-        let binding = selected_new_channel_binding(&snapshot, &previous)
-            .unwrap_or_else(|| panic!("expected selected new channel binding"));
-        assert_eq!(binding.channel_id, "channel:shared-parity-lab");
-        assert_eq!(binding.context_id, None);
-    }
-
-    #[test]
-    fn selected_new_channel_binding_rejects_preexisting_selection() {
-        let snapshot = snapshot_with_channels(&[
-            ("channel:note-to-self", true),
-            ("channel:shared-parity-lab", false),
-        ]);
-        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
-        assert!(selected_new_channel_binding(&snapshot, &previous).is_none());
     }
 
     #[test]

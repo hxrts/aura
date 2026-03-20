@@ -736,7 +736,10 @@ mod tests {
                         },
                     receipt,
                 } => {
-                    receipt.complete(HarnessUiCommandReceipt::Accepted { operation: None });
+                    receipt.complete(HarnessUiCommandReceipt::Accepted {
+                        operation: None,
+                        value: None,
+                    });
                 }
                 other => panic!("unexpected harness command submission: {other:?}"),
             }
@@ -771,7 +774,10 @@ mod tests {
                 });
             assert_eq!(
                 receipt,
-                HarnessUiCommandReceipt::Accepted { operation: None }
+                HarnessUiCommandReceipt::Accepted {
+                    operation: None,
+                    value: None,
+                }
             );
         };
 

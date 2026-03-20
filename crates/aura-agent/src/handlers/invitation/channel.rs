@@ -441,9 +441,8 @@ impl<'a> InvitationChannelHandler<'a> {
                 bootstrap,
             } = &inv.invitation_type
             {
-                let home_name = nickname_suggestion
-                    .clone()
-                    .unwrap_or_else(|| home_id.to_string());
+                let home_name =
+                    require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
                 return Ok(Some(ChannelInviteDetails {
                     context_id: inv.context_id,
                     channel_id: *home_id,
@@ -464,7 +463,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 bootstrap,
             } = shareable.invitation_type
             {
-                let home_name = nickname_suggestion.unwrap_or_else(|| home_id.to_string());
+                let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
                 return Ok(Some(ChannelInviteDetails {
                     context_id: shareable
                         .context_id
@@ -522,7 +521,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 bootstrap,
             } = invitation_type
             {
-                let home_name = nickname_suggestion.unwrap_or_else(|| home_id.to_string());
+                let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
                 return Ok(Some(ChannelInviteDetails {
                     context_id,
                     channel_id: home_id,
@@ -589,22 +588,35 @@ impl<'a> InvitationChannelHandler<'a> {
         self.require_channel_join(effects, invite.context_id, invite.channel_id, own_id)
             .await?;
 
-        if !self
+        let existing_channel_name = self
             .handler
-            .channel_created_fact_exists(effects, own_id, invite.context_id, invite.channel_id)
-            .await
-        {
+            .channel_created_fact_name(effects, own_id, invite.context_id, invite.channel_id)
+            .await;
+        if existing_channel_name.as_deref() != Some(invite.home_name.as_str()) {
             let now_ms = effects.current_timestamp().await.unwrap_or(0);
-            let fact = ChatFact::channel_created_ms(
-                invite.context_id,
-                invite.channel_id,
-                invite.home_name.clone(),
-                Some(format!("Home channel {}", invite.home_id)),
-                false,
-                now_ms,
-                invite.sender_id,
-            )
-            .to_generic();
+            let fact = match existing_channel_name {
+                Some(_) => ChatFact::channel_updated_ms(
+                    invite.context_id,
+                    invite.channel_id,
+                    Some(invite.home_name.clone()),
+                    Some(format!("Home channel {}", invite.home_id)),
+                    None,
+                    None,
+                    now_ms,
+                    invite.sender_id,
+                )
+                .to_generic(),
+                None => ChatFact::channel_created_ms(
+                    invite.context_id,
+                    invite.channel_id,
+                    invite.home_name.clone(),
+                    Some(format!("Home channel {}", invite.home_id)),
+                    false,
+                    now_ms,
+                    invite.sender_id,
+                )
+                .to_generic(),
+            };
 
             effects
                 .commit_relational_facts(vec![fact])

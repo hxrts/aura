@@ -192,6 +192,7 @@ const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
 /// Frontend and workflow code may inspect invitation metadata through shared
 /// borrows, but lifecycle transitions consume the handle so stale owners cannot
 /// act twice.
+#[aura_macros::strong_reference(domain = "invitation")]
 #[derive(Debug)]
 pub struct InvitationHandle {
     invitation: InvitationInfo,
@@ -1632,22 +1633,20 @@ pub async fn import_invitation_details(
         .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }
 
-/// Resolve a pending invitation into a move-owned lifecycle handle.
-pub async fn resolve_pending_invitation_handle(
+async fn pending_invitation_info_by_id(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
-) -> Result<InvitationHandle, AuraError> {
+) -> Result<InvitationInfo, AuraError> {
     let invitation_id = InvitationId::new(invitation_id);
     let runtime = require_runtime(app_core).await?;
     let invitations = runtime
         .try_list_pending_invitations()
         .await
         .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
-    let invitation = invitations
+    invitations
         .into_iter()
         .find(|invitation| invitation.invitation_id == invitation_id)
-        .ok_or_else(|| AuraError::not_found(invitation_id.to_string()))?;
-    Ok(InvitationHandle::new(invitation))
+        .ok_or_else(|| AuraError::not_found(invitation_id.to_string()))
 }
 
 // ============================================================================
@@ -2243,9 +2242,10 @@ pub async fn accept_device_enrollment_invitation(
 pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
-) -> Result<(), AuraError> {
-    let handle = resolve_pending_invitation_handle(app_core, invitation_id).await?;
-    accept_invitation(app_core, handle).await
+) -> Result<InvitationInfo, AuraError> {
+    let invitation = pending_invitation_info_by_id(app_core, invitation_id).await?;
+    accept_invitation(app_core, InvitationHandle::new(invitation.clone())).await?;
+    Ok(invitation)
 }
 
 /// Decline an invitation using typed InvitationId
@@ -2270,8 +2270,8 @@ pub async fn decline_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    let handle = resolve_pending_invitation_handle(app_core, invitation_id).await?;
-    decline_invitation(app_core, handle).await
+    let invitation = pending_invitation_info_by_id(app_core, invitation_id).await?;
+    decline_invitation(app_core, InvitationHandle::new(invitation)).await
 }
 
 /// Cancel an invitation using typed InvitationId
@@ -2296,8 +2296,8 @@ pub async fn cancel_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    let handle = resolve_pending_invitation_handle(app_core, invitation_id).await?;
-    cancel_invitation(app_core, handle).await
+    let invitation = pending_invitation_info_by_id(app_core, invitation_id).await?;
+    cancel_invitation(app_core, InvitationHandle::new(invitation)).await
 }
 
 /// Import an invitation from a shareable code

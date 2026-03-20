@@ -29,6 +29,7 @@ use std::time::Duration;
 /// This is the canonical owner token for parity-critical key rotation and
 /// membership-change ceremonies. Cancellation consumes the handle so callers
 /// cannot issue multiple cancels on the same owned ceremony instance.
+#[aura_macros::strong_reference(domain = "ceremony")]
 #[derive(Debug)]
 pub struct CeremonyHandle {
     ceremony_id: CeremonyId,

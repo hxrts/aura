@@ -25,9 +25,10 @@ use aura_app::ui::types::{
     BootstrapSurface, PendingAccountBootstrap, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
 };
 use aura_app::ui::workflows::account::{
-    derive_recovered_context_id, parse_backup_code, prepare_pending_account_bootstrap,
-    reconcile_pending_runtime_account_bootstrap,
+    derive_recovered_context_id, initialize_runtime_account, parse_backup_code,
+    prepare_pending_account_bootstrap, reconcile_pending_runtime_account_bootstrap,
 };
+use aura_app::ui::workflows::context as context_workflows;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::{NetworkConfig, StorageConfig};
@@ -75,6 +76,7 @@ pub enum AccountLoadResult {
     Loaded {
         authority: AuthorityId,
         context: ContextId,
+        nickname_suggestion: Option<String>,
     },
     /// No account exists - need to show setup modal
     NotFound,
@@ -186,6 +188,7 @@ async fn try_load_account(
     Ok(AccountLoadResult::Loaded {
         authority: config.authority_id,
         context: config.context_id,
+        nickname_suggestion: config.nickname_suggestion,
     })
 }
 
@@ -886,7 +889,11 @@ async fn handle_tui_launch(
         let startup_tasks = Arc::new(UiTaskOwner::new());
 
         let app_core = match loaded_account {
-            AccountLoadResult::Loaded { authority, context } => {
+            AccountLoadResult::Loaded {
+                authority,
+                context,
+                nickname_suggestion,
+            } => {
                 stdio.println(format_args!("Authority: {authority}"));
                 stdio.println(format_args!("Context: {context}"));
 
@@ -998,9 +1005,8 @@ async fn handle_tui_launch(
                 let app_core = InitializedAppCore::new(app_core).await?;
                 let mut pending_device_enrollment_code = None;
 
-                if let Some(pending_bootstrap) =
-                    load_pending_account_bootstrap(storage.as_ref()).await?
-                {
+                let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
+                if let Some(pending_bootstrap) = pending_bootstrap {
                     pending_device_enrollment_code =
                         pending_bootstrap.device_enrollment_code.clone();
                     pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
@@ -1032,6 +1038,22 @@ async fn handle_tui_launch(
                         );
                         tracing::info!(event = %finalized_event, path = %base_path.display());
                     }
+                } else if context_workflows::current_home_context(app_core.raw())
+                    .await
+                    .is_err()
+                {
+                    let nickname_suggestion = nickname_suggestion.clone().ok_or_else(|| {
+                        AuraError::internal(
+                            "Loaded account is missing bootstrap nickname for runtime initialization"
+                                .to_string(),
+                        )
+                    })?;
+                    initialize_runtime_account(app_core.raw(), nickname_suggestion).await?;
+                    let finalized_event = BootstrapEvent::new(
+                        BootstrapSurface::Tui,
+                        BootstrapEventKind::RuntimeBootstrapFinalized,
+                    );
+                    tracing::info!(event = %finalized_event, path = %base_path.display());
                 }
 
                 if let Err(e) =
@@ -1545,9 +1567,14 @@ mod tests {
 
         let loaded = try_load_account(&storage).await.expect("load account");
         match loaded {
-            AccountLoadResult::Loaded { authority, context } => {
+            AccountLoadResult::Loaded {
+                authority,
+                context,
+                nickname_suggestion,
+            } => {
                 assert_eq!(authority, authority_id);
                 assert_eq!(context, context_id);
+                assert_eq!(nickname_suggestion.as_deref(), Some("Alice"));
             }
             AccountLoadResult::NotFound => panic!("account should have been persisted"),
         }
@@ -1566,9 +1593,14 @@ mod tests {
             .expect("load persisted account");
 
         match loaded {
-            AccountLoadResult::Loaded { authority, context } => {
+            AccountLoadResult::Loaded {
+                authority,
+                context,
+                nickname_suggestion,
+            } => {
                 assert_eq!(authority, authority_id);
                 assert_eq!(context, context_id);
+                assert_eq!(nickname_suggestion.as_deref(), Some("Alice"));
             }
             AccountLoadResult::NotFound => panic!("persisted account should be loaded"),
         }

@@ -69,6 +69,7 @@ async fn resolve_target_authority(
     parse_authority_id(target)
 }
 
+#[aura_macros::strong_reference(domain = "home_scope")]
 #[derive(Debug, Clone)]
 struct ModeratorScope {
     home_id: ChannelId,
@@ -117,6 +118,7 @@ async fn resolve_authoritative_channel_id(
     }
 }
 
+#[cfg(test)]
 fn best_home_for_context(
     homes: &crate::views::home::HomesState,
     context_id: ContextId,
@@ -183,51 +185,11 @@ async fn resolve_scope(
     })
 }
 
-async fn resolve_scope_by_channel_id(
+async fn current_moderator_scope(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<ChannelId>,
 ) -> Result<ModeratorScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
     let homes = homes_state_signal_snapshot(app_core).await?;
-
-    if let Some(channel_id) = channel_hint {
-        if let Some(home_state) = homes.home_state(&channel_id) {
-            let context_id = home_state
-                .context_id
-                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-            let peers = runtime
-                .amp_list_channel_participants(context_id, channel_id)
-                .await
-                .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
-            return Ok(ModeratorScope {
-                home_id: channel_id,
-                context_id,
-                home_state: home_state.clone(),
-                peers,
-            });
-        }
-
-        let context_id = runtime
-            .resolve_amp_channel_context(channel_id)
-            .await
-            .map_err(|e| super::error::runtime_call("resolve moderator scope context", e))?
-            .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
-
-        if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
-            let peers = runtime
-                .amp_list_channel_participants(context_id, best_id)
-                .await
-                .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
-            return Ok(ModeratorScope {
-                home_id: best_id,
-                context_id,
-                home_state: best_home,
-                peers,
-            });
-        }
-
-        return Err(AuraError::permission_denied(context_id.to_string()));
-    }
 
     if let Ok(active_home_id) = crate::workflows::context::current_home_id(app_core).await {
         if let Some(home_state) = homes.home_state(&active_home_id) {
@@ -276,7 +238,13 @@ pub async fn grant_moderator_resolved(
     target_id: AuthorityId,
 ) -> Result<(), AuraError> {
     // Validate current view and collect context/peer fanout.
-    let mut scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit moderator scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let mut scope = current_moderator_scope(app_core).await?;
     let runtime = require_runtime(app_core).await?;
 
     if !scope.home_state.is_admin() {
@@ -379,7 +347,13 @@ pub async fn revoke_moderator_resolved(
     channel_hint: Option<ChannelId>,
     target_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    let mut scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
+    if channel_hint.is_some() {
+        return Err(AuraError::invalid(
+            "explicit moderator scope hints are no longer supported; select the target home first",
+        ));
+    }
+
+    let mut scope = current_moderator_scope(app_core).await?;
     let runtime = require_runtime(app_core).await?;
 
     if !scope.home_state.is_admin() {
@@ -659,11 +633,9 @@ mod tests {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();
         }
-        let unknown = ChannelId::from_bytes(hash(b"moderator-unknown-scope"));
-
-        let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
+        let error = current_moderator_scope(&app_core)
             .await
-            .expect_err("unknown channel scope must fail");
+            .expect_err("missing active moderator scope must fail");
         assert!(!error.to_string().is_empty());
     }
 }

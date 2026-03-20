@@ -11,6 +11,7 @@ fail() {
 
 cargo run -q -p aura-macros --bin ownership_lints -- \
   harness-readiness-ownership \
+  crates/aura-agent/src/reactive/app_signal_views.rs \
   crates/aura-terminal/src \
   crates/aura-web/src \
   crates/aura-harness/src

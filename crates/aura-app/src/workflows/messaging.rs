@@ -164,6 +164,7 @@ struct MessageSendReadiness {
 ///
 /// Parity-critical helpers must accept this typed reference instead of raw
 /// `ChannelId` once authoritative context is known.
+#[aura_macros::strong_reference(domain = "channel")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthoritativeChannelRef {
     channel_id: ChannelId,
@@ -1031,7 +1032,9 @@ async fn try_join_via_pending_channel_invitation(
 
     // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
     if let Ok(authoritative_channel) =
-        resolve_authoritative_channel_ref(app_core, local_channel_id).await
+        require_authoritative_context_id_for_channel(app_core, local_channel_id)
+            .await
+            .map(|context_id| authoritative_channel_ref(local_channel_id, context_id))
     {
         if let Err(_e) = join_channel(app_core, authoritative_channel).await {
             #[cfg(feature = "instrumented")]
@@ -1264,22 +1267,26 @@ pub async fn resolve_authoritative_context_id_for_channel(
     None
 }
 
-/// Resolve a canonical channel id into an authoritative typed reference.
-///
-/// Parity-critical workflows must use this explicit resolution step before they
-/// perform runtime membership, readiness, or delivery operations for an
-/// existing channel.
+/// Construct an authoritative channel reference once the canonical context is already known.
+#[must_use]
+pub fn authoritative_channel_ref(
+    channel_id: ChannelId,
+    context_id: ContextId,
+) -> AuthoritativeChannelRef {
+    AuthoritativeChannelRef::new(channel_id, context_id)
+}
+
+/// Require the canonical context currently associated with a channel in app state.
 #[aura_macros::authoritative_source(kind = "runtime")]
-pub async fn resolve_authoritative_channel_ref(
+pub async fn require_authoritative_context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
-) -> Result<AuthoritativeChannelRef, AuraError> {
-    let context_id = resolve_authoritative_context_id_for_channel(app_core, channel_id)
+) -> Result<ContextId, AuraError> {
+    resolve_authoritative_context_id_for_channel(app_core, channel_id)
         .await
         .ok_or_else(|| {
             JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
-        })?;
-    Ok(AuthoritativeChannelRef::new(channel_id, context_id))
+        })
 }
 
 pub(crate) async fn authoritative_local_channel_id_for_context(
@@ -1350,8 +1357,10 @@ pub(crate) async fn require_authoritative_channel_ref(
         Duration::from_millis(CHANNEL_CONTEXT_RETRY_BACKOFF_MS),
     )?;
     execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
-        if let Ok(channel) = resolve_authoritative_channel_ref(app_core, channel_id).await {
-            return Ok(channel);
+        if let Ok(context_id) =
+            require_authoritative_context_id_for_channel(app_core, channel_id).await
+        {
+            return Ok(authoritative_channel_ref(channel_id, context_id));
         }
         converge_runtime(runtime).await;
         Err(AuraError::from(super::error::WorkflowError::Precondition(
@@ -1617,6 +1626,7 @@ pub async fn create_channel_with_authoritative_binding(
     let mut channel_id = ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
     let mut channel_context: Option<ContextId> = None;
     if backend == MessagingBackend::Runtime {
+        crate::workflows::system::refresh_account(app_core).await?;
         let runtime = require_runtime(app_core).await?;
         let context_id = current_home_context(app_core).await?;
         channel_context = Some(context_id);
@@ -1868,6 +1878,14 @@ pub async fn join_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel: AuthoritativeChannelRef,
 ) -> Result<(), AuraError> {
+    join_channel_with_name_hint(app_core, channel, None).await
+}
+
+async fn join_channel_with_name_hint(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: AuthoritativeChannelRef,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
     let channel_id = channel.channel_id();
     let context_id = channel.context_id();
@@ -1900,7 +1918,8 @@ pub async fn join_channel(
         }
     }
 
-    apply_authoritative_membership_projection(app_core, channel_id, context_id, true, None).await?;
+    apply_authoritative_membership_projection(app_core, channel_id, context_id, true, name_hint)
+        .await?;
     wait_for_runtime_channel_state(app_core, &runtime, channel).await?;
     warm_channel_connectivity(app_core, &runtime, channel).await;
 
@@ -2050,24 +2069,29 @@ async fn join_channel_by_name_owned(
         return Ok(());
     }
 
-    let authoritative_channel = match resolve_authoritative_channel_ref(app_core, channel_id).await
-    {
-        Ok(channel) => channel,
-        Err(error) => {
-            let join_error = match error {
-                aura_core::AuraError::NotFound { .. } => {
-                    JoinChannelError::MissingAuthoritativeContext { channel_id }
-                }
-                _ => JoinChannelError::Transport {
-                    channel_id,
-                    detail: error.to_string(),
-                },
-            };
-            return fail_join_channel(owner, join_error).await;
-        }
-    };
+    let authoritative_channel =
+        match require_authoritative_context_id_for_channel(app_core, channel_id)
+            .await
+            .map(|context_id| authoritative_channel_ref(channel_id, context_id))
+        {
+            Ok(channel) => channel,
+            Err(error) => {
+                let join_error = match error {
+                    aura_core::AuraError::NotFound { .. } => {
+                        JoinChannelError::MissingAuthoritativeContext { channel_id }
+                    }
+                    _ => JoinChannelError::Transport {
+                        channel_id,
+                        detail: error.to_string(),
+                    },
+                };
+                return fail_join_channel(owner, join_error).await;
+            }
+        };
 
-    if let Err(error) = join_channel(app_core, authoritative_channel).await {
+    if let Err(error) =
+        join_channel_with_name_hint(app_core, authoritative_channel, Some(channel_name)).await
+    {
         let join_error = match error {
             aura_core::AuraError::NotFound { .. } => {
                 JoinChannelError::MissingAuthoritativeContext { channel_id }
@@ -2079,14 +2103,6 @@ async fn join_channel_by_name_owned(
         };
         return fail_join_channel(owner, join_error).await;
     }
-    apply_authoritative_membership_projection(
-        app_core,
-        channel_id,
-        authoritative_channel.context_id(),
-        true,
-        Some(channel_name),
-    )
-    .await?;
     let runtime = require_runtime(app_core).await?;
     converge_runtime(&runtime).await;
     if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await {
@@ -2446,7 +2462,10 @@ async fn send_message_ref_owned(
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
             let authoritative_channel =
-                match resolve_authoritative_channel_ref(app_core, channel_id).await {
+                match require_authoritative_context_id_for_channel(app_core, channel_id)
+                    .await
+                    .map(|context_id| authoritative_channel_ref(channel_id, context_id))
+                {
                     Ok(channel) => channel,
                     Err(_) => {
                         return fail_send_message(

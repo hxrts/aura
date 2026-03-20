@@ -30,7 +30,7 @@ while IFS= read -r hit; do
   fi
 
   if awk -v limit="$line" '
-      NR <= limit && /^\#\[cfg\(test\)\]/ { test_start = NR }
+      NR <= limit && /^#\[cfg\(test\)\]/ { test_start = NR }
       END { exit !(test_start != 0 && limit >= test_start) }
     ' "$file"; then
     continue

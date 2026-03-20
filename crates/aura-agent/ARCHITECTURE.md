@@ -230,6 +230,13 @@ Three ownership classes for runtime effect paths:
 
 Service-owned effects never mutate session state directly. Session-owned effects require both current owner record and current owner capability. Capability-gated trust-boundary APIs fail closed on stale owner, stale capability, or wrong-boundary routing.
 
+Reactive signal views are `Observed` bridges, not alternate owners. They may
+apply authoritative facts to known entities, but they may not fabricate
+canonical channel or invitation metadata from weaker facts such as membership
+events or raw identifiers. If runtime acceptance or reconciliation needs to
+materialize canonical metadata, one explicit owned handler path must do that
+end to end before reactive views are allowed to enrich the projection.
+
 ## Canonical Host/VM Boundary
 
 `aura-agent` aligns with Telltale's canonical execution model. The only legal path from external async input to session mutation:

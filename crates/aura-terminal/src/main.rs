@@ -109,9 +109,9 @@ async fn main() -> Result<(), AuraError> {
         .await
         .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
     let (authority_id, context_id) = match loaded_account {
-        aura_terminal::handlers::tui::AccountLoadResult::Loaded { authority, context } => {
-            (authority, context)
-        }
+        aura_terminal::handlers::tui::AccountLoadResult::Loaded {
+            authority, context, ..
+        } => (authority, context),
         aura_terminal::handlers::tui::AccountLoadResult::NotFound => {
             let bootstrap_event = BootstrapEvent::new(
                 BootstrapSurface::Terminal,
