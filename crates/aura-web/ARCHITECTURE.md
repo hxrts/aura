@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Browser/WASM shell for Aura. Remains thin and delegates shared UI state,
-routing, and snapshot rendering to `aura-ui`.
+Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing, and snapshot rendering to `aura-ui`.
 
 ## Scope
 
@@ -30,22 +29,15 @@ routing, and snapshot rendering to `aura-ui`.
 - Browser-only APIs stay in this crate.
 - Shared UI behavior remains in `aura-ui`.
 - Harness bridge methods are deterministic and backwards-compatible.
-- Harness publication is semantic-first: pushed shared-contract state and render
-  heartbeat are authoritative; DOM inspection is secondary diagnostics only.
-- Browser/DOM fallback paths are diagnostic-only and must not become
-  parity-critical success-path observation.
-- Harness mode may change instrumentation and render stability, but not
-  business-flow semantics.
-- Shared browser-flow execution must go through the semantic command bridge and
-  real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
-- The browser shell is an `Observed` plus bridge crate for shared semantic
-  flows. It may submit commands and expose projections, but it must not own
-  terminal semantic lifecycle truth for parity-critical operations.
+- Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
+- Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
+- Harness mode may change instrumentation and render stability, but not business-flow semantics.
+- Shared browser-flow execution must go through the semantic command bridge and real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
+- The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
 
-The browser shell exports structured observed semantic UI projections and render
-convergence signals for harness observation.
+The browser shell exports structured observed semantic UI projections and render convergence signals for harness observation.
 
 Enforcement locus:
 - `src/harness_bridge.rs` publishes `UiSnapshot` and `RenderHeartbeat`.
@@ -62,19 +54,15 @@ Verification hooks:
 
 ### InvariantBrowserSharedFlowExecutionUsesSemanticBridge
 
-The browser shell accepts shared semantic commands through an explicit bridge and
-executes them through real app workflows.
+The browser shell accepts shared semantic commands through an explicit bridge and executes them through real app workflows.
 
 Enforcement locus:
-- `src/harness_bridge.rs` owns typed command submission and unsupported-command
-  failures.
+- `src/harness_bridge.rs` owns typed command submission and unsupported-command failures.
 - Selector-click helpers remain outside the shared semantic path.
 
 Failure mode:
-- Shared browser scenarios debug DOM/selector timing instead of production
-  workflows.
-- Browser and TUI shared lanes drift because they do not share one execution
-  contract.
+- Shared browser scenarios debug DOM/selector timing instead of production workflows.
+- Browser and TUI shared lanes drift because they do not share one execution contract.
 
 Verification hooks:
 - Browser harness contract tests
@@ -84,14 +72,7 @@ Verification hooks:
 
 Reference: [docs/122_ownership_model.md](../../docs/122_ownership_model.md)
 
-For shared semantic flows, `aura-web` uses `Observed` for browser-side
-projection publication, render-convergence publication, and
-compatibility/version metadata. Narrow `ActorOwned` bridge ownership is
-permitted for browser bridge installation and command ingress (long-lived
-mutable async browser surfaces). The browser shell must not own terminal
-semantic lifecycle truth; browser code must not allocate local semantic owners
-for parity-critical operations or keep browser-local `Submitting` state after
-handoff to shared workflow ownership per docs/122 section 16.
+For shared semantic flows, `aura-web` uses `Observed` for browser-side projection publication, render-convergence publication, and compatibility/version metadata. Narrow `ActorOwned` bridge ownership is permitted for browser bridge installation and command ingress (long-lived mutable async browser surfaces). The browser shell must not own terminal semantic lifecycle truth; browser code must not allocate local semantic owners for parity-critical operations or keep browser-local `Submitting` state after handoff to shared workflow ownership per docs/122 section 16.
 
 ### Inventory
 
@@ -104,12 +85,9 @@ handoff to shared workflow ownership per docs/122 section 16.
 
 ### Capability-Gated Points
 
-- Harness bridge command ingress and compatibility-gated semantic command
-  execution in `src/harness_bridge.rs`.
-- Browser-side semantic projection and render-heartbeat publication in
-  `src/harness_bridge.rs`.
-- Browser clipboard and bootstrap adapters that may trigger upstream workflows,
-  but may not author terminal semantic lifecycle locally.
+- Harness bridge command ingress and compatibility-gated semantic command execution in `src/harness_bridge.rs`.
+- Browser-side semantic projection and render-heartbeat publication in `src/harness_bridge.rs`.
+- Browser clipboard and bootstrap adapters that may trigger upstream workflows, but may not author terminal semantic lifecycle locally.
 
 ### Verification Hooks
 
@@ -122,19 +100,15 @@ handoff to shared workflow ownership per docs/122 section 16.
 
 ### Compatibility Policy
 
-- The harness bridge request/response surface carries explicit compatibility
-  metadata so callers can detect versioned behavior changes.
-- Additive fields and additive non-breaking methods are allowed when old callers
-  continue to observe the same behavior.
-- Breaking request/response or observation-shape changes must update explicit
-  compatibility metadata and tests.
+- The harness bridge request/response surface carries explicit compatibility metadata so callers can detect versioned behavior changes.
+- Additive fields and additive non-breaking methods are allowed when old callers continue to observe the same behavior.
+- Breaking request/response or observation-shape changes must update explicit compatibility metadata and tests.
 
 ## Testing
 
 ### Strategy
 
-Browser harness bridge correctness, semantic projection publication, and
-shared-flow execution parity are the primary concerns.
+Browser harness bridge correctness, semantic projection publication, and shared-flow execution parity are the primary concerns.
 
 ### Commands
 

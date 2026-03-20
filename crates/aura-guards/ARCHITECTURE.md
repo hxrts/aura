@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Provide the guard chain that enforces authorization, flow budgets, leakage budgets, and
-journal coupling for every network-visible send. Guards are pure evaluators that return
-EffectCommands; no guard performs I/O directly.
+Provide the guard chain that enforces authorization, flow budgets, leakage budgets, and journal coupling for every network-visible send. Guards are pure evaluators that return EffectCommands; no guard performs I/O directly.
 
 ## Scope
 
@@ -75,10 +73,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-guards` is primarily `Pure` guard evaluation. Effectful execution around
-guards remains outside the pure decision core and does not turn guards into
-`ActorOwned` semantic owners. Guard execution outcomes participate in typed
-terminal failure rather than hidden fail-open or silent blocking behavior.
+`aura-guards` is primarily `Pure` guard evaluation. Effectful execution around guards remains outside the pure decision core and does not turn guards into `ActorOwned` semantic owners. Guard execution outcomes participate in typed terminal failure rather than hidden fail-open or silent blocking behavior.
 
 See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
 
@@ -101,9 +96,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 
 ### Strategy
 
-Guard chain ordering and the charge-before-send invariant are the primary
-testing concerns. Integration tests in `tests/chain/` verify end-to-end chain
-behavior; inline tests verify individual guard correctness.
+Guard chain ordering and the charge-before-send invariant are the primary testing concerns. Integration tests in `tests/chain/` verify end-to-end chain behavior; inline tests verify individual guard correctness.
 
 ### Commands
 

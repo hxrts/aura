@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Assemble individual effect handlers into cohesive effect systems. Provides registry,
-builder, and lifecycle infrastructure for composing stateless handlers.
+Assemble individual effect handlers into cohesive effect systems. Provides registry, builder, and lifecycle infrastructure for composing stateless handlers.
 
 ## Scope
 
@@ -51,20 +50,11 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-composition` is primarily `Pure` assembly and wiring. It coordinates
-construction and configuration but is not the `ActorOwned` owner of
-parity-critical runtime state. Capability gating belongs in the assembled
-contracts and owner modules. See [Ownership Model §9](../../docs/122_ownership_model.md)
-for reactive contract details.
+`aura-composition` is primarily `Pure` assembly and wiring. It coordinates construction and configuration but is not the `ActorOwned` owner of parity-critical runtime state. Capability gating belongs in the assembled contracts and owner modules. See [Ownership Model §9](../../docs/122_ownership_model.md) for reactive contract details.
 
 ### Allowed Assembly Mechanics
 
-The `Arc<dyn ...>` adapter surfaces in `src/adapters/*` are allowed because
-they are shared references to already-owned handlers, not ownership of mutable
-runtime state. Composition may hold and clone handler references for type-safe
-assembly, but it must not introduce background tasks, internal mutable
-registries with semantic meaning, or lifecycle ownership of the assembled
-system.
+The `Arc<dyn ...>` adapter surfaces in `src/adapters/*` are allowed because they are shared references to already-owned handlers, not ownership of mutable runtime state. Composition may hold and clone handler references for type-safe assembly, but it must not introduce background tasks, internal mutable registries with semantic meaning, or lifecycle ownership of the assembled system.
 
 ### Ownership Inventory
 
@@ -78,16 +68,13 @@ system.
 
 ### Capability-Gated Points
 
-- None local; capability gating belongs in the assembled contracts and owner
-  modules that consume composition output.
+- None local; capability gating belongs in the assembled contracts and owner modules that consume composition output.
 
 ## Testing
 
 ### Strategy
 
-All tests are inline — appropriate for a composition utility crate whose tests
-exercise type-safe registry wiring and builder patterns. No integration test
-surface is needed.
+All tests are inline — appropriate for a composition utility crate whose tests exercise type-safe registry wiring and builder patterns. No integration test surface is needed.
 
 ### Commands
 

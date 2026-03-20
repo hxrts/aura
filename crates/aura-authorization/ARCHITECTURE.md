@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Define authorization semantics and capability refinement using Biscuit tokens
-for cryptographically verifiable capability delegation.
+Define authorization semantics and capability refinement using Biscuit tokens for cryptographically verifiable capability delegation.
 
 ## Scope
 
@@ -52,10 +51,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-authorization` is primarily `Pure`. Capability and policy semantics do not
-require `ActorOwned` runtime state. Transfer or attenuation semantics remain
-explicit and `MoveOwned`. `Observed` layers may inspect authorization results but
-must not invent their own authority.
+`aura-authorization` is primarily `Pure`. Capability and policy semantics do not require `ActorOwned` runtime state. Transfer or attenuation semantics remain explicit and `MoveOwned`. `Observed` layers may inspect authorization results but must not invent their own authority.
 
 ### Ownership Inventory
 
@@ -77,16 +73,11 @@ must not invent their own authority.
 
 ### Strategy
 
-aura-authorization is security-critical — if capability attenuation widens
-scope or cross-authority tokens are accepted, privilege escalation is
-possible. Testing priorities:
+aura-authorization is security-critical — if capability attenuation widens scope or cross-authority tokens are accepted, privilege escalation is possible. Testing priorities:
 
-1. **Cross-authority token rejection**: tokens signed by one root key must
-   fail verification against a different root key
-2. **Attenuation monotonicity**: attenuated tokens must never grant more
-   than the base token
-3. **Policy evaluation**: Datalog rules must deny missing/insufficient
-   capabilities
+1. **Cross-authority token rejection**: tokens signed by one root key must fail verification against a different root key
+2. **Attenuation monotonicity**: attenuated tokens must never grant more than the base token
+3. **Policy evaluation**: Datalog rules must deny missing/insufficient capabilities
 4. **Scope isolation**: resource scopes must bind to the correct authority
 
 ### Commands

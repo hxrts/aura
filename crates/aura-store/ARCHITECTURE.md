@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Define storage domain types and fact-based state management for content-addressed
-storage with cryptographic chunk IDs.
+Define storage domain types and fact-based state management for content-addressed storage with cryptographic chunk IDs.
 
 ## Scope
 
@@ -52,10 +51,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-store` is primarily `Pure`. It defines storage-domain semantics and
-capability shapes rather than `ActorOwned` storage services. Exclusive access or
-transfer semantics are modeled as `MoveOwned` contracts in higher layers.
-`Observed` layers may inspect derived storage state but not mutate domain truth.
+`aura-store` is primarily `Pure`. It defines storage-domain semantics and capability shapes rather than `ActorOwned` storage services. Exclusive access or transfer semantics are modeled as `MoveOwned` contracts in higher layers. `Observed` layers may inspect derived storage state but not mutate domain truth.
 
 ### Ownership Inventory
 
@@ -76,9 +72,7 @@ transfer semantics are modeled as `MoveOwned` contracts in higher layers.
 
 ### Strategy
 
-aura-store defines content-addressed storage. If content addressing is
-non-deterministic, chunk IDs differ across replicas and Merkle trees diverge.
-If CRDT merge laws fail, storage state is order-dependent.
+aura-store defines content-addressed storage. If content addressing is non-deterministic, chunk IDs differ across replicas and Merkle trees diverge. If CRDT merge laws fail, storage state is order-dependent.
 
 ### Commands
 

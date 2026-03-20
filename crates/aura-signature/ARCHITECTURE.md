@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Define identity semantics and signature verification logic, combining cryptographic
-verification with authority lifecycle management and session validation.
+Define identity semantics and signature verification logic, combining cryptographic verification with authority lifecycle management and session validation.
 
 ## Scope
 
@@ -64,10 +63,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-signature` is primarily `Pure`. It models verification and signature-domain
-semantics rather than `ActorOwned` service state. Transfer of signing authority
-remains explicit and `MoveOwned` in higher-layer APIs. `Observed` consumers may
-render signature-derived state but not author it.
+`aura-signature` is primarily `Pure`. It models verification and signature-domain semantics rather than `ActorOwned` service state. Transfer of signing authority remains explicit and `MoveOwned` in higher-layer APIs. `Observed` consumers may render signature-derived state but not author it.
 
 ### Ownership Inventory
 
@@ -88,10 +84,7 @@ render signature-derived state but not author it.
 
 ### Strategy
 
-aura-signature is a pure verification crate. All tests are inline since
-each test is tightly coupled to a specific verification function. The
-critical concern is lifecycle monotonicity — a revoked authority must
-never be reactivated.
+aura-signature is a pure verification crate. All tests are inline since each test is tightly coupled to a specific verification function. The critical concern is lifecycle monotonicity — a revoked authority must never be reactivated.
 
 ### Commands
 

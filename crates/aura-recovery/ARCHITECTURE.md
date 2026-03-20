@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Guardian-based recovery protocol enabling threshold key recovery through social
-relationships. Includes guardian setup, membership management, and recovery ceremonies.
+Guardian-based recovery protocol enabling threshold key recovery through social relationships. Includes guardian setup, membership management, and recovery ceremonies.
 
 ## Scope
 
@@ -57,8 +56,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-recovery` is primarily `Pure` recovery-domain logic plus explicit
-ceremony/workflow contracts.
+`aura-recovery` is primarily `Pure` recovery-domain logic plus explicit ceremony/workflow contracts.
 
 ### Ownership Inventory
 
@@ -73,17 +71,13 @@ ceremony/workflow contracts.
 ### Capability-Gated Points
 
 - grant/approval/recovery transitions
-- ceremony and protocol publication consumed by higher-layer runtime/interface
-  flows
+- ceremony and protocol publication consumed by higher-layer runtime/interface flows
 
 ## Testing
 
 ### Strategy
 
-Guardian threshold enforcement and ceremony safety are the primary concerns.
-Integration tests in `tests/ceremony/` verify protocol choreography, ceremony
-types, and invariant properties. Inline tests verify fact reduction, state
-derivation, and membership change safety.
+Guardian threshold enforcement and ceremony safety are the primary concerns. Integration tests in `tests/ceremony/` verify protocol choreography, ceremony types, and invariant properties. Inline tests verify fact reduction, state derivation, and membership change safety.
 
 ### Commands
 

@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Orchestrate AMP channel lifecycle and message transport coordination on top of
-relational journal facts.
+Orchestrate AMP channel lifecycle and message transport coordination on top of relational journal facts.
 
 ## Scope
 
@@ -55,9 +54,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-amp` combines `Pure` channel-state reduction with `MoveOwned`
-coordination where channel/session authority must be exclusive. Long-lived
-coordination is `ActorOwned` only when explicitly supervised by higher layers.
+`aura-amp` combines `Pure` channel-state reduction with `MoveOwned` coordination where channel/session authority must be exclusive. Long-lived coordination is `ActorOwned` only when explicitly supervised by higher layers.
 
 See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
 
@@ -74,16 +71,13 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 ### Capability-Gated Points
 
 - Message publication and checkpoint publication boundaries.
-- Channel-policy and epoch-advancement operations consumed by higher-layer
-  guards/runtime.
+- Channel-policy and epoch-advancement operations consumed by higher-layer guards/runtime.
 
 ## Testing
 
 ### Strategy
 
-Wire format stability and epoch monotonicity are the primary concerns.
-Integration tests in `tests/wire/` validate serialization roundtrips with
-property-based testing. Inline tests verify pure helper determinism.
+Wire format stability and epoch monotonicity are the primary concerns. Integration tests in `tests/wire/` validate serialization roundtrips with property-based testing. Inline tests verify pure helper determinism.
 
 ### Commands
 

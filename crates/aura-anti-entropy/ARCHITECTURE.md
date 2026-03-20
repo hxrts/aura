@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Provide digest-based reconciliation and broadcast coordination for OpLog sync,
-with explicit guard chain enforcement on network operations.
+Provide digest-based reconciliation and broadcast coordination for OpLog sync, with explicit guard chain enforcement on network operations.
 
 ## Scope
 
@@ -76,10 +75,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-anti-entropy` keeps reconciliation logic `Pure`. Exclusive sync-session
-or reconciliation ownership remains `MoveOwned` in higher-layer coordination.
-Long-lived background reconciliation belongs in explicit `ActorOwned` runtime
-services, not hidden here.
+`aura-anti-entropy` keeps reconciliation logic `Pure`. Exclusive sync-session or reconciliation ownership remains `MoveOwned` in higher-layer coordination. Long-lived background reconciliation belongs in explicit `ActorOwned` runtime services, not hidden here.
 
 See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
 
@@ -96,17 +92,13 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 ### Capability-Gated Points
 
 - Guard-approved digest/op request publication.
-- Typed sync/broadcast outcomes consumed by higher-layer runtime and testing
-  lanes.
+- Typed sync/broadcast outcomes consumed by higher-layer runtime and testing lanes.
 
 ## Testing
 
 ### Strategy
 
-Reconciliation purity and digest determinism are the primary concerns.
-Integration tests in `tests/reconciliation/` validate digest computation,
-serialization roundtrips, and config defaults. Inline tests cover pure
-reconciliation helpers and broadcast rate limiting.
+Reconciliation purity and digest determinism are the primary concerns. Integration tests in `tests/reconciliation/` validate digest computation, serialization roundtrips, and config defaults. Inline tests cover pure reconciliation helpers and broadcast rate limiting.
 
 ### Commands
 

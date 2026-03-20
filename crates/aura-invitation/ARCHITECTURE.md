@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Invitation protocol for establishing relationships between authorities, including
-invitation creation, redemption, and ceremony coordination.
+Invitation protocol for establishing relationships between authorities, including invitation creation, redemption, and ceremony coordination.
 
 ## Scope
 
@@ -58,8 +57,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-invitation` is primarily `Pure` invitation-domain logic plus single-owner
-workflow contracts.
+`aura-invitation` is primarily `Pure` invitation-domain logic plus single-owner workflow contracts.
 
 ### Ownership Inventory
 
@@ -73,20 +71,14 @@ workflow contracts.
 
 ### Capability-Gated Points
 
-- invitation creation, acceptance, redemption, and relationship-establishment
-  boundaries
-- ceremony/protocol publication consumed by higher-layer runtime and interface
-  flows
+- invitation creation, acceptance, redemption, and relationship-establishment boundaries
+- ceremony/protocol publication consumed by higher-layer runtime and interface flows
 
 ## Testing
 
 ### Strategy
 
-Invitation redemption uniqueness and ceremony correctness are the primary
-concerns. Integration tests in `tests/ceremony/` verify end-to-end send/accept
-flows with guard evaluation. The contact establishment matrix stays top-level
-as a cross-flow equivalence test. Inline tests verify fact reduction, guard
-evaluation, descriptor validity, and protocol serialization.
+Invitation redemption uniqueness and ceremony correctness are the primary concerns. Integration tests in `tests/ceremony/` verify end-to-end send/accept flows with guard evaluation. The contact establishment matrix stays top-level as a cross-flow equivalence test. Inline tests verify fact reduction, guard evaluation, descriptor validity, and protocol serialization.
 
 ### Commands
 

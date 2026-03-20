@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Social topology and moderation layer providing home management, neighborhood
-discovery, relay selection, and content moderation for the social graph.
+Social topology and moderation layer providing home management, neighborhood discovery, relay selection, and content moderation for the social graph.
 
 ## Scope
 
@@ -74,18 +73,13 @@ Contract alignment:
 ### Capability-Gated Points
 
 - parity-critical social fact publication
-- moderation and membership transition flows consumed by higher-layer runtime
-  services
+- moderation and membership transition flows consumed by higher-layer runtime services
 
 ## Testing
 
 ### Strategy
 
-Boundary-scoped membership and access level computation are the primary
-concerns. Integration tests in `tests/topology/` verify access levels,
-role enforcement, and simulation scenarios. General integration tests stay
-top-level. Inline tests verify individual components (home, neighborhood,
-topology, access, storage).
+Boundary-scoped membership and access level computation are the primary concerns. Integration tests in `tests/topology/` verify access levels, role enforcement, and simulation scenarios. General integration tests stay top-level. Inline tests verify individual components (home, neighborhood, topology, access, storage).
 
 ### Commands
 

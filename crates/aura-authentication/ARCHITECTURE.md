@@ -2,8 +2,7 @@
 
 ## Purpose
 
-End-to-end authentication protocol including challenge-response flows, session
-management, device key derivation, and guardian-based recovery authorization.
+End-to-end authentication protocol including challenge-response flows, session management, device key derivation, and guardian-based recovery authorization.
 
 ## Scope
 
@@ -72,16 +71,13 @@ Contract alignment:
 ### Capability-Gated Points
 
 - recovery authorization and guardian approval flows
-- parity-critical authentication publication and session/recovery outcome
-  surfaces
+- parity-critical authentication publication and session/recovery outcome surfaces
 
 ## Testing
 
 ### Strategy
 
-All tests are inline — appropriate for an authentication crate with no
-integration test surface beyond the service layer. Tests verify session
-lifecycle, guard evaluation, fact reduction, and DKD protocol correctness.
+All tests are inline — appropriate for an authentication crate with no integration test surface beyond the service layer. Tests verify session lifecycle, guard evaluation, fact reduction, and DKD protocol correctness.
 
 ### Commands
 

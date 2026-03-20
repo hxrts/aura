@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Runtime library for choreographic protocol specifications and multi-party session
-types. Provides semantic abstractions integrating with Telltale for protocol-level
-guards and Aura-specific extensions.
+Runtime library for choreographic protocol specifications and multi-party session types. Provides semantic abstractions integrating with Telltale for protocol-level guards and Aura-specific extensions.
 
 ## Scope
 
@@ -63,10 +61,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-mpst` is primarily `Pure`. It defines protocol/specification structure
-rather than `ActorOwned` runtime ownership. Session/delegation transfer semantics
-consumed by generated protocols remain explicit and `MoveOwned` in higher layers.
-`Observed` tooling may inspect generated artifacts but not author protocol truth.
+`aura-mpst` is primarily `Pure`. It defines protocol/specification structure rather than `ActorOwned` runtime ownership. Session/delegation transfer semantics consumed by generated protocols remain explicit and `MoveOwned` in higher layers. `Observed` tooling may inspect generated artifacts but not author protocol truth.
 
 ### Ownership Inventory
 
@@ -80,16 +75,13 @@ consumed by generated protocols remain explicit and `MoveOwned` in higher layers
 
 ### Capability-Gated Points
 
-- Typed protocol annotations and guard metadata consumed by higher-layer
-  capability-gated mutation/publication paths
+- Typed protocol annotations and guard metadata consumed by higher-layer capability-gated mutation/publication paths
 
 ## Testing
 
 ### Strategy
 
-aura-mpst defines session types and choreographic extensions. If annotations
-are lost or reordered, the guard chain executes in the wrong sequence —
-capability checks may happen after journal commits.
+aura-mpst defines session types and choreographic extensions. If annotations are lost or reordered, the guard chain executes in the wrong sequence — capability checks may happen after journal commits.
 
 ### Commands
 

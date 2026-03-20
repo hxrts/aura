@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Synchronization protocol providing fact exchange, merkle verification, anti-entropy
-coordination, and writer fence semantics for distributed journal consistency.
+Synchronization protocol providing fact exchange, merkle verification, anti-entropy coordination, and writer fence semantics for distributed journal consistency.
 
 ## Scope
 
@@ -56,8 +55,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-sync` combines `Pure` verification/reconciliation logic with explicit
-`MoveOwned` sync-session authority where exclusivity matters.
+`aura-sync` combines `Pure` verification/reconciliation logic with explicit `MoveOwned` sync-session authority where exclusivity matters.
 
 ### Ownership Inventory
 
@@ -71,19 +69,14 @@ Contract alignment:
 ### Capability-Gated Points
 
 - typed terminal protocol/service failure is required at async boundaries
-- readiness and publication are expected to flow through owning runtime/service
-  coordinators rather than ambient callers
-- timeout and retry behavior must use the shared timeout/retry model rather than
-  crate-local wall-clock ownership
+- readiness and publication are expected to flow through owning runtime/service coordinators rather than ambient callers
+- timeout and retry behavior must use the shared timeout/retry model rather than crate-local wall-clock ownership
 
 ## Testing
 
 ### Strategy
 
-Merkle verification and anti-entropy determinism are the primary concerns.
-Tests are organized into three groups: `tests/integrity/` for data integrity
-and digest stability, `tests/protocol/` for sync protocol integration, and
-`tests/integration/` for multi-device and network partition scenarios.
+Merkle verification and anti-entropy determinism are the primary concerns. Tests are organized into three groups: `tests/integrity/` for data integrity and digest stability, `tests/protocol/` for sync protocol integration, and `tests/integration/` for multi-device and network partition scenarios.
 
 ### Commands
 

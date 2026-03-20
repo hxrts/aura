@@ -2,10 +2,7 @@
 
 ## Purpose
 
-Multi-instance orchestration harness for Aura runtime testing and operator
-workflows. Coordinates local PTY and SSH-backed instances, exposes a structured
-tool API, executes semantic scenarios against real frontends through a typed
-semantic command plane, and produces replay and artifact bundles.
+Multi-instance orchestration harness for Aura runtime testing and operator workflows. Coordinates local PTY and SSH-backed instances, exposes a structured tool API, executes semantic scenarios against real frontends through a typed semantic command plane, and produces replay and artifact bundles.
 
 ## Scope
 
@@ -47,13 +44,9 @@ semantic command plane, and produces replay and artifact bundles.
 - Bounded execution: step and global scenario budgets cap execution time with diagnostic timeouts.
 - Secure SSH defaults: strict host key checking stays enabled with enforced fingerprint policy.
 - Primary-lane policy: default lane targets real Aura runtime and real TUI/web surfaces.
-- Semantic-command-plane execution: shared scenarios submit typed semantic
-  commands and await typed readiness/handle/quiescence/projection contracts.
-- Frontend-conformance isolation: renderer-specific mechanics are conformance-only
-  and must not be the primary execution substrate for shared flows.
-- The harness is an `Observed` plus orchestration crate. It may submit commands,
-  wait on typed handles/readiness, and read projections, but it
-  must not author semantic lifecycle truth.
+- Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
+- Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
+- The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.
 
 ### InvariantHarnessDeterministicReplayInputs
 
@@ -76,13 +69,11 @@ Contract alignment:
 
 ### InvariantSharedFlowExecutionIsSemantic
 
-Shared harness scenarios remain portable across TUI and web because they target
-the shared semantic contract rather than frontend mechanics.
+Shared harness scenarios remain portable across TUI and web because they target the shared semantic contract rather than frontend mechanics.
 
 Enforcement locus:
 - `config.rs` parses the shared scenario contract from `aura-app`.
-- `executor.rs` submits typed semantic commands, tracks handles/readiness, and
-  waits on authoritative projection changes.
+- `executor.rs` submits typed semantic commands, tracks handles/readiness, and waits on authoritative projection changes.
 - `backend/` implements the shared semantic command-plane bridge per frontend.
 - Policy checks reject raw mechanics in the core shared scenario set.
 
@@ -97,8 +88,7 @@ Verification hooks:
 
 ### InvariantSharedSemanticLaneIsNotRendererDriven
 
-The main shared-flow lane debugs production workflows through semantic command
-submission and authoritative projections rather than incidental frontend I/O.
+The main shared-flow lane debugs production workflows through semantic command submission and authoritative projections rather than incidental frontend I/O.
 
 Enforcement locus:
 - Shared semantic backend traits expose submit/observe/projection surfaces.
@@ -115,18 +105,15 @@ Verification hooks:
 
 ### InvariantObservationUsesAuthoritativeSemanticState
 
-The harness observes semantic state first and uses DOM/text fallbacks only for
-debugging.
+The harness observes semantic state first and uses DOM/text fallbacks only for debugging.
 
 Enforcement locus:
 - Browser backend consumes pushed `UiSnapshot` and `RenderHeartbeat` data.
 - Tool API snapshot endpoints return structured shared-contract payloads.
 
 Failure mode:
-- Timeouts become ambiguous because the harness cannot distinguish semantic
-  state drift from renderer drift.
-- Observation reads mutate state or silently repair it, making failures
-  non-deterministic.
+- Timeouts become ambiguous because the harness cannot distinguish semantic state drift from renderer drift.
+- Observation reads mutate state or silently repair it, making failures non-deterministic.
 
 Verification hooks:
 - Playwright driver self-test
@@ -136,12 +123,7 @@ Verification hooks:
 
 Reference: [docs/122_ownership_model.md](../../docs/122_ownership_model.md)
 
-For shared semantic flows, `aura-harness` uses `Observed` for typed projection
-reads, readiness waits, handle observation, and timeout diagnostics. Narrow
-`ActorOwned` orchestration is permitted for executor/coordinator processes that
-own multi-instance orchestration state. The harness must not author semantic
-lifecycle truth; it consumes typed move-owned handles/tokens but does not create
-or advance them outside approved command-plane surfaces.
+For shared semantic flows, `aura-harness` uses `Observed` for typed projection reads, readiness waits, handle observation, and timeout diagnostics. Narrow `ActorOwned` orchestration is permitted for executor/coordinator processes that own multi-instance orchestration state. The harness must not author semantic lifecycle truth; it consumes typed move-owned handles/tokens but does not create or advance them outside approved command-plane surfaces.
 
 ### Inventory
 
@@ -154,13 +136,9 @@ or advance them outside approved command-plane surfaces.
 
 ### Capability-Gated Points
 
-- Shared semantic command-plane submission and handle propagation must consume
-  the authoritative `aura-app` contract rather than inventing harness-local
-  semantic ownership.
-- Readiness waits and projection reads may track timeout/trace metadata
-  locally, but may not mutate or repair product semantic truth.
-- Frontend-conformance helpers are explicitly quarantined from the shared
-  semantic lane and may not bypass typed command/observation surfaces.
+- Shared semantic command-plane submission and handle propagation must consume the authoritative `aura-app` contract rather than inventing harness-local semantic ownership.
+- Readiness waits and projection reads may track timeout/trace metadata locally, but may not mutate or repair product semantic truth.
+- Frontend-conformance helpers are explicitly quarantined from the shared semantic lane and may not bypass typed command/observation surfaces.
 
 ### Verification Hooks
 
@@ -176,10 +154,7 @@ or advance them outside approved command-plane surfaces.
 
 ### Strategy
 
-Deterministic replay, semantic flow execution, and tool API correctness
-are the primary concerns. Tests are organized into `tests/phases/` for
-the phased harness evolution (phase 1 through 5), `tests/holepunch/`
-for NAT traversal tiers, and top-level contract tests.
+Deterministic replay, semantic flow execution, and tool API correctness are the primary concerns. Tests are organized into `tests/phases/` for the phased harness evolution (phase 1 through 5), `tests/holepunch/` for NAT traversal tiers, and top-level contract tests.
 
 ### Commands
 

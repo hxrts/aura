@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Portable, platform-agnostic application core containing pure business logic
-(intents, reducers, views) without runtime dependencies. Enables dependency
-inversion through the `RuntimeBridge` trait.
+Portable, platform-agnostic application core containing pure business logic (intents, reducers, views) without runtime dependencies. Enables dependency inversion through the `RuntimeBridge` trait.
 
 ## Scope
 
@@ -31,17 +29,13 @@ inversion through the `RuntimeBridge` trait.
 - **Dependency inversion**: `aura-agent` depends on `aura-app`, never vice versa.
 - **Push-based reactive flow**: Intent -> Journal -> Reduce -> ViewState -> Signal -> UI.
 - **Frontend agnostic**: works with multiple platform frontends.
-- **Shared-flow contract authority**: semantic UI ids, flow support declarations,
-  typed command-plane metadata, and typed diagnostics are defined here.
-- **Shared semantic ownership authority**: parity-critical semantic operation
-  categories, typed terminal lifecycle, and owner-routed handles/tokens are
-  defined here rather than in frontend-local crates.
+- **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
+- **Shared semantic ownership authority**: parity-critical semantic operation categories, typed terminal lifecycle, and owner-routed handles/tokens are defined here rather than in frontend-local crates.
 - Platform-specific code isolated behind feature flags (`native`, `ios`, `android`, `web-js`).
 
 ### InvariantAppWorkflowPurity
 
-Application workflows remain pure and frontend agnostic. Runtime effects are
-consumed through abstraction boundaries.
+Application workflows remain pure and frontend agnostic. Runtime effects are consumed through abstraction boundaries.
 
 Enforcement locus:
 - `src/workflows/` performs intent and state transitions.
@@ -61,25 +55,16 @@ Contract alignment:
 
 ### InvariantSharedUiContractAuthority
 
-`aura-app` is the authoritative home for shared semantic UI identity, shared
-semantic command-plane types, shared-flow parity declarations, shared
-screen/modal/list parity declarations, typed harness-visible diagnostics, shared
-focus/selection semantics, shared action/readiness metadata, and the
-machine-checkable screen/module map used for web/TUI parity enforcement.
+`aura-app` is the authoritative home for shared semantic UI identity, shared semantic command-plane types, shared-flow parity declarations, shared screen/modal/list parity declarations, typed harness-visible diagnostics, shared focus/selection semantics, shared action/readiness metadata, and the machine-checkable screen/module map used for web/TUI parity enforcement.
 
 Enforcement locus:
-- `src/ui_contract.rs` defines semantic ids, `UiSnapshot`, `RenderHeartbeat`,
-  `RuntimeEventSnapshot`, `SHARED_FLOW_SUPPORT`, `SHARED_SCREEN_SUPPORT`,
-  `SHARED_MODAL_SUPPORT`, `SHARED_LIST_SUPPORT`, `SHARED_SCREEN_MODULE_MAP`,
-  and shared semantic command-plane types.
+- `src/ui_contract.rs` defines semantic ids, `UiSnapshot`, `RenderHeartbeat`, `RuntimeEventSnapshot`, `SHARED_FLOW_SUPPORT`, `SHARED_SCREEN_SUPPORT`, `SHARED_MODAL_SUPPORT`, `SHARED_LIST_SUPPORT`, `SHARED_SCREEN_MODULE_MAP`, and shared semantic command-plane types.
 - `src/ui.rs` re-exports the contract for harness and frontend consumption.
 
 Failure mode:
-- Frontends drift in naming or capability and harness scenarios stop being
-  portable across TUI and web.
+- Frontends drift in naming or capability and harness scenarios stop being portable across TUI and web.
 - Timeout diagnostics lose a single authoritative semantic contract.
-- Frontends invent local command request or readiness shapes and shared-flow
-  execution stops being uniform.
+- Frontends invent local command request or readiness shapes and shared-flow execution stops being uniform.
 
 Verification hooks:
 - `cargo test -p aura-app shared_flow_support_contract_is_consistent`
@@ -88,31 +73,21 @@ Verification hooks:
 - `just ci-shared-flow-policy`
 
 Contract alignment:
-- [Testing Guide](../../docs/804_testing_guide.md) defines semantic shared-flow
-  policy and timeout diagnostics.
-- [Verification Guide](../../docs/806_verification_guide.md) defines the
-  Quint/simulator/harness handoff around the shared contract.
+- [Testing Guide](../../docs/804_testing_guide.md) defines semantic shared-flow policy and timeout diagnostics.
+- [Verification Guide](../../docs/806_verification_guide.md) defines the Quint/simulator/harness handoff around the shared contract.
 
 ## Ownership Model
 
-See [docs/122_ownership_model.md](../../docs/122_ownership_model.md) for the
-full ownership framework.
+See [docs/122_ownership_model.md](../../docs/122_ownership_model.md) for the full ownership framework.
 
-For shared semantic flows, `aura-app` is primarily a `Pure` plus `MoveOwned`
-crate.
+For shared semantic flows, `aura-app` is primarily a `Pure` plus `MoveOwned` crate.
 
-- `Pure` — typed workflow/domain transitions, readiness derivation rules,
-  snapshot/projection shaping.
-- `MoveOwned` — opaque operation handles, owner tokens / handoff objects, typed
-  semantic lifecycle and failure contracts.
-- not `ActorOwned` — long-lived mutable async service/runtime state belongs in
-  `aura-agent`.
+- `Pure` — typed workflow/domain transitions, readiness derivation rules, snapshot/projection shaping.
+- `MoveOwned` — opaque operation handles, owner tokens / handoff objects, typed semantic lifecycle and failure contracts.
+- not `ActorOwned` — long-lived mutable async service/runtime state belongs in `aura-agent`.
 - not `Observed` — frontend render crates consume these contracts downstream.
 
-If `aura-app` coordinates a parity-critical operation across async boundaries,
-one authoritative coordinator must own submission, phase advancement, terminal
-success/failure publication, and cancellation / owner-drop failure. Frontend
-crates may not invent parallel lifecycle ownership for those operations.
+If `aura-app` coordinates a parity-critical operation across async boundaries, one authoritative coordinator must own submission, phase advancement, terminal success/failure publication, and cancellation / owner-drop failure. Frontend crates may not invent parallel lifecycle ownership for those operations.
 
 ### Ownership Inventory
 
@@ -125,25 +100,16 @@ crates may not invent parallel lifecycle ownership for those operations.
 
 ### Capability-Gated Points
 
-- Authoritative semantic lifecycle publication in
-  `src/workflows/semantic_facts.rs`.
-- Authoritative readiness publication and replacement in
-  `src/workflows/semantic_facts.rs`.
-- Workflow-owned semantic operation phase/failure publication in
-  `src/workflows/messaging.rs`, `src/workflows/invitation.rs`, and related
-  parity-critical workflow modules.
-- Opaque shared command-plane and lifecycle surfaces in
-  `src/ui_contract.rs` and `src/scenario_contract.rs`.
+- Authoritative semantic lifecycle publication in `src/workflows/semantic_facts.rs`.
+- Authoritative readiness publication and replacement in `src/workflows/semantic_facts.rs`.
+- Workflow-owned semantic operation phase/failure publication in `src/workflows/messaging.rs`, `src/workflows/invitation.rs`, and related parity-critical workflow modules.
+- Opaque shared command-plane and lifecycle surfaces in `src/ui_contract.rs` and `src/scenario_contract.rs`.
 
 ## Testing
 
 ### Strategy
 
-Workflow purity and shared UI contract authority are the primary concerns.
-Compile-fail tests in `tests/ui/` enforce type-level boundaries: private
-semantic owner types, handle consumption semantics, and workflow internals.
-Inline tests verify view reduction, shared contract consistency, and concurrent
-fact publication safety.
+Workflow purity and shared UI contract authority are the primary concerns. Compile-fail tests in `tests/ui/` enforce type-level boundaries: private semantic owner types, handle consumption semantics, and workflow internals. Inline tests verify view reduction, shared contract consistency, and concurrent fact publication safety.
 
 ### Commands
 

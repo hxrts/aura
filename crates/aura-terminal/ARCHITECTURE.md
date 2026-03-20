@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Terminal-based CLI and TUI interfaces for account management, authentication,
-recovery, and diagnostics. Uses AppCore as unified backend while remaining
-platform-agnostic.
+Terminal-based CLI and TUI interfaces for account management, authentication, recovery, and diagnostics. Uses AppCore as unified backend while remaining platform-agnostic.
 
 ## Scope
 
@@ -29,17 +27,11 @@ platform-agnostic.
 ## Invariants
 
 - Terminal interfaces must remain a presentation layer over aura-app.
-- Parity-critical IDs, focus semantics, and action metadata must come from
-  `aura-app::ui_contract`, not frontend-local derivation.
-- Harness mode may add instrumentation or render-stability hooks but must not
-  bypass normal execution semantics for parity-critical flows.
-- The TUI must expose shared semantic command ingress through its real
-  update/event loop; command handling may not depend on render-time polling.
-- Parity-critical semantic export must not depend on placeholder IDs,
-  override-backed lists, or heuristic runtime-event inference.
-- The TUI is an `Observed` plus command-ingress surface for shared semantic
-  flows. It may submit commands and render lifecycle, but it must not own
-  terminal semantic truth for parity-critical operations.
+- Parity-critical IDs, focus semantics, and action metadata must come from `aura-app::ui_contract`, not frontend-local derivation.
+- Harness mode may add instrumentation or render-stability hooks but must not bypass normal execution semantics for parity-critical flows.
+- The TUI must expose shared semantic command ingress through its real update/event loop; command handling may not depend on render-time polling.
+- Parity-critical semantic export must not depend on placeholder IDs, override-backed lists, or heuristic runtime-event inference.
+- The TUI is an `Observed` plus command-ingress surface for shared semantic flows. It may submit commands and render lifecycle, but it must not own terminal semantic truth for parity-critical operations.
 
 ### InvariantTerminalUiBoundary
 
@@ -52,8 +44,7 @@ Enforcement locus:
 Failure mode:
 - Behavior diverges from the crate contract and produces non-reproducible outcomes.
 - Cross-layer assumptions drift and break composition safety.
-- Shared harness execution depends on TUI render timing or PTY choreography
-  instead of the normal command/update path.
+- Shared harness execution depends on TUI render timing or PTY choreography instead of the normal command/update path.
 
 Verification hooks:
 - `just check-arch` and `just test-crate aura-terminal`
@@ -66,12 +57,7 @@ Contract alignment:
 
 Reference: [docs/122_ownership_model.md](../../docs/122_ownership_model.md)
 
-For shared semantic flows, `aura-terminal` uses `Observed` for render state,
-projections, snapshots, and user-visible progress. Narrow `ActorOwned` ingress
-is permitted only for the TUI command/update loop (a long-lived mutable async
-frontend loop). The frontend must not own terminal semantic truth for
-parity-critical operations; frontend-local submission ownership must hand off
-before the first awaited app/runtime workflow step per docs/122 section 16.
+For shared semantic flows, `aura-terminal` uses `Observed` for render state, projections, snapshots, and user-visible progress. Narrow `ActorOwned` ingress is permitted only for the TUI command/update loop (a long-lived mutable async frontend loop). The frontend must not own terminal semantic truth for parity-critical operations; frontend-local submission ownership must hand off before the first awaited app/runtime workflow step per docs/122 section 16.
 
 ### Inventory
 
@@ -84,13 +70,9 @@ before the first awaited app/runtime workflow step per docs/122 section 16.
 
 ### Capability-Gated Points
 
-- Shared semantic command ingress and receipt handling through the real TUI
-  update/event loop.
-- Authoritative semantic lifecycle/readiness mirroring consumed from
-  `aura-app::ui_contract` and `aura-app::workflows::semantic_facts`, never
-  authored locally.
-- Callback factories and subscription bridges that may adapt authoritative
-  operation state for rendering, but may not publish terminal semantic truth.
+- Shared semantic command ingress and receipt handling through the real TUI update/event loop.
+- Authoritative semantic lifecycle/readiness mirroring consumed from `aura-app::ui_contract` and `aura-app::workflows::semantic_facts`, never authored locally.
+- Callback factories and subscription bridges that may adapt authoritative operation state for rendering, but may not publish terminal semantic truth.
 
 ### Verification Hooks
 
@@ -106,10 +88,7 @@ before the first awaited app/runtime workflow step per docs/122 section 16.
 
 ### Strategy
 
-UI boundary correctness and demo mode fidelity are the primary concerns.
-Tests are organized into `tests/demo/` for demo-mode flows, `tests/wiring/`
-for callback and signal dispatch, `tests/regression/` for bug regressions,
-and top-level files for integration, unit, and verification tests.
+UI boundary correctness and demo mode fidelity are the primary concerns. Tests are organized into `tests/demo/` for demo-mode flows, `tests/wiring/` for callback and signal dispatch, `tests/regression/` for bug regressions, and top-level files for integration, unit, and verification tests.
 
 ### Commands
 

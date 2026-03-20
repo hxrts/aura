@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Secure messaging domain providing channel management, message facts, and chat
-state reduction for encrypted group and direct messaging.
+Secure messaging domain providing channel management, message facts, and chat state reduction for encrypted group and direct messaging.
 
 ## Scope
 
@@ -76,9 +75,7 @@ Contract alignment:
 
 ### Strategy
 
-All tests are inline — appropriate for a messaging domain crate whose tests
-verify fact reduction, guard evaluation, and view derivation. No integration
-test surface is needed.
+All tests are inline — appropriate for a messaging domain crate whose tests verify fact reduction, guard evaluation, and view derivation. No integration test surface is needed.
 
 ### Commands
 

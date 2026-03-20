@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Single source of truth for domain types and effect trait definitions. Provides
-foundational algebraic types with zero dependencies on other Aura crates.
+Single source of truth for domain types and effect trait definitions. Provides foundational algebraic types with zero dependencies on other Aura crates.
 
 ## Scope
 
@@ -66,10 +65,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-core` is primarily `Pure`. It defines the canonical ownership vocabulary
-(`actor_owned::*`, `move_owned::*`, `capability_gated::*`) consumed by higher
-layers. It must not own `ActorOwned` runtime state. Downstream `Observed`
-layers consume these contracts but must not mutate or republish semantic truth.
+`aura-core` is primarily `Pure`. It defines the canonical ownership vocabulary (`actor_owned::*`, `move_owned::*`, `capability_gated::*`) consumed by higher layers. It must not own `ActorOwned` runtime state. Downstream `Observed` layers consume these contracts but must not mutate or republish semantic truth.
 
 ### Ownership Inventory
 
@@ -91,9 +87,7 @@ layers consume these contracts but must not mutate or republish semantic truth.
 
 ### Strategy
 
-aura-core is the foundation for a threshold-cryptographic P2P identity system.
-If its invariants break, every crate above it is silently unsound. Testing
-priorities follow the blast radius of a failure:
+aura-core is the foundation for a threshold-cryptographic P2P identity system. If its invariants break, every crate above it is silently unsound. Testing priorities follow the blast radius of a failure:
 
 1. **Cryptographic commitment correctness** — highest-consequence bugs
 2. **Algebraic laws** — semilattice violations cause CRDT divergence

@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Shared Dioxus UI core for Aura providing platform-agnostic UI state, deterministic
-key routing, and canonical text snapshot rendering used by harness automation.
+Shared Dioxus UI core for Aura providing platform-agnostic UI state, deterministic key routing, and canonical text snapshot rendering used by harness automation.
 
 ## Scope
 
@@ -29,21 +28,15 @@ key routing, and canonical text snapshot rendering used by harness automation.
 - Shared core remains platform agnostic; shell crates own platform interop.
 - Snapshot output remains deterministic for equivalent state and key streams.
 - Keyboard routing is centralized and side-effect order is deterministic.
-- Shared state is keyed by semantic ids and typed operation/runtime-event
-  snapshots rather than frontend-local row indexes or renderer-only state.
-- Shared screen and modal structure remains stable enough for semantic harness
-  execution and render-convergence checks.
-- Parity-critical IDs, focus semantics, and action shapes are consumed from
-  `aura-app::ui_contract`; they are not locally reinvented here.
-- Published observed semantic projections must support stale-state detection
-  through shared revision/sequence and render-convergence semantics.
-- Onboarding must publish through the same semantic snapshot path as every
-  other screen.
+- Shared state is keyed by semantic ids and typed operation/runtime-event snapshots rather than frontend-local row indexes or renderer-only state.
+- Shared screen and modal structure remains stable enough for semantic harness execution and render-convergence checks.
+- Parity-critical IDs, focus semantics, and action shapes are consumed from `aura-app::ui_contract`; they are not locally reinvented here.
+- Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
+- Onboarding must publish through the same semantic snapshot path as every other screen.
 
 ### InvariantUiSnapshotReflectsSemanticState
 
-`aura-ui` exports observed semantic projections that match the shared contract
-rather than frontend-local incidental structure.
+`aura-ui` exports observed semantic projections that match the shared contract rather than frontend-local incidental structure.
 
 Enforcement locus:
 - `model.rs` owns typed selection, operation, toast, and runtime-event state.
@@ -62,13 +55,11 @@ Contract alignment:
 
 ### InvariantSharedFlowShapesAreUniform
 
-Shared screens and modals expose consistent semantic structure for frontends
-and the harness.
+Shared screens and modals expose consistent semantic structure for frontends and the harness.
 
 Enforcement locus:
 - shared modal/button/field ids are driven from the `aura-app` contract.
-- keyboard and click flows resolve through shared control ids and typed modal
-  state.
+- keyboard and click flows resolve through shared control ids and typed modal state.
 
 Failure mode:
 - Harness execution requires per-screen or per-frontend special cases.
@@ -84,9 +75,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-ui` is an `Observed` shared UI core for parity-critical semantic flows.
-It may render lifecycle and submit frontend-local UI transitions, but terminal
-semantic truth stays in authoritative workflow/runtime ownership upstream.
+`aura-ui` is an `Observed` shared UI core for parity-critical semantic flows. It may render lifecycle and submit frontend-local UI transitions, but terminal semantic truth stays in authoritative workflow/runtime ownership upstream.
 
 ### Ownership Inventory
 
@@ -99,21 +88,15 @@ semantic truth stays in authoritative workflow/runtime ownership upstream.
 
 ### Capability-Gated Points
 
-- shared semantic lifecycle and readiness must be consumed from
-  `aura-app::ui_contract` / `aura-app` authoritative workflow publication,
-  never authored locally in `aura-ui`
-- shared-flow completion helpers may dismiss UI state and surface observed
-  progress, but may not publish terminal semantic truth
-- keyboard and focus routing may trigger frontend-local transitions, but parity-
-  critical command ownership remains upstream in shell/workflow boundaries
+- shared semantic lifecycle and readiness must be consumed from `aura-app::ui_contract` / `aura-app` authoritative workflow publication, never authored locally in `aura-ui`
+- shared-flow completion helpers may dismiss UI state and surface observed progress, but may not publish terminal semantic truth
+- keyboard and focus routing may trigger frontend-local transitions, but parity-critical command ownership remains upstream in shell/workflow boundaries
 
 ## Testing
 
 ### Strategy
 
-Snapshot determinism and shared-flow shape uniformity are the primary concerns.
-Tests verify semantic snapshot correctness, operation instance lifecycle, and
-shared screen/modal structure.
+Snapshot determinism and shared-flow shape uniformity are the primary concerns. Tests verify semantic snapshot correctness, operation instance lifecycle, and shared screen/modal structure.
 
 ### Commands
 

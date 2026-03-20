@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Compile-time DSL parser for choreographies with Aura-specific annotations. Generates
-type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints
-via `src/bin/arch_lints.rs`.
+Compile-time DSL parser for choreographies with Aura-specific annotations. Generates type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints via `src/bin/arch_lints.rs`.
 
 ## Scope
 
@@ -58,10 +56,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-macros` is primarily `Pure`. It owns compile-time translation, not
-`ActorOwned` runtime lifecycle. Macro output may expose `MoveOwned` or
-capability-gated contracts, but the macro crate does not own those lifecycles at
-runtime. `Observed` tooling may inspect expansions, not mutate semantic truth.
+`aura-macros` is primarily `Pure`. It owns compile-time translation, not `ActorOwned` runtime lifecycle. Macro output may expose `MoveOwned` or capability-gated contracts, but the macro crate does not own those lifecycles at runtime. `Observed` tooling may inspect expansions, not mutate semantic truth.
 
 ### Ownership Inventory
 
@@ -74,17 +69,13 @@ runtime. `Observed` tooling may inspect expansions, not mutate semantic truth.
 
 ### Capability-Gated Points
 
-- Generated typed capability surfaces and ownership contracts consumed by
-  downstream crates
+- Generated typed capability surfaces and ownership contracts consumed by downstream crates
 
 ## Testing
 
 ### Strategy
 
-aura-macros is a proc-macro crate — all work happens at compile time. The
-critical concern is that valid inputs compile and invalid inputs produce
-clear errors. If a valid choreography is rejected or an invalid one is
-silently accepted, the DSL contract is broken.
+aura-macros is a proc-macro crate — all work happens at compile time. The critical concern is that valid inputs compile and invalid inputs produce clear errors. If a valid choreography is rejected or an invalid one is silently accepted, the DSL contract is broken.
 
 ### Commands
 

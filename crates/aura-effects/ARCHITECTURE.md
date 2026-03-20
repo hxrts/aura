@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Production-grade stateless effect handlers implementing infrastructure effect traits.
-Delegates to OS services for crypto, storage, networking, and time.
+Production-grade stateless effect handlers implementing infrastructure effect traits. Delegates to OS services for crypto, storage, networking, and time.
 
 ## Scope
 
@@ -36,9 +35,7 @@ Infrastructure handlers remain stateless, single-party, and isolated from domain
 Enforcement locus:
 - src handler implementations map effect traits to operating system integration points.
 - No domain crate dependencies are introduced in handler modules.
-- `just lint-arch-syntax` owns the syntax-level checks for stateless handler
-  boundaries, raw impure/runtime escape hatches, and direct crypto/time/random
-  usage; `just check-arch` keeps the integration/governance checks.
+- `just lint-arch-syntax` owns the syntax-level checks for stateless handler boundaries, raw impure/runtime escape hatches, and direct crypto/time/random usage; `just check-arch` keeps the integration/governance checks.
 
 Failure mode:
 - Behavior diverges from the crate contract and produces non-reproducible outcomes.
@@ -55,27 +52,17 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-effects` is primarily a stateless adapter layer, not an `ActorOwned`
-semantic owner. Handlers implement effects only; semantic lifecycle, readiness,
-and `MoveOwned` authority transfer are defined in higher layers. See
-[Ownership Model §9](../../docs/122_ownership_model.md) for reactive contract
-details.
+`aura-effects` is primarily a stateless adapter layer, not an `ActorOwned` semantic owner. Handlers implement effects only; semantic lifecycle, readiness, and `MoveOwned` authority transfer are defined in higher layers. See [Ownership Model §9](../../docs/122_ownership_model.md) for reactive contract details.
 
 ### Allowed Adapter Mechanics
 
-The following stateful mechanics are currently allowed because they are
-low-level adapter boundaries rather than product-semantic owners:
+The following stateful mechanics are currently allowed because they are low-level adapter boundaries rather than product-semantic owners:
 
-- `reactive/*`: signal graph subscriptions and task registry used to drive the
-  reactive effect surface
-- `query/handler.rs`: query-side caches, pending-consensus tracking, and
-  subscription plumbing around the reactive/query effect boundary
-- `encrypted_storage.rs`: local master-key cache and one-time initialization
-  guard for the encrypted-storage adapter
+- `reactive/*`: signal graph subscriptions and task registry used to drive the reactive effect surface
+- `query/handler.rs`: query-side caches, pending-consensus tracking, and subscription plumbing around the reactive/query effect boundary
+- `encrypted_storage.rs`: local master-key cache and one-time initialization guard for the encrypted-storage adapter
 
-These surfaces are allowed only as handler-local mechanics. They must not grow
-product-semantic lifecycle, readiness ownership, or unsupervised business-flow
-coordination.
+These surfaces are allowed only as handler-local mechanics. They must not grow product-semantic lifecycle, readiness ownership, or unsupervised business-flow coordination.
 
 ### Ownership Inventory
 
@@ -90,18 +77,14 @@ coordination.
 
 ### Capability-Gated Points
 
-- Upstream capability-gated effect entrypoints consumed through handler
-  implementations.
+- Upstream capability-gated effect entrypoints consumed through handler implementations.
 - No handler-local semantic lifecycle or readiness publication.
 
 ## Testing
 
 ### Strategy
 
-Handler isolation and purity are the primary testing concerns. Each handler
-must be stateless between calls and confined to infrastructure-only concerns.
-Integration tests live in `tests/handlers/`; build-configuration guards live
-at `tests/` top level.
+Handler isolation and purity are the primary testing concerns. Each handler must be stateless between calls and confined to infrastructure-only concerns. Integration tests live in `tests/handlers/`; build-configuration guards live at `tests/` top level.
 
 ### Commands
 

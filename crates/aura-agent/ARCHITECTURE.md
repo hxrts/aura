@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Production runtime composition and effect system assembly for authority-based
-identity management. Owns structured concurrency, service lifecycle, session
-ownership, effect registry, builder infrastructure, and choreography adapters.
+Production runtime composition and effect system assembly for authority-based identity management. Owns structured concurrency, service lifecycle, session ownership, effect registry, builder infrastructure, and choreography adapters.
 
 ## Scope
 
@@ -53,9 +51,7 @@ Summary:
 - Authority-first design: all operations scoped to specific authorities.
 - Lazy composition: effects assembled on-demand.
 - Mode-aware execution: production, testing, and simulation use same API.
-- For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It
-  may own long-lived mutable async runtime state, but it must not leak that
-  ownership into frontend-local semantic lifecycle authorship.
+- For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It may own long-lived mutable async runtime state, but it must not leak that ownership into frontend-local semantic lifecycle authorship.
 
 ### InvariantStructuredConcurrency
 
@@ -75,8 +71,7 @@ Verification hooks:
 
 Contract alignment:
 - [Runtime](../../docs/104_runtime.md) defines service actor patterns.
-- Actor services are the correct abstraction for runtime supervision;
-  they are not the abstraction that defines session ownership transfer.
+- Actor services are the correct abstraction for runtime supervision; they are not the abstraction that defines session ownership transfer.
 
 ### InvariantCanonicalIngress
 
@@ -97,8 +92,7 @@ Verification hooks:
 Contract alignment:
 - [Effect System](../../docs/103_effect_system.md) defines session-local VM bridge.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines canonical execution.
-- Session ownership is explicit and singular; delegation is modeled as a move,
-  not as ambient access through a service actor.
+- Session ownership is explicit and singular; delegation is modeled as a move, not as ambient access through a service actor.
 
 ### InvariantSessionOwnership
 
@@ -122,8 +116,7 @@ Contract alignment:
 
 ### InvariantRuntimeCompositionBoundary
 
-Runtime composition assembles existing effect handlers without introducing new
-effect implementations or protocol logic.
+Runtime composition assembles existing effect handlers without introducing new effect implementations or protocol logic.
 
 Enforcement locus:
 - `src/runtime/` composes handlers and services through registry and builder types.
@@ -179,8 +172,7 @@ Recovery is acceptable only when:
 
 ## Structured Concurrency Model
 
-`aura-agent` uses structured concurrency as the only production async model.
-This model is intentionally split:
+`aura-agent` uses structured concurrency as the only production async model. This model is intentionally split:
 
 - actor services solve long-lived runtime supervision and lifecycle
 - move semantics solve session and endpoint ownership transfer
@@ -195,9 +187,7 @@ Rules:
 - Detached fire-and-forget tasks are forbidden in production runtime code.
 - Shutdown is hierarchical and parent-driven.
 
-See [Runtime](../../docs/104_runtime.md) §Service Actor Patterns for the
-actor struct examples, command/reply pattern, and async primitive
-preferred/forbidden lists.
+See [Runtime](../../docs/104_runtime.md) §Service Actor Patterns for the actor struct examples, command/reply pattern, and async primitive preferred/forbidden lists.
 
 ### Concurrency Profiles
 
@@ -207,13 +197,11 @@ Three runtime concurrency profiles for choreography work:
 - **EnvelopeAdmitted**: Disjoint or admitted work preserving safety-visible meaning.
 - **Fallback**: Immediate degradation to canonical execution when envelope admission fails.
 
-See [Runtime](../../docs/104_runtime.md) §Concurrency Profiles for the full
-contract, envelope admission rules, and current path classification.
+See [Runtime](../../docs/104_runtime.md) §Concurrency Profiles for the full contract, envelope admission rules, and current path classification.
 
 ## Session Ownership
 
-Telltale-facing session state follows strict ownership rules. This is the
-move-semantics side of the runtime design.
+Telltale-facing session state follows strict ownership rules. This is the move-semantics side of the runtime design.
 
 Rules:
 
@@ -223,8 +211,7 @@ Rules:
 - Session ownership and task ownership move together.
 - Session-bound effects execute only under the current owner capability.
 
-The current owner may be hosted by an actor, but ownership itself remains a
-single-owner move boundary, not a shared mutable actor coordination pattern.
+The current owner may be hosted by an actor, but ownership itself remains a single-owner move boundary, not a shared mutable actor coordination pattern.
 
 ### Owner Record vs Owner Capability
 
@@ -241,15 +228,11 @@ Three ownership classes for runtime effect paths:
 - `session-owned`: VM/session mutation, blocked-receive injection, owner-routed round advancement.
 - `capability-gated trust-boundary APIs`: commands crossing subsystem or authority boundaries requiring capability validation.
 
-Service-owned effects never mutate session state directly. Session-owned effects
-require both current owner record and current owner capability. Capability-gated
-trust-boundary APIs fail closed on stale owner, stale capability, or
-wrong-boundary routing.
+Service-owned effects never mutate session state directly. Session-owned effects require both current owner record and current owner capability. Capability-gated trust-boundary APIs fail closed on stale owner, stale capability, or wrong-boundary routing.
 
 ## Canonical Host/VM Boundary
 
-`aura-agent` aligns with Telltale's canonical execution model. The only legal
-path from external async input to session mutation:
+`aura-agent` aligns with Telltale's canonical execution model. The only legal path from external async input to session mutation:
 
 1. External event received by host runtime.
 2. Host runtime converts it to typed ingress.
@@ -258,15 +241,11 @@ path from external async input to session mutation:
 
 Enforcement notes:
 
-- Raw VM admission helpers stay inside the runtime boundary; higher layers use
-  owned ingress/session wrappers.
+- Raw VM admission helpers stay inside the runtime boundary; higher layers use owned ingress/session wrappers.
 - VM fragment ownership mutation stays inside runtime-owned surfaces.
-- Link/delegate orchestration uses `ReconfigurationManager`; `ReconfigurationController`
-  remains an internal runtime primitive.
+- Link/delegate orchestration uses `ReconfigurationManager`; `ReconfigurationController` remains an internal runtime primitive.
 
-See [Runtime](../../docs/104_runtime.md) §Link and Delegate Boundaries for the
-full link/delegate boundary contract, delegation bundle composition, and
-theorem-pack alignment rules.
+See [Runtime](../../docs/104_runtime.md) §Link and Delegate Boundaries for the full link/delegate boundary contract, delegation bundle composition, and theorem-pack alignment rules.
 
 ## Telltale Bridge Ownership
 
@@ -305,31 +284,25 @@ Ownership categories follow [docs/122_ownership_model.md](../../docs/122_ownersh
   - `runtime/services/rendezvous_manager.rs` via `RendezvousManager`
   - service-local supervision rooted in `task_registry.rs`
 - `MoveOwned`
-  - `runtime/services/reconfiguration_manager.rs` via `ReconfigurationManager`
-    and `SessionDelegationTransfer`
+  - `runtime/services/reconfiguration_manager.rs` via `ReconfigurationManager` and `SessionDelegationTransfer`
   - `runtime/session_ingress.rs` via `RuntimeSessionOwner`
   - `runtime/subsystems/vm_fragment.rs` via `VmFragmentRegistry`
 - `CapabilityGated`
   - runtime reconfiguration admission in `runtime/services/reconfiguration_manager.rs`
   - session-owner capability checks in `runtime/session_ingress.rs`
-  - runtime-facing readiness/lifecycle publication through sanctioned runtime
-    coordinator paths
+  - runtime-facing readiness/lifecycle publication through sanctioned runtime coordinator paths
 
 ### Capability-Gated Points
 
-- Runtime-owned readiness and lifecycle publication must flow through sanctioned
-  coordinator APIs and capability checks rather than arbitrary handlers.
-- Session and endpoint mutation must validate both current owner record and
-  current owner capability.
-- Runtime helper modules may stage work, but they may not author frontend- or
-  harness-visible semantic truth without the owning capability.
+- Runtime-owned readiness and lifecycle publication must flow through sanctioned coordinator APIs and capability checks rather than arbitrary handlers.
+- Session and endpoint mutation must validate both current owner record and current owner capability.
+- Runtime helper modules may stage work, but they may not author frontend- or harness-visible semantic truth without the owning capability.
 
 Rules:
 
 - Do not replace `MoveOwned` session/delegation transfer with an actor mailbox.
 - Do not route long-lived mutable service ownership through move-owned handles.
-- Do not author runtime-visible mutation/publication without the relevant
-  capability gate.
+- Do not author runtime-visible mutation/publication without the relevant capability gate.
 
 ### Verification Hooks
 
@@ -339,19 +312,13 @@ Rules:
 - `just ci-capability-boundaries`
 - targeted runtime/service tests via `cargo test -p aura-agent`
 
-Architecture/tooling split: runtime ownership boundaries that can be closed by
-types, visibility, or compile-fail tests should not rely primarily on shell grep
-checks. `just check-arch` remains the right gate for repo-wide
-runtime/integration invariants.
+Architecture/tooling split: runtime ownership boundaries that can be closed by types, visibility, or compile-fail tests should not rely primarily on shell grep checks. `just check-arch` remains the right gate for repo-wide runtime/integration invariants.
 
 ## Testing
 
 ### Strategy
 
-Structured concurrency, ownership boundaries, and runtime composition are the
-primary concerns. Compile-fail tests in `tests/ui/` enforce type-level
-boundaries. Integration tests verify service lifecycle, session management,
-protocol choreography, and reactive scheduling.
+Structured concurrency, ownership boundaries, and runtime composition are the primary concerns. Compile-fail tests in `tests/ui/` enforce type-level boundaries. Integration tests verify service lifecycle, session management, protocol choreography, and reactive scheduling.
 
 ### Commands
 

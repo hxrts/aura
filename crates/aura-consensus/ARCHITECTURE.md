@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Strong-agreement protocol for single-operation consensus using FROST threshold
-signatures. Sole strong-agreement mechanism in Aura; all other coordination is CRDT.
+Strong-agreement protocol for single-operation consensus using FROST threshold signatures. Sole strong-agreement mechanism in Aura; all other coordination is CRDT.
 
 ## Scope
 
@@ -111,11 +110,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-consensus` uses `MoveOwned` for proposal, transcript, and ceremony
-authority that must remain exclusive. Long-lived consensus coordination may be
-`ActorOwned` where supervision and lifecycle matter, but that ownership stays
-explicit. Consensus operations require typed terminal success, failure, or
-abort paths.
+`aura-consensus` uses `MoveOwned` for proposal, transcript, and ceremony authority that must remain exclusive. Long-lived consensus coordination may be `ActorOwned` where supervision and lifecycle matter, but that ownership stays explicit. Consensus operations require typed terminal success, failure, or abort paths.
 
 See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
 
@@ -132,17 +127,13 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 ### Capability-Gated Points
 
 - Agreement and publication boundaries that emit consensus results/evidence.
-- Guard-mediated send and runtime-bridge publication paths that consume
-  consensus outputs.
+- Guard-mediated send and runtime-bridge publication paths that consume consensus outputs.
 
 ## Testing
 
 ### Strategy
 
-Consensus safety invariants are the highest-consequence tests in the system.
-`tests/safety/` validates equivocation detection, guard enforcement, and
-protocol coherence. `tests/contracts/` validates wire format stability and
-DKG transcript correctness. Inline tests cover the pure state machine.
+Consensus safety invariants are the highest-consequence tests in the system. `tests/safety/` validates equivocation detection, guard enforcement, and protocol coherence. `tests/contracts/` validates wire format stability and DKG transcript correctness. Inline tests cover the pure state machine.
 
 ### Commands
 

@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Peer discovery and channel establishment protocol including descriptor exchange,
-flood propagation, and LAN discovery for P2P connectivity.
+Peer discovery and channel establishment protocol including descriptor exchange, flood propagation, and LAN discovery for P2P connectivity.
 
 ## Scope
 
@@ -63,8 +62,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-rendezvous` combines `Pure` descriptor semantics with explicit `MoveOwned`
-channel-establishment authority where exclusivity matters.
+`aura-rendezvous` combines `Pure` descriptor semantics with explicit `MoveOwned` channel-establishment authority where exclusivity matters.
 
 ### Ownership Inventory
 
@@ -85,11 +83,7 @@ channel-establishment authority where exclusivity matters.
 
 ### Strategy
 
-Channel lifecycle correctness and descriptor validity are the primary concerns.
-Integration tests in `tests/channel/` verify end-to-end flows from descriptor
-publication through handshake completion. Inline tests verify channel state
-machine transitions, fact reduction, flood deduplication, and protocol
-serialization.
+Channel lifecycle correctness and descriptor validity are the primary concerns. Integration tests in `tests/channel/` verify end-to-end flows from descriptor publication through handshake completion. Inline tests verify channel state machine transitions, fact reduction, flood deduplication, and protocol serialization.
 
 ### Commands
 

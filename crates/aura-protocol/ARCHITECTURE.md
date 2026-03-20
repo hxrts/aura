@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Coordinate multi-party protocols and guard-chain enforcement. This crate provides
-orchestration glue, not single-party effect implementations.
+Coordinate multi-party protocols and guard-chain enforcement. This crate provides orchestration glue, not single-party effect implementations.
 
 ## Scope
 
@@ -54,10 +53,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-protocol` uses `MoveOwned` for delegation, session transfer, and other
-exclusive orchestration boundaries. `ActorOwned` state is used only for
-justified long-lived coordinators. Async orchestration flows must reach typed
-terminal outcomes.
+`aura-protocol` uses `MoveOwned` for delegation, session transfer, and other exclusive orchestration boundaries. `ActorOwned` state is used only for justified long-lived coordinators. Async orchestration flows must reach typed terminal outcomes.
 
 See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
 
@@ -79,10 +75,7 @@ See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + 
 
 ### Strategy
 
-Protocol coordination contracts and guard mediation are the primary concerns.
-Integration tests in `tests/coordination/` verify transport coordinator
-behavior; inline tests verify state machines, context immutability, and
-CRDT delivery semantics.
+Protocol coordination contracts and guard mediation are the primary concerns. Integration tests in `tests/coordination/` verify transport coordinator behavior; inline tests verify state machines, context immutability, and CRDT delivery semantics.
 
 ### Commands
 

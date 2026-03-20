@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Deterministic simulation runtime for testing and protocol verification. Implements
-simulation-specific effect handlers enabling reproducible testing without real
-delays or inherent failures.
+Deterministic simulation runtime for testing and protocol verification. Implements simulation-specific effect handlers enabling reproducible testing without real delays or inherent failures.
 
 ## Scope
 
@@ -110,22 +108,15 @@ Contract alignment:
 
 ### Capability-Gated Points
 
-- Fault injection configuration is simulator-owned and may mutate only through
-  simulator control surfaces.
-- Shared inbox/state transfer into simulator handlers is explicit and scoped to
-  simulation harness/composer boundaries.
-- Differential and parity outputs are observed artifacts and must not become a
-  new semantic-truth source for production flows.
+- Fault injection configuration is simulator-owned and may mutate only through simulator control surfaces.
+- Shared inbox/state transfer into simulator handlers is explicit and scoped to simulation harness/composer boundaries.
+- Differential and parity outputs are observed artifacts and must not become a new semantic-truth source for production flows.
 
 ## Testing
 
 ### Strategy
 
-Deterministic replay and protocol simulation fidelity are the primary
-concerns. Integration tests verify each simulated protocol produces
-correct outcomes. Property tests verify consensus and choreography
-invariants under fault injection. ITF trace replay verifies conformance
-with Quint formal models.
+Deterministic replay and protocol simulation fidelity are the primary concerns. Integration tests verify each simulated protocol produces correct outcomes. Property tests verify consensus and choreography invariants under fault injection. ITF trace replay verifies conformance with Quint formal models.
 
 ### Commands
 

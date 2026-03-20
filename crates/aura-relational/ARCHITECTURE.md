@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Contact and relationship management providing cross-authority relationship facts,
-guardian request handling, and consensus-backed relationship establishment.
+Contact and relationship management providing cross-authority relationship facts, guardian request handling, and consensus-backed relationship establishment.
 
 ## Scope
 
@@ -75,10 +74,7 @@ Contract alignment:
 
 ### Strategy
 
-All tests are inline — appropriate for a relational domain crate with no
-integration test surface. Tests verify fact reduction, guardian binding,
-and context scoping. Mutual agreement enforcement is consensus-gated
-(Category C) and tested at the consensus layer.
+All tests are inline — appropriate for a relational domain crate with no integration test surface. Tests verify fact reduction, guardian binding, and context scoping. Mutual agreement enforcement is consensus-gated (Category C) and tested at the consensus layer.
 
 ### Commands
 

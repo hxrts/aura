@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Shared testing infrastructure providing test fixtures, effect system harnesses,
-mock implementations, time control, and simulation support for deterministic
-testing across all layers.
+Shared testing infrastructure providing test fixtures, effect system harnesses, mock implementations, time control, and simulation support for deterministic testing across all layers.
 
 ## Scope
 
@@ -56,9 +54,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-testkit` uses test-only `ActorOwned` mock state for deterministic control
-and models `MoveOwned` transfer and capability behavior so tests can exercise
-the production ownership contract faithfully.
+`aura-testkit` uses test-only `ActorOwned` mock state for deterministic control and models `MoveOwned` transfer and capability behavior so tests can exercise the production ownership contract faithfully.
 
 ### Ownership Inventory
 
@@ -71,22 +67,15 @@ the production ownership contract faithfully.
 
 ### Capability-Gated Points
 
-- mock/runtime bridge helpers that model authoritative lifecycle/readiness or
-  capability behavior for tests must do so explicitly and remain test-only
-- stateful effect doubles may expose mutation for deterministic control, but
-  those shortcuts must not become production-facing backdoors
-- mock transport/journal/time helpers should preserve the same capability and
-  ownership semantics the production code expects to consume
+- mock/runtime bridge helpers that model authoritative lifecycle/readiness or capability behavior for tests must do so explicitly and remain test-only
+- stateful effect doubles may expose mutation for deterministic control, but those shortcuts must not become production-facing backdoors
+- mock transport/journal/time helpers should preserve the same capability and ownership semantics the production code expects to consume
 
 ## Testing
 
 ### Strategy
 
-Mock contract fidelity and handler coverage are the primary concerns.
-Tests are organized into `tests/amp/` for AMP fixtures, `tests/consensus/`
-for consensus differential and conformance, `tests/protocol/` for protocol
-fixtures, and `tests/conformance/` for cross-implementation conformance.
-Top-level files cover handler coverage, effects, performance, and tree tests.
+Mock contract fidelity and handler coverage are the primary concerns. Tests are organized into `tests/amp/` for AMP fixtures, `tests/consensus/` for consensus differential and conformance, `tests/protocol/` for protocol fixtures, and `tests/conformance/` for cross-implementation conformance. Top-level files cover handler coverage, effects, performance, and tree tests.
 
 ### Commands
 

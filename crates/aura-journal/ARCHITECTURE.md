@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Fact-based journal semantics using join-semilattice CRDTs for deterministic
-conflict-free state reduction across distributed replicas.
+Fact-based journal semantics using join-semilattice CRDTs for deterministic conflict-free state reduction across distributed replicas.
 
 ## Scope
 
@@ -122,8 +121,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-journal` is primarily `Pure`. Fact reduction and journal-domain semantics
-are deterministic. It does not own `ActorOwned` runtime state.
+`aura-journal` is primarily `Pure`. Fact reduction and journal-domain semantics are deterministic. It does not own `ActorOwned` runtime state.
 
 ### Ownership Inventory
 
@@ -142,8 +140,7 @@ are deterministic. It does not own `ActorOwned` runtime state.
 
 ### Strategy
 
-aura-journal is the CRDT convergence layer — if reduction diverges, every
-replica disagrees on state irrecoverably. Testing priorities:
+aura-journal is the CRDT convergence layer — if reduction diverges, every replica disagrees on state irrecoverably. Testing priorities:
 
 1. **Reducer determinism**: same facts → same state regardless of order
 2. **CRDT convergence laws**: join associativity, commutativity, idempotence

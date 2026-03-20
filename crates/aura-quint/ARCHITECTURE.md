@@ -2,9 +2,7 @@
 
 ## Purpose
 
-Native Rust interface to the Quint formal verification language using the Quint
-Rust evaluator directly. Eliminates Node.js dependency while providing full
-verification capabilities.
+Native Rust interface to the Quint formal verification language using the Quint Rust evaluator directly. Eliminates Node.js dependency while providing full verification capabilities.
 
 ## Scope
 
@@ -77,8 +75,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-quint` is primarily `Pure` plus `Observed`. It owns verification bridge
-schemas and analysis logic, not runtime semantic ownership.
+`aura-quint` is primarily `Pure` plus `Observed`. It owns verification bridge schemas and analysis logic, not runtime semantic ownership.
 
 ### Ownership Inventory
 
@@ -90,19 +87,14 @@ schemas and analysis logic, not runtime semantic ownership.
 
 ### Capability-Gated Points
 
-- capability semantics may be modeled in verification inputs/results, but
-  `aura-quint` must not expose runtime mutation shortcuts
-- bridge validation and artifact transfer should stay explicit and typed rather
-  than relying on hidden mutable ownership
+- capability semantics may be modeled in verification inputs/results, but `aura-quint` must not expose runtime mutation shortcuts
+- bridge validation and artifact transfer should stay explicit and typed rather than relying on hidden mutable ownership
 
 ## Testing
 
 ### Strategy
 
-IR determinism and bridge transform correctness are the primary concerns.
-The single integration test (`tests/bridge_pipeline.rs`) verifies the full
-pipeline. Inline tests verify each bridge stage independently: import,
-export, validation, and format roundtrip.
+IR determinism and bridge transform correctness are the primary concerns. The single integration test (`tests/bridge_pipeline.rs`) verifies the full pipeline. Inline tests verify each bridge stage independently: import, export, validation, and format roundtrip.
 
 ### Commands
 

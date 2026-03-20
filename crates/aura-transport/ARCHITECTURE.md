@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Define P2P communication abstractions and transport semantics with privacy-by-design
-and authority-centric messaging.
+Define P2P communication abstractions and transport semantics with privacy-by-design and authority-centric messaging.
 
 ## Scope
 
@@ -29,9 +28,7 @@ and authority-centric messaging.
 - Authority-centric: uses `AuthorityId` for cross-authority communication.
 - Context-scoped: uses `ContextId` for relational context scoping.
 - Compatible with Telltale session types.
-- Canonical transport invariants use contract names: `InvariantSequenceMonotonic`,
-  `InvariantContextIsolation`, `InvariantReceiptValidityWindow`, and
-  `InvariantCrossEpochReplayPrevention`.
+- Canonical transport invariants use contract names: `InvariantSequenceMonotonic`, `InvariantContextIsolation`, `InvariantReceiptValidityWindow`, and `InvariantCrossEpochReplayPrevention`.
 
 ### InvariantSequenceMonotonic
 
@@ -56,10 +53,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-transport` is primarily `Pure`. It defines transport-domain semantics and
-typed receipts, not `ActorOwned` connection ownership. Channel/session transfer
-semantics requiring exclusivity are carried as `MoveOwned` contracts in higher
-layers. `Observed` projections consume these contracts downstream.
+`aura-transport` is primarily `Pure`. It defines transport-domain semantics and typed receipts, not `ActorOwned` connection ownership. Channel/session transfer semantics requiring exclusivity are carried as `MoveOwned` contracts in higher layers. `Observed` projections consume these contracts downstream.
 
 ### Ownership Inventory
 
@@ -80,9 +74,7 @@ layers. `Observed` projections consume these contracts downstream.
 
 ### Strategy
 
-aura-transport defines wire protocol types. If serialization breaks, peers
-can't communicate. If context isolation breaks, messages leak across
-relationships. If epoch validation breaks, replay attacks succeed.
+aura-transport defines wire protocol types. If serialization breaks, peers can't communicate. If context isolation breaks, messages leak across relationships. If epoch validation breaks, replay attacks succeed.
 
 ### Commands
 

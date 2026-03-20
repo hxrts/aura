@@ -2,8 +2,7 @@
 
 ## Purpose
 
-Define maintenance domain facts, release metadata, and reduction helpers for
-snapshots, cache invalidation, OTA upgrades, and admin replacement.
+Define maintenance domain facts, release metadata, and reduction helpers for snapshots, cache invalidation, OTA upgrades, and admin replacement.
 
 ## Scope
 
@@ -61,11 +60,7 @@ Contract alignment:
 
 > Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-`aura-maintenance` is primarily `Pure`. It defines maintenance facts, release
-identity, and policy scope rather than `ActorOwned` staging or activation
-services. Exclusive cutover or replacement authority is modeled as `MoveOwned`
-higher-layer contracts. `Observed` layers may display maintenance state but must
-not author lifecycle truth.
+`aura-maintenance` is primarily `Pure`. It defines maintenance facts, release identity, and policy scope rather than `ActorOwned` staging or activation services. Exclusive cutover or replacement authority is modeled as `MoveOwned` higher-layer contracts. `Observed` layers may display maintenance state but must not author lifecycle truth.
 
 ### Ownership Inventory
 
@@ -78,16 +73,13 @@ not author lifecycle truth.
 
 ### Capability-Gated Points
 
-- Maintenance fact publication and high-risk operation admission consumed by
-  higher-layer guards and consensus paths
+- Maintenance fact publication and high-risk operation admission consumed by higher-layer guards and consensus paths
 
 ## Testing
 
 ### Strategy
 
-aura-maintenance defines upgrade, snapshot, and admin replacement facts.
-The critical concern is reducer determinism — if replicas disagree on
-maintenance state, some may run different software versions (split-brain).
+aura-maintenance defines upgrade, snapshot, and admin replacement facts. The critical concern is reducer determinism — if replicas disagree on maintenance state, some may run different software versions (split-brain).
 
 ### Commands
 
