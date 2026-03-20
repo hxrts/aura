@@ -4,7 +4,7 @@ This document gives an intuitive overview of Aura's architecture. It covers the 
 
 ## Overview
 
-Aura is a peer-to-peer identity and communication system built on three pillars. Threshold cryptography distributes trust across multiple devices. Session-typed protocols ensure safe multi-party coordination. CRDT journals provide conflict-free replicated state.
+Aura distributes identity and trust across devices and social relationships to enable private peer-to-peer communication.
 
 The system operates without dedicated servers. Discovery, availability, and recovery are provided by the web of trust. Peers relay messages for each other based on social relationships. No single party can observe all communication or deny service.
 
