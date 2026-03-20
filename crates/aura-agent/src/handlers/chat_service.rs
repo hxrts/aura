@@ -39,6 +39,7 @@ use aura_protocol::amp::{
 use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
+use aura_social::{is_user_banned, is_user_muted};
 use uuid::Uuid;
 
 /// Chat service API for the agent layer.
@@ -231,6 +232,7 @@ impl ChatServiceApi {
         &self,
         authority_id: AuthorityId,
         context_id: ContextId,
+        channel_id: Option<ChannelId>,
     ) -> AgentResult<GuardSnapshot> {
         let now = self
             .effects
@@ -245,6 +247,27 @@ impl ChatServiceApi {
             CapabilityId::from(aura_chat::guards::costs::CAP_CHAT_CHANNEL_CREATE),
             CapabilityId::from(aura_chat::guards::costs::CAP_CHAT_MESSAGE_SEND),
         ];
+        let committed_facts = self
+            .effects
+            .load_committed_facts(self.effects.authority_id())
+            .await
+            .map_err(|e| AgentError::effects(format!("moderation fact load failed: {e}")))?;
+        let sender_is_banned =
+            is_user_banned(
+                &committed_facts,
+                &context_id,
+                &authority_id,
+                now.ts_ms,
+                channel_id.as_ref(),
+            );
+        let sender_is_muted =
+            is_user_muted(
+                &committed_facts,
+                &context_id,
+                &authority_id,
+                now.ts_ms,
+                channel_id.as_ref(),
+            );
 
         Ok(GuardSnapshot::new(
             authority_id,
@@ -252,7 +275,8 @@ impl ChatServiceApi {
             aura_core::FlowCost::new(u32::MAX),
             capabilities,
             now.ts_ms,
-        ))
+        )
+        .with_moderation_status(sender_is_banned, sender_is_muted))
     }
 
     async fn execute_outcome(&self, outcome: GuardOutcome) -> AgentResult<()> {
@@ -335,6 +359,7 @@ impl ChatServiceApi {
                 | aura_chat::ChatFact::ChannelClosed { channel_id: c, .. }
                 | aura_chat::ChatFact::ChannelUpdated { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageSentSealed { channel_id: c, .. }
+                | aura_chat::ChatFact::MessageDeliveryUpdated { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageRead { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageEdited { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageDeleted { channel_id: c, .. } => {
@@ -389,7 +414,7 @@ impl ChatServiceApi {
         .await
         .map_err(|e| AgentError::effects(format!("AMP channel creation failed: {e}")))?;
 
-        let snapshot = self.build_snapshot(creator_id, context_id).await?;
+        let snapshot = self.build_snapshot(creator_id, context_id, Some(channel_id)).await?;
         let outcome =
             self.facts
                 .prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);
@@ -453,7 +478,9 @@ impl ChatServiceApi {
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
-        let snapshot = self.build_snapshot(sender_id, context_id).await?;
+        let snapshot = self
+            .build_snapshot(sender_id, context_id, Some(channel_id))
+            .await?;
 
         let message_uuid = self.effects.random_uuid().await;
         let message_id = message_uuid.to_string();
@@ -938,6 +965,8 @@ impl ChatServiceApi {
             channel_id,
             name.clone(),
             description.clone(), // Maps to topic in the fact
+            None,
+            None,
             now.ts_ms,
             requester,
         );

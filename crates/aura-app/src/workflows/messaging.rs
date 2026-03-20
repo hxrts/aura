@@ -24,14 +24,14 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
-    issue_channel_invitation_created_proof, prove_channel_membership_ready,
-    prove_message_committed,
+    issue_channel_invitation_created_proof, issue_message_committed_proof,
+    prove_channel_membership_ready,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
 use crate::workflows::signals::{emit_signal, read_signal, read_signal_or_default};
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
-use crate::workflows::state_helpers::with_chat_state;
+use crate::workflows::state_helpers::{reduce_chat_fact_observed, update_chat_projection_observed};
 use crate::{
     core::IntentError,
     runtime_bridge::{InvitationBridgeType, InvitationInfo, RuntimeBridge},
@@ -48,7 +48,7 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_chat::ChatFact;
+use aura_chat::{ChatFact, ChatMessageDeliveryStatus};
 use aura_core::{
     crypto::hash::hash,
     effects::amp::{
@@ -237,6 +237,7 @@ struct ChannelReadinessCoordinator {
 
 impl ChannelReadinessCoordinator {
     async fn load(app_core: &Arc<RwLock<AppCore>>) -> Self {
+        // OWNERSHIP: observed
         let chat = chat_snapshot(app_core).await;
         let (runtime, self_authority) = {
             let core = app_core.read().await;
@@ -248,7 +249,11 @@ impl ChannelReadinessCoordinator {
         for channel in chat.all_channels().cloned() {
             let recipients = match (&runtime, self_authority) {
                 (Some(runtime), Some(authority_id)) => {
-                    authoritative_recipient_peers_for_channel(runtime, &channel, authority_id)
+                    authoritative_recipient_peers_for_channel_id(
+                        runtime,
+                        channel.id,
+                        authority_id,
+                    )
                         .await
                         .unwrap_or_default()
                 }
@@ -558,13 +563,23 @@ async fn send_chat_fact_with_retry(
 
 async fn mark_message_delivery_failed(
     app_core: &Arc<RwLock<AppCore>>,
+    context_id: ContextId,
+    channel_id: ChannelId,
     message_id: &str,
+    actor_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    let updated =
-        with_chat_state(app_core, |chat_state| chat_state.mark_failed(message_id)).await?;
-    if !updated {
-        return Ok(());
-    }
+    reduce_chat_fact_observed(
+        app_core,
+        &ChatFact::message_delivery_updated_ms(
+            context_id,
+            channel_id,
+            message_id.to_string(),
+            ChatMessageDeliveryStatus::Failed,
+            projection_update_timestamp_ms(app_core).await,
+            actor_id,
+        ),
+    )
+    .await?;
 
     #[cfg(feature = "instrumented")]
     tracing::warn!(
@@ -576,7 +591,7 @@ async fn mark_message_delivery_failed(
 }
 
 async fn deliver_message_fact_remotely(
-    app_core: &Arc<RwLock<AppCore>>,
+    _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     context_id: ContextId,
     channel_id: ChannelId,
@@ -585,8 +600,7 @@ async fn deliver_message_fact_remotely(
 ) -> Result<(), AuraError> {
     let mut delivered_remote = false;
     let mut recipients =
-        authoritative_recipient_peers_for_channel_id(app_core, runtime, channel_id, sender_id)
-            .await?;
+        authoritative_recipient_peers_for_channel_id(runtime, channel_id, sender_id).await?;
     let mut failed_fanout = Vec::new();
     let mut attempted_fanout_total = 0usize;
     let mut last_connectivity_error: Option<String> = None;
@@ -604,13 +618,9 @@ async fn deliver_message_fact_remotely(
                 runtime
                     .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
                     .await;
-                recipients = authoritative_recipient_peers_for_channel_id(
-                    app_core,
-                    runtime,
-                    channel_id,
-                    sender_id,
-                )
-                .await?;
+                recipients =
+                    authoritative_recipient_peers_for_channel_id(runtime, channel_id, sender_id)
+                        .await?;
                 continue;
             }
             break;
@@ -652,13 +662,9 @@ async fn deliver_message_fact_remotely(
             runtime
                 .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
                 .await;
-            recipients = authoritative_recipient_peers_for_channel_id(
-                app_core,
-                runtime,
-                channel_id,
-                sender_id,
-            )
-            .await?;
+            recipients =
+                authoritative_recipient_peers_for_channel_id(runtime, channel_id, sender_id)
+                    .await?;
         } else {
             break;
         }
@@ -712,7 +718,7 @@ async fn deliver_message_fact_remotely(
 }
 
 async fn ensure_runtime_note_to_self_channel(
-    app_core: &Arc<RwLock<AppCore>>,
+    _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     authority_id: AuthorityId,
     timestamp_ms: u64,
@@ -769,11 +775,6 @@ async fn ensure_runtime_note_to_self_channel(
             .await
             .map_err(|e| super::error::runtime_call("persist note-to-self channel", e))?;
     }
-
-    with_chat_state(app_core, |chat_state| {
-        chat_state.ensure_note_to_self_channel(authority_id);
-    })
-    .await?;
 
     Ok(channel_id)
 }
@@ -1010,6 +1011,7 @@ async fn resolve_target_authority_for_invite(
 pub async fn current_home_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<ChannelId, AuraError> {
+    // OWNERSHIP: first-run-default
     let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
         .await
         .ok();
@@ -1077,6 +1079,12 @@ async fn enforce_home_join_allowed(
     validation::enforce_home_join_allowed(app_core, context_id, channel_id, authority_id).await
 }
 
+async fn projection_update_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
+    crate::workflows::time::current_time_ms(app_core)
+        .await
+        .unwrap_or(0)
+}
+
 async fn ensure_channel_visible_after_join(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -1091,52 +1099,24 @@ async fn ensure_channel_visible_after_join(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| channel_id.to_string());
 
-    with_chat_state(app_core, |chat| {
-        if let Some(channel) = chat.channel_mut(&channel_id) {
-            if channel.context_id.is_none() {
-                channel.context_id = Some(context_id);
-            }
-            if name_hint.is_some() && channel.name != normalized_name {
-                channel.name = normalized_name.clone();
-            }
-            return;
-        }
-
-        let canonical = Channel {
-            id: channel_id,
-            context_id: Some(context_id),
-            name: normalized_name.clone(),
-            topic: None,
-            channel_type: ChannelType::Home,
-            unread_count: 0,
-            is_dm: false,
-            member_ids: Vec::new(),
-            member_count: 1,
-            last_message: None,
-            last_message_time: None,
-            last_activity: 0,
-            last_finalized_epoch: 0,
-        };
-
-        let stale_id = chat
-            .all_channels()
-            .find(|channel| {
-                channel.id != channel_id
-                    && !channel.is_dm
-                    && channel.name.eq_ignore_ascii_case(&normalized_name)
-            })
-            .map(|channel| channel.id);
-        if let Some(stale_id) = stale_id {
-            chat.rebind_channel_identity(&stale_id, canonical);
-            return;
-        }
-
-        chat.upsert_channel(canonical);
-    })
+    let updated_at_ms = projection_update_timestamp_ms(app_core).await;
+    reduce_chat_fact_observed(
+        app_core,
+        &ChatFact::channel_updated_ms(
+            context_id,
+            channel_id,
+            Some(normalized_name),
+            None,
+            Some(1),
+            None,
+            updated_at_ms,
+            AuthorityId::new_from_entropy([0u8; 32]),
+        ),
+    )
     .await
 }
 
-async fn apply_authoritative_membership_projection(
+pub(in crate::workflows) async fn apply_authoritative_membership_projection(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     context_id: ContextId,
@@ -1145,6 +1125,7 @@ async fn apply_authoritative_membership_projection(
 ) -> Result<(), AuraError> {
     if joined {
         ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await?;
+        // OWNERSHIP: fact-backed
         let chat = chat_snapshot(app_core).await;
         if chat.channel(&channel_id).is_none() {
             return Err(super::error::WorkflowError::Precondition(
@@ -1155,155 +1136,36 @@ async fn apply_authoritative_membership_projection(
         return Ok(());
     }
 
-    let updated = with_chat_state(app_core, |chat| {
-        if let Some(channel) = chat.channel_mut(&channel_id) {
-            channel.context_id = Some(context_id);
-            channel.member_count = 0;
-            return true;
-        }
-        false
-    })
-    .await?;
-
-    if !updated {
-        // Channel projections can be pruned transiently during reactive churn.
-        // Preserve canonical identity by materializing a placeholder entry so
-        // subsequent `/join` reuses the same ChannelId.
-        let fallback_name = name_hint
-            .map(normalize_channel_name)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| channel_id.to_string());
-
-        with_chat_state(app_core, |chat| {
-            chat.upsert_channel(Channel {
-                id: channel_id,
-                context_id: Some(context_id),
-                name: fallback_name.clone(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: Vec::new(),
-                member_count: 0,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            });
+    // OWNERSHIP: fact-backed
+    let existing_name = chat_snapshot(app_core)
+        .await
+        .channel(&channel_id)
+        .map(|channel| channel.name.clone());
+    let fallback_name = name_hint
+        .map(normalize_channel_name)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            existing_name
+                .as_deref()
+                .map(normalize_channel_name)
+                .filter(|value| !value.is_empty())
         })
-        .await?;
-    }
-
-    Ok(())
-}
-
-async fn restore_home_member_membership(
-    app_core: &Arc<RwLock<AppCore>>,
-    context_id: ContextId,
-    authority_id: AuthorityId,
-    joined_at_ms: u64,
-) -> Result<(), AuraError> {
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
-
-    let target_home_id = homes
-        .iter()
-        .find_map(|(home_id, home)| (home.context_id == Some(context_id)).then_some(*home_id));
-
-    if let Some(home_id) = target_home_id {
-        if let Some(home) = homes.home_mut(&home_id) {
-            if home.member(&authority_id).is_none() {
-                home.add_member(HomeMember {
-                    id: authority_id,
-                    name: authority_id.to_string(),
-                    role: HomeRole::Participant,
-                    is_online: true,
-                    joined_at: joined_at_ms,
-                    last_seen: Some(joined_at_ms),
-                    storage_allocated: crate::views::home::HomeState::MEMBER_ALLOCATION,
-                });
-            }
-        }
-        core.views_mut().set_homes(homes);
-    }
-
-    Ok(())
-}
-
-/// Ensure a peer appears in the projected local membership for a channel.
-pub async fn project_channel_peer_membership(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_id: ChannelId,
-    peer_authority: AuthorityId,
-    name_hint: Option<&str>,
-) -> Result<(), AuraError> {
-    project_channel_peer_membership_with_context(
+        .unwrap_or_else(|| channel_id.to_string());
+    let updated_at_ms = projection_update_timestamp_ms(app_core).await;
+    reduce_chat_fact_observed(
         app_core,
-        channel_id,
-        None,
-        peer_authority,
-        name_hint,
+        &ChatFact::channel_updated_ms(
+            context_id,
+            channel_id,
+            Some(fallback_name),
+            None,
+            Some(0),
+            None,
+            updated_at_ms,
+            AuthorityId::new_from_entropy([0u8; 32]),
+        ),
     )
     .await
-}
-
-/// Ensure a peer appears in the projected local membership for a channel,
-/// using an explicit context hint when one is already known.
-pub async fn project_channel_peer_membership_with_context(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_id: ChannelId,
-    context_id: Option<ContextId>,
-    peer_authority: AuthorityId,
-    name_hint: Option<&str>,
-) -> Result<(), AuraError> {
-    with_chat_state(app_core, |chat| {
-        let fallback_name = name_hint
-            .map(normalize_channel_name)
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| channel_id.to_string());
-        let channel = chat.channel_mut(&channel_id);
-        if let Some(channel) = channel {
-            if let Some(context_id) = context_id {
-                if channel.context_id != Some(context_id) {
-                    channel.context_id = Some(context_id);
-                }
-            } else if channel.context_id.is_none() {
-                channel.context_id = None;
-            }
-            if !channel.member_ids.contains(&peer_authority) {
-                channel.member_ids.push(peer_authority);
-            }
-            channel.member_count = channel
-                .member_count
-                .max(channel.member_ids.len() as u32 + 1);
-            if channel.name == channel.id.to_string() && fallback_name != channel.name {
-                channel.name = fallback_name;
-            }
-            return;
-        }
-
-        chat.upsert_channel(Channel {
-            id: channel_id,
-            context_id,
-            name: fallback_name,
-            topic: None,
-            channel_type: ChannelType::Home,
-            unread_count: 0,
-            is_dm: false,
-            member_ids: vec![peer_authority],
-            member_count: 2,
-            last_message: None,
-            last_message_time: None,
-            last_activity: 0,
-            last_finalized_epoch: 0,
-        });
-    })
-    .await?;
-
-    project_home_peer_membership(app_core, channel_id, context_id, peer_authority, name_hint)
-        .await?;
-
-    Ok(())
 }
 
 /// Authoritative channel identity returned by channel-creation workflows.
@@ -1317,106 +1179,6 @@ pub struct CreatedChannel {
     pub channel_id: ChannelId,
     /// Authoritative context associated with the created channel, when known.
     pub context_id: Option<ContextId>,
-}
-
-async fn project_home_peer_membership(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_id: ChannelId,
-    context_id: Option<ContextId>,
-    peer_authority: AuthorityId,
-    name_hint: Option<&str>,
-) -> Result<(), AuraError> {
-    let joined_at_ms = crate::workflows::time::current_time_ms(app_core).await?;
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
-    let local_authority = core.authority().copied();
-
-    let target_home_id = homes
-        .home_state(&channel_id)
-        .map(|_| channel_id)
-        .or_else(|| {
-            context_id.and_then(|context_id| {
-                homes.iter().find_map(|(home_id, home)| {
-                    (home.context_id == Some(context_id)).then_some(*home_id)
-                })
-            })
-        });
-
-    let target_home_id = match target_home_id {
-        Some(target_home_id) => target_home_id,
-        None => {
-            let Some(context_id) = context_id else {
-                return Ok(());
-            };
-            let mut home = HomeState::new(
-                channel_id,
-                Some(
-                    name_hint
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_else(|| channel_id.to_string()),
-                ),
-                peer_authority,
-                joined_at_ms,
-                context_id,
-            );
-            if let Some(local_authority) = local_authority.filter(|id| *id != peer_authority) {
-                if home.member(&local_authority).is_none() {
-                    home.add_member(HomeMember {
-                        id: local_authority,
-                        name: "You".to_string(),
-                        role: HomeRole::Participant,
-                        is_online: true,
-                        joined_at: joined_at_ms,
-                        last_seen: Some(joined_at_ms),
-                        storage_allocated: HomeState::MEMBER_ALLOCATION,
-                    });
-                }
-                home.my_role = HomeRole::Participant;
-            }
-            homes.add_home(home);
-            channel_id
-        }
-    };
-
-    let Some(home) = homes.home_mut(&target_home_id) else {
-        return Ok(());
-    };
-
-    if let Some(context_id) = context_id {
-        if home.context_id != Some(context_id) {
-            home.context_id = Some(context_id);
-        }
-    }
-
-    if home.member(&peer_authority).is_some() {
-        let homes_state = homes.clone();
-        core.views_mut().set_homes(homes);
-        drop(core);
-        emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
-        return Ok(());
-    }
-
-    home.add_member(HomeMember {
-        id: peer_authority,
-        name: name_hint
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| peer_authority.to_string()),
-        role: HomeRole::Participant,
-        is_online: true,
-        joined_at: joined_at_ms,
-        last_seen: Some(joined_at_ms),
-        storage_allocated: HomeState::MEMBER_ALLOCATION,
-    });
-    let homes_state = homes.clone();
-    core.views_mut().set_homes(homes);
-    drop(core);
-    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
-
-    Ok(())
 }
 
 /// Return the canonical context currently associated with a channel in app state.
@@ -1437,31 +1199,7 @@ pub async fn authoritative_context_id_for_channel(
             return Some(context_id);
         }
     }
-
-    let mut homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
-    if homes.iter().next().is_none() {
-        let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
-            .await
-            .unwrap_or_default();
-        if signal_homes.iter().next().is_some() {
-            homes = signal_homes;
-        }
-    }
-
-    if let Some(context_id) = homes
-        .home_state(&channel_id)
-        .and_then(|home| home.context_id)
-    {
-        return Some(context_id);
-    }
-
-    chat_snapshot(app_core)
-        .await
-        .channel(&channel_id)
-        .and_then(|channel| channel.context_id)
+    None
 }
 
 pub(crate) async fn authoritative_local_channel_id_for_context(
@@ -1469,38 +1207,30 @@ pub(crate) async fn authoritative_local_channel_id_for_context(
     context_id: ContextId,
     channel_name_hint: Option<&str>,
 ) -> Option<ChannelId> {
-    let homes = {
+    let runtime = {
         let core = app_core.read().await;
-        core.views().get_homes()
+        core.runtime().cloned()
     };
-    if let Some((home_id, _)) = homes
-        .iter()
-        .find(|(_, home)| home.context_id == Some(context_id))
-    {
-        return Some(*home_id);
-    }
+    let Some(runtime) = runtime else {
+        return None;
+    };
 
-    let normalized_name_hint = channel_name_hint
-        .map(normalize_channel_name)
-        .filter(|value| !value.is_empty());
-    let chat = chat_snapshot(app_core).await;
-    if let Some(channel) = chat.all_channels().find(|channel| {
-        if channel.context_id != Some(context_id) {
-            return false;
-        }
-        normalized_name_hint
-            .as_ref()
-            .is_none_or(|name_hint| normalize_channel_name(&channel.name) == *name_hint)
-    }) {
-        return Some(channel.id);
-    }
-
-    if let Some(channel_name_hint) = channel_name_hint {
-        return resolve_chat_channel_id_from_state_or_input(app_core, channel_name_hint)
+    let channel_name_hint = channel_name_hint?;
+    let matches = runtime
+        .resolve_authoritative_channel_ids_by_name(channel_name_hint)
+        .await
+        .ok()?;
+    for channel_id in matches {
+        if runtime
+            .resolve_amp_channel_context(channel_id)
             .await
-            .ok();
+            .ok()
+            .flatten()
+            == Some(context_id)
+        {
+            return Some(channel_id);
+        }
     }
-
     None
 }
 
@@ -1510,9 +1240,21 @@ async fn local_channel_id_for_accepted_pending_invitation(
     fallback_channel_id: ChannelId,
 ) -> ChannelId {
     match &invitation.invitation_type {
-        InvitationBridgeType::Channel { .. } => {
-            let _ = app_core;
-            fallback_channel_id
+        InvitationBridgeType::Channel {
+            context_id,
+            nickname_suggestion,
+            ..
+        } => {
+            let Some(context_id) = *context_id else {
+                return fallback_channel_id;
+            };
+            authoritative_local_channel_id_for_context(
+                app_core,
+                context_id,
+                nickname_suggestion.as_deref(),
+            )
+            .await
+            .unwrap_or(fallback_channel_id)
         }
         _ => fallback_channel_id,
     }
@@ -1591,142 +1333,44 @@ pub(in crate::workflows) async fn wait_for_runtime_channel_state(
     })
 }
 
-async fn ensure_home_state_for_channel(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_id: ChannelId,
-    context_id: ContextId,
-    owner_id: AuthorityId,
-    channel_name: &str,
-    members: &[AuthorityId],
-    now_ms: u64,
-) -> Result<(), AuraError> {
-    let mut changed = false;
-    let homes_state = {
-        let mut core = app_core.write().await;
-        let mut homes = core.views().get_homes();
-
-        if let Some(home) = homes.home_mut(&channel_id) {
-            if home.context_id.is_none() {
-                home.context_id = Some(context_id);
-                changed = true;
-            }
-            if let Some(member) = home.member_mut(&owner_id) {
-                if member.role != HomeRole::Member {
-                    member.role = HomeRole::Member;
-                    changed = true;
-                }
-            } else {
-                home.add_member(HomeMember {
-                    id: owner_id,
-                    name: owner_id.to_string(),
-                    role: HomeRole::Member,
-                    is_online: true,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-                changed = true;
-            }
-
-            for member in members {
-                if *member == owner_id || home.member(member).is_some() {
-                    continue;
-                }
-                home.add_member(HomeMember {
-                    id: *member,
-                    name: member.to_string(),
-                    role: HomeRole::Participant,
-                    is_online: true,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-                changed = true;
-            }
-        } else {
-            let mut home = HomeState::new(
-                channel_id,
-                Some(channel_name.to_string()),
-                owner_id,
-                now_ms,
-                context_id,
-            );
-            for member in members {
-                if *member == owner_id || home.member(member).is_some() {
-                    continue;
-                }
-                home.add_member(HomeMember {
-                    id: *member,
-                    name: member.to_string(),
-                    role: HomeRole::Participant,
-                    is_online: true,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-            }
-            homes.add_home_with_auto_select(home);
-            changed = true;
-        }
-
-        if homes.current_home_id().is_none() {
-            homes.select_home(Some(channel_id));
-            changed = true;
-        }
-
-        core.views_mut().set_homes(homes.clone());
-        homes
-    };
-
-    if changed {
-        emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
-    }
-
-    Ok(())
-}
+// OWNERSHIP: authoritative-source
 async fn authoritative_recipient_peers_for_channel_id(
-    app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel_id: ChannelId,
-    self_authority: AuthorityId,
-) -> Result<Vec<AuthorityId>, AuraError> {
-    let chat = chat_snapshot(app_core).await;
-    let Some(channel) = chat.channel(&channel_id).cloned() else {
-        return Ok(Vec::new());
-    };
-    authoritative_recipient_peers_for_channel(runtime, &channel, self_authority).await
-}
-
-async fn authoritative_recipient_peers_for_channel(
-    runtime: &Arc<dyn RuntimeBridge>,
-    channel: &Channel,
     self_authority: AuthorityId,
 ) -> Result<Vec<AuthorityId>, AuraError> {
     let context_id = runtime
-        .resolve_amp_channel_context(channel.id)
+        .resolve_amp_channel_context(channel_id)
         .await
-        .map_err(|error| {
-            AuraError::agent(format!(
-                "failed to resolve authoritative context for channel {}: {error}",
-                channel.id
-            ))
-        })?
+        .map_err(|error| super::error::runtime_call("resolve authoritative channel context", error))?
         .ok_or_else(|| {
-            AuraError::agent(format!(
-                "missing authoritative context for channel {}",
-                channel.id
-            ))
+            super::error::WorkflowError::MissingAuthoritativeContext {
+                channel: channel_id.to_string(),
+            }
         })?;
 
     let mut participants = runtime
-        .amp_list_channel_participants(context_id, channel.id)
+        .amp_list_channel_participants(context_id, channel_id)
         .await
-        .map_err(|error| {
-            AuraError::agent(format!(
-                "failed to resolve authoritative participants for channel {} in context {}: {error}",
-                channel.id, context_id
-            ))
+        .map_err(|error| super::error::WorkflowError::AuthoritativeParticipantsLookup {
+            channel: channel_id.to_string(),
+            context: context_id.to_string(),
+            source: AuraError::agent(error.to_string()),
         })?;
+    if participants.is_empty() {
+        let _ = runtime.process_ceremony_messages().await;
+        converge_runtime(runtime).await;
+        participants = runtime
+            .amp_list_channel_participants(context_id, channel_id)
+            .await
+            .map_err(|error| {
+                super::error::WorkflowError::AuthoritativeParticipantsLookupAfterConvergence {
+                    channel: channel_id.to_string(),
+                    context: context_id.to_string(),
+                    source: AuraError::agent(error.to_string()),
+                }
+            })?;
+    }
     participants.retain(|authority| *authority != self_authority);
     participants.sort_unstable();
     participants.dedup();
@@ -1752,7 +1396,6 @@ async fn warm_channel_connectivity(
         };
     let result = execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         let recipients = authoritative_recipient_peers_for_channel_id(
-            app_core,
             runtime,
             channel_id,
             runtime.authority_id(),
@@ -1881,6 +1524,7 @@ pub async fn create_channel(
 ///
 /// This is the single-step surface for UI layers that must preserve the
 /// channel/context binding without performing a second lookup after creation.
+// OWNERSHIP: fact-backed
 pub async fn create_channel_with_authoritative_binding(
     app_core: &Arc<RwLock<AppCore>>,
     name: &str,
@@ -1975,43 +1619,29 @@ pub async fn create_channel_with_authoritative_binding(
         channel_id = channel_id_from_input(name)?;
     }
 
-    // Update UI state for responsiveness; reactive reductions may also update this later.
-    with_chat_state(app_core, |chat_state| {
-        let channel = Channel {
-            id: channel_id,
-            context_id: channel_context,
-            name: name.to_string(),
-            topic,
-            channel_type: ChannelType::Home,
-            unread_count: 0,
-            is_dm: false,
-            member_ids: member_ids.clone(),
-            member_count: (member_ids.len() as u32).saturating_add(1),
-            last_message: None,
-            last_message_time: None,
-            last_activity: timestamp_ms,
-            last_finalized_epoch: 0,
-        };
+    if backend != MessagingBackend::Runtime {
+        // OWNERSHIP: observed-display-update
+        // Local-only display update; the runtime path is authoritative and fact-backed.
+        update_chat_projection_observed(app_core, |chat_state| {
+            let channel = Channel {
+                id: channel_id,
+                context_id: channel_context,
+                name: name.to_string(),
+                topic,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: member_ids.clone(),
+                member_count: (member_ids.len() as u32).saturating_add(1),
+                last_message: None,
+                last_message_time: None,
+                last_activity: timestamp_ms,
+                last_finalized_epoch: 0,
+            };
 
-        // Upsert to avoid races with reactive ChannelCreated reductions that may
-        // insert the channel first without populated member_ids.
-        chat_state.upsert_channel(channel);
-    })
-    .await?;
-
-    if backend == MessagingBackend::Runtime {
-        if let (Some(context_id), Some(owner_id)) = (channel_context, channel_owner) {
-            ensure_home_state_for_channel(
-                app_core,
-                channel_id,
-                context_id,
-                owner_id,
-                name,
-                &member_ids,
-                timestamp_ms,
-            )
-            .await?;
-        }
+            chat_state.upsert_channel(channel);
+        })
+        .await?;
     }
 
     if backend == MessagingBackend::Runtime {
@@ -2198,13 +1828,6 @@ pub async fn join_channel(
         }
     }
 
-    restore_home_member_membership(
-        app_core,
-        context_id,
-        runtime.authority_id(),
-        crate::workflows::time::current_time_ms(app_core).await?,
-    )
-    .await?;
     apply_authoritative_membership_projection(app_core, channel_id, context_id, true, None).await?;
     wait_for_runtime_channel_state(app_core, &runtime, channel_id).await?;
     warm_channel_connectivity(app_core, &runtime, channel_id, context_id).await;
@@ -2247,11 +1870,38 @@ pub async fn join_channel_by_name_with_instance(
     join_channel_by_name_owned(app_core, channel_name, &owner, None).await
 }
 
+/// Join an existing channel by name and return the directly-settled terminal
+/// status for frontend handoff consumers.
+pub async fn join_channel_by_name_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::join_channel(),
+        instance_id,
+        SemanticOperationKind::JoinChannel,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        join_channel_by_name_owned(app_core, channel_name, &owner, None).await
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 #[aura_macros::semantic_owner(
     owner = "join_channel_by_name_with_instance",
     terminal = "publish_success_with",
     postcondition = "channel_membership_ready",
     proof = crate::workflows::semantic_facts::ChannelMembershipReadyProof,
+    authoritative_inputs = "runtime,authoritative_source",
     depends_on = "channel_target_resolved,authoritative_context_materialized",
     child_ops = "",
     category = "move_owned"
@@ -2279,34 +1929,33 @@ async fn join_channel_by_name_owned(
         return Err(error);
     }
 
-    let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
-    let channel_exists_locally = {
-        let chat = chat_snapshot(app_core).await;
-        chat.channel(&channel_id).is_some()
-            || chat
-                .all_channels()
-                .any(|channel| channel.name.eq_ignore_ascii_case(channel_name))
-    };
-    let known_members: Vec<String> = contacts_snapshot(app_core)
-        .await
-        .contact_ids()
-        .map(ToString::to_string)
-        .collect();
-
     // Local-only frontends still need "/join" to create/select channels.
     if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
+        let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
+        let channel_exists_locally = {
+            let chat = chat_snapshot(app_core).await;
+            chat.channel(&channel_id).is_some()
+                || chat
+                    .all_channels()
+                    .any(|channel| channel.name.eq_ignore_ascii_case(channel_name))
+        };
+        let known_members: Vec<String> = contacts_snapshot(app_core)
+            .await
+            .contact_ids()
+            .map(ToString::to_string)
+            .collect();
         if !channel_exists_locally {
             create_channel(app_core, channel_name, None, &known_members, 0, 0).await?;
         }
+        refresh_authoritative_channel_membership_readiness(app_core).await?;
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
             .await?;
         return Ok(());
     }
 
-    if !channel_exists_locally
-        && try_join_via_pending_channel_invitation(app_core, channel_id).await?
-    {
+    let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
+    if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
             .await?;
@@ -2354,12 +2003,14 @@ async fn join_channel_by_name_owned(
 }
 
 /// Leave a channel using a typed ChannelId.
+// OWNERSHIP: observed-display-update
+// Local-only display/runtime shim until leave facts exist locally.
 pub async fn leave_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
 ) -> Result<(), AuraError> {
     if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
-        with_chat_state(app_core, |chat| {
+        update_chat_projection_observed(app_core, |chat| {
             let _ = chat.remove_channel(&channel_id);
         })
         .await?;
@@ -2395,27 +2046,6 @@ pub async fn leave_channel_by_name(
     if candidate_ids.is_empty() {
         candidate_ids
             .push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
-    }
-
-    // Channel views can transiently carry duplicate IDs for the same display name
-    // (for example hash-derived and runtime-derived identifiers). Expand the leave
-    // set to all channels sharing the resolved display name(s) so `/leave` is
-    // semantically idempotent for a named channel.
-    let snapshot = chat_snapshot(app_core).await;
-    let mut candidate_names = BTreeSet::new();
-    for channel_id in &candidate_ids {
-        if let Some(channel) = snapshot.channel(channel_id) {
-            candidate_names.insert(channel.name.to_ascii_lowercase());
-        }
-    }
-    if !candidate_names.is_empty() {
-        for channel in snapshot.all_channels() {
-            if candidate_names.contains(&channel.name.to_ascii_lowercase())
-                && !candidate_ids.contains(&channel.id)
-            {
-                candidate_ids.push(channel.id);
-            }
-        }
     }
 
     for channel_id in &candidate_ids {
@@ -2715,7 +2345,6 @@ async fn send_message_ref_owned(
             (sender_id, message_id)
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
-            let channel_view = chat_snapshot(app_core).await.channel(&channel_id).cloned();
             let context_id = match authoritative_context_id_for_channel(app_core, channel_id).await
             {
                 Some(context_id) => context_id,
@@ -2730,7 +2359,7 @@ async fn send_message_ref_owned(
             owner
                 .publish_phase(SemanticOperationPhase::AuthoritativeContextReady)
                 .await?;
-            if send_operation_requires_delivery_readiness(channel_view.as_ref()) {
+            if channel_id != note_to_self_channel_id(sender_id) {
                 let readiness = match require_send_message_readiness(app_core, channel_id).await {
                     Ok(readiness) => readiness,
                     Err(error) => return fail_send_message(owner, error).await,
@@ -2902,7 +2531,14 @@ async fn send_message_ref_owned(
                         message_id = %message_id,
                         "remote message delivery failed before terminal send success"
                     );
-                    if let Err(_mark_error) = mark_message_delivery_failed(app_core, &message_id).await
+                    if let Err(_mark_error) = mark_message_delivery_failed(
+                        app_core,
+                        context_id,
+                        channel_id,
+                        &message_id,
+                        sender_id,
+                    )
+                    .await
                     {
                         #[cfg(feature = "instrumented")]
                         tracing::error!(
@@ -2942,48 +2578,67 @@ async fn send_message_ref_owned(
         (sender_id, message_id)
     };
 
-    // Update UI state for responsiveness.
-    with_chat_state(app_core, |chat_state| {
-        if !chat_state.has_channel(&channel_id) {
-            chat_state.add_channel(Channel {
-                id: channel_id,
-                context_id: channel_context,
-                name: channel_label,
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: Vec::new(),
-                member_count: 1,
-                last_message: None,
-                last_message_time: None,
-                last_activity: timestamp_ms,
-                last_finalized_epoch: 0,
-            });
-        }
-
-        chat_state.apply_message(
-            channel_id,
-            Message {
-                id: message_id.clone(),
+    if let Some(context_id) = channel_context {
+        reduce_chat_fact_observed(
+            app_core,
+            &ChatFact::message_sent_sealed_ms(
+                context_id,
                 channel_id,
+                message_id.clone(),
                 sender_id,
-                sender_name: "You".to_string(),
-                content: content.to_string(),
-                timestamp: timestamp_ms,
-                reply_to: None,
-                is_own: true,
-                is_read: true,
-                delivery_status: MessageDeliveryStatus::Sent,
+                "You".to_string(),
+                content.as_bytes().to_vec(),
+                timestamp_ms,
+                None,
                 epoch_hint,
-                is_finalized: false,
-            },
-        );
-    })
-    .await?;
+            ),
+        )
+        .await?;
+    } else {
+        // OWNERSHIP: observed-display-update
+        // Local-only sender display update until local mode emits authoritative chat facts.
+        update_chat_projection_observed(app_core, |chat_state| {
+            if !chat_state.has_channel(&channel_id) {
+                chat_state.add_channel(Channel {
+                    id: channel_id,
+                    context_id: channel_context,
+                    name: channel_label,
+                    topic: None,
+                    channel_type: ChannelType::Home,
+                    unread_count: 0,
+                    is_dm: false,
+                    member_ids: Vec::new(),
+                    member_count: 1,
+                    last_message: None,
+                    last_message_time: None,
+                    last_activity: timestamp_ms,
+                    last_finalized_epoch: 0,
+                });
+            }
+
+            chat_state.apply_message(
+                channel_id,
+                Message {
+                    id: message_id.clone(),
+                    channel_id,
+                    sender_id,
+                    sender_name: "You".to_string(),
+                    content: content.to_string(),
+                    timestamp: timestamp_ms,
+                    reply_to: None,
+                    is_own: true,
+                    is_read: true,
+                    delivery_status: MessageDeliveryStatus::Sent,
+                    epoch_hint,
+                    is_finalized: false,
+                },
+            );
+        })
+        .await?;
+    }
 
     owner
-        .publish_success_with(prove_message_committed(app_core, channel_id, &message_id).await?)
+        .publish_success_with(issue_message_committed_proof(message_id.clone()))
         .await?;
 
     Ok(message_id)
@@ -3017,6 +2672,9 @@ pub async fn start_direct_chat(
 }
 
 /// Start a direct chat with a canonical authority ID.
+// OWNERSHIP: observed-display-update
+// Contact snapshot reads only shape the display label; channel identity and runtime
+// creation are authoritative.
 pub async fn start_direct_chat_with_authority(
     app_core: &Arc<RwLock<AppCore>>,
     contact_authority: AuthorityId,
@@ -3108,24 +2766,6 @@ pub async fn start_direct_chat_with_authority(
 
         send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
 
-        with_chat_state(app_core, |chat_state| {
-            chat_state.upsert_channel(Channel {
-                id: channel_id,
-                context_id: Some(context_id),
-                name: channel_name.clone(),
-                topic: Some(format!("Direct messages with {contact_id}")),
-                channel_type: ChannelType::DirectMessage,
-                unread_count: 0,
-                is_dm: true,
-                member_ids: vec![contact_authority],
-                member_count: 2,
-                last_message: None,
-                last_message_time: None,
-                last_activity: timestamp_ms,
-                last_finalized_epoch: 0,
-            });
-        })
-        .await?;
         return Ok(channel_id);
     }
 
@@ -3153,7 +2793,9 @@ pub async fn start_direct_chat_with_authority(
         last_finalized_epoch: 0,
     };
 
-    with_chat_state(app_core, |chat_state| {
+    // OWNERSHIP: observed-display-update
+    // Local-only direct-message display/runtime shim.
+    update_chat_projection_observed(app_core, |chat_state| {
         // Add the DM channel (add_channel avoids duplicates)
         chat_state.add_channel(dm_channel);
     })
@@ -3167,6 +2809,7 @@ pub async fn start_direct_chat_with_authority(
 /// **What it does**: Reads chat state from ViewState
 /// **Returns**: Current chat state with channels and messages
 /// **Signal pattern**: Read-only operation (no emission)
+// OWNERSHIP: observed
 pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState, AuraError> {
     Ok(chat_snapshot(app_core).await)
 }
@@ -3274,11 +2917,53 @@ pub async fn invite_user_to_channel_with_context(
     .await
 }
 
+/// Invite a user to a channel and return the directly-settled terminal status
+/// for frontend handoff consumers.
+pub async fn invite_user_to_channel_with_context_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    target_user_id: &str,
+    channel_name_or_id: &str,
+    context_id: Option<ContextId>,
+    operation_instance_id: Option<OperationInstanceId>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        operation_instance_id,
+        SemanticOperationKind::InviteActorToChannel,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        invite_user_to_channel_with_context_owned(
+            app_core,
+            target_user_id,
+            channel_name_or_id,
+            context_id,
+            None,
+            message,
+            ttl_ms,
+            &owner,
+            None,
+        )
+        .await
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 #[aura_macros::semantic_owner(
     owner = "invite_user_to_channel_with_context",
     terminal = "publish_success_with",
     postcondition = "channel_invitation_created",
     proof = crate::workflows::semantic_facts::ChannelInvitationCreatedProof,
+    authoritative_inputs = "runtime,authoritative_source",
     depends_on = "target_authority_resolved,channel_target_resolved",
     child_ops = "",
     category = "move_owned"
@@ -3463,11 +3148,11 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         "local_projection",
         None,
         async {
-            project_channel_peer_membership_with_context(
+            apply_authoritative_membership_projection(
                 app_core,
                 channel_id,
-                Some(context_id),
-                receiver,
+                context_id,
+                true,
                 None,
             )
             .await?;
@@ -3489,6 +3174,10 @@ mod tests {
     use crate::signal_defs::{
         AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME,
     };
+    use crate::workflows::semantic_facts::{
+        assert_succeeded_with_postcondition, assert_terminal_failure_or_cancelled,
+    };
+    use crate::ui_contract::{SemanticOperationStatus, WorkflowTerminalStatus};
     use crate::views::contacts::{Contact, ContactsState};
     use crate::views::home::{BanRecord, HomeRole, HomeState, HomesState, MuteRecord};
     use crate::workflows::signals::{emit_signal, read_signal_or_default};
@@ -3515,7 +3204,7 @@ mod tests {
         let channel_id = ChannelId::from_bytes(hash(b"membership-ready"));
         let peer = AuthorityId::new_from_entropy([55u8; 32]);
 
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: None,
@@ -3602,7 +3291,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_join_channel_success_implies_membership_ready_postcondition() {
+    async fn test_join_channel_terminal_status_success_implies_membership_ready_postcondition() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -3617,58 +3306,38 @@ mod tests {
         .unwrap();
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        let status = facts.iter().find_map(|fact| match fact {
-            AuthoritativeSemanticFact::OperationStatus {
-                operation_id,
-                instance_id,
-                status,
-                ..
-            } if *operation_id == OperationId::join_channel()
-                && instance_id
-                    .as_ref()
-                    .is_some_and(|id| id.0 == "join-postcondition-1") =>
-            {
-                Some(status.clone())
-            }
-            _ => None,
-        });
-        let status = status.expect("join operation status must exist");
-        assert_eq!(status.kind, SemanticOperationKind::JoinChannel);
-        assert_eq!(status.phase, SemanticOperationPhase::Succeeded);
-        assert!(facts.iter().any(|fact| matches!(
-            fact,
-            AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
-                if channel.name.as_deref() == Some("shared-parity-lab")
-        )));
+        assert_succeeded_with_postcondition(
+            &facts,
+            &OperationId::join_channel(),
+            &OperationInstanceId("join-postcondition-1".to_string()),
+            SemanticOperationKind::JoinChannel,
+            |facts| {
+                facts.iter().any(|fact| matches!(
+                    fact,
+                    AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                        if channel.name.as_deref() == Some("shared-parity-lab")
+                ))
+            },
+        );
     }
 
     #[tokio::test]
-    async fn authoritative_context_prefers_home_context_over_chat_projection() {
+    async fn authoritative_context_uses_runtime_context_over_stale_projection() {
         let config = AppConfig::default();
-        let core = AppCore::new(config).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
+        let owner = AuthorityId::new_from_entropy([91u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
-        let owner = AuthorityId::new_from_entropy([91u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"home-context-preferred"));
-        let home_context = ContextId::new_from_entropy([92u8; 32]);
+        let authoritative_context = ContextId::new_from_entropy([92u8; 32]);
         let stale_chat_context = ContextId::new_from_entropy([93u8; 32]);
+        runtime.set_amp_channel_context(channel_id, authoritative_context);
 
-        {
-            let mut core = app_core.write().await;
-            core.set_authority(owner);
-            let mut homes = core.views().get_homes();
-            homes.add_home(HomeState::new(
-                channel_id,
-                Some("shared-parity-lab".to_string()),
-                owner,
-                0,
-                home_context,
-            ));
-            core.views_mut().set_homes(homes);
-        }
-
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: Some(stale_chat_context),
@@ -3690,7 +3359,7 @@ mod tests {
 
         assert_eq!(
             authoritative_context_id_for_channel(&app_core, channel_id).await,
-            Some(home_context)
+            Some(authoritative_context)
         );
     }
 
@@ -3709,7 +3378,7 @@ mod tests {
             core.set_authority(local);
         }
 
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: None,
@@ -3735,14 +3404,90 @@ mod tests {
 
         let channel_id_string = channel_id.to_string();
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert!(facts.iter().any(|fact| {
+        assert!(!facts.iter().any(|fact| {
             matches!(
                 fact,
-                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, .. }
                     if channel.id.as_deref() == Some(channel_id_string.as_str())
-                        && *member_count == 2
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn test_authoritative_recipient_resolution_ignores_projection_members_without_runtime_participants(
+    ) {
+        let local = AuthorityId::new_from_entropy([101u8; 32]);
+        let projected_peer = AuthorityId::new_from_entropy([102u8; 32]);
+        let context_id = ContextId::new_from_entropy([103u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"authoritative-recipient-runtime-empty"));
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_participants(context_id, channel_id, Vec::new());
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let recipients = authoritative_recipient_peers_for_channel(
+            &runtime_bridge,
+            &Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![projected_peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            },
+            local,
+        )
+        .await
+        .expect("authoritative recipient query should succeed");
+
+        assert!(
+            recipients.is_empty(),
+            "projection members must not be treated as authoritative recipients"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_authoritative_recipient_resolution_fails_explicitly_without_runtime_context() {
+        let local = AuthorityId::new_from_entropy([104u8; 32]);
+        let projected_peer = AuthorityId::new_from_entropy([105u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"authoritative-recipient-no-runtime"));
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+
+        let error = authoritative_recipient_peers_for_channel(
+            &runtime_bridge,
+            &Channel {
+                id: channel_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![projected_peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            },
+            local,
+        )
+        .await
+        .expect_err("missing authoritative context must fail explicitly");
+
+        assert!(
+            error
+                .to_string()
+                .contains("resolve authoritative channel context"),
+            "authoritative recipient resolution must fail on missing runtime context"
+        );
     }
 
     #[test]
@@ -3808,7 +3553,7 @@ mod tests {
             core.set_authority(local);
         }
 
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: None,
@@ -3834,8 +3579,8 @@ mod tests {
             .unwrap_or_else(|| panic!("expected channel readiness state for {channel_id}"));
 
         assert_eq!(state.member_count, 2);
-        assert_eq!(state.recipients, vec![peer]);
-        assert!(state.delivery_supported);
+        assert!(state.recipients.is_empty());
+        assert!(!state.delivery_supported);
     }
 
     #[test]
@@ -4027,7 +3772,7 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let existing_id = ChannelId::from_bytes(hash(b"join-existing-id"));
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: existing_id,
                 context_id: None,
@@ -4115,6 +3860,189 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_join_channel_by_name_with_terminal_status_returns_direct_terminal_status() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let outcome = join_channel_by_name_with_terminal_status(
+            &app_core,
+            "porch",
+            Some(OperationInstanceId("join-channel-direct-1".to_string())),
+        )
+        .await;
+
+        assert!(outcome.result.is_ok());
+        assert!(matches!(
+            outcome.terminal,
+            Some(WorkflowTerminalStatus {
+                status: SemanticOperationStatus {
+                    kind: SemanticOperationKind::JoinChannel,
+                    phase: SemanticOperationPhase::Succeeded,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_join_channel_success_implies_membership_ready_postcondition() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let outcome = join_channel_by_name_with_terminal_status(
+            &app_core,
+            "porch",
+            Some(OperationInstanceId(
+                "join-channel-direct-postcondition".to_string(),
+            )),
+        )
+        .await;
+
+        assert!(outcome.result.is_ok());
+
+        let channel_id = get_chat_state(&app_core)
+            .await
+            .expect("chat state")
+            .all_channels()
+            .find(|channel| channel.name == "porch")
+            .map(|channel| channel.id)
+            .expect("joined channel must exist");
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        let channel_id_string = channel_id.to_string();
+        assert!(facts.iter().any(|fact| matches!(
+            fact,
+            AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                if channel.id.as_deref() == Some(channel_id_string.as_str())
+        )));
+    }
+
+    #[tokio::test]
+    async fn test_join_channel_stale_projection_fails_explicitly_without_projection_fallback() {
+        let local = AuthorityId::new_from_entropy([106u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+        let config = AppConfig::default();
+        let core = AppCore::with_runtime(config, runtime_bridge).expect("runtime-backed app core");
+        let app_core = Arc::new(RwLock::new(core));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let stale_channel_id = ChannelId::from_bytes(hash(b"stale-projection-join"));
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: stale_channel_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        let outcome = tokio::time::timeout(
+            Duration::from_millis(250),
+            join_channel_by_name_with_terminal_status(
+                &app_core,
+                "shared-parity-lab",
+                Some(OperationInstanceId("join-channel-stale-projection".to_string())),
+            ),
+        )
+        .await
+        .expect("stale projection join must fail without spinning");
+
+        assert!(outcome.result.is_err());
+        assert!(matches!(
+            outcome.terminal,
+            Some(WorkflowTerminalStatus {
+                status: SemanticOperationStatus {
+                    kind: SemanticOperationKind::JoinChannel,
+                    phase: SemanticOperationPhase::Failed,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_send_message_stale_projection_fails_explicitly_without_projection_fallback() {
+        let local = AuthorityId::new_from_entropy([108u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+        let config = AppConfig::default();
+        let core = AppCore::with_runtime(config, runtime_bridge).expect("runtime-backed app core");
+        let app_core = Arc::new(RwLock::new(core));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let stale_channel_id = ChannelId::from_bytes(hash(b"stale-projection-send"));
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: stale_channel_id,
+                context_id: None,
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        let instance_id = OperationInstanceId("send-stale-projection".to_string());
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            send_message_by_name_with_instance(
+                &app_core,
+                "shared-parity-lab",
+                "hello",
+                1_701_000_000_123,
+                Some(instance_id.clone()),
+            ),
+        )
+        .await
+        .expect("stale projection send must fail without spinning");
+
+        assert!(result.is_err());
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert_terminal_failure_or_cancelled(
+            &facts,
+            &OperationId::send_message(),
+            &instance_id,
+            SemanticOperationKind::SendChatMessage,
+        );
+    }
+
+    #[tokio::test]
     async fn test_send_message_with_instance_publishes_terminal_success() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
@@ -4182,6 +4110,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_mark_message_delivery_failed_reduces_delivery_status() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([91u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"delivery-failed-reduction"));
+        let sender_id = AuthorityId::new_from_entropy([92u8; 32]);
+        let message_id = "delivery-failed-message".to_string();
+
+        reduce_chat_fact_observed(
+            &app_core,
+            &ChatFact::channel_created_ms(
+                context_id,
+                channel_id,
+                "delivery-failed".to_string(),
+                None,
+                false,
+                1_701_000_000_010,
+                sender_id,
+            ),
+        )
+        .await
+        .unwrap();
+        reduce_chat_fact_observed(
+            &app_core,
+            &ChatFact::message_sent_sealed_ms(
+                context_id,
+                channel_id,
+                message_id.clone(),
+                sender_id,
+                "Alice".to_string(),
+                b"hello".to_vec(),
+                1_701_000_000_011,
+                None,
+                None,
+            ),
+        )
+        .await
+        .unwrap();
+
+        mark_message_delivery_failed(&app_core, context_id, channel_id, &message_id, sender_id)
+            .await
+            .unwrap();
+
+        let chat = chat_snapshot(&app_core).await;
+        let message = chat
+            .channel(&channel_id)
+            .and_then(|_| {
+                chat.messages_for_channel(&channel_id)
+                    .iter()
+                    .find(|message| message.id == message_id)
+            })
+            .expect("message should still exist after failure reduction");
+        assert_eq!(message.delivery_status, MessageDeliveryStatus::Failed);
+    }
+
+    #[tokio::test]
     async fn test_ensure_channel_visible_after_join_inserts_missing_channel() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
@@ -4211,7 +4198,7 @@ mod tests {
 
         let context_id = ContextId::new_from_entropy([13u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"join-visible-existing"));
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: None,
@@ -4252,7 +4239,7 @@ mod tests {
         let canonical_id = ChannelId::from_bytes(hash(b"join-visible-canonical"));
         let context_id = ContextId::new_from_entropy([22u8; 32]);
 
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: stale_id,
                 context_id: None,
@@ -4322,7 +4309,7 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let channel_id = ChannelId::from_bytes(hash(b"resolve-name-variants"));
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: None,
@@ -4417,7 +4404,7 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: foreign_chat_id,
                 context_id: None,
@@ -4469,7 +4456,7 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: chat_id,
                 context_id: Some(chat_context_id),
@@ -4496,49 +4483,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authoritative_local_channel_id_for_context_prefers_local_home_identity() {
+    async fn authoritative_local_channel_id_for_context_uses_runtime_resolution() {
         let config = AppConfig::default();
-        let core = AppCore::new(config).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
+        let owner = AuthorityId::new_from_entropy([19u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
-        let local_home_id = ChannelId::from_bytes(hash(b"local-home-id"));
-        let foreign_home_id = ChannelId::from_bytes(hash(b"foreign-home-id"));
-        let owner = AuthorityId::new_from_entropy([19u8; 32]);
+        let authoritative_channel_id = ChannelId::from_bytes(hash(b"authoritative-home-id"));
         let context_id = ContextId::new_from_entropy([20u8; 32]);
-
-        {
-            let mut core = app_core.write().await;
-            let mut homes = core.views().get_homes();
-            homes.add_home(HomeState::new(
-                local_home_id,
-                Some("shared-parity-lab".to_string()),
-                owner,
-                0,
-                context_id,
-            ));
-            core.views_mut().set_homes(homes);
-        }
-
-        with_chat_state(&app_core, |chat| {
-            chat.upsert_channel(Channel {
-                id: foreign_home_id,
-                context_id: None,
-                name: "shared-parity-lab".to_string(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: Vec::new(),
-                member_count: 1,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            });
-        })
-        .await
-        .unwrap();
+        runtime.set_authoritative_channel_name_matches(
+            "shared-parity-lab",
+            vec![authoritative_channel_id],
+        );
+        runtime.set_amp_channel_context(authoritative_channel_id, context_id);
 
         let resolved = authoritative_local_channel_id_for_context(
             &app_core,
@@ -4546,42 +4507,36 @@ mod tests {
             Some("shared-parity-lab"),
         )
         .await
-        .expect("local home identity should resolve");
+        .expect("runtime-backed channel identity should resolve");
 
-        assert_eq!(resolved, local_home_id);
+        assert_eq!(resolved, authoritative_channel_id);
     }
 
     #[tokio::test]
-    async fn local_channel_id_for_accepted_pending_invitation_prefers_local_context_binding() {
+    async fn local_channel_id_for_accepted_pending_invitation_uses_canonical_channel_identity() {
         let config = AppConfig::default();
-        let core = AppCore::new(config).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
+        let owner = AuthorityId::new_from_entropy([21u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
-        let local_home_id = ChannelId::from_bytes(hash(b"local-accepted-home-id"));
-        let foreign_home_id = ChannelId::from_bytes(hash(b"foreign-accepted-home-id"));
-        let owner = AuthorityId::new_from_entropy([21u8; 32]);
+        let canonical_channel_id = ChannelId::from_bytes(hash(b"canonical-accepted-home-id"));
         let context_id = ContextId::new_from_entropy([22u8; 32]);
-
-        {
-            let mut core = app_core.write().await;
-            let mut homes = core.views().get_homes();
-            homes.add_home(HomeState::new(
-                local_home_id,
-                Some("shared-parity-lab".to_string()),
-                owner,
-                0,
-                context_id,
-            ));
-            core.views_mut().set_homes(homes);
-        }
+        runtime.set_authoritative_channel_name_matches(
+            "shared-parity-lab",
+            vec![canonical_channel_id],
+        );
+        runtime.set_amp_channel_context(canonical_channel_id, context_id);
 
         let invitation = InvitationInfo {
             invitation_id: InvitationId::new("inv-local-context".to_string()),
             sender_id: AuthorityId::new_from_entropy([23u8; 32]),
             receiver_id: owner,
             invitation_type: InvitationBridgeType::Channel {
-                home_id: foreign_home_id.to_string(),
+                home_id: canonical_channel_id.to_string(),
                 context_id: Some(context_id),
                 nickname_suggestion: Some("shared-parity-lab".to_string()),
             },
@@ -4594,11 +4549,11 @@ mod tests {
         let resolved = local_channel_id_for_accepted_pending_invitation(
             &app_core,
             &invitation,
-            foreign_home_id,
+            canonical_channel_id,
         )
         .await;
 
-        assert_eq!(resolved, local_home_id);
+        assert_eq!(resolved, canonical_channel_id);
     }
 
     #[tokio::test]
@@ -4610,7 +4565,7 @@ mod tests {
 
         let context_id = ContextId::new_from_entropy([19u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"leave-join-canonical-reuse"));
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: Some(context_id),
@@ -4654,7 +4609,7 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let channel_id = ChannelId::from_bytes(hash(b"leave-by-name-local"));
-        with_chat_state(&app_core, |chat| {
+        update_chat_projection_observed(&app_core, |chat| {
             chat.upsert_channel(Channel {
                 id: channel_id,
                 context_id: None,
@@ -4680,6 +4635,26 @@ mod tests {
 
         let state = get_chat_state(&app_core).await.unwrap();
         assert!(state.channel(&channel_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_leave_channel_by_name_missing_target_settles_without_spinning() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(250),
+            leave_channel_by_name(&app_core, "#missing-channel"),
+        )
+        .await
+        .expect("missing leave target must fail without spinning");
+
+        assert!(
+            result.is_ok(),
+            "missing leave target should settle immediately instead of spinning"
+        );
     }
 
     #[test]
@@ -4737,7 +4712,11 @@ mod tests {
 
         let result =
             enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 1_000).await;
-        assert!(result.is_ok(), "empty member list should not block sender");
+        let error = result.expect_err("authoritative moderation now requires runtime");
+        assert!(
+            error.to_string().contains("requires runtime"),
+            "expected explicit runtime requirement, got: {error}"
+        );
     }
 
     #[tokio::test]
@@ -4775,11 +4754,12 @@ mod tests {
 
         let result =
             enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 2_000).await;
-        assert!(result.is_err(), "muted sender should be blocked");
-        let error = result.unwrap_err().to_string();
+        let error = result
+            .expect_err("authoritative moderation now requires runtime")
+            .to_string();
         assert!(
-            error.contains("muted"),
-            "expected muted error, got: {error}"
+            error.contains("requires runtime"),
+            "expected explicit runtime requirement, got: {error}"
         );
     }
 
@@ -4820,8 +4800,8 @@ mod tests {
 
         let result =
             enforce_home_join_allowed(&app_core, mismatched_context, home_id, banned).await;
-        assert!(result.is_err(), "banned sender must be blocked");
-        assert!(result.unwrap_err().to_string().contains("banned"));
+        let error = result.expect_err("authoritative moderation now requires runtime");
+        assert!(error.to_string().contains("requires runtime"));
     }
 
     #[tokio::test]
@@ -4881,8 +4861,8 @@ mod tests {
             2_000,
         )
         .await;
-        assert!(result.is_err(), "muted sender should be blocked");
-        assert!(result.unwrap_err().to_string().contains("muted"));
+        let error = result.expect_err("authoritative moderation now requires runtime");
+        assert!(error.to_string().contains("requires runtime"));
     }
 
     #[tokio::test]
@@ -4931,8 +4911,8 @@ mod tests {
 
         let result =
             enforce_home_join_allowed(&app_core, context_id, channel_home_id, banned).await;
-        assert!(result.is_err(), "banned sender must be blocked");
-        assert!(result.unwrap_err().to_string().contains("banned"));
+        let error = result.expect_err("authoritative moderation now requires runtime");
+        assert!(error.to_string().contains("requires runtime"));
     }
 
     #[tokio::test]

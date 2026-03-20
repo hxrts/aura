@@ -112,7 +112,7 @@ pub async fn parity_timestamp_ms(
         return Ok(HARNESS_TIME_BASE_MS + sequence.saturating_mul(1_000) + offset);
     }
 
-    current_time_ms(app_core).await
+    current_time_ms(app_core).await.map_err(Into::into)
 }
 
 #[allow(dead_code)]

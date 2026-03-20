@@ -10,7 +10,9 @@ use crate::workflows::ceremonies::{
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::snapshot_policy::recovery_snapshot;
-use crate::workflows::state_helpers::{with_contacts_state, with_recovery_state};
+use crate::workflows::state_helpers::{
+    update_contacts_projection_observed, update_recovery_projection_observed,
+};
 use crate::workflows::time::current_time_ms;
 use crate::{
     runtime_bridge::CeremonyStatus,
@@ -205,7 +207,8 @@ pub async fn toggle_guardian_contact(
             .map_err(|e| super::error::runtime_call("create guardian invitation", e))?;
     }
 
-    with_recovery_state(app_core, |state| -> Result<(), AuraError> {
+    // OWNERSHIP: observed-display-update
+    update_recovery_projection_observed(app_core, |state| -> Result<(), AuraError> {
         if was_guardian {
             let _ = state.revoke_guardian(&contact);
         } else if let Some(existing) = state.guardian_mut(&contact) {
@@ -242,7 +245,8 @@ pub async fn toggle_guardian_contact(
     })
     .await??;
 
-    with_contacts_state(app_core, |state| {
+    // OWNERSHIP: observed-display-update
+    update_contacts_projection_observed(app_core, |state| {
         if let Some(existing) = state.contact_mut(&contact) {
             existing.is_guardian = !was_guardian;
         } else {
@@ -324,6 +328,7 @@ pub async fn dispute_recovery(
 /// **What it does**: Reads recovery state from ViewState
 /// **Returns**: Current recovery state
 /// **Signal pattern**: Read-only operation (no emission)
+// OWNERSHIP: observed
 pub async fn get_recovery_status(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<RecoveryState, AuraError> {
@@ -415,7 +420,8 @@ async fn set_recovery_state(
     app_core: &Arc<RwLock<AppCore>>,
     state: RecoveryState,
 ) -> Result<(), AuraError> {
-    with_recovery_state(app_core, |recovery_state| {
+    // OWNERSHIP: observed-display-update
+    update_recovery_projection_observed(app_core, |recovery_state| {
         *recovery_state = state;
     })
     .await?;

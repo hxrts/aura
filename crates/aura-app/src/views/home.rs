@@ -408,11 +408,6 @@ impl HomeState {
         had_entry
     }
 
-    /// Clean up expired mutes
-    pub fn cleanup_expired_mutes(&mut self, current_time_ms: u64) {
-        self.mute_list
-            .retain(|_, record| !record.is_expired(current_time_ms));
-    }
 }
 
 // =============================================================================

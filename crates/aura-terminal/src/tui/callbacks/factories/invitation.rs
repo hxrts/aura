@@ -31,15 +31,14 @@ impl InvitationsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let inv_id = invitation_id.clone();
-            let app_core = ctx.app_core_raw().clone();
             let cmd = EffectCommand::AcceptInvitation { invitation_id };
             spawn_ctx(ctx.clone(), async move {
-                let accepted_invitation = {
-                    let core = app_core.read().await;
-                    core.snapshot().invitations.invitation(&inv_id).cloned()
-                };
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
+                match ctx.dispatch_with_response(cmd).await {
+                    Ok(OpResponse::InvitationAccepted {
+                        sender_id,
+                        invitation_type,
+                        ..
+                    }) => {
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::InvitationAccepted {
@@ -47,34 +46,27 @@ impl InvitationsCallbacks {
                             },
                         )
                         .await;
-                        let mut runtime_facts = Vec::new();
-                        let replace_kinds = vec![RuntimeEventKind::InvitationAccepted];
-                        if let Some(invitation) = accepted_invitation.as_ref() {
-                            let invitation_kind = if matches!(
-                                invitation.invitation_type,
-                                aura_app::ui::types::InvitationType::Home
-                            ) {
-                                InvitationFactKind::Contact
-                            } else {
-                                InvitationFactKind::Generic
-                            };
-                            runtime_facts.push(RuntimeFact::InvitationAccepted {
-                                invitation_kind,
-                                authority_id: Some(invitation.from_id.to_string()),
-                                operation_state: Some(OperationState::Succeeded),
-                            });
-                        }
-                        if !runtime_facts.is_empty() {
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::RuntimeFactsUpdated {
-                                    replace_kinds,
-                                    facts: runtime_facts,
-                                },
-                            )
-                            .await;
-                        }
+                        let invitation_kind = if invitation_type.starts_with("contact")
+                            || invitation_type.starts_with("channel:")
+                        {
+                            InvitationFactKind::Contact
+                        } else {
+                            InvitationFactKind::Generic
+                        };
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::RuntimeFactsUpdated {
+                                replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
+                                facts: vec![RuntimeFact::InvitationAccepted {
+                                    invitation_kind,
+                                    authority_id: Some(sender_id),
+                                    operation_state: Some(OperationState::Succeeded),
+                                }],
+                            },
+                        )
+                        .await;
                     }
+                    Ok(_) => {}
                     Err(_error) => {}
                 }
             });

@@ -12,11 +12,12 @@ use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, Ceremony
 use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus,
-    RuntimeBridge, SettingsBridgeState, SyncStatus,
+    AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo,
+    LanPeerInfo, RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
-use aura_app::signal_defs::INVITATIONS_SIGNAL;
+use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
+use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
@@ -59,6 +60,7 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
+use aura_social::{is_user_banned, is_user_muted};
 use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
@@ -88,6 +90,41 @@ const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
+
+fn collect_authoritative_moderation_homes(
+    homes: &HomesState,
+    context_id: ContextId,
+    channel_id: ChannelId,
+) -> Vec<HomeState> {
+    let mut candidates = Vec::new();
+
+    if let Some(home) = homes.home_state(&channel_id) {
+        if home.context_id == Some(context_id) {
+            candidates.push(home.clone());
+        }
+    }
+
+    for (_, home) in homes.iter() {
+        if home.context_id == Some(context_id)
+            && !candidates
+                .iter()
+                .any(|candidate: &HomeState| candidate.id == home.id)
+        {
+            candidates.push(home.clone());
+        }
+    }
+
+    if let Some(home) = homes.current_home() {
+        if !candidates
+            .iter()
+            .any(|candidate: &HomeState| candidate.id == home.id)
+        {
+            candidates.push(home.clone());
+        }
+    }
+
+    candidates
+}
 
 async fn execute_with_effect_timeout<TTime, T, E, Fut>(
     time: &TTime,
@@ -188,6 +225,56 @@ async fn resolve_channel_context_from_local_chat_facts(
     }
 
     Ok(None)
+}
+
+async fn resolve_channel_ids_from_local_chat_facts(
+    effects: &crate::runtime::AuraEffectSystem,
+    authority: AuthorityId,
+    channel_name: &str,
+) -> Result<Vec<ChannelId>, IntentError> {
+    let normalized = channel_name.trim().to_ascii_lowercase();
+    let facts = effects
+        .load_committed_facts(authority)
+        .await
+        .map_err(|error| {
+            IntentError::internal_error(format!(
+                "failed to load committed facts for channel-name resolution: {error}"
+            ))
+        })?;
+
+    let mut resolved = Vec::new();
+    let mut seen = HashSet::new();
+    for fact in facts.into_iter().rev() {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
+            continue;
+        };
+
+        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            continue;
+        }
+
+        match ChatFact::from_envelope(&envelope) {
+            Some(ChatFact::ChannelCreated {
+                channel_id, name, ..
+            }) if seen.insert(channel_id) && name.trim().eq_ignore_ascii_case(&normalized) => {
+                resolved.push(channel_id);
+            }
+            Some(ChatFact::ChannelUpdated {
+                channel_id,
+                name: Some(name),
+                ..
+            }) if seen.insert(channel_id) && name.trim().eq_ignore_ascii_case(&normalized) => {
+                resolved.push(channel_id);
+            }
+            Some(ChatFact::ChannelCreated { channel_id, .. })
+            | Some(ChatFact::ChannelUpdated { channel_id, .. }) => {
+                seen.insert(channel_id);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(resolved)
 }
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
@@ -772,9 +859,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         if let Ok(invitation_service) = self.agent.invitations() {
             let local_authority = self.agent.authority_id();
-            for invitation in invitation_service.list_pending().await {
+            for invitation in invitation_service
+                .list_cached_matching(|inv| inv.status == aura_invitation::InvitationStatus::Accepted)
+                .await
+            {
                 if invitation.sender_id != local_authority
-                    || invitation.status != aura_invitation::InvitationStatus::Accepted
                 {
                     continue;
                 }
@@ -790,6 +879,59 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         Ok(participants.into_iter().collect())
+    }
+
+    async fn moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        current_time_ms: u64,
+    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+        let committed_facts = self
+            .agent
+            .runtime()
+            .effects()
+            .load_committed_facts(self.agent.authority_id())
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!(
+                    "failed to load committed facts for moderation status: {error}"
+                ))
+            })?;
+        let homes: HomesState = self
+            .reactive_handler()
+            .read(&*HOMES_SIGNAL)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!(
+                    "failed to read authoritative homes signal for moderation status: {error}"
+                ))
+            })?;
+        let candidates = collect_authoritative_moderation_homes(&homes, context_id, channel_id);
+        let roster_known = candidates.iter().any(|home| !home.members.is_empty());
+        let is_member = candidates
+            .iter()
+            .any(|home| home.member(&authority_id).is_some());
+
+        Ok(AuthoritativeModerationStatus {
+            is_banned: is_user_banned(
+                &committed_facts,
+                &context_id,
+                &authority_id,
+                current_time_ms,
+                Some(&channel_id),
+            ),
+            is_muted: is_user_muted(
+                &committed_facts,
+                &context_id,
+                &authority_id,
+                current_time_ms,
+                Some(&channel_id),
+            ),
+            roster_known,
+            is_member,
+        })
     }
 
     async fn resolve_amp_channel_context(
@@ -832,6 +974,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         Ok(None)
+    }
+
+    async fn resolve_authoritative_channel_ids_by_name(
+        &self,
+        channel_name: &str,
+    ) -> Result<Vec<ChannelId>, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let authority = self.agent.authority_id();
+        resolve_channel_ids_from_local_chat_facts(&effects, authority, channel_name).await
     }
 
     async fn amp_repair_local_channel_membership(
@@ -1318,6 +1469,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             channel_id,
             None,
             Some(topic),
+            None,
+            None,
             timestamp_ms,
             self.agent.authority_id(),
         )
@@ -4101,5 +4254,73 @@ mod tests {
             .expect("resolve channel context");
 
         assert_eq!(resolved, Some(context));
+    }
+
+    #[tokio::test]
+    async fn amp_list_channel_participants_includes_accepted_channel_invitees() {
+        let authority = AuthorityId::new_from_entropy([10u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([11u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([12u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent.clone());
+        let context = ContextId::new_from_entropy([13u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"accepted-channel-invitee-visible"));
+
+        bridge
+            .amp_create_channel(ChannelCreateParams {
+                context,
+                channel: Some(channel),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .expect("create channel");
+        bridge
+            .amp_join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("join channel");
+
+        let invitations = agent.invitations().expect("invitation service");
+        let invitation = invitations
+            .invite_to_channel(
+                receiver,
+                channel.to_string(),
+                Some(context),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create channel invitation");
+        invitations
+            .accept(&invitation.invitation_id)
+            .await
+            .expect("mark invitation accepted");
+
+        let participants = bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect("list authoritative participants");
+
+        assert!(participants.contains(&authority));
+        assert!(
+            participants.contains(&receiver),
+            "accepted invitee should appear in authoritative participant set"
+        );
     }
 }

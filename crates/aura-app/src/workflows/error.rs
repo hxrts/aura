@@ -96,6 +96,30 @@ pub enum WorkflowError {
         timeout_ms: u64,
     },
 
+    /// Authoritative channel context could not be resolved.
+    #[error("Missing authoritative context for channel {channel}")]
+    MissingAuthoritativeContext { channel: String },
+
+    /// Authoritative participant lookup failed.
+    #[error("Authoritative participant lookup for channel {channel} in context {context}: {source}")]
+    AuthoritativeParticipantsLookup {
+        channel: String,
+        context: String,
+        #[source]
+        source: AuraError,
+    },
+
+    /// Authoritative participant lookup still failed after an explicit convergence pass.
+    #[error(
+        "Authoritative participant lookup for channel {channel} in context {context} after convergence: {source}"
+    )]
+    AuthoritativeParticipantsLookupAfterConvergence {
+        channel: String,
+        context: String,
+        #[source]
+        source: AuraError,
+    },
+
     /// Passthrough for an underlying AuraError.
     #[error(transparent)]
     Core(AuraError),

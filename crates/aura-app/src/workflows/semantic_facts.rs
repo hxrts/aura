@@ -16,7 +16,7 @@ use crate::signal_defs::{
 use crate::ui_contract::{
     AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, OperationId, OperationInstanceId,
     SemanticOperationCausality, SemanticOperationError, SemanticOperationKind,
-    SemanticOperationPhase, SemanticOperationStatus,
+    SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
 };
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;
@@ -239,6 +239,7 @@ pub(in crate::workflows) struct SemanticWorkflowOwner {
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
     publication_state: Mutex<SemanticWorkflowPublicationState>,
+    last_terminal_status: Mutex<Option<WorkflowTerminalStatus>>,
 }
 
 impl SemanticWorkflowOwner {
@@ -258,6 +259,7 @@ impl SemanticWorkflowOwner {
             instance_id,
             kind,
             publication_state: Mutex::new(publication_state),
+            last_terminal_status: Mutex::new(None),
         }
     }
 
@@ -267,6 +269,21 @@ impl SemanticWorkflowOwner {
 
     pub(in crate::workflows) fn kind(&self) -> SemanticOperationKind {
         self.kind
+    }
+
+    async fn record_terminal_status(
+        &self,
+        causality: Option<SemanticOperationCausality>,
+        status: SemanticOperationStatus,
+    ) {
+        *self.last_terminal_status.lock().await = Some(WorkflowTerminalStatus {
+            causality,
+            status,
+        });
+    }
+
+    pub(in crate::workflows) async fn terminal_status(&self) -> Option<WorkflowTerminalStatus> {
+        self.last_terminal_status.lock().await.clone()
     }
 
     pub(in crate::workflows) async fn publish_phase(
@@ -318,8 +335,20 @@ impl SemanticWorkflowOwner {
                 SemanticWorkflowPublicationState::Legacy => None,
             }
         };
+        let terminal_status = matches!(
+            phase,
+            SemanticOperationPhase::Succeeded | SemanticOperationPhase::Cancelled
+        )
+        .then(|| WorkflowTerminalStatus {
+            causality: publication.as_ref().and_then(|publication| publication.causality),
+            status: if phase == SemanticOperationPhase::Cancelled {
+                SemanticOperationStatus::cancelled(self.kind)
+            } else {
+                SemanticOperationStatus::new(self.kind, phase)
+            },
+        });
         if let Some(publication) = publication {
-            publish_exact_operation_lifecycle(&self.app_core, publication).await
+            publish_exact_operation_lifecycle(&self.app_core, publication).await?
         } else {
             publish_authoritative_operation_phase_with_instance(
                 &self.app_core,
@@ -329,8 +358,14 @@ impl SemanticWorkflowOwner {
                 self.kind,
                 phase,
             )
-            .await
+            .await?
         }
+
+        if let Some(status) = terminal_status {
+            self.record_terminal_status(status.causality, status.status)
+                .await;
+        }
+        Ok(())
     }
 
     pub(in crate::workflows) async fn publish_success_with<Proof>(
@@ -359,8 +394,12 @@ impl SemanticWorkflowOwner {
                 SemanticWorkflowPublicationState::Legacy => None,
             }
         };
+        let terminal_status = WorkflowTerminalStatus {
+            causality: publication.as_ref().and_then(|publication| publication.causality),
+            status: SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded),
+        };
         if let Some(publication) = publication {
-            publish_exact_operation_lifecycle(&self.app_core, publication).await
+            publish_exact_operation_lifecycle(&self.app_core, publication).await?
         } else {
             publish_authoritative_operation_phase_with_instance(
                 &self.app_core,
@@ -370,8 +409,11 @@ impl SemanticWorkflowOwner {
                 self.kind,
                 SemanticOperationPhase::Succeeded,
             )
-            .await
+            .await?
         }
+        self.record_terminal_status(terminal_status.causality, terminal_status.status)
+            .await;
+        Ok(())
     }
 
     pub(in crate::workflows) async fn publish_failure(
@@ -397,8 +439,12 @@ impl SemanticWorkflowOwner {
                 SemanticWorkflowPublicationState::Legacy => None,
             }
         };
+        let terminal_status = WorkflowTerminalStatus {
+            causality: publication.as_ref().and_then(|publication| publication.causality),
+            status: SemanticOperationStatus::failed(self.kind, error.clone()),
+        };
         if let Some(publication) = publication {
-            publish_exact_operation_lifecycle(&self.app_core, publication).await
+            publish_exact_operation_lifecycle(&self.app_core, publication).await?
         } else {
             publish_authoritative_operation_failure_with_instance(
                 &self.app_core,
@@ -408,8 +454,11 @@ impl SemanticWorkflowOwner {
                 self.kind,
                 error,
             )
-            .await
+            .await?
         }
+        self.record_terminal_status(terminal_status.causality, terminal_status.status)
+            .await;
+        Ok(())
     }
 
     pub(in crate::workflows) async fn terminal_success_fact(
@@ -479,6 +528,7 @@ pub(in crate::workflows) fn issue_semantic_operation_context(
     })
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -490,6 +540,7 @@ pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> Home
 }
 
 #[allow(dead_code)]
+#[aura_macros::authoritative_source(kind = "signal")]
 pub(in crate::workflows) async fn prove_home_created(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: ChannelId,
@@ -510,6 +561,7 @@ pub(in crate::workflows) async fn prove_home_created(
     }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -523,6 +575,7 @@ pub(in crate::workflows) fn issue_channel_membership_ready_proof(
 }
 
 #[allow(dead_code)]
+#[aura_macros::authoritative_source(kind = "signal")]
 pub(in crate::workflows) async fn prove_channel_membership_ready(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -546,6 +599,7 @@ pub(in crate::workflows) async fn prove_channel_membership_ready(
     }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -558,6 +612,7 @@ pub(in crate::workflows) fn issue_invitation_created_proof(
     InvitationCreatedProof { invitation_id }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -570,6 +625,7 @@ pub(in crate::workflows) fn issue_channel_invitation_created_proof(
     ChannelInvitationCreatedProof { invitation_id }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -581,6 +637,7 @@ pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
     InvitationAcceptedOrMaterializedProof { invitation_id }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -592,6 +649,7 @@ pub(in crate::workflows) fn issue_pending_invitation_consumed_proof(
     PendingInvitationConsumedProof { invitation_id }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -603,6 +661,7 @@ pub(in crate::workflows) fn issue_device_enrollment_started_proof(
     DeviceEnrollmentStartedProof { ceremony_id }
 }
 
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -614,27 +673,7 @@ pub(in crate::workflows) fn issue_message_committed_proof(message_id: impl Into<
     }
 }
 
-pub(in crate::workflows) async fn prove_message_committed(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_id: ChannelId,
-    message_id: &str,
-) -> Result<MessageCommittedProof, AuraError> {
-    let chat = crate::workflows::snapshot_policy::chat_snapshot(app_core).await;
-    if chat
-        .messages_for_channel(&channel_id)
-        .iter()
-        .any(|message| message.id == message_id)
-    {
-        Ok(issue_message_committed_proof(message_id))
-    } else {
-        Err(AuraError::from(
-            crate::workflows::error::WorkflowError::Precondition(
-                "message_committed proof requires the message to exist in chat state",
-            ),
-        ))
-    }
-}
-
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
@@ -1078,6 +1117,72 @@ pub(in crate::workflows) async fn publish_authoritative_operation_failure_with_i
         )
         .await
     }
+}
+
+#[cfg(test)]
+pub(crate) fn authoritative_status_for_instance(
+    facts: &[AuthoritativeSemanticFact],
+    operation_id: &OperationId,
+    instance_id: &OperationInstanceId,
+) -> Option<SemanticOperationStatus> {
+    facts.iter().find_map(|fact| match fact {
+        AuthoritativeSemanticFact::OperationStatus {
+            operation_id: observed_operation_id,
+            instance_id: Some(observed_instance_id),
+            status,
+            ..
+        } if observed_operation_id == operation_id && observed_instance_id == instance_id => {
+            Some(status.clone())
+        }
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn assert_succeeded_with_postcondition(
+    facts: &[AuthoritativeSemanticFact],
+    operation_id: &OperationId,
+    instance_id: &OperationInstanceId,
+    expected_kind: SemanticOperationKind,
+    postcondition_holds: impl Fn(&[AuthoritativeSemanticFact]) -> bool,
+) {
+    let status = authoritative_status_for_instance(facts, operation_id, instance_id)
+        .unwrap_or_else(|| panic!("missing status for {operation_id:?}/{instance_id:?}"));
+    assert_eq!(status.kind, expected_kind);
+    assert_eq!(status.phase, SemanticOperationPhase::Succeeded);
+    assert!(
+        postcondition_holds(facts),
+        "declared postcondition must hold after success for {operation_id:?}/{instance_id:?}"
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn assert_terminal_failure_or_cancelled(
+    facts: &[AuthoritativeSemanticFact],
+    operation_id: &OperationId,
+    instance_id: &OperationInstanceId,
+    expected_kind: SemanticOperationKind,
+) {
+    let status = authoritative_status_for_instance(facts, operation_id, instance_id)
+        .unwrap_or_else(|| panic!("missing status for {operation_id:?}/{instance_id:?}"));
+    assert_eq!(status.kind, expected_kind);
+    assert!(
+        matches!(
+            status.phase,
+            SemanticOperationPhase::Failed | SemanticOperationPhase::Cancelled
+        ),
+        "expected failed/cancelled terminal status for {operation_id:?}/{instance_id:?}, got {:?}",
+        status.phase
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn assert_terminal_failure_status(
+    terminal: &WorkflowTerminalStatus,
+    expected_kind: SemanticOperationKind,
+) {
+    assert_eq!(terminal.status.kind, expected_kind);
+    assert_eq!(terminal.status.phase, SemanticOperationPhase::Failed);
 }
 
 #[cfg(test)]

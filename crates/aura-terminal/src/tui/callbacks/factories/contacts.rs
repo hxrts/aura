@@ -1,7 +1,7 @@
 //! Contacts domain callbacks.
 
 use super::*;
-use crate::tui::semantic_lifecycle::reconcile_handed_off_terminal_status;
+use crate::tui::semantic_lifecycle::apply_handed_off_terminal_status;
 use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the contacts screen
@@ -106,7 +106,7 @@ impl ContactsCallbacks {
                     }
 
                     let dispatch = std::panic::AssertUnwindSafe(
-                        aura_app::ui::workflows::messaging::invite_user_to_channel_with_context(
+                        aura_app::ui::workflows::messaging::invite_user_to_channel_with_context_terminal_status(
                             &app_core,
                             &contact_id,
                             &channel,
@@ -120,14 +120,18 @@ impl ContactsCallbacks {
                     )
                     .catch_unwind();
                     match dispatch.await {
-                        Ok(Ok(_)) => {
+                        Ok(aura_app::ui_contract::WorkflowTerminalOutcome {
+                            result: Ok(_),
+                            terminal,
+                        }) => {
                             if let Some(operation_instance_id) = operation_instance_id {
-                                if let Err(error) = reconcile_handed_off_terminal_status(
+                                if let Err(error) = apply_handed_off_terminal_status(
                                     &app_core,
                                     &tx,
                                     OperationId::invitation_create(),
                                     operation_instance_id,
                                     SemanticOperationKind::InviteActorToChannel,
+                                    terminal,
                                 )
                                 .await
                                 {
@@ -141,14 +145,18 @@ impl ContactsCallbacks {
                                 }
                             }
                         }
-                        Ok(Err(error)) => {
+                        Ok(aura_app::ui_contract::WorkflowTerminalOutcome {
+                            result: Err(error),
+                            terminal,
+                        }) => {
                             if let Some(operation_instance_id) = operation_instance_id {
-                                let _ = reconcile_handed_off_terminal_status(
+                                let _ = apply_handed_off_terminal_status(
                                     &app_core,
                                     &tx,
                                     OperationId::invitation_create(),
                                     operation_instance_id,
                                     SemanticOperationKind::InviteActorToChannel,
+                                    terminal,
                                 )
                                 .await;
                             }
@@ -170,12 +178,13 @@ impl ContactsCallbacks {
                                 "invite_to_channel callback panicked".to_string()
                             };
                             if let Some(operation_instance_id) = operation_instance_id {
-                                let _ = reconcile_handed_off_terminal_status(
+                                let _ = apply_handed_off_terminal_status(
                                     &app_core,
                                     &tx,
                                     OperationId::invitation_create(),
                                     operation_instance_id,
                                     SemanticOperationKind::InviteActorToChannel,
+                                    None,
                                 )
                                 .await;
                             }

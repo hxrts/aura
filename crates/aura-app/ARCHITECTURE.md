@@ -134,6 +134,8 @@ just ci-move-semantics
 | Operation lifecycle allows terminal regression | InvariantAppWorkflowPurity | `src/ui_contract.rs` `semantic_operation_phase_generated_lifecycle_rejects_terminal_regression` | Covered |
 | Concurrent fact updates lose entries | InvariantAppWorkflowPurity | `src/workflows/semantic_facts.rs` `concurrent_authoritative_fact_updates_do_not_lose_entries` | Covered |
 | Operation lifecycle loses instance identity | InvariantAppWorkflowPurity | `src/workflows/semantic_facts.rs` `exact_operation_lifecycle_publication_retains_instance_identity` | Covered |
+| Invitation accept succeeds before authoritative materialization | InvariantAppWorkflowPurity | `src/workflows/invitation.rs` `channel_reconcile_materialization_preserves_terminal_success`, `accept_pending_home_invitation_with_terminal_status_returns_direct_failure_status` | Covered |
+| Messaging reducer parity regresses back to direct mutation | InvariantAppWorkflowPurity | `src/workflows/messaging.rs` `test_mark_message_delivery_failed_reduces_delivery_status`, `test_ensure_channel_visible_after_join_*`, `test_join_channel_success_implies_membership_ready_postcondition` | Covered |
 | Signal boundary leaked | InvariantSharedUiContractAuthority | `tests/ui_signals/` (1 compile-fail) | Covered |
 | Home role E2E flow broken | — | `tests/home_role_e2e.rs` | Covered |
 

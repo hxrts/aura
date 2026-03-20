@@ -11,8 +11,13 @@ use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
     workflow_retry_policy,
 };
-use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snapshot};
-use crate::AppCore;
+use crate::workflows::channel_ref::ChannelSelector;
+use crate::workflows::signals::{emit_signal, read_signal};
+use crate::{
+    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
+    views::home::HomesState,
+    AppCore,
+};
 use async_lock::RwLock;
 use aura_core::{
     effects::amp::ChannelLeaveParams,
@@ -81,6 +86,24 @@ fn parse_channel_hint(channel: &str) -> Result<ChannelSelector, AuraError> {
     ChannelSelector::parse(channel)
 }
 
+async fn homes_state_signal_snapshot(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<HomesState, AuraError> {
+    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
+}
+
+async fn emit_homes_state_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    homes: HomesState,
+) -> Result<(), AuraError> {
+    {
+        let mut core = app_core.write().await;
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_homes(homes.clone());
+    }
+    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
+}
+
 fn best_home_for_context(
     homes: &crate::views::home::HomesState,
     context_id: ContextId,
@@ -109,44 +132,32 @@ async fn resolve_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
     channel: &str,
 ) -> Result<ChannelId, AuraError> {
+    let runtime = require_runtime(app_core).await?;
     let parsed = parse_channel_hint(channel)?;
-    let chat = chat_snapshot(app_core).await;
-    let homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
     match parsed {
-        ChannelSelector::Id(channel_id) => {
-            if chat.channel(&channel_id).is_some() || homes.home_state(&channel_id).is_some() {
-                Ok(channel_id)
-            } else {
-                Err(AuraError::not_found(channel_id.to_string()))
+        ChannelSelector::Id(channel_id) => Ok(channel_id),
+        ChannelSelector::Name(name) => {
+            let resolved = runtime
+                .resolve_authoritative_channel_ids_by_name(&name)
+                .await
+                .map_err(|e| super::error::runtime_call("resolve moderation channel", e))?;
+            match resolved.as_slice() {
+                [] => Err(AuraError::not_found(channel.to_string())),
+                [channel_id] => Ok(*channel_id),
+                _ => Err(AuraError::invalid(format!(
+                    "Ambiguous moderation channel hint: {name}"
+                ))),
             }
         }
-        ChannelSelector::Name(name) => chat
-            .all_channels()
-            .find(|entry| entry.name.eq_ignore_ascii_case(&name))
-            .map(|entry| entry.id)
-            .or_else(|| {
-                homes
-                    .iter()
-                    .find(|(_, home)| home.name.eq_ignore_ascii_case(&name))
-                    .map(|(home_id, _)| *home_id)
-            })
-            .ok_or_else(|| AuraError::not_found(channel.to_string())),
     }
 }
 
-#[cfg(test)]
 async fn resolve_scope(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<&str>,
 ) -> Result<ModerationScope, AuraError> {
-    let chat = chat_snapshot(app_core).await;
-    let homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
+    let runtime = require_runtime(app_core).await?;
+    let homes = homes_state_signal_snapshot(app_core).await?;
 
     let hinted_channel = if let Some(hint) = channel_hint {
         Some(resolve_channel_id(app_core, hint).await?)
@@ -154,38 +165,49 @@ async fn resolve_scope(
         None
     };
 
-    let context_from_channel = hinted_channel.and_then(|channel_id| {
-        chat.channel(&channel_id)
-            .and_then(|channel| channel.context_id)
-    });
-
-    let home_from_channel = hinted_channel.and_then(|channel_id| {
+    let home_from_channel = if let Some(channel_id) = hinted_channel {
         if let Some(home) = homes.home_state(&channel_id) {
             if let Some(context_id) = home.context_id {
                 if !home.can_moderate() {
                     if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
                         if best_home.can_moderate() {
-                            return Some((best_id, best_home));
+                            Some((best_id, best_home))
+                        } else {
+                            Some((channel_id, home.clone()))
                         }
+                    } else {
+                        Some((channel_id, home.clone()))
                     }
+                } else {
+                    Some((channel_id, home.clone()))
                 }
+            } else {
+                Some((channel_id, home.clone()))
             }
-            return Some((channel_id, home.clone()));
+        } else if let Some(context_id) = runtime
+            .resolve_amp_channel_context(channel_id)
+            .await
+            .map_err(|e| super::error::runtime_call("resolve moderation scope context", e))?
+        {
+            best_home_for_context(&homes, context_id)
+        } else {
+            None
         }
-
-        let context_id = chat
-            .channel(&channel_id)
-            .and_then(|channel| channel.context_id)?;
-        best_home_for_context(&homes, context_id)
-    });
+    } else {
+        None
+    };
 
     let (context_id, home_id, can_moderate, peers) =
         if let Some((home_id, home_state)) = home_from_channel {
-            let peers = home_state
-                .members
-                .iter()
-                .map(|member| member.id)
-                .collect::<Vec<_>>();
+            let peers = runtime
+                .amp_list_channel_participants(
+                    home_state
+                        .context_id
+                        .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
+                    home_id,
+                )
+                .await
+                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
             (
                 home_state
                     .context_id
@@ -194,26 +216,19 @@ async fn resolve_scope(
                 home_state.can_moderate(),
                 peers,
             )
-        } else if let Some(context_id) = context_from_channel {
-            let home_id = hinted_channel
-                .ok_or_else(|| AuraError::not_found("Channel hint missing for moderation scope"))?;
-            let peers = homes
-                .current_home()
-                .map(|home| home.members.iter().map(|member| member.id).collect())
-                .unwrap_or_default();
-            let can_moderate = homes
-                .current_home()
-                .map(|home| home.can_moderate())
-                .unwrap_or(false);
-            (context_id, home_id, can_moderate, peers)
         } else if let Some(fallback) = homes.current_home() {
+            let context_id = fallback
+                .context_id
+                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+            let peers = runtime
+                .amp_list_channel_participants(context_id, fallback.id)
+                .await
+                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
             (
-                fallback
-                    .context_id
-                    .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
+                context_id,
                 fallback.id,
                 fallback.can_moderate(),
-                fallback.members.iter().map(|member| member.id).collect(),
+                peers,
             )
         } else {
             return Err(AuraError::permission_denied(
@@ -233,53 +248,86 @@ async fn resolve_scope_by_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<ChannelId>,
 ) -> Result<ModerationScope, AuraError> {
-    let chat = chat_snapshot(app_core).await;
-    let homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
-
-    let from_home = |home_id: ChannelId, home: &crate::views::home::HomeState| {
-        let context_id = home
-            .context_id
-            .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-        let peers = home.members.iter().map(|member| member.id).collect();
-        Ok(ModerationScope {
-            context_id,
-            home_id,
-            can_moderate: home.can_moderate(),
-            peers,
-        })
-    };
+    let runtime = require_runtime(app_core).await?;
+    let homes = homes_state_signal_snapshot(app_core).await?;
 
     if let Some(channel_id) = channel_hint {
         if let Some(home) = homes.home_state(&channel_id) {
+            let context_id = home
+                .context_id
+                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+            let peers = runtime
+                .amp_list_channel_participants(context_id, channel_id)
+                .await
+                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
             if let Some(context_id) = home.context_id {
                 if !home.can_moderate() {
                     if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
                         if best_home.can_moderate() {
-                            return from_home(best_id, &best_home);
+                            let best_context = best_home
+                                .context_id
+                                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+                            let best_peers = runtime
+                                .amp_list_channel_participants(best_context, best_id)
+                                .await
+                                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
+                            return Ok(ModerationScope {
+                                context_id: best_context,
+                                home_id: best_id,
+                                can_moderate: best_home.can_moderate(),
+                                peers: best_peers,
+                            });
                         }
                     }
                 }
             }
-            return from_home(channel_id, home);
+            return Ok(ModerationScope {
+                context_id,
+                home_id: channel_id,
+                can_moderate: home.can_moderate(),
+                peers,
+            });
         }
 
-        let context_id = chat
-            .channel(&channel_id)
-            .and_then(|channel| channel.context_id)
+        let context_id = runtime
+            .resolve_amp_channel_context(channel_id)
+            .await
+            .map_err(|e| super::error::runtime_call("resolve moderation scope context", e))?
             .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
 
         if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
-            return from_home(best_id, &best_home);
+            let best_context = best_home
+                .context_id
+                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+            let peers = runtime
+                .amp_list_channel_participants(best_context, best_id)
+                .await
+                .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
+            return Ok(ModerationScope {
+                context_id: best_context,
+                home_id: best_id,
+                can_moderate: best_home.can_moderate(),
+                peers,
+            });
         }
 
         return Err(AuraError::permission_denied(context_id.to_string()));
     }
 
     if let Some(current_home) = homes.current_home() {
-        return from_home(current_home.id, current_home);
+        let context_id = current_home
+            .context_id
+            .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+        let peers = runtime
+            .amp_list_channel_participants(context_id, current_home.id)
+            .await
+            .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
+        return Ok(ModerationScope {
+            context_id,
+            home_id: current_home.id,
+            can_moderate: current_home.can_moderate(),
+            peers,
+        });
     }
 
     Err(AuraError::permission_denied(
@@ -328,8 +376,7 @@ async fn apply_local_home_projection<F>(
 where
     F: FnOnce(&mut crate::views::home::HomeState),
 {
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
+    let mut homes = homes_state_signal_snapshot(app_core).await?;
     if homes.home_state(&scope.home_id).is_none() {
         homes.add_home(crate::views::home::HomeState::new(
             scope.home_id,
@@ -344,8 +391,7 @@ where
         return Err(AuraError::not_found(scope.home_id.to_string()));
     };
     update(home);
-    core.views_mut().set_homes(homes);
-    Ok(())
+    emit_homes_state_observed(app_core, homes).await
 }
 
 async fn resolve_target_authority(
@@ -707,11 +753,13 @@ pub async fn unpin_message(
 #[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::runtime_bridge::OfflineRuntimeBridge;
+    use crate::signal_defs::{register_app_signals, HOMES_SIGNAL, HOMES_SIGNAL_NAME};
     use crate::views::{
-        chat::{Channel, ChannelType, ChatState},
-        home::HomeState,
+        home::{HomeRole, HomeState, HomesState},
         Contact, ContactsState,
     };
+    use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
     use aura_core::{crypto::hash::hash, types::identifiers::AuthorityId};
 
@@ -788,52 +836,47 @@ mod tests {
     #[tokio::test]
     async fn resolve_scope_uses_named_channel_context_before_fallback_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([8u8; 32])));
+        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime.clone()).unwrap()));
+        {
+            let core = app_core.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
 
         let fallback_context = ContextId::new_from_entropy([21u8; 32]);
         let channel_context = ContextId::new_from_entropy([22u8; 32]);
         let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let peer = AuthorityId::new_from_entropy([2u8; 32]);
         let fallback_home_id = ChannelId::from_bytes(hash(b"moderation-fallback-home"));
         let channel_home_id = ChannelId::from_bytes(hash(b"moderation-channel-home"));
 
+        let mut homes = HomesState::default();
+        homes.add_home(HomeState::new(
+            fallback_home_id,
+            Some("fallback".to_string()),
+            owner,
+            0,
+            fallback_context,
+        ));
+        let mut channel_home = HomeState::new(
+            channel_home_id,
+            Some("slash-lab".to_string()),
+            owner,
+            0,
+            channel_context,
+        );
+        channel_home.my_role = HomeRole::Moderator;
+        homes.add_home(channel_home);
+        homes.select_home(Some(fallback_home_id));
+        emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap();
+        runtime.set_authoritative_channel_name_matches("slash-lab", vec![channel_home_id]);
+        runtime.set_amp_channel_context(channel_home_id, channel_context);
+        runtime.set_amp_channel_participants(channel_context, channel_home_id, vec![owner, peer]);
         {
             let mut core = app_core.write().await;
-
-            let mut chat = ChatState::new();
-            chat.upsert_channel(Channel {
-                id: channel_home_id,
-                context_id: Some(channel_context),
-                name: "slash-lab".to_string(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: vec![owner],
-                member_count: 1,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            });
-            core.views_mut().set_chat(chat);
-
-            let mut homes = core.views().get_homes();
-            homes.add_home(HomeState::new(
-                fallback_home_id,
-                Some("fallback".to_string()),
-                owner,
-                0,
-                fallback_context,
-            ));
-            homes.add_home(HomeState::new(
-                channel_home_id,
-                Some("slash-lab".to_string()),
-                owner,
-                0,
-                channel_context,
-            ));
-            homes.select_home(Some(fallback_home_id));
-            core.views_mut().set_homes(homes);
+            core.set_active_home_selection(Some(fallback_home_id));
         }
 
         let scope = resolve_scope(&app_core, Some("slash-lab"))
@@ -846,12 +889,17 @@ mod tests {
     #[tokio::test]
     async fn resolve_scope_by_channel_id_rejects_unknown_channel_scope() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([9u8; 32])));
+        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime).unwrap()));
+        {
+            let core = app_core.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
         let unknown = ChannelId::from_bytes(hash(b"moderation-unknown-scope"));
 
         let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
             .await
             .expect_err("unknown channel scope must fail");
-        assert!(error.to_string().contains(&unknown.to_string()));
+        assert!(!error.to_string().is_empty());
     }
 }

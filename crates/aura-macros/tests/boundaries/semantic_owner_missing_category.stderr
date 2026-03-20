@@ -6,8 +6,8 @@ error: semantic_owner requires `category = "move_owned"`
  9 | |     terminal = "publish_done",
 10 | |     postcondition = "demo_done",
 ...  |
-13 | |     child_ops = ""
-14 | | )]
+14 | |     child_ops = ""
+15 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

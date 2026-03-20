@@ -288,6 +288,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
 }
 
 async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    // OWNERSHIP: observed
     let chat = app_core.read().await.snapshot().chat;
     emit_signal(app_core, &*CHAT_SIGNAL, chat, CHAT_SIGNAL_NAME).await
 }
@@ -325,6 +326,7 @@ where
 }
 
 /// Refresh connection + network status derived from CONTACTS_SIGNAL.
+// OWNERSHIP: observed-display-update
 pub async fn refresh_connection_status_from_contacts(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
@@ -336,6 +338,7 @@ pub async fn refresh_connection_status_from_contacts(
         let core = app_core.read().await;
         core.runtime().cloned()
     };
+    // OWNERSHIP: observed
     let mut contacts_state = contacts_snapshot(app_core).await;
     if let Ok(state) = read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await {
         contacts_state = state;

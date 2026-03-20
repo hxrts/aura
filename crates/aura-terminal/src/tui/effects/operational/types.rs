@@ -190,6 +190,15 @@ pub enum OpResponse {
     RecoveryGuardianInvited { invitation_id: String },
     /// Home invitation accepted.
     HomeInvitationAccepted { invitation_id: String },
+    /// Invitation accepted with structured metadata for post-operation updates.
+    InvitationAccepted {
+        /// Accepted invitation identifier.
+        invitation_id: String,
+        /// Sender authority identifier.
+        sender_id: String,
+        /// Invitation type label.
+        invitation_type: String,
+    },
     /// Home created.
     HomeCreated { home_id: String },
     /// Neighborhood created.

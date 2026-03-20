@@ -49,7 +49,8 @@ use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextI
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner};
 use aura_journal::fact::{FactOptions, RelationalFact};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// Status of the runtime's sync service
 #[derive(Debug, Clone, Default)]
@@ -267,6 +268,19 @@ pub struct InvitationInfo {
     pub message: Option<String>,
 }
 
+/// Authoritative moderation status for an authority in a home-scoped context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AuthoritativeModerationStatus {
+    /// Whether the authority is banned from the home/context.
+    pub is_banned: bool,
+    /// Whether the authority is muted at the queried time.
+    pub is_muted: bool,
+    /// Whether the authoritative home roster is populated.
+    pub roster_known: bool,
+    /// Whether the authority is an authoritative member of the home roster.
+    pub is_member: bool,
+}
+
 // =============================================================================
 // Settings Bridge Types
 // =============================================================================
@@ -481,11 +495,35 @@ pub trait RuntimeBridge: Send + Sync {
         channel: ChannelId,
     ) -> Result<Vec<AuthorityId>, IntentError>;
 
+    /// Return authoritative moderation status for an authority within a
+    /// home-scoped context.
+    async fn moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        current_time_ms: u64,
+    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+        let _ = (context_id, channel_id, authority_id, current_time_ms);
+        Err(IntentError::no_agent(
+            "Authoritative moderation status not available in offline mode",
+        ))
+    }
+
     /// Resolve the authoritative checkpoint context for a channel from runtime-owned facts.
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError>;
+
+    /// Resolve authoritative channel identifiers by normalized display name.
+    ///
+    /// This is the runtime-owned replacement for projection-backed channel name
+    /// lookup in workflow code.
+    async fn resolve_authoritative_channel_ids_by_name(
+        &self,
+        channel_name: &str,
+    ) -> Result<Vec<ChannelId>, IntentError>;
 
     /// Repair local AMP membership after a checkpoint repair.
     ///
@@ -1056,6 +1094,13 @@ pub type BoxedRuntimeBridge = Arc<dyn RuntimeBridge>;
 pub struct OfflineRuntimeBridge {
     authority_id: AuthorityId,
     reactive: ReactiveHandler,
+    pending_invitations: Arc<Mutex<Option<Vec<InvitationInfo>>>>,
+    amp_channel_contexts: Arc<Mutex<HashMap<ChannelId, ContextId>>>,
+    authoritative_channel_name_matches: Arc<Mutex<HashMap<String, Vec<ChannelId>>>>,
+    amp_channel_states: Arc<Mutex<HashMap<(ContextId, ChannelId), bool>>>,
+    amp_channel_participants: Arc<Mutex<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>,
+    moderation_statuses:
+        Arc<Mutex<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>,
 }
 
 impl OfflineRuntimeBridge {
@@ -1064,7 +1109,95 @@ impl OfflineRuntimeBridge {
         Self {
             authority_id,
             reactive: ReactiveHandler::new(),
+            pending_invitations: Arc::new(Mutex::new(None)),
+            amp_channel_contexts: Arc::new(Mutex::new(HashMap::new())),
+            authoritative_channel_name_matches: Arc::new(Mutex::new(HashMap::new())),
+            amp_channel_states: Arc::new(Mutex::new(HashMap::new())),
+            amp_channel_participants: Arc::new(Mutex::new(HashMap::new())),
+            moderation_statuses: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    #[cfg(test)]
+    /// Configure the pending invitation snapshot returned by the offline bridge.
+    pub fn set_pending_invitations(&self, invitations: Vec<InvitationInfo>) {
+        *self.pending_invitations.lock().expect("pending invitations mutex") = Some(invitations);
+    }
+
+    #[cfg(test)]
+    /// Configure a runtime-owned moderation status answer for the offline bridge.
+    pub fn set_moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        status: AuthoritativeModerationStatus,
+    ) {
+        self.moderation_statuses
+            .lock()
+            .expect("moderation statuses mutex")
+            .insert((context_id, channel_id, authority_id), status);
+    }
+
+    #[cfg(test)]
+    /// Configure authoritative AMP context for a channel.
+    pub fn set_amp_channel_context(&self, channel_id: ChannelId, context_id: ContextId) {
+        self.amp_channel_contexts
+            .lock()
+            .expect("amp channel contexts mutex")
+            .insert(channel_id, context_id);
+    }
+
+    #[cfg(test)]
+    /// Configure authoritative channel-name lookup results.
+    pub fn set_authoritative_channel_name_matches(
+        &self,
+        channel_name: impl Into<String>,
+        channel_ids: Vec<ChannelId>,
+    ) {
+        self.authoritative_channel_name_matches
+            .lock()
+            .expect("authoritative channel name matches mutex")
+            .insert(
+                channel_name.into().trim().to_ascii_lowercase(),
+                channel_ids,
+            );
+    }
+
+    #[cfg(test)]
+    /// Configure authoritative AMP participants for a channel.
+    pub fn set_amp_channel_participants(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        participants: Vec<AuthorityId>,
+    ) {
+        self.amp_channel_contexts
+            .lock()
+            .expect("amp channel contexts mutex")
+            .insert(channel_id, context_id);
+        self.amp_channel_participants
+            .lock()
+            .expect("amp channel participants mutex")
+            .insert((context_id, channel_id), participants);
+    }
+
+    #[cfg(test)]
+    /// Configure whether authoritative AMP channel state exists for a channel.
+    pub fn set_amp_channel_state_exists(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        exists: bool,
+    ) {
+        self.amp_channel_contexts
+            .lock()
+            .expect("amp channel contexts mutex")
+            .insert(channel_id, context_id);
+        self.amp_channel_states
+            .lock()
+            .expect("amp channel states mutex")
+            .insert((context_id, channel_id), exists);
     }
 }
 
@@ -1105,25 +1238,88 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn amp_channel_state_exists(
         &self,
-        _context: ContextId,
-        _channel: ChannelId,
+        context: ContextId,
+        channel: ChannelId,
     ) -> Result<bool, IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+        self.amp_channel_states
+            .lock()
+            .expect("amp channel states mutex")
+            .get(&(context, channel))
+            .copied()
+            .ok_or_else(|| {
+                IntentError::no_agent(format!(
+                    "authoritative AMP state unavailable in offline mode for channel {channel} in context {context}"
+                ))
+            })
     }
 
     async fn amp_list_channel_participants(
         &self,
-        _context: ContextId,
-        _channel: ChannelId,
+        context: ContextId,
+        channel: ChannelId,
     ) -> Result<Vec<AuthorityId>, IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+        self.amp_channel_participants
+            .lock()
+            .expect("amp channel participants mutex")
+            .get(&(context, channel))
+            .cloned()
+            .ok_or_else(|| {
+                IntentError::no_agent(format!(
+                    "authoritative AMP participants unavailable in offline mode for channel {channel} in context {context}"
+                ))
+            })
+    }
+
+    async fn moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        _current_time_ms: u64,
+    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+        self.moderation_statuses
+            .lock()
+            .expect("moderation statuses mutex")
+            .get(&(context_id, channel_id, authority_id))
+            .copied()
+            .ok_or_else(|| {
+                IntentError::no_agent(format!(
+                    "authoritative moderation status unavailable in offline mode for channel {channel_id} in context {context_id}"
+                ))
+            })
     }
 
     async fn resolve_amp_channel_context(
         &self,
-        _channel: ChannelId,
+        channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+        self.amp_channel_contexts
+            .lock()
+            .expect("amp channel contexts mutex")
+            .get(&channel)
+            .copied()
+            .map(Some)
+            .ok_or_else(|| {
+                IntentError::no_agent(format!(
+                    "authoritative AMP context unavailable in offline mode for channel {channel}"
+                ))
+            })
+    }
+
+    async fn resolve_authoritative_channel_ids_by_name(
+        &self,
+        channel_name: &str,
+    ) -> Result<Vec<ChannelId>, IntentError> {
+        self.authoritative_channel_name_matches
+            .lock()
+            .expect("authoritative channel name matches mutex")
+            .get(&channel_name.trim().to_ascii_lowercase())
+            .cloned()
+            .ok_or_else(|| {
+                IntentError::no_agent(format!(
+                    "authoritative channel-name lookup unavailable in offline mode for channel {channel_name}"
+                ))
+            })
     }
 
     async fn amp_repair_local_channel_membership(
@@ -1529,9 +1725,20 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
-        Err(IntentError::no_agent(
-            "Pending invitations not available in offline mode",
-        ))
+        self.pending_invitations
+            .lock()
+            .expect("pending invitations mutex")
+            .as_ref()
+            .map(|invitations| {
+                invitations
+                    .iter()
+                    .filter(|invitation| invitation.status == InvitationBridgeStatus::Pending)
+                    .cloned()
+                    .collect()
+            })
+            .ok_or_else(|| {
+                IntentError::no_agent("pending invitations unavailable in offline mode")
+            })
     }
 
     async fn import_invitation(&self, _code: &str) -> Result<InvitationInfo, IntentError> {
@@ -1661,6 +1868,77 @@ mod tests {
         assert!(settings_error.to_string().contains("No agent configured"));
         assert!(bridge.try_list_devices().await.is_err());
         assert!(bridge.try_list_authorities().await.is_err());
+        let channel = ChannelId::from_bytes([44u8; 32]);
+        let context = ContextId::new_from_entropy([45u8; 32]);
+        let amp_context_error = bridge
+            .resolve_amp_channel_context(channel)
+            .await
+            .expect_err("offline AMP context query must fail explicitly");
+        assert!(amp_context_error.to_string().contains("offline mode"));
+        let participants_error = bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect_err("offline AMP participants query must fail explicitly");
+        assert!(participants_error.to_string().contains("offline mode"));
+        let moderation_error = bridge
+            .moderation_status(context, channel, authority, 1_000)
+            .await
+            .expect_err("offline moderation query must fail explicitly");
+        assert!(moderation_error.to_string().contains("offline mode"));
+    }
+
+    #[tokio::test]
+    async fn test_offline_bridge_explicit_authoritative_overrides_remain_usable() {
+        let authority = AuthorityId::new_from_entropy([46u8; 32]);
+        let peer = AuthorityId::new_from_entropy([47u8; 32]);
+        let channel = ChannelId::from_bytes([48u8; 32]);
+        let context = ContextId::new_from_entropy([49u8; 32]);
+        let bridge = OfflineRuntimeBridge::new(authority);
+
+        bridge.set_amp_channel_context(channel, context);
+        bridge.set_amp_channel_participants(context, channel, Vec::new());
+        bridge.set_moderation_status(
+            context,
+            channel,
+            authority,
+            AuthoritativeModerationStatus {
+                roster_known: true,
+                is_member: true,
+                is_banned: false,
+                is_muted: true,
+            },
+        );
+
+        assert_eq!(
+            bridge
+                .resolve_amp_channel_context(channel)
+                .await
+                .expect("configured AMP context query should succeed"),
+            Some(context)
+        );
+        assert!(
+            bridge
+                .amp_list_channel_participants(context, channel)
+                .await
+                .expect("configured AMP participants query should succeed")
+                .is_empty()
+        );
+        let status = bridge
+            .moderation_status(context, channel, authority, 1_000)
+            .await
+            .expect("configured moderation query should succeed");
+        assert!(status.roster_known);
+        assert!(status.is_member);
+        assert!(status.is_muted);
+
+        bridge.set_amp_channel_participants(context, channel, vec![peer]);
+        assert_eq!(
+            bridge
+                .amp_list_channel_participants(context, channel)
+                .await
+                .expect("updated AMP participants query should succeed"),
+            vec![peer]
+        );
     }
 
     #[tokio::test]

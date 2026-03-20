@@ -1,4 +1,5 @@
 use super::*;
+use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,
@@ -216,6 +217,89 @@ impl<'a> InvitationContactHandler<'a> {
                         CONTACT_FACT_TYPE_ID.into(),
                         contact_fact.to_bytes(),
                     )
+                    .await
+                    .map_err(|e| AgentError::effects(e.to_string()))?;
+
+                effects.await_next_view_update().await;
+
+                let mut updated = invitation.clone();
+                updated.status = InvitationStatus::Accepted;
+                InvitationHandler::persist_created_invitation(
+                    effects.as_ref(),
+                    self.handler.context.authority.authority_id(),
+                    &updated,
+                )
+                .await?;
+                self.handler
+                    .invitation_cache
+                    .cache_invitation(updated)
+                    .await;
+
+                processed = processed.saturating_add(1);
+                continue;
+            }
+
+            if content_type == CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE {
+                let acceptance: ChannelInvitationAcceptance =
+                    match serde_json::from_slice(&envelope.payload) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Invalid channel invitation acceptance payload"
+                            );
+                            continue;
+                        }
+                    };
+
+                if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
+                    continue;
+                }
+
+                let Some(invitation) = InvitationHandler::load_created_invitation(
+                    effects.as_ref(),
+                    self.handler.context.authority.authority_id(),
+                    &acceptance.invitation_id,
+                )
+                .await
+                else {
+                    tracing::debug!(
+                        invitation_id = %acceptance.invitation_id,
+                        "Ignoring channel acceptance for unknown invitation"
+                    );
+                    continue;
+                };
+
+                if !matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                    continue;
+                }
+
+                let now_ms = effects.current_timestamp().await.unwrap_or(0);
+                let fact = InvitationFact::accepted_ms(
+                    acceptance.invitation_id.clone(),
+                    acceptance.acceptor_id,
+                    now_ms,
+                );
+                execute_journal_append(
+                    fact,
+                    &self.handler.context.authority,
+                    acceptance.context_id,
+                    effects.as_ref(),
+                )
+                .await?;
+
+                let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await;
+                let membership = ChannelMembershipFact::new(
+                    acceptance.context_id,
+                    acceptance.channel_id,
+                    acceptance.acceptor_id,
+                    ChannelParticipantEvent::Joined,
+                    timestamp,
+                )
+                .to_generic();
+
+                effects
+                    .commit_relational_facts(vec![membership])
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
 

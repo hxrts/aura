@@ -9,18 +9,24 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
     AttrStyle, Block, Expr, ExprAwait, ExprCall, ExprGroup, ExprMethodCall, ExprParen, ExprPath,
-    ExprReference, File, ImplItem, ImplItemFn, Item, ItemFn, ItemStruct, Local, MetaNameValue, Pat,
-    ReturnType, Token, Type, Visibility,
+    ExprReference, File, ImplItem, ImplItemFn, Item, ItemFn, ItemMod, ItemStruct, Local,
+    MetaNameValue, Pat, ReturnType, Token, Type, Visibility,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LintMode {
+    WorkflowNoViewReadsForDecisions,
+    WorkflowNoViewWrites,
+    WorkflowNoFallbackDefaults,
+    WorkflowNoViewDerivedReadiness,
+    WorkflowNoViewDerivedRecipientResolution,
     SemanticOwnerBoundedAwaits,
     BestEffortSideEffectBoundary,
     SemanticOwnerDetachedContinuation,
     SemanticOwnerNoSpawn,
     SemanticOwnerProofSuccess,
     WorkflowProofBearingSuccess,
+    ProofIssuerAuthoritativeSource,
     ParityCriticalIgnoredResults,
     ActorOwnedTaskSpawn,
     AsyncSessionOwnership,
@@ -35,12 +41,20 @@ enum LintMode {
 impl LintMode {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "workflow-no-view-reads-for-decisions" => Ok(Self::WorkflowNoViewReadsForDecisions),
+            "workflow-no-view-writes" => Ok(Self::WorkflowNoViewWrites),
+            "workflow-no-fallback-defaults" => Ok(Self::WorkflowNoFallbackDefaults),
+            "workflow-no-view-derived-readiness" => Ok(Self::WorkflowNoViewDerivedReadiness),
+            "workflow-no-view-derived-recipient-resolution" => {
+                Ok(Self::WorkflowNoViewDerivedRecipientResolution)
+            }
             "semantic-owner-bounded-awaits" => Ok(Self::SemanticOwnerBoundedAwaits),
             "best-effort-side-effect-boundary" => Ok(Self::BestEffortSideEffectBoundary),
             "semantic-owner-detached-continuation" => Ok(Self::SemanticOwnerDetachedContinuation),
             "semantic-owner-no-spawn" => Ok(Self::SemanticOwnerNoSpawn),
             "semantic-owner-proof-success" => Ok(Self::SemanticOwnerProofSuccess),
             "workflow-proof-bearing-success" => Ok(Self::WorkflowProofBearingSuccess),
+            "proof-issuer-authoritative-source" => Ok(Self::ProofIssuerAuthoritativeSource),
             "parity-critical-ignored-results" => Ok(Self::ParityCriticalIgnoredResults),
             "actor-owned-task-spawn" => Ok(Self::ActorOwnedTaskSpawn),
             "async-session-ownership" => Ok(Self::AsyncSessionOwnership),
@@ -56,12 +70,20 @@ impl LintMode {
 
     fn display_name(self) -> &'static str {
         match self {
+            Self::WorkflowNoViewReadsForDecisions => "workflow-no-view-reads-for-decisions",
+            Self::WorkflowNoViewWrites => "workflow-no-view-writes",
+            Self::WorkflowNoFallbackDefaults => "workflow-no-fallback-defaults",
+            Self::WorkflowNoViewDerivedReadiness => "workflow-no-view-derived-readiness",
+            Self::WorkflowNoViewDerivedRecipientResolution => {
+                "workflow-no-view-derived-recipient-resolution"
+            }
             Self::SemanticOwnerBoundedAwaits => "semantic-owner-bounded-awaits",
             Self::BestEffortSideEffectBoundary => "best-effort-side-effect-boundary",
             Self::SemanticOwnerDetachedContinuation => "semantic-owner-detached-continuation",
             Self::SemanticOwnerNoSpawn => "semantic-owner-no-spawn",
             Self::SemanticOwnerProofSuccess => "semantic-owner-proof-success",
             Self::WorkflowProofBearingSuccess => "workflow-proof-bearing-success",
+            Self::ProofIssuerAuthoritativeSource => "proof-issuer-authoritative-source",
             Self::ParityCriticalIgnoredResults => "parity-critical-ignored-results",
             Self::ActorOwnedTaskSpawn => "actor-owned-task-spawn",
             Self::AsyncSessionOwnership => "async-session-ownership",
@@ -114,6 +136,23 @@ fn run() -> Result<(), String> {
             eprintln!("{violation}");
         }
         return Err(match mode {
+            LintMode::WorkflowNoViewReadsForDecisions => {
+                "parity-critical workflow code still reads projections to make semantic decisions"
+                    .to_string()
+            }
+            LintMode::WorkflowNoViewWrites => {
+                "parity-critical workflow code still mutates projections directly".to_string()
+            }
+            LintMode::WorkflowNoFallbackDefaults => {
+                "parity-critical workflow code still masks missing authoritative state with fallback defaults"
+                    .to_string()
+            }
+            LintMode::WorkflowNoViewDerivedReadiness => {
+                "authoritative readiness is still being derived from projections".to_string()
+            }
+            LintMode::WorkflowNoViewDerivedRecipientResolution => {
+                "recipient resolution still depends on projected state".to_string()
+            }
             LintMode::SemanticOwnerBoundedAwaits => {
                 "semantic owner protocol violations remain in owner or handoff functions".to_string()
             }
@@ -134,6 +173,10 @@ fn run() -> Result<(), String> {
             }
             LintMode::WorkflowProofBearingSuccess => {
                 "workflow code still publishes plain success directly instead of consuming typed postcondition proofs"
+                    .to_string()
+            }
+            LintMode::ProofIssuerAuthoritativeSource => {
+                "typed semantic success proofs are still minted outside #[authoritative_source(...)] helpers"
                     .to_string()
             }
             LintMode::ParityCriticalIgnoredResults => {
@@ -210,6 +253,9 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         LintMode::FrontendSemanticHandoffBoundary => {
             return scan_frontend_semantic_handoff_boundary(file, syntax);
         }
+        LintMode::ProofIssuerAuthoritativeSource => {
+            return scan_proof_issuer_authoritative_source(file, syntax);
+        }
         LintMode::HarnessMoveOwnershipBoundary => {
             return scan_harness_move_ownership_boundary(file, source);
         }
@@ -221,7 +267,12 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         }
         LintMode::TimeoutPolicyBoundary => return scan_timeout_policy_boundary(file, syntax),
         LintMode::TimeDomainUsage => return scan_time_domain_usage(file, syntax),
-        LintMode::SemanticOwnerBoundedAwaits
+        LintMode::WorkflowNoViewReadsForDecisions
+        | LintMode::WorkflowNoViewWrites
+        | LintMode::WorkflowNoFallbackDefaults
+        | LintMode::WorkflowNoViewDerivedReadiness
+        | LintMode::WorkflowNoViewDerivedRecipientResolution
+        | LintMode::SemanticOwnerBoundedAwaits
         | LintMode::BestEffortSideEffectBoundary
         | LintMode::SemanticOwnerDetachedContinuation
         | LintMode::SemanticOwnerNoSpawn
@@ -232,32 +283,51 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
 
     let mut violations = Vec::new();
     for item in &syntax.items {
-        scan_item(mode, file, item, &mut violations);
+        scan_item(mode, file, source, item, &mut violations);
     }
     violations
 }
 
-fn scan_item(mode: LintMode, file: &Path, item: &Item, violations: &mut Vec<String>) {
+fn scan_item(
+    mode: LintMode,
+    file: &Path,
+    source: &str,
+    item: &Item,
+    violations: &mut Vec<String>,
+) {
     match item {
-        Item::Fn(item_fn) => scan_function(
-            mode,
-            file,
-            &item_fn.attrs,
-            &item_fn.sig.ident.to_string(),
-            &item_fn.block,
-            violations,
-        ),
+        Item::Fn(item_fn) => {
+            if has_cfg_test_attr(&item_fn.attrs) {
+                return;
+            }
+            scan_function(
+                mode,
+                file,
+                source,
+                &item_fn.attrs,
+                &item_fn.sig.ident.to_string(),
+                item_fn.sig.ident.span().start().line,
+                &item_fn.block,
+                violations,
+            )
+        }
         Item::Impl(item_impl) => {
             for impl_item in &item_impl.items {
                 if let ImplItem::Fn(item_fn) = impl_item {
-                    scan_impl_function(mode, file, item_fn, violations);
+                    if has_cfg_test_attr(&item_fn.attrs) {
+                        continue;
+                    }
+                    scan_impl_function(mode, file, source, item_fn, violations);
                 }
             }
         }
         Item::Mod(item_mod) => {
+            if has_cfg_test_attr(&item_mod.attrs) {
+                return;
+            }
             if let Some((_, items)) = &item_mod.content {
                 for nested in items {
-                    scan_item(mode, file, nested, violations);
+                    scan_item(mode, file, source, nested, violations);
                 }
             }
         }
@@ -268,29 +338,127 @@ fn scan_item(mode: LintMode, file: &Path, item: &Item, violations: &mut Vec<Stri
 fn scan_impl_function(
     mode: LintMode,
     file: &Path,
+    source: &str,
     item_fn: &ImplItemFn,
     violations: &mut Vec<String>,
 ) {
     scan_function(
         mode,
         file,
+        source,
         &item_fn.attrs,
         &item_fn.sig.ident.to_string(),
+        item_fn.sig.ident.span().start().line,
         &item_fn.block,
         violations,
     );
 }
 
+fn scan_proof_issuer_authoritative_source(file: &Path, syntax: &File) -> Vec<String> {
+    if !file
+        .to_string_lossy()
+        .contains("crates/aura-app/src/workflows/")
+    {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    for item in &syntax.items {
+        match item {
+            Item::Fn(item_fn) => collect_proof_issuer_violations(
+                file,
+                &item_fn.sig.ident.to_string(),
+                &item_fn.sig.output,
+                &item_fn.attrs,
+                &mut violations,
+            ),
+            Item::Impl(item_impl) => {
+                for impl_item in &item_impl.items {
+                    if let ImplItem::Fn(method) = impl_item {
+                        collect_proof_issuer_violations(
+                            file,
+                            &method.sig.ident.to_string(),
+                            &method.sig.output,
+                            &method.attrs,
+                            &mut violations,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    violations
+}
+
+fn collect_proof_issuer_violations(
+    file: &Path,
+    function_name: &str,
+    output: &ReturnType,
+    attrs: &[syn::Attribute],
+    violations: &mut Vec<String>,
+) {
+    if !looks_like_proof_issuer(function_name, output) || has_cfg_test_attr(attrs) {
+        return;
+    }
+    if has_marker_attr(attrs, "authoritative_source") {
+        return;
+    }
+
+    let start = match output {
+        ReturnType::Default => attrs
+            .last()
+            .map(|attr| attr.span().start())
+            .unwrap_or_else(|| Span::call_site().start()),
+        ReturnType::Type(_, ty) => ty.span().start(),
+    };
+    violations.push(format!(
+        "{}:{}:{}: proof issuer `{}` must be declared with #[authoritative_source(...)]",
+        file.display(),
+        start.line,
+        start.column + 1,
+        function_name
+    ));
+}
+
+fn looks_like_proof_issuer(function_name: &str, output: &ReturnType) -> bool {
+    if function_name.starts_with("issue_") && function_name.ends_with("_proof") {
+        return true;
+    }
+    if function_name.starts_with("prove_") {
+        return true;
+    }
+
+    match output {
+        ReturnType::Default => false,
+        ReturnType::Type(_, ty) => {
+            let rendered = ty.to_token_stream().to_string();
+            rendered.contains("Proof") && !rendered.contains("Capability")
+        }
+    }
+}
+
 fn scan_function(
     mode: LintMode,
     file: &Path,
+    source: &str,
     attrs: &[syn::Attribute],
     function_name: &str,
+    function_line: usize,
     block: &Block,
     violations: &mut Vec<String>,
 ) {
     let contains_handoff = function_contains_call(block, "handoff_to_app_workflow");
     let should_scan = match mode {
+        LintMode::WorkflowNoViewReadsForDecisions
+        | LintMode::WorkflowNoViewWrites
+        | LintMode::WorkflowNoFallbackDefaults
+        | LintMode::WorkflowNoViewDerivedReadiness
+        | LintMode::WorkflowNoViewDerivedRecipientResolution => {
+            file.to_string_lossy().contains("crates/aura-app/src/workflows/")
+                && !has_marker_attr(attrs, "observed_only")
+        }
         LintMode::SemanticOwnerBoundedAwaits => {
             has_marker_attr(attrs, "semantic_owner") || contains_handoff
         }
@@ -307,6 +475,7 @@ fn scan_function(
                     .file_name()
                     .is_some_and(|name| name == "semantic_facts.rs")
         }
+        LintMode::ProofIssuerAuthoritativeSource => false,
         LintMode::ParityCriticalIgnoredResults => {
             has_marker_attr(attrs, "semantic_owner")
                 || has_marker_attr(attrs, "best_effort_boundary")
@@ -327,6 +496,7 @@ fn scan_function(
     let mut visitor = OwnershipVisitor {
         mode,
         file,
+        source,
         function_name,
         violations: Vec::new(),
         has_handoff: contains_handoff,
@@ -337,6 +507,7 @@ fn scan_function(
         declared_terminal_helpers: semantic_owner_terminal_helpers(attrs),
         requires_typed_success_proof: semantic_owner_declares_proof(attrs),
         found_proof_success_call: false,
+        function_ownership_tags: ownership_tags_before_line(source, function_line),
     };
     visitor.visit_block(block);
     visitor.finish();
@@ -354,9 +525,52 @@ fn has_marker_attr(attrs: &[syn::Attribute], name: &str) -> bool {
     })
 }
 
+fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        matches!(attr.style, AttrStyle::Outer)
+            && attr.path().is_ident("cfg")
+            && attr.to_token_stream().to_string().contains("test")
+    })
+}
+
+fn ownership_tags_before_line(source: &str, line: usize) -> Vec<String> {
+    if line == 0 {
+        return Vec::new();
+    }
+
+    let lines = source.lines().collect::<Vec<_>>();
+    let start = line.saturating_sub(8);
+    let end = line.saturating_sub(1).min(lines.len());
+    let mut tags = Vec::new();
+    for candidate in &lines[start..end] {
+        if let Some((_, tag)) = candidate.split_once("OWNERSHIP:") {
+            tags.push(tag.trim().to_string());
+        }
+    }
+    tags
+}
+
+fn ownership_tags_near_line(source: &str, line: usize) -> Vec<String> {
+    if line == 0 {
+        return Vec::new();
+    }
+
+    let lines = source.lines().collect::<Vec<_>>();
+    let start = line.saturating_sub(4);
+    let end = line.min(lines.len());
+    let mut tags = Vec::new();
+    for candidate in &lines[start..end] {
+        if let Some((_, tag)) = candidate.split_once("OWNERSHIP:") {
+            tags.push(tag.trim().to_string());
+        }
+    }
+    tags
+}
+
 struct OwnershipVisitor<'a> {
     mode: LintMode,
     file: &'a Path,
+    source: &'a str,
     function_name: &'a str,
     violations: Vec<String>,
     has_handoff: bool,
@@ -367,10 +581,50 @@ struct OwnershipVisitor<'a> {
     declared_terminal_helpers: Vec<String>,
     requires_typed_success_proof: bool,
     found_proof_success_call: bool,
+    function_ownership_tags: Vec<String>,
 }
 
 impl OwnershipVisitor<'_> {
+    fn is_finally_classified_exception(&self, span: Span) -> bool {
+        let mut tags = self.function_ownership_tags.clone();
+        tags.extend(ownership_tags_near_line(self.source, span.start().line));
+        if tags.is_empty() {
+            return false;
+        }
+
+        match self.mode {
+            LintMode::WorkflowNoViewReadsForDecisions => tags.iter().any(|tag| {
+                matches!(
+                    tag.as_str(),
+                    "observed"
+                        | "observed-display-update"
+                        | "authoritative-source"
+                        | "first-run-default"
+                        | "deprecated-legacy-bridge"
+                        | "fact-backed"
+                )
+            }),
+            LintMode::WorkflowNoViewWrites => tags.iter().any(|tag| {
+                matches!(
+                    tag.as_str(),
+                    "observed-display-update" | "fact-backed" | "deprecated-legacy-bridge"
+                )
+            }),
+            LintMode::WorkflowNoFallbackDefaults => tags.iter().any(|tag| {
+                matches!(tag.as_str(), "first-run-default" | "deprecated-legacy-bridge")
+            }),
+            LintMode::WorkflowNoViewDerivedReadiness
+            | LintMode::WorkflowNoViewDerivedRecipientResolution => {
+                tags.iter().any(|tag| tag == "deprecated-legacy-bridge")
+            }
+            _ => false,
+        }
+    }
+
     fn push_violation(&mut self, span: Span, message: String) {
+        if self.is_finally_classified_exception(span) {
+            return;
+        }
         let start = span.start();
         self.violations.push(format!(
             "{}:{}:{}: {}",
@@ -436,6 +690,14 @@ impl OwnershipVisitor<'_> {
                 self.function_name
             ));
         }
+
+        if self.mode == LintMode::WorkflowNoViewDerivedReadiness
+            && self.function_name.contains("readiness")
+            && self.violations.is_empty()
+            && self.function_name.contains("authoritative")
+        {
+            return;
+        }
     }
 
     fn check_post_terminal_call(&mut self, span: Span, call_name: &str, rendered: String) {
@@ -480,6 +742,71 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
 
         let method_name = node.method.to_string();
         let tokens = node.to_token_stream().to_string();
+        match self.mode {
+            LintMode::WorkflowNoViewReadsForDecisions => {
+                if method_name == "snapshot" {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "workflow `{}` reads snapshot() for semantic decisions: {}",
+                            self.function_name, tokens
+                        ),
+                    );
+                }
+            }
+            LintMode::WorkflowNoViewWrites => {
+                if method_name == "views_mut" {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "workflow `{}` mutates projection state directly: {}",
+                            self.function_name, tokens
+                        ),
+                    );
+                }
+            }
+            LintMode::WorkflowNoFallbackDefaults => {
+                if method_name == "unwrap_or_default"
+                    || (method_name == "unwrap_or" && tokens.contains("( 0"))
+                {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "workflow `{}` masks missing authoritative state with fallback default: {}",
+                            self.function_name, tokens
+                        ),
+                    );
+                }
+            }
+            LintMode::WorkflowNoViewDerivedReadiness => {
+                if self.function_name.contains("readiness")
+                    && (method_name == "snapshot" || method_name == "views_mut")
+                {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "readiness workflow `{}` depends on projected state: {}",
+                            self.function_name, tokens
+                        ),
+                    );
+                }
+            }
+            LintMode::WorkflowNoViewDerivedRecipientResolution => {
+                if (self.function_name.contains("recipient")
+                    || self.function_name.contains("delivery"))
+                    && (method_name == "snapshot" || method_name == "views_mut")
+                {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "recipient/delivery workflow `{}` depends on projected state: {}",
+                            self.function_name, tokens
+                        ),
+                    );
+                }
+            }
+            _ => {}
+        }
         self.note_terminal_publication(node.span(), &method_name, &tokens);
         self.check_post_terminal_call(node.span(), &method_name, tokens.clone());
         if self.mode == LintMode::SemanticOwnerProofSuccess {
@@ -544,6 +871,73 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         if let Some(call_name) = expr_call_name(&node.func) {
             let tokens = node.to_token_stream().to_string();
+            match self.mode {
+                LintMode::WorkflowNoViewReadsForDecisions => {
+                    if is_view_read_call_name(&call_name) {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "workflow `{}` reads projection helper for semantic decisions: {}",
+                                self.function_name, tokens
+                            ),
+                        );
+                    }
+                }
+                LintMode::WorkflowNoViewWrites => {
+                    if is_view_write_call_name(&call_name) {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "workflow `{}` mutates projection helper directly: {}",
+                                self.function_name, tokens
+                            ),
+                        );
+                    }
+                }
+                LintMode::WorkflowNoFallbackDefaults => {
+                    if is_fallback_heuristic_call_name(&call_name)
+                        || tokens.contains("unwrap_or_else ( Vec :: new")
+                    {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "workflow `{}` masks missing authoritative state with fallback heuristic: {}",
+                                self.function_name, tokens
+                            ),
+                        );
+                    }
+                }
+                LintMode::WorkflowNoViewDerivedReadiness => {
+                    if self.function_name.contains("readiness")
+                        && (is_view_read_call_name(&call_name)
+                            || is_view_write_call_name(&call_name))
+                    {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "readiness workflow `{}` depends on projected state: {}",
+                                self.function_name, tokens
+                            ),
+                        );
+                    }
+                }
+                LintMode::WorkflowNoViewDerivedRecipientResolution => {
+                    if (self.function_name.contains("recipient")
+                        || self.function_name.contains("delivery"))
+                        && (is_view_read_call_name(&call_name)
+                            || is_view_write_call_name(&call_name))
+                    {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "recipient/delivery workflow `{}` depends on projected state: {}",
+                                self.function_name, tokens
+                            ),
+                        );
+                    }
+                }
+                _ => {}
+            }
             self.note_terminal_publication(node.span(), &call_name, &tokens);
             self.check_post_terminal_call(node.span(), &call_name, tokens.clone());
 
@@ -674,8 +1068,14 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     }
                 }
             }
-            LintMode::SemanticOwnerProofSuccess
+            LintMode::WorkflowNoViewReadsForDecisions
+            | LintMode::WorkflowNoViewWrites
+            | LintMode::WorkflowNoFallbackDefaults
+            | LintMode::WorkflowNoViewDerivedReadiness
+            | LintMode::WorkflowNoViewDerivedRecipientResolution
+            | LintMode::SemanticOwnerProofSuccess
             | LintMode::WorkflowProofBearingSuccess
+            | LintMode::ProofIssuerAuthoritativeSource
             | LintMode::ParityCriticalIgnoredResults => {}
             LintMode::ActorOwnedTaskSpawn
             | LintMode::SemanticOwnerDetachedContinuation
@@ -806,6 +1206,36 @@ fn expr_call_name(expr: &Expr) -> Option<String> {
             .map(|segment| segment.ident.to_string()),
         _ => None,
     }
+}
+
+fn is_view_read_call_name(call_name: &str) -> bool {
+    matches!(
+        call_name,
+        "chat_snapshot"
+            | "contacts_snapshot"
+            | "recovery_snapshot"
+            | "fallback_home"
+            | "homes_state_signal_fallback"
+            | "current_home_context_or_fallback"
+    )
+}
+
+fn is_view_write_call_name(call_name: &str) -> bool {
+    matches!(
+        call_name,
+        "with_chat_state"
+            | "with_homes_state"
+            | "with_contacts_state"
+            | "with_recovery_state"
+            | "with_neighborhood_state"
+    )
+}
+
+fn is_fallback_heuristic_call_name(call_name: &str) -> bool {
+    matches!(
+        call_name,
+        "fallback_home" | "homes_state_signal_fallback" | "current_home_context_or_fallback"
+    )
 }
 
 fn semantic_owner_terminal_helpers(attrs: &[syn::Attribute]) -> Vec<String> {
@@ -1341,6 +1771,20 @@ fn scan_timeout_policy_boundary(file: &Path, syntax: &File) -> Vec<String> {
     }
 
     impl<'ast> Visit<'ast> for Visitor<'_> {
+        fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
+            visit::visit_item_fn(self, node);
+        }
+
+        fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
+            visit::visit_item_mod(self, node);
+        }
+
         fn visit_expr_call(&mut self, node: &'ast ExprCall) {
             if let Some(path) = call_path_string(&node.func) {
                 let path = path.replace(' ', "");
@@ -1390,6 +1834,20 @@ fn scan_time_domain_usage(file: &Path, syntax: &File) -> Vec<String> {
     }
 
     impl<'ast> Visit<'ast> for Visitor<'_> {
+        fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
+            visit::visit_item_fn(self, node);
+        }
+
+        fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
+            visit::visit_item_mod(self, node);
+        }
+
         fn visit_expr_call(&mut self, node: &'ast ExprCall) {
             if let Some(path) = call_path_string(&node.func) {
                 let path = path.replace(' ', "");

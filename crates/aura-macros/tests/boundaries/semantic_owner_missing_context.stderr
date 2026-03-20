@@ -6,8 +6,8 @@ error: semantic_owner requires a parameter typed as OperationContext or containi
  7 | |     terminal = "publish_done",
  8 | |     postcondition = "demo_done",
 ...  |
-12 | |     category = "move_owned"
-13 | | )]
+13 | |     category = "move_owned"
+14 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -215,6 +215,8 @@ pub async fn set_read_receipt_policy(
 /// * `channel_id` - The channel being viewed
 /// * `unread_messages` - List of (message_id, sender_id) tuples for unread messages
 /// * `timestamp_ms` - Current timestamp
+///
+/// OWNERSHIP: observed
 pub async fn emit_read_receipts(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: aura_core::types::identifiers::ContextId,

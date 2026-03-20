@@ -8,7 +8,7 @@
 
 use crate::workflows::signals::emit_signal;
 use crate::workflows::signals::read_signal_or_default;
-use crate::workflows::state_helpers::with_neighborhood_state;
+use crate::workflows::state_helpers::update_neighborhood_projection_observed;
 use crate::{
     signal_defs::{
         ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, DiscoveredPeersState,
@@ -40,7 +40,8 @@ pub async fn add_peer(
     app_core: &Arc<RwLock<AppCore>>,
     peer_id: AuthorityId,
 ) -> Result<usize, AuraError> {
-    let count = with_neighborhood_state(app_core, |state| {
+    // OWNERSHIP: observed-display-update
+    let count = update_neighborhood_projection_observed(app_core, |state| {
         state.add_connected_peer(peer_id);
         state.connected_peer_count()
     })
@@ -63,7 +64,8 @@ pub async fn remove_peer(
     app_core: &Arc<RwLock<AppCore>>,
     peer_id: &AuthorityId,
 ) -> Result<usize, AuraError> {
-    let count = with_neighborhood_state(app_core, |state| {
+    // OWNERSHIP: observed-display-update
+    let count = update_neighborhood_projection_observed(app_core, |state| {
         state.remove_connected_peer(peer_id);
         state.connected_peer_count()
     })

@@ -14,6 +14,33 @@ use aura_app::ui::types::InvitationBridgeType;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
+
+fn format_invitation_type(invitation_info: &aura_app::ui::types::InvitationInfo) -> String {
+    match &invitation_info.invitation_type {
+        InvitationBridgeType::Channel { home_id, .. } => {
+            format!("channel:{home_id}")
+        }
+        InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
+        InvitationBridgeType::Contact { nickname } => {
+            if let Some(name) = nickname {
+                format!("contact:{name}")
+            } else {
+                "contact".to_string()
+            }
+        }
+        InvitationBridgeType::DeviceEnrollment {
+            nickname_suggestion,
+            device_id,
+            ..
+        } => {
+            if let Some(name) = nickname_suggestion {
+                format!("device:{name}")
+            } else {
+                format!("device:{device_id}")
+            }
+        }
+    }
+}
 use super::EffectCommand;
 
 // Re-export workflows for convenience
@@ -277,35 +304,10 @@ pub async fn handle_invitations(
                     }
 
                     // Format invitation type for display
-                    let invitation_type = match &invitation_info.invitation_type {
-                        InvitationBridgeType::Channel { home_id, .. } => {
-                            format!("channel:{home_id}")
-                        }
-                        InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
-                        InvitationBridgeType::Contact { nickname } => {
-                            if let Some(name) = nickname {
-                                format!("contact:{name}")
-                            } else {
-                                "contact".to_string()
-                            }
-                        }
-                        InvitationBridgeType::DeviceEnrollment {
-                            nickname_suggestion,
-                            device_id,
-                            ..
-                        } => {
-                            if let Some(name) = nickname_suggestion {
-                                format!("device:{name}")
-                            } else {
-                                format!("device:{device_id}")
-                            }
-                        }
-                    };
-
                     Some(Ok(OpResponse::InvitationImported {
                         invitation_id: invitation_info.invitation_id.as_str().to_string(),
                         sender_id: invitation_info.sender_id.to_string(),
-                        invitation_type,
+                        invitation_type: format_invitation_type(&invitation_info),
                         expires_at: invitation_info.expires_at_ms,
                         message: invitation_info.message,
                     }))
@@ -320,10 +322,15 @@ pub async fn handle_invitations(
         EffectCommand::AcceptInvitation { invitation_id } => {
             match resolve_pending_invitation_handle(app_core, invitation_id).await {
                 Ok(handle) => {
+                    let accepted = handle.info().clone();
                     match aura_app::ui::workflows::invitation::accept_invitation(app_core, handle)
                         .await
                     {
-                        Ok(()) => Some(Ok(OpResponse::Ok)),
+                        Ok(()) => Some(Ok(OpResponse::InvitationAccepted {
+                            invitation_id: accepted.invitation_id.as_str().to_string(),
+                            sender_id: accepted.sender_id.to_string(),
+                            invitation_type: format_invitation_type(&accepted),
+                        })),
                         Err(e) => Some(Err(OpError::typed(
                             OpFailureCode::AcceptInvitation,
                             format!("Failed to accept invitation: {e}"),

@@ -73,6 +73,7 @@ async fn resolve_scope_by_channel_id(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<ChannelId>,
 ) -> Result<AccessScope, AuraError> {
+    // OWNERSHIP: observed
     let homes = {
         let core = app_core.read().await;
         core.views().get_homes()
@@ -189,6 +190,7 @@ pub async fn configure_home_capabilities_resolved(
             partial: fact_partial_caps(&fact),
             limited: fact_limited_caps(&fact),
         });
+        // OWNERSHIP: observed-display-update
         core.views_mut().set_homes(homes);
     }
     drop(core);
@@ -297,6 +299,7 @@ pub async fn set_access_override_resolved(
     let mut homes = core.views().get_homes();
     if let Some(home) = homes.home_mut(&scope.home_id) {
         home.set_access_override(authority_id, access_level);
+        // OWNERSHIP: observed-display-update
         core.views_mut().set_homes(homes);
     }
     drop(core);

@@ -624,6 +624,7 @@ impl CommandResolver {
     pub async fn capture_snapshot(&self, app_core: &Arc<RwLock<AppCore>>) -> ResolverSnapshot {
         let token = SnapshotToken(self.next_token.fetch_add(1, Ordering::Relaxed));
         self.latest_token.store(token.0, Ordering::Release);
+        // OWNERSHIP: observed
         let state = app_core.read().await.snapshot();
         ResolverSnapshot { token, state }
     }
@@ -1188,6 +1189,7 @@ fn effective_contact_name(contact: &Contact) -> String {
 
 /// Execute a pre-planned command with no string re-resolution.
 #[cfg(feature = "signals")]
+// OWNERSHIP: observed
 pub async fn execute_planned(
     app_core: &Arc<RwLock<AppCore>>,
     plan: PlannedCommand,
@@ -1282,6 +1284,7 @@ async fn consistency_invariant_holds(
     app_core: &Arc<RwLock<AppCore>>,
     plan: &PlannedCommand,
 ) -> bool {
+    // OWNERSHIP: observed
     let snapshot = app_core.read().await.snapshot();
     match plan {
         PlannedCommand::Membership(plan) => match &plan.operation.command {
@@ -1552,7 +1555,7 @@ async fn execute_general(
                 "strong-command-msg",
                 &[text.as_str()],
             )
-            .await;
+            .await?;
             messaging::send_direct_message_to_authority(app_core, target.0, text, timestamp_ms)
                 .await?;
             Ok(Some("direct message sent".to_string()))
@@ -1563,7 +1566,7 @@ async fn execute_general(
                 "strong-command-me",
                 &[action.as_str()],
             )
-            .await;
+            .await?;
             let channel_id = scope_channel_id(&plan.scope, "me")?;
             messaging::send_action(app_core, channel_id.0, action, timestamp_ms).await?;
             Ok(Some("action sent".to_string()))

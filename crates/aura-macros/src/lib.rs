@@ -289,6 +289,26 @@ pub fn best_effort_boundary(_attr: TokenStream, item: TokenStream) -> TokenStrea
     transform_best_effort_boundary(item)
 }
 
+/// Marker attribute for helpers that mint or read authoritative semantic truth.
+///
+/// This is currently a no-op at expansion time and exists so repo-local
+/// ownership lints can distinguish authoritative-source helpers from observed
+/// snapshot helpers.
+#[proc_macro_attribute]
+pub fn authoritative_source(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
+/// Marker attribute for helpers that are projection/display-only.
+///
+/// This is currently a no-op at expansion time and exists so repo-local
+/// ownership lints can distinguish observed-only reads from semantic workflow
+/// ownership.
+#[proc_macro_attribute]
+pub fn observed_only(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
 #[proc_macro_attribute]
 pub fn actor_owned(attr: TokenStream, item: TokenStream) -> TokenStream {
     let config = match syn::parse::<ActorOwnedAttr>(attr) {
@@ -376,6 +396,7 @@ struct SemanticOwnerAttr {
     terminal: LitStr,
     postcondition: LitStr,
     proof: Option<Type>,
+    authoritative_inputs: Vec<LitStr>,
     depends_on: Vec<LitStr>,
     child_ops: Vec<LitStr>,
     category: LitStr,
@@ -480,6 +501,7 @@ impl Parse for SemanticOwnerAttr {
         let mut terminal = None;
         let mut postcondition = None;
         let mut proof = None;
+        let mut authoritative_inputs = None;
         let mut depends_on = None;
         let mut child_ops = None;
         let mut category = None;
@@ -493,6 +515,10 @@ impl Parse for SemanticOwnerAttr {
                 postcondition = Some(expect_string_literal(&meta, "postcondition")?);
             } else if meta.path.is_ident("proof") {
                 proof = Some(expect_type_value(&meta, "proof")?);
+            } else if meta.path.is_ident("authoritative_inputs") {
+                authoritative_inputs = Some(parse_optional_list_literal(
+                    &expect_string_literal(&meta, "authoritative_inputs")?,
+                )?);
             } else if meta.path.is_ident("depends_on") {
                 depends_on = Some(parse_optional_list_literal(&expect_string_literal(
                     &meta,
@@ -508,7 +534,7 @@ impl Parse for SemanticOwnerAttr {
             } else {
                 return Err(Error::new_spanned(
                     meta,
-                    "unsupported semantic_owner attribute key; expected `owner`, `terminal`, `postcondition`, `proof`, `depends_on`, `child_ops`, or `category`",
+                    "unsupported semantic_owner attribute key; expected `owner`, `terminal`, `postcondition`, `proof`, `authoritative_inputs`, `depends_on`, `child_ops`, or `category`",
                 ));
             }
         }
@@ -535,6 +561,12 @@ impl Parse for SemanticOwnerAttr {
                     "semantic_owner requires `proof = TypePath`",
                 )
             })?),
+            authoritative_inputs: authoritative_inputs.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "semantic_owner requires `authoritative_inputs = \"a,b,...\"` (use empty string for none)",
+                )
+            })?,
             depends_on: depends_on.ok_or_else(|| {
                 Error::new(
                     proc_macro2::Span::call_site(),
@@ -731,6 +763,7 @@ fn transform_semantic_owner_fn(
     let terminal = config.terminal.clone();
     let postcondition = config.postcondition.clone();
     let proof = config.proof.clone();
+    let authoritative_inputs = config.authoritative_inputs.clone();
     let depends_on = config.depends_on.clone();
     let child_ops = config.child_ops.clone();
     if let Err(error) = validate_semantic_owner_signature(
@@ -780,8 +813,18 @@ fn transform_semantic_owner_fn(
         );
     }
     let proof_stmt_count = usize::from(proof.is_some());
-    for (index, dependency) in depends_on.iter().enumerate() {
+    for (index, input) in authoritative_inputs.iter().enumerate() {
         let stmt_index = 4 + proof_stmt_count + index;
+        function.block.stmts.insert(
+            stmt_index,
+            parse_quote! {
+                let _: ::aura_core::SemanticOwnerAuthoritativeInput =
+                    ::aura_core::SemanticOwnerAuthoritativeInput::new(#input);
+            },
+        );
+    }
+    for (index, dependency) in depends_on.iter().enumerate() {
+        let stmt_index = 4 + proof_stmt_count + authoritative_inputs.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -791,7 +834,8 @@ fn transform_semantic_owner_fn(
         );
     }
     for (index, child_op) in child_ops.iter().enumerate() {
-        let stmt_index = 4 + proof_stmt_count + depends_on.len() + index;
+        let stmt_index =
+            4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -801,7 +845,7 @@ fn transform_semantic_owner_fn(
         );
     }
     function.block.stmts.insert(
-        4 + proof_stmt_count + depends_on.len() + child_ops.len(),
+        4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
         parse_quote! {
             let _: &'static str = #terminal;
         },
@@ -817,6 +861,7 @@ fn transform_semantic_owner_impl_fn(
     let terminal = config.terminal.clone();
     let postcondition = config.postcondition.clone();
     let proof = config.proof.clone();
+    let authoritative_inputs = config.authoritative_inputs.clone();
     let depends_on = config.depends_on.clone();
     let child_ops = config.child_ops.clone();
     if let Err(error) = validate_semantic_owner_signature(
@@ -866,8 +911,18 @@ fn transform_semantic_owner_impl_fn(
         );
     }
     let proof_stmt_count = usize::from(proof.is_some());
-    for (index, dependency) in depends_on.iter().enumerate() {
+    for (index, input) in authoritative_inputs.iter().enumerate() {
         let stmt_index = 4 + proof_stmt_count + index;
+        function.block.stmts.insert(
+            stmt_index,
+            parse_quote! {
+                let _: ::aura_core::SemanticOwnerAuthoritativeInput =
+                    ::aura_core::SemanticOwnerAuthoritativeInput::new(#input);
+            },
+        );
+    }
+    for (index, dependency) in depends_on.iter().enumerate() {
+        let stmt_index = 4 + proof_stmt_count + authoritative_inputs.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -877,7 +932,8 @@ fn transform_semantic_owner_impl_fn(
         );
     }
     for (index, child_op) in child_ops.iter().enumerate() {
-        let stmt_index = 4 + proof_stmt_count + depends_on.len() + index;
+        let stmt_index =
+            4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -887,7 +943,7 @@ fn transform_semantic_owner_impl_fn(
         );
     }
     function.block.stmts.insert(
-        4 + proof_stmt_count + depends_on.len() + child_ops.len(),
+        4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
         parse_quote! {
             let _: &'static str = #terminal;
         },

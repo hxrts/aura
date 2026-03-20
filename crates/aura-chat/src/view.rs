@@ -25,7 +25,7 @@ use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReduc
 use aura_core::types::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 
-use crate::{ChatFact, CHAT_FACT_TYPE_ID};
+use crate::{ChatFact, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID};
 
 /// Delta type for chat view updates.
 ///
@@ -37,6 +37,8 @@ pub enum ChatDelta {
     ChannelAdded {
         /// Identifier of the channel (debug-friendly string).
         channel_id: String,
+        /// Relational context identifier when authoritative context is known.
+        context_id: Option<String>,
         /// Human-friendly channel name.
         name: String,
         /// Optional description/topic for the channel.
@@ -59,12 +61,16 @@ pub enum ChatDelta {
     ChannelUpdated {
         /// Identifier of the channel whose metadata changed.
         channel_id: String,
+        /// Updated authoritative context identifier, if provided.
+        context_id: Option<String>,
         /// Updated channel name, if provided.
         name: Option<String>,
         /// Updated topic, if provided.
         topic: Option<String>,
         /// Updated member count hint.
         member_count: Option<u32>,
+        /// Updated known non-self participant identifiers.
+        member_ids: Option<Vec<String>>,
     },
     /// A new message was sent
     MessageAdded {
@@ -104,6 +110,15 @@ pub enum ChatDelta {
         new_content: String,
         /// Unix epoch milliseconds when the edit occurred.
         edited_at: u64,
+    },
+    /// A message delivery lifecycle status changed.
+    MessageDeliveryUpdated {
+        /// Channel containing the message.
+        channel_id: String,
+        /// Identifier of the message.
+        message_id: String,
+        /// Updated delivery lifecycle status.
+        delivery_status: ChatMessageDeliveryStatus,
     },
     /// A message was read by a recipient
     ///
@@ -152,6 +167,11 @@ impl ComposableDelta for ChatDelta {
                 message_id,
                 ..
             }
+            | ChatDelta::MessageDeliveryUpdated {
+                channel_id,
+                message_id,
+                ..
+            }
             | ChatDelta::MessageRemoved {
                 channel_id,
                 message_id,
@@ -171,18 +191,24 @@ impl ComposableDelta for ChatDelta {
         match (self, other) {
             (
                 ChatDelta::ChannelAdded {
+                    context_id,
                     name,
                     topic,
                     member_count,
                     ..
                 },
                 ChatDelta::ChannelUpdated {
+                    context_id: new_context_id,
                     name: new_name,
                     topic: new_topic,
                     member_count: new_count,
+                    member_ids: _new_member_ids,
                     ..
                 },
             ) => {
+                if new_context_id.is_some() {
+                    *context_id = new_context_id;
+                }
                 if let Some(new_name) = new_name {
                     *name = new_name;
                 }
@@ -196,18 +222,25 @@ impl ComposableDelta for ChatDelta {
             }
             (
                 ChatDelta::ChannelUpdated {
+                    context_id,
                     name,
                     topic,
                     member_count,
+                    member_ids,
                     ..
                 },
                 ChatDelta::ChannelUpdated {
+                    context_id: new_context_id,
                     name: new_name,
                     topic: new_topic,
                     member_count: new_count,
+                    member_ids: new_member_ids,
                     ..
                 },
             ) => {
+                if new_context_id.is_some() {
+                    *context_id = new_context_id;
+                }
                 if new_name.is_some() {
                     *name = new_name;
                 }
@@ -216,6 +249,9 @@ impl ComposableDelta for ChatDelta {
                 }
                 if new_count.is_some() {
                     *member_count = new_count;
+                }
+                if new_member_ids.is_some() {
+                    *member_ids = new_member_ids;
                 }
                 true
             }
@@ -279,6 +315,18 @@ impl ComposableDelta for ChatDelta {
                 }
                 true
             }
+            (
+                ChatDelta::MessageDeliveryUpdated {
+                    delivery_status, ..
+                },
+                ChatDelta::MessageDeliveryUpdated {
+                    delivery_status: other_status,
+                    ..
+                },
+            ) => {
+                *delivery_status = other_status;
+                true
+            }
             (ChatDelta::MessageRemoved { .. }, ChatDelta::MessageRemoved { .. }) => true,
             (
                 ChatDelta::MessageRead { read_at, .. },
@@ -322,19 +370,20 @@ impl ViewDeltaReducer for ChatViewReducer {
 
         let delta = match chat_fact {
             ChatFact::ChannelCreated {
+                context_id,
                 channel_id,
                 name,
                 topic,
                 is_dm,
                 created_at,
                 creator_id,
-                ..
             } => Some(ChatDelta::ChannelAdded {
                 channel_id: channel_id.to_string(),
+                context_id: Some(context_id.to_string()),
                 name,
                 topic,
                 is_dm,
-                member_count: 0, // Would need additional fact tracking
+                member_count: 1,
                 created_at: created_at.ts_ms,
                 creator_id: creator_id.to_string(),
             }),
@@ -342,15 +391,20 @@ impl ViewDeltaReducer for ChatViewReducer {
                 channel_id: channel_id.to_string(),
             }),
             ChatFact::ChannelUpdated {
+                context_id,
                 channel_id,
                 name,
                 topic,
+                member_count,
+                member_ids,
                 ..
             } => Some(ChatDelta::ChannelUpdated {
                 channel_id: channel_id.to_string(),
+                context_id: Some(context_id.to_string()),
                 name,
                 topic,
-                member_count: None,
+                member_count,
+                member_ids: member_ids.map(|ids| ids.into_iter().map(|id| id.to_string()).collect()),
             }),
             ChatFact::MessageSentSealed {
                 channel_id,
@@ -397,6 +451,16 @@ impl ViewDeltaReducer for ChatViewReducer {
                 editor_id: editor_id.to_string(),
                 new_content: String::from_utf8_lossy(&new_payload).to_string(),
                 edited_at: edited_at.ts_ms,
+            }),
+            ChatFact::MessageDeliveryUpdated {
+                channel_id,
+                message_id,
+                delivery_status,
+                ..
+            } => Some(ChatDelta::MessageDeliveryUpdated {
+                channel_id: channel_id.to_string(),
+                message_id,
+                delivery_status,
             }),
             ChatFact::MessageDeleted {
                 channel_id,
@@ -551,6 +615,7 @@ mod tests {
         let deltas = vec![
             ChatDelta::ChannelAdded {
                 channel_id: "chan-1".to_string(),
+                context_id: Some("ctx-1".to_string()),
                 name: "general".to_string(),
                 topic: None,
                 is_dm: false,
@@ -560,9 +625,11 @@ mod tests {
             },
             ChatDelta::ChannelUpdated {
                 channel_id: "chan-1".to_string(),
+                context_id: Some("ctx-2".to_string()),
                 name: Some("general-chat".to_string()),
                 topic: Some("new topic".to_string()),
                 member_count: Some(3),
+                member_ids: None,
             },
         ];
 

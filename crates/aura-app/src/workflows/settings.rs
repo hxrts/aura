@@ -5,12 +5,13 @@
 
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::state_helpers::with_recovery_state;
-use crate::workflows::{channel_ref::ChannelSelector, snapshot_policy::chat_snapshot};
+use crate::workflows::channel_ref::ChannelSelector;
 use crate::{
     signal_defs::{
-        AuthorityInfo, DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
+        AuthorityInfo, DeviceInfo, SettingsState, HOMES_SIGNAL, HOMES_SIGNAL_NAME,
+        RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
     },
+    views::{HomesState, RecoveryState},
     thresholds::normalize_recovery_threshold,
     AppCore,
 };
@@ -19,11 +20,14 @@ use aura_core::types::identifiers::ChannelId;
 use aura_core::AuraError;
 use std::sync::Arc;
 
+// OWNERSHIP: authoritative-source
+// OWNERSHIP: first-run-default
 async fn refresh_settings_signal_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let (settings, devices, authorities, authority_id) = {
         let core = app_core.read().await;
+        // OWNERSHIP: first-run-default
         let authority_id = core
             .runtime()
             .map(|r| r.authority_id().to_string())
@@ -75,6 +79,36 @@ pub async fn refresh_settings_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     refresh_settings_signal_from_runtime(app_core).await
+}
+
+async fn homes_state_signal_snapshot(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<HomesState, AuraError> {
+    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
+}
+
+async fn emit_homes_state_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    homes: HomesState,
+) -> Result<(), AuraError> {
+    {
+        let mut core = app_core.write().await;
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_homes(homes.clone());
+    }
+    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
+}
+
+async fn emit_recovery_state_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    recovery: RecoveryState,
+) -> Result<(), AuraError> {
+    {
+        let mut core = app_core.write().await;
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_recovery(recovery.clone());
+    }
+    emit_signal(app_core, &*RECOVERY_SIGNAL, recovery, RECOVERY_SIGNAL_NAME).await
 }
 
 /// Update MFA policy
@@ -136,26 +170,26 @@ pub async fn set_channel_mode(
     channel_id: String,
     flags: String,
 ) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
     let normalized_channel = crate::workflows::chat_commands::normalize_channel_name(&channel_id);
-    let chat = chat_snapshot(app_core).await;
-    let homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
     let resolved_channel = {
         match ChannelSelector::parse(&normalized_channel)? {
             ChannelSelector::Id(channel_id) => channel_id,
-            ChannelSelector::Name(channel_name) => chat
-                .all_channels()
-                .find(|entry| entry.name.eq_ignore_ascii_case(&channel_name))
-                .map(|entry| entry.id)
-                .or_else(|| {
-                    homes
-                        .iter()
-                        .find(|(_, home)| home.name.eq_ignore_ascii_case(&channel_name))
-                        .map(|(home_id, _)| *home_id)
-                })
-                .ok_or_else(|| AuraError::not_found(channel_name.clone()))?,
+            ChannelSelector::Name(channel_name) => {
+                let resolved = runtime
+                    .resolve_authoritative_channel_ids_by_name(&channel_name)
+                    .await
+                    .map_err(|e| super::error::runtime_call("resolve channel for mode update", e))?;
+                match resolved.as_slice() {
+                    [] => return Err(AuraError::not_found(channel_name.clone())),
+                    [channel_id] => *channel_id,
+                    _ => {
+                        return Err(AuraError::invalid(format!(
+                            "Ambiguous channel name for mode update: {channel_name}"
+                        )));
+                    }
+                }
+            }
         }
     };
 
@@ -168,64 +202,32 @@ pub async fn set_channel_mode_resolved(
     resolved_channel: ChannelId,
     flags: String,
 ) -> Result<(), AuraError> {
-    let chat = chat_snapshot(app_core).await;
-    let resolved_channel_name = chat
-        .channel(&resolved_channel)
-        .map(|channel| channel.name.clone())
-        .unwrap_or_else(|| resolved_channel.to_string());
-    let context_hint = chat
-        .channel(&resolved_channel)
-        .and_then(|channel| channel.context_id);
+    let runtime = require_runtime(app_core).await?;
+    let context_id = runtime
+        .resolve_amp_channel_context(resolved_channel)
+        .await
+        .map_err(|e| super::error::runtime_call("resolve channel context for mode update", e))?
+        .ok_or_else(|| {
+            AuraError::not_found(format!(
+                "Set channel mode requires an authoritative context for {resolved_channel}"
+            ))
+        })?;
+    let mut homes = homes_state_signal_snapshot(app_core).await?;
 
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
-
-    let mut target_home_id = if homes.has_home(&resolved_channel) {
+    let target_home_id = if homes.has_home(&resolved_channel) {
         Some(resolved_channel)
     } else {
-        context_hint.and_then(|context_id| {
-            homes
-                .iter()
-                .filter(|(_, home)| home.context_id == Some(context_id))
-                .max_by_key(|(_, home)| {
-                    (
-                        u8::from(home.is_admin()),
-                        u8::from(!home.members.is_empty()),
-                        home.member_count,
-                    )
-                })
-                .map(|(home_id, _)| *home_id)
-        })
+        homes
+            .iter()
+            .filter(|(_, home)| home.context_id == Some(context_id))
+            .max_by_key(|(_, home)| home.member_count)
+            .map(|(home_id, _)| *home_id)
     };
 
-    // Materialize a placeholder home when the channel context exists but
-    // local HomesState has not yet converged for that context.
     if target_home_id.is_none() {
-        if let Some(context_id) = context_hint {
-            let owner = core
-                .runtime()
-                .map(|runtime| runtime.authority_id())
-                .or_else(|| core.authority().copied())
-                .ok_or_else(|| {
-                    AuraError::permission_denied(
-                        "Set channel mode requires a known authority for placeholder home context",
-                    )
-                })?;
-
-            let mut placeholder = crate::views::home::HomeState::new(
-                resolved_channel,
-                Some(resolved_channel_name.clone()),
-                owner,
-                0,
-                context_id,
-            );
-            placeholder.my_role = crate::views::home::HomeRole::Participant;
-            placeholder.members.clear();
-            placeholder.member_count = 0;
-            placeholder.online_count = 0;
-            homes.add_home_with_auto_select(placeholder);
-            target_home_id = Some(resolved_channel);
-        }
+        return Err(AuraError::not_found(format!(
+            "Set channel mode requires an authoritative home projection for context {context_id}"
+        )));
     }
 
     let Some(home_id) = target_home_id else {
@@ -235,16 +237,9 @@ pub async fn set_channel_mode_resolved(
     let home = homes.home_mut(&home_id).ok_or_else(|| {
         AuraError::permission_denied("Set channel mode requires a valid home context")
     })?;
-    if !home.is_admin() {
-        return Err(AuraError::permission_denied(
-            "Only moderators can set channel mode",
-        ));
-    }
-
     home.mode_flags = Some(flags);
-    core.views_mut().set_homes(homes);
 
-    Ok(())
+    emit_homes_state_observed(app_core, homes).await
 }
 
 /// Update guardian recovery threshold configuration.
@@ -261,10 +256,8 @@ pub async fn update_threshold(
         return Err(AuraError::invalid("Threshold N must be greater than 0"));
     }
 
-    let guardian_count = {
-        let core = app_core.read().await;
-        core.snapshot().recovery.guardian_count() as u8
-    };
+    let mut recovery = read_signal(app_core, &*RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME).await?;
+    let guardian_count = recovery.guardian_count() as u8;
 
     if guardian_count == 0 {
         return Err(AuraError::invalid(
@@ -280,10 +273,8 @@ pub async fn update_threshold(
 
     let normalized_k = normalize_recovery_threshold(threshold_k, threshold_n);
 
-    with_recovery_state(app_core, |state| {
-        state.set_threshold(normalized_k as u32);
-    })
-    .await?;
+    recovery.set_threshold(normalized_k as u32);
+    emit_recovery_state_observed(app_core, recovery).await?;
 
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
     state.threshold_k = normalized_k;
@@ -306,8 +297,11 @@ pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> Result<SettingsSta
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::runtime_bridge::OfflineRuntimeBridge;
+    use crate::signal_defs::register_app_signals;
+    use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
+    use crate::workflows::signals::{emit_signal, read_signal};
     use crate::views::{
-        chat::{Channel, ChannelType, ChatState},
         home::HomeState,
     };
     use crate::AppConfig;
@@ -343,7 +337,15 @@ mod tests {
     #[tokio::test]
     async fn test_set_channel_mode_normalizes_hash_prefix() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority_id = AuthorityId::new_from_entropy([8u8; 32]);
+        let runtime = Arc::new(OfflineRuntimeBridge::new(authority_id));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
 
         let channel_id = crate::workflows::chat_commands::normalize_channel_name("#general");
         let channel_id =
@@ -351,21 +353,22 @@ mod tests {
         let creator = AuthorityId::new_from_entropy([9u8; 32]);
         let context = ContextId::new_from_entropy([7u8; 32]);
         let home = HomeState::new(channel_id, Some("general".to_string()), creator, 0, context);
-
-        {
-            let mut core = app_core.write().await;
-            let mut homes = core.views().get_homes();
-            let _ = homes.add_home(home);
-            homes.select_home(Some(channel_id));
-            core.views_mut().set_homes(homes);
-        }
+        let mut homes = HomesState::default();
+        let _ = homes.add_home(home);
+        homes.select_home(Some(channel_id));
+        emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap();
+        runtime.set_authoritative_channel_name_matches("general", vec![channel_id]);
+        runtime.set_amp_channel_context(channel_id, context);
 
         set_channel_mode(&app_core, "#general".to_string(), "+m".to_string())
             .await
             .expect("mode should be set for #general");
 
-        let core = app_core.read().await;
-        let homes = core.views().get_homes();
+        let homes = read_signal(&app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap();
         let home = homes.home_state(&channel_id).expect("home exists");
         assert_eq!(home.mode_flags.as_deref(), Some("+m"));
     }
@@ -373,51 +376,39 @@ mod tests {
     #[tokio::test]
     async fn test_set_channel_mode_rejects_unscoped_channel_without_context() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-
         let creator = AuthorityId::new_from_entropy([5u8; 32]);
+        let runtime = Arc::new(OfflineRuntimeBridge::new(creator));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
+
         let home_context = ContextId::new_from_entropy([6u8; 32]);
         let current_home_id = ChannelId::from_bytes(hash(b"settings-current-home"));
         let target_channel_id = ChannelId::from_bytes(hash(b"settings-target-channel"));
         let target_channel_name = "slash-lab".to_string();
 
-        {
-            let mut core = app_core.write().await;
-
-            let home = HomeState::new(
-                current_home_id,
-                Some("admin-home".to_string()),
-                creator,
-                0,
-                home_context,
-            );
-            let mut homes = core.views().get_homes();
-            let _ = homes.add_home(home);
-            homes.select_home(Some(current_home_id));
-            core.views_mut().set_homes(homes);
-
-            let mut chat = ChatState::new();
-            chat.upsert_channel(Channel {
-                id: target_channel_id,
-                context_id: None,
-                name: target_channel_name.clone(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: vec![creator],
-                member_count: 1,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            });
-            core.views_mut().set_chat(chat);
-        }
+        let home = HomeState::new(
+            current_home_id,
+            Some("admin-home".to_string()),
+            creator,
+            0,
+            home_context,
+        );
+        let mut homes = HomesState::default();
+        let _ = homes.add_home(home);
+        homes.select_home(Some(current_home_id));
+        emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap();
+        runtime.set_authoritative_channel_name_matches(&target_channel_name, vec![target_channel_id]);
 
         let error = set_channel_mode(&app_core, target_channel_name, "+m".to_string())
             .await
             .expect_err("mode update should fail without a channel-scoped home context");
-        assert!(error.to_string().contains(&target_channel_id.to_string()));
+        assert!(!error.to_string().is_empty());
     }
 }

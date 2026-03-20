@@ -167,10 +167,11 @@ pub use ownership::{
     OwnershipCapability, OwnershipCategory, OwnershipError, OwnershipErrorDomain, OwnershipResult,
     OwnershipTransfer, OwnershipTransferCapability, PostTerminalBestEffort,
     PostconditionProofCapability, PublicationSequence, ReadinessPublicationCapability,
-    SemanticOwnerAwaitPolicy, SemanticOwnerBestEffortPolicy, SemanticOwnerChildOperation,
-    SemanticOwnerDependency, SemanticOwnerHandoffPolicy, SemanticOwnerPostcondition,
-    SemanticOwnerProtocol, SemanticSuccessProof, SupervisionRegistration, TerminalOutcome,
-    TerminalPublisher, Terminality, TraceContext,
+    SemanticOwnerAuthoritativeInput, SemanticOwnerAwaitPolicy,
+    SemanticOwnerBestEffortPolicy, SemanticOwnerChildOperation, SemanticOwnerDependency,
+    SemanticOwnerHandoffPolicy, SemanticOwnerPostcondition, SemanticOwnerProtocol,
+    SemanticSuccessProof, SupervisionRegistration, TerminalOutcome, TerminalPublisher,
+    Terminality, TraceContext,
 };
 pub use reconfiguration::{
     ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,

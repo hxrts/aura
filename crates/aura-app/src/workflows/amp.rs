@@ -1,6 +1,6 @@
 //! AMP workflows (channel state inspection and maintenance).
 
-use super::error::runtime_call;
+use super::error::{fact_encoding, runtime_call};
 use aura_core::types::identifiers::{ChannelId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
 use aura_journal::fact::{
@@ -56,23 +56,23 @@ pub async fn propose_bump<E: AmpJournalEffects>(
 }
 
 /// Create an AMP channel checkpoint fact.
+///
+/// OWNERSHIP: authoritative-source
 pub async fn create_checkpoint<E: AmpJournalEffects>(
     effects: &E,
     context: ContextId,
     channel: ChannelId,
 ) -> Result<ChannelCheckpoint, AuraError> {
     let state = inspect_channel(effects, context, channel).await?;
+    let checkpoint_payload =
+        serde_json::to_vec(&(state.chan_epoch, state.current_gen)).map_err(fact_encoding)?;
     let checkpoint = ChannelCheckpoint {
         context,
         channel,
         chan_epoch: state.chan_epoch,
         base_gen: state.current_gen,
         window: 32,
-        ck_commitment: Hash32::new(hash::hash(
-            serde_json::to_vec(&(state.chan_epoch, state.current_gen))
-                .unwrap_or_default()
-                .as_slice(),
-        )),
+        ck_commitment: Hash32::new(hash::hash(checkpoint_payload.as_slice())),
         skip_window_override: None,
     };
 

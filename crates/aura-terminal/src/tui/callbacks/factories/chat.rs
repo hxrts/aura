@@ -1,7 +1,7 @@
 //! Chat domain callbacks.
 
 use super::*;
-use crate::tui::semantic_lifecycle::reconcile_handed_off_terminal_status;
+use crate::tui::semantic_lifecycle::apply_handed_off_terminal_status;
 use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the chat screen
@@ -58,47 +58,57 @@ impl ChatCallbacks {
                     SemanticOperationTransferScope::AcceptPendingChannelInvitation,
                 );
                 let accept = std::panic::AssertUnwindSafe(
-                    aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_instance(
+                    aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_terminal_status(
                         &app_core,
                         Some(handoff_instance_id),
                     ),
                 )
                 .catch_unwind();
                 match accept.await {
-                    Ok(Ok(_)) => {
-                        if let Err(error) = reconcile_handed_off_terminal_status(
-                            &app_core,
-                            &tx,
-                            OperationId::invitation_accept(),
-                            operation_instance_id,
-                            SemanticOperationKind::AcceptPendingChannelInvitation,
-                        )
-                        .await
-                        {
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error("invitation", error)),
-                            )
-                            .await;
+                    Ok(outcome) => {
+                        let terminal = outcome.terminal;
+                        match outcome.result {
+                            Ok(_) => {
+                                if let Err(error) = apply_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::invitation_accept(),
+                                    operation_instance_id,
+                                    SemanticOperationKind::AcceptPendingChannelInvitation,
+                                    terminal,
+                                )
+                                .await
+                                {
+                                    send_ui_update_reliable(
+                                        &tx,
+                                        UiUpdate::ToastAdded(ToastMessage::error(
+                                            "invitation",
+                                            error,
+                                        )),
+                                    )
+                                    .await;
+                                }
+                            }
+                            Err(error) => {
+                                let _ = apply_handed_off_terminal_status(
+                                    &app_core,
+                                    &tx,
+                                    OperationId::invitation_accept(),
+                                    operation_instance_id.clone(),
+                                    SemanticOperationKind::AcceptPendingChannelInvitation,
+                                    terminal,
+                                )
+                                .await;
+                                send_ui_update_reliable(
+                                    &tx,
+                                    UiUpdate::ToastAdded(ToastMessage::error(
+                                        "invitation",
+                                        format!("Accept pending invitation failed: {error}"),
+                                    )),
+                                )
+                                .await;
+                            }
                         }
-                    }
-                    Ok(Err(error)) => {
-                        let _ = reconcile_handed_off_terminal_status(
-                            &app_core,
-                            &tx,
-                            OperationId::invitation_accept(),
-                            operation_instance_id.clone(),
-                            SemanticOperationKind::AcceptPendingChannelInvitation,
-                        )
-                        .await;
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "invitation",
-                                format!("Accept pending invitation failed: {error}"),
-                            )),
-                        )
-                        .await;
                     }
                     Err(panic) => {
                         let detail = if let Some(message) = panic.downcast_ref::<&str>() {
@@ -112,12 +122,13 @@ impl ChatCallbacks {
                         } else {
                             "accept_pending_channel_invitation callback panicked".to_string()
                         };
-                        let _ = reconcile_handed_off_terminal_status(
+                        let _ = apply_handed_off_terminal_status(
                             &app_core,
                             &tx,
                             OperationId::invitation_accept(),
                             operation_instance_id,
                             SemanticOperationKind::AcceptPendingChannelInvitation,
+                            None,
                         )
                         .await;
                         send_ui_update_reliable(
@@ -450,24 +461,16 @@ impl ChatCallbacks {
 
                 match result {
                     Ok(_) => {
-                        let channel_name = {
-                            let core = app_core.read().await;
-                            core.snapshot()
-                                .chat
-                                .all_channels()
-                                .find(|channel| channel.id.to_string() == channel_id_clone)
-                                .map(|channel| Some(channel.name.clone()))
-                                .unwrap_or(None)
+                        let channel_fact = match channel_id_clone.parse::<aura_core::ChannelId>() {
+                            Ok(channel_id) => ChannelFactKey::identified(channel_id.to_string()),
+                            Err(_) => ChannelFactKey::named(channel_id_clone.clone()),
                         };
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::RuntimeFactsUpdated {
                                 replace_kinds: vec![RuntimeEventKind::MessageCommitted],
                                 facts: vec![RuntimeFact::MessageCommitted {
-                                    channel: ChannelFactKey {
-                                        id: Some(channel_id_clone.clone()),
-                                        name: channel_name.clone(),
-                                    },
+                                    channel: channel_fact,
                                     content: content_clone.clone(),
                                 }],
                             },
@@ -533,21 +536,25 @@ impl ChatCallbacks {
                         let _ = operation
                             .handoff_to_app_workflow(SemanticOperationTransferScope::JoinChannel);
                     }
-                    match aura_app::ui::workflows::messaging::join_channel_by_name_with_instance(
+                    match aura_app::ui::workflows::messaging::join_channel_by_name_with_terminal_status(
                         &app_core,
                         &channel_name,
                         workflow_instance_id,
                     )
                     .await
                     {
-                        Ok(()) => {
+                        aura_app::ui_contract::WorkflowTerminalOutcome {
+                            result: Ok(()),
+                            terminal,
+                        } => {
                             if let Some(operation_instance_id) = operation_instance_id {
-                                if let Err(error) = reconcile_handed_off_terminal_status(
+                                if let Err(error) = apply_handed_off_terminal_status(
                                     &app_core,
                                     &tx,
                                     OperationId::join_channel(),
                                     operation_instance_id,
                                     SemanticOperationKind::JoinChannel,
+                                    terminal,
                                 )
                                 .await
                                 {
@@ -561,14 +568,18 @@ impl ChatCallbacks {
                                 }
                             }
                         }
-                        Err(error) => {
+                        aura_app::ui_contract::WorkflowTerminalOutcome {
+                            result: Err(error),
+                            terminal,
+                        } => {
                             if let Some(operation_instance_id) = operation_instance_id {
-                                let _ = reconcile_handed_off_terminal_status(
+                                let _ = apply_handed_off_terminal_status(
                                     &app_core,
                                     &tx,
                                     OperationId::join_channel(),
                                     operation_instance_id,
                                     SemanticOperationKind::JoinChannel,
+                                    terminal,
                                 )
                                 .await;
                             }

@@ -73,14 +73,14 @@ impl InvitationManager {
         .await
     }
 
-    /// List pending invitations.
-    pub async fn list_pending(&self, is_pending: impl Fn(&Invitation) -> bool) -> Vec<Invitation> {
+    /// List cached invitations matching a predicate.
+    pub async fn list_matching(&self, predicate: impl Fn(&Invitation) -> bool) -> Vec<Invitation> {
         self.state
             .read()
             .await
             .invitations
             .values()
-            .filter(|inv| is_pending(inv))
+            .filter(|inv| predicate(inv))
             .cloned()
             .collect()
     }

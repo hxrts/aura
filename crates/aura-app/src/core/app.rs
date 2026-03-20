@@ -28,7 +28,7 @@ use aura_core::effects::reactive::{
 use aura_core::hash;
 use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
-use aura_core::types::identifiers::{AuthorityId, CeremonyId};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
@@ -106,6 +106,13 @@ pub struct AppCore {
     /// View state manager
     views: ViewState,
 
+    /// Authoritative active-home selection for workflow resolution.
+    ///
+    /// This is owned by the application core rather than inferred from view
+    /// projections so parity-critical workflows do not depend on view-only
+    /// selection heuristics.
+    active_home_selection: Option<ChannelId>,
+
     /// Optional RuntimeBridge for runtime operations (sync, signing, network)
     ///
     /// When present, enables:
@@ -159,6 +166,7 @@ impl AppCore {
             authority: None,
             account_id,
             views: ViewState::default(),
+            active_home_selection: None,
             runtime: None,
             reactive,
             #[cfg(feature = "callbacks")]
@@ -225,6 +233,7 @@ impl AppCore {
             authority: Some(authority),
             account_id,
             views: ViewState::default(),
+            active_home_selection: None,
             runtime: None,
             reactive,
             #[cfg(feature = "callbacks")]
@@ -310,6 +319,16 @@ impl AppCore {
     /// Returns `false` for demo/offline mode (created with `new()`).
     pub fn has_runtime(&self) -> bool {
         self.runtime.is_some()
+    }
+
+    /// Return the authoritative active-home selection, if one has been stored.
+    pub fn active_home_selection(&self) -> Option<ChannelId> {
+        self.active_home_selection
+    }
+
+    /// Store the authoritative active-home selection.
+    pub fn set_active_home_selection(&mut self, home_id: Option<ChannelId>) {
+        self.active_home_selection = home_id;
     }
 
     // ==================== Reactive Effects ====================

@@ -7,7 +7,8 @@ use aura_core::types::identifiers::ChannelId;
 
 use crate::facts::ChatFact;
 use crate::guards::{
-    check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
+    check_capability, check_flow_budget, check_moderation, costs, EffectCommand, GuardOutcome,
+    GuardSnapshot,
 };
 
 /// Guard-compatible fact-first chat operations.
@@ -73,6 +74,9 @@ impl ChatFactService {
             snapshot,
             &crate::guards::types::CapabilityId::from(costs::CAP_CHAT_MESSAGE_SEND),
         ) {
+            return outcome;
+        }
+        if let Some(outcome) = check_moderation(snapshot) {
             return outcome;
         }
         if let Some(outcome) = check_flow_budget(snapshot, costs::CHAT_MESSAGE_SEND_COST) {
@@ -165,5 +169,35 @@ mod tests {
                 EffectCommand::JournalAppend { .. }
             ]
         ));
+    }
+
+    #[test]
+    fn send_denied_when_sender_is_muted_before_flow_budget() {
+        let service = ChatFactService::new();
+        let snapshot = GuardSnapshot::new(
+            AuthorityId::new_from_entropy([5u8; 32]),
+            ContextId::new_from_entropy([6u8; 32]),
+            FlowCost::new(10),
+            vec![crate::guards::types::CapabilityId::from(
+                costs::CAP_CHAT_MESSAGE_SEND,
+            )],
+            123,
+        )
+        .with_moderation_status(false, true);
+
+        let out = service.prepare_send_message_sealed(
+            &snapshot,
+            ChannelId::default(),
+            "message-1".into(),
+            "you".into(),
+            b"payload".to_vec(),
+            None,
+            None,
+        );
+        assert!(matches!(
+            out.decision,
+            crate::guards::GuardDecision::Deny { .. }
+        ));
+        assert!(out.effects.is_empty());
     }
 }

@@ -407,6 +407,7 @@ impl DispatchHelper {
             | OpResponse::RecoveryCompleted
             | OpResponse::RecoveryGuardianInvited { .. }
             | OpResponse::HomeInvitationAccepted { .. }
+            | OpResponse::InvitationAccepted { .. }
             | OpResponse::HomeCreated { .. }
             | OpResponse::NeighborhoodCreated { .. }
             | OpResponse::HomeAddedToNeighborhood { .. }

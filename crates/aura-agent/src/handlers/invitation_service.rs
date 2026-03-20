@@ -578,6 +578,14 @@ impl InvitationServiceApi {
         self.handler.list_pending_with_storage(&self.effects).await
     }
 
+    /// List cached invitations matching a predicate.
+    pub async fn list_cached_matching(
+        &self,
+        predicate: impl Fn(&Invitation) -> bool,
+    ) -> Vec<Invitation> {
+        self.handler.list_cached_matching(predicate).await
+    }
+
     /// Get an invitation by ID
     ///
     /// # Arguments

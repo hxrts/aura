@@ -100,6 +100,7 @@ required-features = ["host"]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
+aura-composition = { path = "../aura-composition" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 aura-chat = { path = "../aura-chat" }

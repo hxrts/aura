@@ -127,6 +127,22 @@ impl SemanticOwnerDependency {
     }
 }
 
+/// Declared authoritative input kind for a semantic owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SemanticOwnerAuthoritativeInput {
+    name: &'static str,
+}
+
+impl SemanticOwnerAuthoritativeInput {
+    pub const fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    pub const fn name(self) -> &'static str {
+        self.name
+    }
+}
+
 /// Declared child-operation allowance for a semantic owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SemanticOwnerChildOperation {

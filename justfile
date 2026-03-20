@@ -644,6 +644,13 @@ ci-ownership-policy:
     just ci-semantic-owner-no-spawn
     just ci-semantic-owner-proof-success
     just ci-workflow-proof-bearing-success
+    just ci-proof-issuer-authoritative-source
+    just ci-workflow-no-view-reads
+    just ci-workflow-no-view-writes
+    just ci-workflow-no-fallback-defaults
+    just ci-workflow-no-view-derived-readiness
+    just ci-workflow-no-view-derived-recipient-resolution
+    just ci-workflow-ownership-tag-ratchet
     just ci-parity-critical-ignored-results
     just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
@@ -684,6 +691,27 @@ ci-semantic-owner-proof-success:
 
 ci-workflow-proof-bearing-success:
     bash scripts/check/workflow-proof-bearing-success.sh
+
+ci-proof-issuer-authoritative-source:
+    bash scripts/check/proof-issuer-authoritative-source.sh
+
+ci-workflow-no-view-reads:
+    bash scripts/check/workflow-no-view-reads-for-decisions.sh
+
+ci-workflow-no-view-writes:
+    bash scripts/check/workflow-no-view-writes.sh
+
+ci-workflow-no-fallback-defaults:
+    bash scripts/check/workflow-no-fallback-defaults.sh
+
+ci-workflow-no-view-derived-readiness:
+    bash scripts/check/workflow-no-view-derived-readiness.sh
+
+ci-workflow-no-view-derived-recipient-resolution:
+    bash scripts/check/workflow-no-view-derived-recipient-resolution.sh
+
+ci-workflow-ownership-tag-ratchet:
+    bash scripts/check/workflow-ownership-tag-ratchet.sh
 
 ci-parity-critical-ignored-results:
     bash scripts/check/parity-critical-ignored-results.sh

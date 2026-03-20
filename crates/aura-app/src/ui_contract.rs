@@ -850,6 +850,18 @@ impl SemanticOperationStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowTerminalStatus {
+    pub causality: Option<SemanticOperationCausality>,
+    pub status: SemanticOperationStatus,
+}
+
+#[derive(Debug)]
+pub struct WorkflowTerminalOutcome<T> {
+    pub result: Result<T, aura_core::AuraError>,
+    pub terminal: Option<WorkflowTerminalStatus>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SemanticOperationCausality {
     pub owner_epoch: OwnerEpoch,
@@ -3333,6 +3345,7 @@ mod tests {
                     id: "channel:0000000000000000".to_string(),
                     selected: true,
                     confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
                 }],
             }],
             messages: Vec::new(),
@@ -3366,6 +3379,7 @@ mod tests {
                     id: "override:channel-list".to_string(),
                     selected: true,
                     confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
                 }],
             }],
             messages: Vec::new(),
@@ -3399,6 +3413,7 @@ mod tests {
                     id: "row-2".to_string(),
                     selected: true,
                     confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
                 }],
             }],
             messages: Vec::new(),
@@ -4686,6 +4701,7 @@ mod tests {
                     id: "amp-bridge".to_string(),
                     selected: true,
                     confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
                 }],
             }],
             messages: vec![MessageSnapshot {
@@ -4945,6 +4961,7 @@ mod tests {
                         id: "settings".to_string(),
                         selected: true,
                         confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
                     }],
                 },
                 ListSnapshot {
@@ -4954,11 +4971,13 @@ mod tests {
                             id: "guardian-threshold".to_string(),
                             selected: true,
                             confirmation: ConfirmationState::Confirmed,
+                            is_current: false,
                         },
                         ListItemSnapshot {
                             id: "appearance".to_string(),
                             selected: false,
                             confirmation: ConfirmationState::Confirmed,
+                            is_current: false,
                         },
                     ],
                 },
@@ -4968,6 +4987,7 @@ mod tests {
                         id: "stale-home".to_string(),
                         selected: true,
                         confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
                     }],
                 },
             ],
@@ -5007,6 +5027,7 @@ mod tests {
                         id: "settings".to_string(),
                         selected: true,
                         confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
                     }],
                 },
                 ListSnapshot {
@@ -5016,11 +5037,13 @@ mod tests {
                             id: "guardian-threshold".to_string(),
                             selected: true,
                             confirmation: ConfirmationState::Confirmed,
+                            is_current: false,
                         },
                         ListItemSnapshot {
                             id: "observability".to_string(),
                             selected: false,
                             confirmation: ConfirmationState::Confirmed,
+                            is_current: false,
                         },
                     ],
                 },
@@ -5030,6 +5053,7 @@ mod tests {
                         id: "stale-member".to_string(),
                         selected: true,
                         confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
                     }],
                 },
             ],

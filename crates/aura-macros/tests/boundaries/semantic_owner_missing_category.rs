@@ -9,6 +9,7 @@ fn publish_done() {}
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,
+    authoritative_inputs = "",
     depends_on = "",
     child_ops = ""
 )]

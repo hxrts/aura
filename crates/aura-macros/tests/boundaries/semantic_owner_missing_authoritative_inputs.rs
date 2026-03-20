@@ -1,7 +1,4 @@
-use aura_core::{
-    OperationContext, OperationTimeoutBudget, OwnedShutdownToken, SemanticOwnerPostcondition,
-    SemanticSuccessProof, TraceContext,
-};
+use aura_core::{OperationContext, SemanticOwnerPostcondition, SemanticSuccessProof, TraceContext};
 
 struct DemoProof;
 
@@ -18,20 +15,14 @@ fn publish_done() {}
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,
-    authoritative_inputs = "runtime",
     depends_on = "",
     child_ops = "",
     category = "move_owned"
 )]
-async fn valid_owner(
+async fn missing_authoritative_inputs(
     _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
 ) {
     publish_done();
 }
 
-fn main() {
-    let _ = (
-        OperationTimeoutBudget::deferred_local_policy(),
-        OwnedShutdownToken::detached(),
-    );
-}
+fn main() {}

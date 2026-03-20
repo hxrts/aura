@@ -9,15 +9,44 @@ use super::harness_determinism;
 use crate::workflows::runtime::require_runtime;
 use crate::AppCore;
 use aura_core::AuraError;
+use thiserror::Error;
+
+/// Typed failure modes for workflow time resolution.
+#[derive(Debug, Clone, Error)]
+pub enum TimeUnavailable {
+    /// No runtime bridge is installed, so no authoritative time source exists.
+    #[error("runtime is unavailable for workflow time")]
+    RuntimeUnavailable,
+    /// The runtime bridge reported a time-query failure.
+    #[error("runtime time query failed: {detail}")]
+    RuntimeQuery {
+        /// Details from the runtime bridge failure.
+        detail: String,
+    },
+    /// Harness parity mode requested a deterministic timestamp but no harness
+    /// parity context was available.
+    #[error("harness parity time unavailable")]
+    HarnessParityUnavailable,
+}
+
+impl From<TimeUnavailable> for AuraError {
+    fn from(value: TimeUnavailable) -> Self {
+        AuraError::internal(value.to_string())
+    }
+}
 
 /// Resolve current wall-clock time in milliseconds via the runtime bridge.
 #[cfg_attr(not(feature = "signals"), allow(dead_code))]
-pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, AuraError> {
-    let runtime = require_runtime(app_core).await?;
+pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, TimeUnavailable> {
+    let runtime = require_runtime(app_core)
+        .await
+        .map_err(|_| TimeUnavailable::RuntimeUnavailable)?;
     runtime
         .current_time_ms()
         .await
-        .map_err(|e| runtime_call("get current time", e).into())
+        .map_err(|e| TimeUnavailable::RuntimeQuery {
+            detail: runtime_call("get current time", e).to_string(),
+        })
 }
 
 /// Resolve a workflow timestamp using harness parity time when enabled and a
@@ -27,27 +56,14 @@ pub async fn local_first_timestamp_ms(
     app_core: &Arc<RwLock<AppCore>>,
     scope: &str,
     components: &[&str],
-) -> u64 {
+) -> Result<u64, TimeUnavailable> {
     if harness_determinism::harness_mode_enabled() {
         return harness_determinism::parity_timestamp_ms(app_core, scope, components)
             .await
-            .unwrap_or(1);
+            .map_err(|_| TimeUnavailable::HarnessParityUnavailable);
     }
 
-    match current_time_ms(app_core).await {
-        Ok(ts) => ts,
-        Err(_e) => {
-            #[cfg(feature = "instrumented")]
-            tracing::warn!(
-                error = %_e,
-                "time source unavailable — using fallback timestamp 1"
-            );
-            // Use 1 instead of 0 so the timestamp is distinguishable from
-            // "not set" (which uses 0 by convention) while still being
-            // obviously wrong if it shows up in debugging.
-            1
-        }
-    }
+    current_time_ms(app_core).await
 }
 
 /// Sleep through the runtime bridge so callers stay runtime-neutral.
@@ -56,4 +72,30 @@ pub async fn sleep_ms(app_core: &Arc<RwLock<AppCore>>, ms: u64) -> Result<(), Au
     let runtime = require_runtime(app_core).await?;
     runtime.sleep_ms(ms).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AppConfig, AppCore};
+
+    #[tokio::test]
+    async fn current_time_ms_without_runtime_returns_typed_error() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+
+        let error = current_time_ms(&app_core)
+            .await
+            .expect_err("missing runtime should be surfaced explicitly");
+        assert!(matches!(error, TimeUnavailable::RuntimeUnavailable));
+    }
+
+    #[tokio::test]
+    async fn local_first_timestamp_without_runtime_returns_typed_error() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+
+        let error = local_first_timestamp_ms(&app_core, "time-test", &[])
+            .await
+            .expect_err("missing runtime should not fall back to a fake timestamp");
+        assert!(matches!(error, TimeUnavailable::RuntimeUnavailable));
+    }
 }

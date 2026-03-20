@@ -102,7 +102,7 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 }
 
 pub use fact_service::ChatFactService;
-pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
+pub use facts::{ChatFact, ChatFactReducer, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID};
 pub use group::ChatGroup;
 pub use types::*;
 pub use view::{ChatDelta, ChatViewReducer};

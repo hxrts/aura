@@ -4,16 +4,13 @@ use std::sync::Arc;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
-use aura_app::ui::signals::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
 use aura_app::ui::types::AppCore;
 use aura_app::ui_contract::{
-    bridged_operation_statuses, HarnessUiOperationHandle, OperationId, OperationInstanceId,
-    SemanticFailureCode, SemanticFailureDomain, SemanticOperationCausality,
-    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
-    SemanticOperationStatus,
+    HarnessUiOperationHandle, OperationId, OperationInstanceId, SemanticFailureCode,
+    SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
 };
 use aura_core::SemanticOwnerProtocol;
-use aura_core::effects::reactive::ReactiveEffects;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -109,33 +106,15 @@ async fn publish_handoff_protocol_failure(
     .await;
 }
 
-pub(crate) async fn reconcile_handed_off_terminal_status(
-    app_core: &Arc<RwLock<AppCore>>,
+pub(crate) async fn apply_handed_off_terminal_status(
+    _app_core: &Arc<RwLock<AppCore>>,
     tx: &UiUpdateSender,
     operation_id: OperationId,
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
+    terminal: Option<WorkflowTerminalStatus>,
 ) -> Result<(), String> {
-    let facts = {
-        let core = app_core.read().await;
-        core.reactive()
-            .read(&*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to read authoritative semantic facts after handoff for {}: {error}",
-                    operation_id.0
-                )
-            })?
-    };
-
-    let Some((_, _, causality, status)) = bridged_operation_statuses(&facts)
-        .into_iter()
-        .find(|(observed_operation_id, observed_instance_id, _, _)| {
-            *observed_operation_id == operation_id
-                && observed_instance_id.as_ref() == Some(&instance_id)
-        })
-    else {
+    let Some(terminal) = terminal else {
         let detail = format!(
             "handoff completed without terminal authoritative status for {}:{}",
             operation_id.0, instance_id.0
@@ -144,19 +123,19 @@ pub(crate) async fn reconcile_handed_off_terminal_status(
         return Err(detail);
     };
 
-    if status.kind != kind {
+    if terminal.status.kind != kind {
         let detail = format!(
             "handoff completed with mismatched semantic kind for {}:{} (expected={kind:?} observed={:?})",
-            operation_id.0, instance_id.0, status.kind
+            operation_id.0, instance_id.0, terminal.status.kind
         );
         publish_handoff_protocol_failure(tx, operation_id, instance_id, kind, detail.clone()).await;
         return Err(detail);
     }
 
-    if !status.phase.is_terminal() {
+    if !terminal.status.phase.is_terminal() {
         let detail = format!(
             "handoff completed without terminal phase for {}:{} (observed={:?})",
-            operation_id.0, instance_id.0, status.phase
+            operation_id.0, instance_id.0, terminal.status.phase
         );
         publish_handoff_protocol_failure(tx, operation_id, instance_id, kind, detail.clone()).await;
         return Err(detail);
@@ -167,8 +146,8 @@ pub(crate) async fn reconcile_handed_off_terminal_status(
         authoritative_operation_status_update(
             operation_id,
             Some(instance_id),
-            causality,
-            status,
+            terminal.causality,
+            terminal.status,
         ),
     )
     .await;

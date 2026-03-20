@@ -100,6 +100,8 @@ pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
 
 const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
     "application/aura-contact-invitation-acceptance";
+const CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
+    "application/aura-channel-invitation-acceptance";
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const INVITATION_CONTENT_TYPE: &str = "application/aura-invitation";
 const INVITATION_PREPARE_STAGE_TIMEOUT_MS: u64 = 4_000;
@@ -173,6 +175,14 @@ async fn attempt_network_send_envelope(
 struct ContactInvitationAcceptance {
     invitation_id: InvitationId,
     acceptor_id: AuthorityId,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ChannelInvitationAcceptance {
+    invitation_id: InvitationId,
+    acceptor_id: AuthorityId,
+    context_id: ContextId,
+    channel_id: ChannelId,
 }
 
 /// Result of an invitation action
@@ -1746,8 +1756,16 @@ impl InvitationHandler {
     /// List pending invitations (from cache)
     pub async fn list_pending(&self) -> Vec<Invitation> {
         self.invitation_cache
-            .list_pending(|inv| inv.status == InvitationStatus::Pending)
+            .list_matching(|inv| inv.status == InvitationStatus::Pending)
             .await
+    }
+
+    /// List cached invitations matching a predicate.
+    pub async fn list_cached_matching(
+        &self,
+        predicate: impl Fn(&Invitation) -> bool,
+    ) -> Vec<Invitation> {
+        self.invitation_cache.list_matching(predicate).await
     }
 
     /// List pending invitations from cache plus persisted stores.

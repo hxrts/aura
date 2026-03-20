@@ -44,6 +44,19 @@ use aura_journal::{
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
+/// Message delivery lifecycle status exposed through chat facts/view reduction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ChatMessageDeliveryStatus {
+    /// Message is sent but not yet confirmed as delivered or read.
+    Sent,
+    /// Message has been delivered to a recipient device.
+    Delivered,
+    /// Message has been read by a recipient.
+    Read,
+    /// Delivery failed after retries/convergence were exhausted.
+    Failed,
+}
+
 /// Type identifier for chat facts
 pub const CHAT_FACT_TYPE_ID: &str = "chat";
 /// Key for indexing chat facts in the journal
@@ -100,6 +113,10 @@ pub enum ChatFact {
         name: Option<String>,
         /// Updated channel topic (optional)
         topic: Option<String>,
+        /// Updated member-count hint when authoritative membership/materialization changes
+        member_count: Option<u32>,
+        /// Updated known non-self participant identifiers when authoritative membership changes
+        member_ids: Option<Vec<AuthorityId>>,
         /// Timestamp when channel was updated (uses unified time system)
         updated_at: PhysicalTime,
         /// Authority that updated the channel
@@ -167,6 +184,21 @@ pub enum ChatFact {
         /// Timestamp when message was edited
         edited_at: PhysicalTime,
     },
+    /// Message delivery lifecycle updated.
+    MessageDeliveryUpdated {
+        /// Relational context of the message
+        context_id: ContextId,
+        /// Channel containing the message
+        channel_id: ChannelId,
+        /// Message whose delivery state changed
+        message_id: String,
+        /// Updated delivery status
+        delivery_status: ChatMessageDeliveryStatus,
+        /// Timestamp when the delivery state changed
+        updated_at: PhysicalTime,
+        /// Authority that observed or authored the delivery transition
+        actor_id: AuthorityId,
+    },
     /// Message deleted (Category B operation - deferred approval may apply)
     ///
     /// Delete facts mark a message as deleted. The original message remains
@@ -195,6 +227,7 @@ impl ChatFact {
             ChatFact::MessageSentSealed { sent_at, .. } => sent_at.ts_ms,
             ChatFact::MessageRead { read_at, .. } => read_at.ts_ms,
             ChatFact::MessageEdited { edited_at, .. } => edited_at.ts_ms,
+            ChatFact::MessageDeliveryUpdated { updated_at, .. } => updated_at.ts_ms,
             ChatFact::MessageDeleted { deleted_at, .. } => deleted_at.ts_ms,
         }
     }
@@ -229,6 +262,10 @@ impl ChatFact {
             },
             ChatFact::MessageEdited { message_id, .. } => ChatFactKey {
                 sub_type: "message-edited",
+                data: message_id.as_bytes().to_vec(),
+            },
+            ChatFact::MessageDeliveryUpdated { message_id, .. } => ChatFactKey {
+                sub_type: "message-delivery-updated",
                 data: message_id.as_bytes().to_vec(),
             },
             ChatFact::MessageDeleted { message_id, .. } => ChatFactKey {
@@ -286,6 +323,8 @@ impl ChatFact {
         channel_id: ChannelId,
         name: Option<String>,
         topic: Option<String>,
+        member_count: Option<u32>,
+        member_ids: Option<Vec<AuthorityId>>,
         updated_at_ms: u64,
         actor_id: AuthorityId,
     ) -> Self {
@@ -294,6 +333,8 @@ impl ChatFact {
             channel_id,
             name,
             topic,
+            member_count,
+            member_ids,
             updated_at: PhysicalTime {
                 ts_ms: updated_at_ms,
                 uncertainty: None,
@@ -372,6 +413,28 @@ impl ChatFact {
                 ts_ms: edited_at_ms,
                 uncertainty: None,
             },
+        }
+    }
+
+    /// Create a MessageDeliveryUpdated fact with millisecond timestamp.
+    pub fn message_delivery_updated_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        delivery_status: ChatMessageDeliveryStatus,
+        updated_at_ms: u64,
+        actor_id: AuthorityId,
+    ) -> Self {
+        Self::MessageDeliveryUpdated {
+            context_id,
+            channel_id,
+            message_id,
+            delivery_status,
+            updated_at: PhysicalTime {
+                ts_ms: updated_at_ms,
+                uncertainty: None,
+            },
+            actor_id,
         }
     }
 

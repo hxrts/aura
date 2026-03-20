@@ -2041,7 +2041,7 @@ mod tests {
                 code: "invite-code".to_string(),
             },
             IntentAction::OpenSettingsSection(SettingsSection::Devices),
-            IntentAction::RemoveSelectedDevice,
+            IntentAction::RemoveSelectedDevice { device_id: None },
             IntentAction::SwitchAuthority {
                 authority_id: "authority:self".to_string(),
             },
@@ -2101,7 +2101,7 @@ mod tests {
                 code: "invite-code".to_string(),
             },
             IntentAction::OpenSettingsSection(SettingsSection::Devices),
-            IntentAction::RemoveSelectedDevice,
+            IntentAction::RemoveSelectedDevice { device_id: None },
             IntentAction::SwitchAuthority {
                 authority_id: "authority:self".to_string(),
             },
@@ -2160,7 +2160,7 @@ mod tests {
                 code: "invite-code".to_string(),
             },
             IntentAction::OpenSettingsSection(SettingsSection::Devices),
-            IntentAction::RemoveSelectedDevice,
+            IntentAction::RemoveSelectedDevice { device_id: None },
             IntentAction::SwitchAuthority {
                 authority_id: "authority:self".to_string(),
             },
@@ -2340,7 +2340,7 @@ mod tests {
                 device_name: "mobile".to_string(),
                 code_name: "device_code".to_string(),
             },
-            IntentAction::RemoveSelectedDevice,
+            IntentAction::RemoveSelectedDevice { device_id: None },
             IntentAction::CreateContactInvitation {
                 receiver_authority_id: "authority:test".to_string(),
                 code_name: None,

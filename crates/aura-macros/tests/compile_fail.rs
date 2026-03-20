@@ -65,6 +65,7 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/semantic_owner_missing_context.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_owner.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_proof.rs");
+    t.compile_fail("tests/boundaries/semantic_owner_missing_authoritative_inputs.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_category.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_terminal_path.rs");
     t.compile_fail("tests/boundaries/actor_owned_missing_capacity.rs");

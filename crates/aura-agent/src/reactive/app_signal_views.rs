@@ -1138,20 +1138,46 @@ impl ReactiveView for ChatSignalView {
                                 changed = true;
                             }
                             ChatFact::ChannelUpdated {
+                                context_id,
                                 channel_id,
                                 name,
                                 topic,
+                                member_count,
+                                member_ids,
                                 updated_at,
                                 ..
                             } => {
                                 if let Some(channel) = state.channel_mut(&channel_id) {
+                                    channel.context_id = Some(context_id);
                                     if let Some(name) = name {
                                         channel.name = name;
                                     }
                                     if topic.is_some() {
                                         channel.topic = topic;
                                     }
+                                    if let Some(member_count) = member_count {
+                                        channel.member_count = member_count;
+                                    }
+                                    if let Some(member_ids) = member_ids {
+                                        channel.member_ids = member_ids;
+                                    }
                                     channel.last_activity = updated_at.ts_ms;
+                                } else {
+                                    state.upsert_channel(Channel {
+                                        id: channel_id,
+                                        context_id: Some(context_id),
+                                        name: name.unwrap_or_else(|| channel_id.to_string()),
+                                        topic,
+                                        channel_type: ChannelType::Home,
+                                        unread_count: 0,
+                                        is_dm: false,
+                                        member_ids: member_ids.unwrap_or_default(),
+                                        member_count: member_count.unwrap_or(1),
+                                        last_message: None,
+                                        last_message_time: None,
+                                        last_activity: updated_at.ts_ms,
+                                        last_finalized_epoch: 0,
+                                    });
                                 }
                                 changed = true;
                             }
@@ -1293,6 +1319,32 @@ impl ReactiveView for ChatSignalView {
                                         changed = true;
                                     }
                                 }
+                            }
+                            ChatFact::MessageDeliveryUpdated {
+                                channel_id,
+                                message_id,
+                                delivery_status,
+                                ..
+                            } => {
+                                let updated = match delivery_status {
+                                    aura_chat::ChatMessageDeliveryStatus::Sent => false,
+                                    aura_chat::ChatMessageDeliveryStatus::Delivered => {
+                                        state.mark_delivered(&message_id)
+                                    }
+                                    aura_chat::ChatMessageDeliveryStatus::Read => {
+                                        state.mark_read_by_recipient(&message_id)
+                                    }
+                                    aura_chat::ChatMessageDeliveryStatus::Failed => {
+                                        state.mark_failed(&message_id)
+                                    }
+                                };
+                                tracing::debug!(
+                                    channel_id = %channel_id,
+                                    message_id,
+                                    ?delivery_status,
+                                    "Message delivery status updated"
+                                );
+                                changed |= updated;
                             }
                             ChatFact::MessageEdited {
                                 channel_id,

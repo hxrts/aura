@@ -69,6 +69,15 @@ fn resolution_from_home(
     })
 }
 
+#[aura_macros::authoritative_source(kind = "app_core")]
+async fn authoritative_active_home_selection(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Option<ChannelId> {
+    let core = app_core.read().await;
+    core.active_home_selection()
+}
+
+// OWNERSHIP: first-run-default
 fn fallback_home(homes: &HomesState) -> Option<(ChannelId, HomeState)> {
     homes
         .iter()
@@ -76,23 +85,19 @@ fn fallback_home(homes: &HomesState) -> Option<(ChannelId, HomeState)> {
         .map(|(home_id, home)| (*home_id, home.clone()))
 }
 
-async fn homes_state_signal_fallback(app_core: &Arc<RwLock<AppCore>>) -> HomesState {
-    let view_homes = {
-        let core = app_core.read().await;
-        core.views().get_homes()
-    };
-    if view_homes.iter().next().is_some() {
-        return view_homes;
-    }
-
+#[aura_macros::authoritative_source(kind = "signal")]
+// OWNERSHIP: authoritative-source
+// OWNERSHIP: first-run-default
+async fn homes_state_signal_snapshot(app_core: &Arc<RwLock<AppCore>>) -> HomesState {
     let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
         .await
         .unwrap_or_default();
     if signal_homes.iter().next().is_some() {
-        let mut core = app_core.write().await;
-        core.views_mut().set_homes(signal_homes.clone());
+        return signal_homes;
     }
-    signal_homes
+
+    let core = app_core.read().await;
+    core.views().get_homes()
 }
 
 /// Set active context for navigation and command targeting
@@ -128,6 +133,8 @@ pub async fn set_context(
 /// - 0: Limited access
 /// - 1: Partial access (default)
 /// - 2: Full access
+///
+/// OWNERSHIP: observed-display-update
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -141,7 +148,7 @@ pub async fn move_position(
         _ => 1, // Default to partial
     };
 
-    let signal_homes = homes_state_signal_fallback(app_core).await;
+    let signal_homes = homes_state_signal_snapshot(app_core).await;
 
     let mut core = app_core.write().await;
 
@@ -182,6 +189,7 @@ pub async fn move_position(
     // home is known locally (for member/channel metadata lookups).
     if homes.has_home(&target_home_id) {
         homes.select_home(Some(target_home_id));
+        core.set_active_home_selection(Some(target_home_id));
         core.views_mut().set_homes(homes);
     }
 
@@ -231,13 +239,14 @@ fn resolve_home_name(
 ///
 /// This is a local-first workflow that stamps a deterministic neighborhood ID
 /// and updates `NEIGHBORHOOD_SIGNAL`.
+// OWNERSHIP: observed-display-update
 pub async fn create_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
 ) -> Result<String, AuraError> {
     let timestamp_ms =
         crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
-            .await;
+            .await?;
     let neighborhood_name = if name.trim().is_empty() {
         "Neighborhood".to_string()
     } else {
@@ -280,6 +289,7 @@ pub async fn create_neighborhood(
 /// Add a home as a member of the active neighborhood and apply allocation budget.
 ///
 /// The workflow is idempotent per home ID for the currently active neighborhood.
+// OWNERSHIP: observed-display-update
 pub async fn add_home_to_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -317,6 +327,7 @@ pub async fn add_home_to_neighborhood(
             }
         }
 
+        // OWNERSHIP: observed-display-update
         core.views_mut().set_homes(homes.clone());
         core.views_mut().set_neighborhood(neighborhood.clone());
         (homes, neighborhood)
@@ -335,6 +346,7 @@ pub async fn add_home_to_neighborhood(
 }
 
 /// Force direct one_hop_link between local home and the target home in the active neighborhood.
+// OWNERSHIP: observed-display-update
 pub async fn link_home_one_hop_link(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -385,6 +397,7 @@ pub async fn link_home_one_hop_link(
 ///
 /// This is currently a local-first workflow. It creates a deterministic home ID,
 /// updates `HOMES_SIGNAL`, and makes the home visible in `NEIGHBORHOOD_SIGNAL`.
+// OWNERSHIP: observed-display-update
 async fn create_home_with_creator(
     app_core: &Arc<RwLock<AppCore>>,
     creator: AuthorityId,
@@ -393,7 +406,7 @@ async fn create_home_with_creator(
 ) -> Result<ChannelId, AuraError> {
     let timestamp_ms =
         crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
-            .await;
+            .await?;
     let home_name = name
         .as_deref()
         .map(str::trim)
@@ -428,6 +441,7 @@ async fn create_home_with_creator(
         }
         let result = homes.add_home(home);
         homes.select_home(Some(result.home_id));
+        core.set_active_home_selection(Some(result.home_id));
 
         let mut neighborhood = core.views().get_neighborhood();
         if neighborhood.home_name.is_empty() || neighborhood.home_home_id == ChannelId::default() {
@@ -458,6 +472,7 @@ async fn create_home_with_creator(
             });
         }
 
+        // OWNERSHIP: observed-display-update
         core.views_mut().set_homes(homes.clone());
         core.views_mut().set_neighborhood(neighborhood.clone());
         (homes, neighborhood)
@@ -542,6 +557,7 @@ pub async fn create_home_for_authority(
 
 /// Ensure a local-first home projection remains present in views/signals until
 /// runtime-backed facts supersede it.
+// OWNERSHIP: test-only-helper
 pub async fn ensure_local_home_projection(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: ChannelId,
@@ -552,7 +568,7 @@ pub async fn ensure_local_home_projection(
         ContextId::new_from_entropy(hash(format!("home-context:{creator}:{home_id}").as_bytes()));
     let timestamp_ms =
         crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
-            .await;
+            .await?;
 
     let (homes_state, neighborhood_state) = {
         let mut core = app_core.write().await;
@@ -576,6 +592,7 @@ pub async fn ensure_local_home_projection(
             let _ = homes.add_home(home);
         }
         homes.select_home(Some(home_id));
+        core.set_active_home_selection(Some(home_id));
 
         let mut neighborhood = core.views().get_neighborhood();
         let should_set_local_home = neighborhood.home_home_id == ChannelId::default()
@@ -606,6 +623,7 @@ pub async fn ensure_local_home_projection(
             });
         }
 
+        // OWNERSHIP: test-only-helper
         core.views_mut().set_homes(homes.clone());
         core.views_mut().set_neighborhood(neighborhood.clone());
         (homes, neighborhood)
@@ -638,15 +656,23 @@ pub const fn missing_active_home_message() -> &'static str {
 }
 
 /// Resolve an active home/context with deterministic fallback behavior.
+///
+/// OWNERSHIP: first-run-default
 pub async fn resolve_active_home(
     app_core: &Arc<RwLock<AppCore>>,
     home_hint: Option<ChannelId>,
 ) -> Result<ActiveHomeResolution, AuraError> {
-    let homes = homes_state_signal_fallback(app_core).await;
+    let homes = homes_state_signal_snapshot(app_core).await;
 
     if let Some(home_id) = home_hint {
         if let Some(home_state) = homes.home_state(&home_id) {
             return resolution_from_home(home_id, home_state, ActiveHomeSource::ExplicitHint);
+        }
+    }
+
+    if let Some(home_id) = authoritative_active_home_selection(app_core).await {
+        if let Some(home_state) = homes.home_state(&home_id) {
+            return resolution_from_home(home_id, home_state, ActiveHomeSource::Selected);
         }
     }
 
@@ -718,6 +744,7 @@ pub async fn get_current_position(app_core: &Arc<RwLock<AppCore>>) -> Option<Tra
 /// so that tests have a valid current home available.
 ///
 /// **Signal pattern**: Emits HOMES_SIGNAL
+// OWNERSHIP: test-only-helper
 pub async fn initialize_test_home(
     app_core: &Arc<RwLock<AppCore>>,
     name: &str,
@@ -818,6 +845,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_active_home_prefers_authoritative_selection_over_view_current_home() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([24u8; 32]);
+        let selected_home = ChannelId::from_bytes(hash(b"selected-home-authoritative"));
+        let selected_ctx = ContextId::new_from_entropy(hash(b"selected-ctx-authoritative"));
+        let stale_view_home = ChannelId::from_bytes(hash(b"selected-home-stale-view"));
+        let stale_view_ctx = ContextId::new_from_entropy(hash(b"selected-ctx-stale-view"));
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home(HomeState::new(
+                selected_home,
+                Some("Selected".to_string()),
+                authority,
+                1,
+                selected_ctx,
+            ));
+            homes.add_home(HomeState::new(
+                stale_view_home,
+                Some("Stale".to_string()),
+                authority,
+                2,
+                stale_view_ctx,
+            ));
+            homes.select_home(Some(stale_view_home));
+            core.set_active_home_selection(Some(selected_home));
+            core.views_mut().set_homes(homes);
+        }
+
+        let resolved = resolve_active_home(&app_core, None).await.unwrap();
+        assert_eq!(resolved.home_id, selected_home);
+        assert_eq!(resolved.context_id, selected_ctx);
+        assert_eq!(resolved.source, ActiveHomeSource::Selected);
+    }
+
+    #[tokio::test]
     async fn test_resolve_active_home_uses_deterministic_fallback() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
@@ -856,6 +921,7 @@ mod tests {
                 ctx_b,
             ));
             homes.select_home(None);
+            core.set_active_home_selection(None);
             core.views_mut().set_homes(homes);
         }
 
@@ -949,6 +1015,7 @@ mod tests {
                 ctx_b,
             ));
             homes.select_home(Some(home_a));
+            core.set_active_home_selection(Some(home_a));
             core.views_mut().set_homes(homes);
 
             let mut neighborhood = core.views().get_neighborhood();

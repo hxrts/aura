@@ -15,9 +15,10 @@
 
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyKind, CeremonyStatus, DeviceEnrollmentStart,
-    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, KeyRotationCeremonyStatus,
-    LanPeerInfo, RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
+    AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyKind,
+    CeremonyStatus, DeviceEnrollmentStart, InvitationBridgeStatus, InvitationBridgeType,
+    InvitationInfo, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus, RuntimeBridge,
+    SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
@@ -76,6 +77,15 @@ pub struct MockRuntimeBridge {
     devices: Arc<RwLock<Vec<BridgeDeviceInfo>>>,
     /// Whether canonical AMP channel state should be reported as available.
     amp_channel_state_exists: Arc<RwLock<bool>>,
+    /// Mock authoritative AMP participants keyed by (context, channel).
+    amp_channel_participants: Arc<RwLock<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>,
+    /// Mock authoritative AMP contexts keyed by channel.
+    amp_channel_contexts: Arc<RwLock<HashMap<ChannelId, ContextId>>>,
+    /// Mock authoritative channel-name matches keyed by normalized name.
+    authoritative_channel_name_matches: Arc<RwLock<HashMap<String, Vec<ChannelId>>>>,
+    /// Authoritative moderation statuses keyed by (context, channel, authority).
+    moderation_statuses:
+        Arc<RwLock<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>,
 }
 
 // Manual Debug impl since ReactiveHandler doesn't derive Debug
@@ -117,6 +127,10 @@ impl MockRuntimeBridge {
                 last_seen: Some(1700000000000),
             }])),
             amp_channel_state_exists: Arc::new(RwLock::new(true)),
+            amp_channel_participants: Arc::new(RwLock::new(HashMap::new())),
+            amp_channel_contexts: Arc::new(RwLock::new(HashMap::new())),
+            authoritative_channel_name_matches: Arc::new(RwLock::new(HashMap::new())),
+            moderation_statuses: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -222,6 +236,15 @@ impl MockRuntimeBridge {
             .collect()
     }
 
+    /// Replace the authoritative pending invitation set for tests.
+    pub async fn set_pending_invitations(&self, invitations: Vec<InvitationInfo>) {
+        let mut guard = self.invitations.write().await;
+        guard.clear();
+        for invitation in invitations {
+            guard.insert(invitation.invitation_id.clone(), invitation);
+        }
+    }
+
     /// Advance the mock time by the given milliseconds
     pub fn advance_time_ms(&self, ms: u64) {
         self.current_time_ms.fetch_add(ms, Ordering::SeqCst);
@@ -235,6 +258,57 @@ impl MockRuntimeBridge {
     /// Control whether canonical AMP channel state exists for readiness tests.
     pub async fn set_amp_channel_state_exists(&self, exists: bool) {
         *self.amp_channel_state_exists.write().await = exists;
+    }
+
+    /// Configure authoritative AMP participants for a channel.
+    pub async fn set_amp_channel_participants(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        participants: Vec<AuthorityId>,
+    ) {
+        self.amp_channel_participants
+            .write()
+            .await
+            .insert((context_id, channel_id), participants);
+        self.amp_channel_contexts
+            .write()
+            .await
+            .insert(channel_id, context_id);
+    }
+
+    /// Configure authoritative AMP context for a channel.
+    pub async fn set_amp_channel_context(&self, channel_id: ChannelId, context_id: ContextId) {
+        self.amp_channel_contexts
+            .write()
+            .await
+            .insert(channel_id, context_id);
+    }
+
+    /// Configure authoritative channel ids returned for a given channel name.
+    pub async fn set_authoritative_channel_name_matches(
+        &self,
+        channel_name: impl Into<String>,
+        channel_ids: Vec<ChannelId>,
+    ) {
+        self.authoritative_channel_name_matches
+            .write()
+            .await
+            .insert(channel_name.into().trim().to_ascii_lowercase(), channel_ids);
+    }
+
+    /// Configure authoritative moderation status for a home-scoped context.
+    pub async fn set_moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        status: AuthoritativeModerationStatus,
+    ) {
+        self.moderation_statuses
+            .write()
+            .await
+            .insert((context_id, channel_id, authority_id), status);
     }
 
     /// Generate a unique string ID for general use
@@ -356,16 +430,41 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn amp_list_channel_participants(
         &self,
-        _context: ContextId,
-        _channel: ChannelId,
+        context: ContextId,
+        channel: ChannelId,
     ) -> Result<Vec<AuthorityId>, IntentError> {
-        Ok(vec![])
+        Ok(self
+            .amp_channel_participants
+            .read()
+            .await
+            .get(&(context, channel))
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn moderation_status(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        authority_id: AuthorityId,
+        _current_time_ms: u64,
+    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+        Ok(self
+            .moderation_statuses
+            .read()
+            .await
+            .get(&(context_id, channel_id, authority_id))
+            .copied()
+            .unwrap_or_default())
     }
 
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError> {
+        if let Some(context) = self.amp_channel_contexts.read().await.get(&channel).copied() {
+            return Ok(Some(context));
+        }
         let facts = self.facts.read().await;
         for fact in facts.iter().rev() {
             if let RelationalFact::Protocol(
@@ -378,6 +477,19 @@ impl RuntimeBridge for MockRuntimeBridge {
             }
         }
         Ok(None)
+    }
+
+    async fn resolve_authoritative_channel_ids_by_name(
+        &self,
+        channel_name: &str,
+    ) -> Result<Vec<ChannelId>, IntentError> {
+        Ok(self
+            .authoritative_channel_name_matches
+            .read()
+            .await
+            .get(&channel_name.trim().to_ascii_lowercase())
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn amp_repair_local_channel_membership(

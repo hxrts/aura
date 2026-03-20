@@ -1,5 +1,4 @@
 use super::*;
-use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 
 const INVITATION_CHANNEL_JOIN_TIMEOUT_MS: u64 = 2_000;
 const INVITATION_VIEW_UPDATE_TIMEOUT_MS: u64 = 500;
@@ -39,23 +38,19 @@ impl<'a> InvitationChannelHandler<'a> {
             return Ok(());
         }
 
-        let timestamp = ChannelMembershipFact::random_timestamp(effects).await;
-        let membership = ChannelMembershipFact::new(
-            invitation.context_id,
-            home_id,
+        let acceptance = ChannelInvitationAcceptance {
+            invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
-            ChannelParticipantEvent::Joined,
-            timestamp,
-        )
-        .to_generic();
-
-        let payload =
-            aura_core::util::serialization::to_vec(&membership).map_err(|e| AgentError::internal(e.to_string()))?;
+            context_id: invitation.context_id,
+            channel_id: home_id,
+        };
+        let payload = serde_json::to_vec(&acceptance)
+            .map_err(|e| AgentError::internal(e.to_string()))?;
 
         let mut metadata = HashMap::new();
         metadata.insert(
             "content-type".to_string(),
-            CHAT_FACT_CONTENT_TYPE.to_string(),
+            CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
         );
         metadata.insert(
             "invitation-id".to_string(),

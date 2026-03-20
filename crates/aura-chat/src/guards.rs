@@ -52,6 +52,12 @@ pub struct GuardSnapshot {
 
     /// Current timestamp in milliseconds.
     pub now_ms: u64,
+
+    /// Sender is currently banned in this context/channel.
+    pub sender_is_banned: bool,
+
+    /// Sender is currently muted in this context/channel.
+    pub sender_is_muted: bool,
 }
 
 impl GuardSnapshot {
@@ -69,7 +75,17 @@ impl GuardSnapshot {
             flow_budget_remaining,
             capabilities,
             now_ms,
+            sender_is_banned: false,
+            sender_is_muted: false,
         }
+    }
+
+    /// Attach authoritative moderation status to the prepared guard snapshot.
+    #[must_use]
+    pub fn with_moderation_status(mut self, sender_is_banned: bool, sender_is_muted: bool) -> Self {
+        self.sender_is_banned = sender_is_banned;
+        self.sender_is_muted = sender_is_muted;
+        self
     }
 
     /// Returns `true` if the snapshot contains the given capability.
@@ -134,4 +150,20 @@ pub fn check_flow_budget(
     required_cost: FlowCost,
 ) -> Option<GuardOutcome> {
     types::check_flow_budget(snapshot, required_cost)
+}
+
+/// Deny chat send/join effects when authoritative moderation status blocks the
+/// sender in this context/channel.
+pub fn check_moderation(snapshot: &GuardSnapshot) -> Option<GuardOutcome> {
+    if snapshot.sender_is_banned {
+        return Some(GuardOutcome::denied(types::GuardViolation::other(
+            "authoritative moderation denied chat operation: sender is banned",
+        )));
+    }
+    if snapshot.sender_is_muted {
+        return Some(GuardOutcome::denied(types::GuardViolation::other(
+            "authoritative moderation denied chat operation: sender is muted",
+        )));
+    }
+    None
 }

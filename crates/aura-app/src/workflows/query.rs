@@ -25,6 +25,7 @@ pub async fn list_participants(
     app_core: &Arc<RwLock<AppCore>>,
     channel: &str,
 ) -> Result<Vec<String>, AuraError> {
+    // OWNERSHIP: observed
     let contacts = contacts_snapshot(app_core).await;
     let chat = chat_snapshot(app_core).await;
 
@@ -113,6 +114,7 @@ pub async fn get_user_info_by_authority_id(
     app_core: &Arc<RwLock<AppCore>>,
     authority_id: AuthorityId,
 ) -> Result<Contact, AuraError> {
+    // OWNERSHIP: observed
     let contacts = contacts_snapshot(app_core).await;
     contacts
         .contact(&authority_id)
@@ -130,6 +132,7 @@ pub async fn resolve_contact(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
 ) -> Result<Contact, AuraError> {
+    // OWNERSHIP: observed
     let contacts = contacts_snapshot(app_core).await;
     let target = target.trim();
     if target.is_empty() {
@@ -191,6 +194,7 @@ pub async fn resolve_contact(
 /// This function reads from CONTACTS_SIGNAL first, which is populated by the agent's
 /// reactive pipeline. Falls back to ViewState snapshot if the signal is not available.
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
+    // OWNERSHIP: observed
     contacts_snapshot(app_core)
         .await
         .all_contacts()
