@@ -256,7 +256,7 @@ AMP provides patterns for reliable asynchronous messaging. Messages may arrive o
 
 Anti-entropy ensures journal convergence after network partitions. Peers periodically exchange fact digests and request missing facts. The protocol compares digest sets, identifies gaps, and selectively transfers facts to reconcile state.
 
-Because facts are join-semilattice elements, merging facts from any peer is safe regardless of ordering. Anti-entropy does not require coordination or agreement. It runs continuously in the background and ensures that connected peers eventually share the same fact set.
+Because journals are CRDTs, merging facts from any peer is safe regardless of ordering. Anti-entropy does not require coordination or agreement. It runs continuously in the background and ensures that connected peers eventually share the same fact set.
 
 ## 7. Runtime and Ownership
 
