@@ -322,25 +322,22 @@ This rule is stronger than "use timeouts". A bounded best-effort step is still a
 
 ## Correct-By-Construction Requirements
 
-For parity-critical operation families, "correct by construction" means the following should eventually be true everywhere:
+For parity-critical operation families, "correct by construction" means:
 
 - submission uses one canonical typed owner wrapper
 - owner handoff uses one canonical consumed transfer API
 - terminal publication uses one capability-gated API family
 - success implies one declared authoritative postcondition
-- proof-bound success consumes one opaque typed proof minted by sanctioned
-  capability-gated code
+- proof-bound success consumes one opaque typed proof minted by sanctioned capability-gated code
 - bounded awaits use one approved timeout-budget helper family
 - retries use one approved retry-policy helper family
 - best-effort work uses one explicit helper family that cannot publish or delay primary terminal state
 - semantic owners do not spawn except through declared child-operation APIs
 - parity-critical results are not ignored or downgraded to logging-only paths
 
-If a new operation family cannot yet use those canonical wrappers, that is technical debt that should be tracked explicitly. New parallel helper stacks should not be introduced.
-
 ## Enforcement Ratchet
 
-Aura should treat ownership enforcement as a ratchet, not a static checklist.
+Aura treats ownership enforcement as a ratchet, not a static checklist.
 
 The desired order of strength is:
 
@@ -373,7 +370,6 @@ Every parity-critical operation family should have invariant tests for all of th
   handoff
 - older authoritative instances cannot overwrite newer local submissions
 
-If one of these invariants is missing for an operation family, the family is not yet fully migrated to the ownership model.
 
 ## Frontend Handoff Rule
 
@@ -461,7 +457,7 @@ The ownership model is enforced in layers.
 
 Types and private constructors provide the first line of defense. Capability-gated mutation and publication APIs form the second layer. Canonical owner wrappers and macros provide the third layer. AST-backed checks, compile-fail tests, invariant tests, and then thin `scripts/check/*.sh` / `just ci-*` wrappers complete CI enforcement.
 
-Current enforcement split:
+Enforcement split:
 
 - Types, private constructors, sealed traits, and consumed ownership wrappers
   are the primary defense.
@@ -533,6 +529,4 @@ When adding or modifying a parity-critical path, ask these questions:
 - Which awaits are terminally required, and which are best-effort only?
 - Is any later parity-critical step relying on hidden best-effort follow-up?
 - What bounded budget owns each required wait and retry?
-- What legacy bypasses should be deleted rather than preserved?
-
 If these answers are unclear, the design is not complete enough.
