@@ -3363,7 +3363,7 @@ fn semantic_wait_matches_for_instance(
                     });
                     if !matched {
                         if let Some(channel_id) = unique_authoritative_shared_channel_id(snapshot) {
-                            let mut candidate_step = non_operation_step.clone();
+                            let mut candidate_step = non_operation_step;
                             candidate_step.contains = Some(channel_id);
                             if !semantic_wait_matches(&candidate_step, snapshot) {
                                 return false;
@@ -5739,7 +5739,7 @@ mod tests {
         let source = include_str!("executor.rs");
         for helper in [
             "fn wait_for_semantic_state(",
-            "fn wait_for_runtime_event(",
+            "fn wait_for_runtime_event_snapshot(",
             "fn wait_for_operation_handle_state(",
         ] {
             let start = source

@@ -409,13 +409,15 @@ mod cap_laws {
 
         let token_a = biscuit_auth::Biscuit::builder()
             .build(&key_a)
-            .expect("build token A");
+            .unwrap_or_else(|error| panic!("build token A: {error}"));
         let token_b = biscuit_auth::Biscuit::builder()
             .build(&key_b)
-            .expect("build token B");
+            .unwrap_or_else(|error| panic!("build token B: {error}"));
 
-        let cap_a = Cap::from_biscuit_with_key(&token_a, &key_a.public()).expect("wrap token A");
-        let cap_b = Cap::from_biscuit_with_key(&token_b, &key_b.public()).expect("wrap token B");
+        let cap_a = Cap::from_biscuit_with_key(&token_a, &key_a.public())
+            .unwrap_or_else(|error| panic!("wrap token A: {error}"));
+        let cap_b = Cap::from_biscuit_with_key(&token_b, &key_b.public())
+            .unwrap_or_else(|error| panic!("wrap token B: {error}"));
 
         let result = cap_a.meet(&cap_b);
         // Different issuers → incomparable → bottom

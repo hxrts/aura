@@ -2494,6 +2494,8 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
 ];
 
 /// Keep `docs/997_flow_coverage.md` aligned with this canonical shared-flow mapping.
+// Coverage metadata stays co-located with the shared flow contract so CI can
+// ratchet flow-relevant source changes against reviewed scenario coverage.
 pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNeighborhood,

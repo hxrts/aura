@@ -744,6 +744,7 @@ async fn reconcile_channel_invitation_acceptance(
     }
 }
 
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 struct AcceptedChannelInvitationTarget {
     channel_id: ChannelId,
     context_hint: Option<ContextId>,

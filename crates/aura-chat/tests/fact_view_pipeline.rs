@@ -37,13 +37,15 @@ fn channel_creation_produces_view_delta() {
     let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes, None);
 
     assert_eq!(deltas.len(), 1);
-    let chat_delta = downcast_delta::<ChatDelta>(&deltas[0]).expect("should be ChatDelta");
+    let Some(chat_delta) = downcast_delta::<ChatDelta>(&deltas[0]) else {
+        panic!("expected ChatDelta");
+    };
     match chat_delta {
         ChatDelta::ChannelAdded { name, topic, .. } => {
             assert_eq!(name, "general");
             assert_eq!(topic, &Some("General discussion".to_string()));
         }
-        other => panic!("Expected ChannelAdded, got {:?}", other),
+        other => panic!("Expected ChannelAdded, got {other:?}"),
     }
 }
 

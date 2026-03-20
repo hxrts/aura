@@ -1292,9 +1292,7 @@ pub(crate) async fn authoritative_local_channel_id_for_context(
         let core = app_core.read().await;
         core.runtime().cloned()
     };
-    let Some(runtime) = runtime else {
-        return None;
-    };
+    let runtime = runtime?;
 
     let channel_name_hint = channel_name_hint?;
     let matches = runtime
@@ -1848,7 +1846,7 @@ pub async fn create_channel_with_authoritative_binding(
                 .publish_success_with(
                     prove_channel_membership_ready(app_core, created.channel_id).await?,
                 )
-                .await?
+                .await?;
         }
         Err(error) => {
             owner
@@ -3143,7 +3141,7 @@ async fn invite_user_to_channel_with_context_owned(
             channel_id,
             context_id,
             Some(channel_name_hint),
-            &owner,
+            owner,
             None,
             Some(deadline),
             stage_tracker.clone(),
@@ -3660,6 +3658,7 @@ mod tests {
     fn test_authoritative_send_readiness_for_channel_requires_matching_facts() {
         let channel_id = ChannelId::from_bytes(hash(b"send-ready"));
         let other_channel_id = ChannelId::from_bytes(hash(b"other-send-ready"));
+        let context_id = ContextId::new_from_entropy([7u8; 32]);
         let facts = vec![
             AuthoritativeSemanticFact::RecipientPeersResolved {
                 channel: ChannelFactKey {
@@ -3677,7 +3676,10 @@ mod tests {
             },
         ];
 
-        let readiness = authoritative_send_readiness_for_channel(&facts, channel_id);
+        let readiness = authoritative_send_readiness_for_channel(
+            &facts,
+            AuthoritativeChannelRef::new(channel_id, context_id),
+        );
         assert!(readiness.recipient_resolution_ready);
         assert!(!readiness.delivery_ready);
     }

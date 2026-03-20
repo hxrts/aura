@@ -36,6 +36,7 @@
 use crate::core::IntentError;
 use crate::views::naming::{truncate_id_for_display, EffectiveName};
 use crate::ReactiveHandler;
+use async_lock::Mutex;
 use async_trait::async_trait;
 use aura_core::effects::amp::{
     AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
@@ -50,7 +51,15 @@ use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner};
 use aura_journal::fact::{FactOptions, RelationalFact};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+type PendingInvitationsState = Arc<Mutex<Option<Vec<InvitationInfo>>>>;
+type AmpChannelContexts = Arc<Mutex<HashMap<ChannelId, ContextId>>>;
+type AuthoritativeChannelNameMatches = Arc<Mutex<HashMap<String, Vec<ChannelId>>>>;
+type AmpChannelStates = Arc<Mutex<HashMap<(ContextId, ChannelId), bool>>>;
+type AmpChannelParticipants = Arc<Mutex<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>;
+type ModerationStatuses =
+    Arc<Mutex<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>;
 
 /// Status of the runtime's sync service
 #[derive(Debug, Clone, Default)]
@@ -1094,13 +1103,12 @@ pub type BoxedRuntimeBridge = Arc<dyn RuntimeBridge>;
 pub struct OfflineRuntimeBridge {
     authority_id: AuthorityId,
     reactive: ReactiveHandler,
-    pending_invitations: Arc<Mutex<Option<Vec<InvitationInfo>>>>,
-    amp_channel_contexts: Arc<Mutex<HashMap<ChannelId, ContextId>>>,
-    authoritative_channel_name_matches: Arc<Mutex<HashMap<String, Vec<ChannelId>>>>,
-    amp_channel_states: Arc<Mutex<HashMap<(ContextId, ChannelId), bool>>>,
-    amp_channel_participants: Arc<Mutex<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>,
-    moderation_statuses:
-        Arc<Mutex<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>,
+    pending_invitations: PendingInvitationsState,
+    amp_channel_contexts: AmpChannelContexts,
+    authoritative_channel_name_matches: AuthoritativeChannelNameMatches,
+    amp_channel_states: AmpChannelStates,
+    amp_channel_participants: AmpChannelParticipants,
+    moderation_statuses: ModerationStatuses,
 }
 
 impl OfflineRuntimeBridge {
@@ -1121,10 +1129,11 @@ impl OfflineRuntimeBridge {
     #[cfg(test)]
     /// Configure the pending invitation snapshot returned by the offline bridge.
     pub fn set_pending_invitations(&self, invitations: Vec<InvitationInfo>) {
-        *self
+        let mut guard = self
             .pending_invitations
-            .lock()
-            .expect("pending invitations mutex") = Some(invitations);
+            .try_lock()
+            .unwrap_or_else(|| panic!("pending invitations mutex already locked"));
+        *guard = Some(invitations);
     }
 
     #[cfg(test)]
@@ -1137,8 +1146,8 @@ impl OfflineRuntimeBridge {
         status: AuthoritativeModerationStatus,
     ) {
         self.moderation_statuses
-            .lock()
-            .expect("moderation statuses mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("moderation statuses mutex already locked"))
             .insert((context_id, channel_id, authority_id), status);
     }
 
@@ -1146,8 +1155,8 @@ impl OfflineRuntimeBridge {
     /// Configure authoritative AMP context for a channel.
     pub fn set_amp_channel_context(&self, channel_id: ChannelId, context_id: ContextId) {
         self.amp_channel_contexts
-            .lock()
-            .expect("amp channel contexts mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel contexts mutex already locked"))
             .insert(channel_id, context_id);
     }
 
@@ -1159,8 +1168,8 @@ impl OfflineRuntimeBridge {
         channel_ids: Vec<ChannelId>,
     ) {
         self.authoritative_channel_name_matches
-            .lock()
-            .expect("authoritative channel name matches mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("authoritative channel name matches mutex already locked"))
             .insert(channel_name.into().trim().to_ascii_lowercase(), channel_ids);
     }
 
@@ -1173,12 +1182,12 @@ impl OfflineRuntimeBridge {
         participants: Vec<AuthorityId>,
     ) {
         self.amp_channel_contexts
-            .lock()
-            .expect("amp channel contexts mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel contexts mutex already locked"))
             .insert(channel_id, context_id);
         self.amp_channel_participants
-            .lock()
-            .expect("amp channel participants mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel participants mutex already locked"))
             .insert((context_id, channel_id), participants);
     }
 
@@ -1191,12 +1200,12 @@ impl OfflineRuntimeBridge {
         exists: bool,
     ) {
         self.amp_channel_contexts
-            .lock()
-            .expect("amp channel contexts mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel contexts mutex already locked"))
             .insert(channel_id, context_id);
         self.amp_channel_states
-            .lock()
-            .expect("amp channel states mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel states mutex already locked"))
             .insert((context_id, channel_id), exists);
     }
 
@@ -1211,8 +1220,8 @@ impl OfflineRuntimeBridge {
         exists: bool,
     ) {
         self.amp_channel_states
-            .lock()
-            .expect("amp channel states mutex")
+            .try_lock()
+            .unwrap_or_else(|| panic!("amp channel states mutex already locked"))
             .insert((context_id, channel_id), exists);
     }
 }
@@ -1259,7 +1268,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<bool, IntentError> {
         self.amp_channel_states
             .lock()
-            .expect("amp channel states mutex")
+            .await
             .get(&(context, channel))
             .copied()
             .ok_or_else(|| {
@@ -1276,7 +1285,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<Vec<AuthorityId>, IntentError> {
         self.amp_channel_participants
             .lock()
-            .expect("amp channel participants mutex")
+            .await
             .get(&(context, channel))
             .cloned()
             .ok_or_else(|| {
@@ -1295,7 +1304,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<AuthoritativeModerationStatus, IntentError> {
         self.moderation_statuses
             .lock()
-            .expect("moderation statuses mutex")
+            .await
             .get(&(context_id, channel_id, authority_id))
             .copied()
             .ok_or_else(|| {
@@ -1311,7 +1320,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<Option<ContextId>, IntentError> {
         self.amp_channel_contexts
             .lock()
-            .expect("amp channel contexts mutex")
+            .await
             .get(&channel)
             .copied()
             .map(Some)
@@ -1328,7 +1337,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     ) -> Result<Vec<ChannelId>, IntentError> {
         self.authoritative_channel_name_matches
             .lock()
-            .expect("authoritative channel name matches mutex")
+            .await
             .get(&channel_name.trim().to_ascii_lowercase())
             .cloned()
             .ok_or_else(|| {
@@ -1743,9 +1752,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
         self.pending_invitations
             .lock()
-            .expect("pending invitations mutex")
+            .await
             .as_ref()
-            .map(|invitations| {
+            .map(|invitations: &Vec<InvitationInfo>| {
                 invitations
                     .iter()
                     .filter(|invitation| invitation.status == InvitationBridgeStatus::Pending)

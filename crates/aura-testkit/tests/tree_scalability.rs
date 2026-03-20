@@ -35,7 +35,9 @@ fn test_device_id(seed: u64) -> DeviceId {
     use aura_core::hash::hash;
     let hash_input = format!("device-{}", seed);
     let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .unwrap_or_else(|_| panic!("hash prefix should fit into UUID bytes"));
     DeviceId(Uuid::from_bytes(uuid_bytes))
 }
 
@@ -43,7 +45,9 @@ fn test_uuid(seed: u64) -> Uuid {
     use aura_core::hash::hash;
     let hash_input = format!("uuid-{}", seed);
     let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .unwrap_or_else(|_| panic!("hash prefix should fit into UUID bytes"));
     Uuid::from_bytes(uuid_bytes)
 }
 
@@ -66,7 +70,7 @@ fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
                     test_device_id(leaf_id as u64),
                     vec![0u8; 32],
                 )
-                .expect("valid leaf"),
+                .unwrap_or_else(|error| panic!("valid leaf: {error}")),
                 under: NodeIndex(0),
             },
             version: 1,

@@ -348,7 +348,7 @@ impl SemanticWorkflowOwner {
             },
         });
         if let Some(publication) = publication {
-            publish_exact_operation_lifecycle(&self.app_core, publication).await?
+            publish_exact_operation_lifecycle(&self.app_core, publication).await?;
         } else {
             publish_authoritative_operation_phase_with_instance(
                 &self.app_core,
@@ -358,7 +358,7 @@ impl SemanticWorkflowOwner {
                 self.kind,
                 phase,
             )
-            .await?
+            .await?;
         }
 
         if let Some(status) = terminal_status {
@@ -401,7 +401,7 @@ impl SemanticWorkflowOwner {
             status: SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded),
         };
         if let Some(publication) = publication {
-            publish_exact_operation_lifecycle(&self.app_core, publication).await?
+            publish_exact_operation_lifecycle(&self.app_core, publication).await?;
         } else {
             publish_authoritative_operation_phase_with_instance(
                 &self.app_core,
@@ -411,7 +411,7 @@ impl SemanticWorkflowOwner {
                 self.kind,
                 SemanticOperationPhase::Succeeded,
             )
-            .await?
+            .await?;
         }
         self.record_terminal_status(terminal_status.causality, terminal_status.status)
             .await;
@@ -448,7 +448,7 @@ impl SemanticWorkflowOwner {
             status: SemanticOperationStatus::failed(self.kind, error.clone()),
         };
         if let Some(publication) = publication {
-            publish_exact_operation_lifecycle(&self.app_core, publication).await?
+            publish_exact_operation_lifecycle(&self.app_core, publication).await?;
         } else {
             publish_authoritative_operation_failure_with_instance(
                 &self.app_core,
@@ -458,7 +458,7 @@ impl SemanticWorkflowOwner {
                 self.kind,
                 error,
             )
-            .await?
+            .await?;
         }
         self.record_terminal_status(terminal_status.causality, terminal_status.status)
             .await;
@@ -658,6 +658,7 @@ pub(in crate::workflows) fn issue_device_enrollment_started_proof(
     category = "capability_gated",
     capability = "semantic_postcondition_proof"
 )]
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub(in crate::workflows) fn issue_message_committed_proof(
     message_id: impl Into<String>,
 ) -> MessageCommittedProof {

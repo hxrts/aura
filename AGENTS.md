@@ -76,7 +76,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 - **Shared UX contract ownership**: parity-critical UI ids, focus semantics, action contracts, and parity metadata come from `aura-app::ui_contract`
 - **Harness mode discipline**: `AURA_HARNESS_MODE` may change instrumentation or rendering stability, but must not change parity-critical business-flow semantics
 - **Harness mode exceptions**: allowlisted harness-only hooks must carry owner, justification, and design-note metadata in `scripts/check/user-flow-policy-guardrails.sh`
-- **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`
+- **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`; this includes the explicit `stage_runtime_identity` bootstrap handoff and the page-owned semantic queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`)
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
@@ -88,10 +88,10 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
   authoritative context, later APIs must require the strongest typed reference;
   raw-id re-resolution, `resolve_*` downgrade, and `*_or_fallback` repair are
   forbidden on that path
-- **Frontend ownership discipline**: parity-critical frontend submission uses only the sanctioned `LocalTerminalOperationOwner` / `WorkflowHandoffOperationOwner` path; browser/TUI task ownership uses only `WebTaskOwner` / `UiTaskOwner`; readiness refresh remains private to `aura-app::workflows`
+- **Frontend ownership discipline**: parity-critical frontend submission uses only the sanctioned local-terminal / workflow-handoff owner path; browser/TUI task ownership uses only `WebTaskOwner` / `UiTaskOwner`; readiness refresh remains private to `aura-app::workflows`
 - **Shared semantic lifecycle ownership**: `aura-app::workflows` owns authoritative parity-critical semantic lifecycle publication after handoff; `aura-terminal`, `aura-web`, and `aura-harness` submit and observe but do not keep parallel terminal publication paths
 - **Frontend/app facade boundary**: frontend parity-critical imports go through `aura_app::ui` and `aura_app::ui::workflows`; do not reach into crate-root `aura_app::workflows` or private semantic helper modules
-- **Runtime-private ownership boundaries**: raw VM admission helpers, VM fragment ownership registry mutation, and `ReconfigurationController` stay internal to `aura-agent`; use the sanctioned ingress and manager surfaces instead
+- **Runtime-private ownership boundaries**: raw VM admission helpers, VM fragment ownership registry mutation, and reconfiguration-controller internals stay internal to `aura-agent`; use the sanctioned ingress and manager surfaces instead
 - **Runtime structured-concurrency boundary**: production raw spawn stays inside `aura-agent::task_registry`; long-lived runtime services use bounded actor ingress and owned task handles instead of ad hoc `tokio::spawn`
 - **Architecture enforcement split**: prefer type/API design, compile-fail
   tests, and Rust-native lints for syntactic or boundary-shape rules;

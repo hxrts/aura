@@ -1350,7 +1350,11 @@ proptest! {
         tui.send_char('?');
 
         prop_assert!(tui.has_modal());
-        prop_assert!(matches!(tui.current_modal(), Some(QueuedModal::Help { .. })));
+        let is_help_modal = tui.current_modal().is_some_and(|modal| match modal {
+            QueuedModal::Help { .. } => true,
+            _ => false,
+        });
+        prop_assert!(is_help_modal);
     }
 
     /// Resize always updates terminal size

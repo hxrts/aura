@@ -13,8 +13,12 @@ fn biscuit_bridge_authorizes_basic_token() {
     let keypair = biscuit_auth::KeyPair::new();
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
     // Add the required capability fact to make authorization succeed
-    builder.add_fact(fact!("capability(\"read\")")).unwrap();
-    let token = builder.build(&keypair).unwrap();
+    builder
+        .add_fact(fact!("capability(\"read\")"))
+        .unwrap_or_else(|err| panic!("failed to add read capability fact: {err:?}"));
+    let token = builder
+        .build(&keypair)
+        .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
     let bridge =
         BiscuitAuthorizationBridge::new(keypair.public(), AuthorityId::new_from_entropy([1u8; 32]));
     let scope = ResourceScope::Authority {
@@ -24,7 +28,7 @@ fn biscuit_bridge_authorizes_basic_token() {
 
     let result = bridge
         .authorize(&token, AuthorizationOp::Read, &scope)
-        .unwrap();
+        .unwrap_or_else(|err| panic!("bridge authorization failed unexpectedly: {err:?}"));
     assert!(result.authorized);
 }
 
@@ -34,7 +38,9 @@ fn biscuit_bridge_authorizes_basic_token() {
 fn biscuit_bridge_extracts_token_facts() {
     let keypair = biscuit_auth::KeyPair::new();
     let builder = biscuit_auth::builder::BiscuitBuilder::new();
-    let token = builder.build(&keypair).unwrap();
+    let token = builder
+        .build(&keypair)
+        .unwrap_or_else(|err| panic!("failed to build empty biscuit token: {err:?}"));
     let bridge =
         BiscuitAuthorizationBridge::new(keypair.public(), AuthorityId::new_from_entropy([2u8; 32]));
 

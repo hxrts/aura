@@ -198,7 +198,7 @@ fn upgrade_activations_counted_independently() {
         auth,
         Uuid::from_bytes(60u128.to_be_bytes()),
         SemanticVersion::new(1, 0, 0),
-        fence.clone(),
+        fence,
         v1_metadata,
     ));
     let upgrade_v2 = MaintenanceFact::UpgradeActivated(UpgradeActivated::new(

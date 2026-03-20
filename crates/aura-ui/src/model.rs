@@ -2199,7 +2199,7 @@ impl UiController {
             .ok()
             .map(|model| render_canonical_snapshot(&model))
             .unwrap_or_else(|| {
-                let snapshot = self.ui_snapshot();
+                let snapshot = UiSnapshot::loading(ScreenId::Neighborhood);
                 format!(
                     "[harness-snapshot-busy]\nscreen={:?}\nreadiness={:?}\nopen_modal={:?}\nfocused_control={:?}",
                     snapshot.screen, snapshot.readiness, snapshot.open_modal, snapshot.focused_control

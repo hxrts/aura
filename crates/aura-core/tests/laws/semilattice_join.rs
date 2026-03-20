@@ -183,7 +183,7 @@ fn test_join_meet_consistency() {
 
 fn fact_with_entry(key: &str, value: &str) -> Fact {
     Fact::with_value(key, FactValue::String(value.to_string()))
-        .expect("fact construction should succeed")
+        .unwrap_or_else(|error| panic!("fact construction should succeed: {error}"))
 }
 
 /// join(a, join(b, c)) = join(join(a, b), c)

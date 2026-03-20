@@ -176,7 +176,7 @@ Every parity-critical operation must have typed terminal behavior. Direct bounda
 
 Every submitted operation must reach a terminal state. Terminal states may not regress. Owner drop must publish failure or cancellation explicitly.
 
-Terminality alone is not strong enough. Aura also requires owner-internal liveness: a legal owner may not contain unbounded internal work that can keep an operation in `Submitting` forever. If the owner can hang indefinitely while still technically being the "right" owner, the architecture is incomplete.
+Terminality alone is not strong enough. Aura also requires owner-internal liveness: a legal owner may not contain unbounded internal work that can keep an operation in `OperationState::Submitting` forever. If the owner can hang indefinitely while still technically being the "right" owner, the architecture is incomplete.
 
 ## Semantic Owner Protocol
 
@@ -190,14 +190,15 @@ terminal publication.
 4. The canonical owner must publish a terminal state before any best-effort
    repair, warm-up, or post-success reconciliation that is allowed to fail.
 5. Best-effort follow-up work must never be required for the operation to stop
-   being `Submitting`.
+   being `OperationState::Submitting`.
 
 This forbids the bug shape where:
 
 - the callback is the "temporary" owner
 - the app workflow is the "real" owner
 - both are structurally legal
-- but the callback keeps local `Submitting` state alive while the workflow has
+- but the callback keeps local `OperationState::Submitting` state alive while
+  the workflow has
   already reached terminal publication or is blocked in best-effort work
 
 The handoff boundary must therefore be before awaited workflow execution, not after it.
@@ -260,14 +261,14 @@ If a semantic owner needs long-lived convergence, that convergence must be owned
 
 ## Typed Success Proofs
 
-Declared postconditions are not documentation-only. For parity-critical operation families, `Succeeded` should be tied to an opaque typed proof surface whenever the authoritative postcondition is stronger than "the function returned `Ok`".
+Declared postconditions are not documentation-only. For parity-critical operation families, `Succeeded` should be tied to an opaque typed proof surface whenever the authoritative postcondition is stronger than "the function returned successfully".
 
 The required pattern is:
 
 - capability-gated code performs the authoritative mutation, readiness check,
   or materialization step
-- that sanctioned helper mints an opaque proof witness such as
-  `ChannelMembershipReadyProof`
+- that sanctioned helper mints an opaque proof witness for the declared
+  postcondition, such as a channel-membership-ready proof
 - the semantic owner publishes terminal success by consuming that proof through
   the canonical success path
 
@@ -303,7 +304,8 @@ Best-effort work:
   convenience
 - must run only after terminal publication, or under a different owner with its
   own explicit lifecycle
-- must not prevent the submitted operation from leaving `Submitting`
+- must not prevent the submitted operation from leaving
+  `OperationState::Submitting`
 - must not directly publish parity-critical lifecycle or readiness
 - must not directly perform parity-critical mutation such as committing facts,
   materializing authoritative state, registering required ownership, or other
@@ -499,8 +501,8 @@ Primary enforcement belongs in typed ownership primitives and proc-macro declara
 - `HarnessUiOperationHandle` and `UiOperationHandle` are constructor/accessor
   surfaces, not public-field records
 - readiness refresh helpers stay private to `aura-app::workflows`
-- `LocalTerminalOperationOwner` and `WorkflowHandoffOperationOwner` are the
-  sanctioned frontend submission windows
+- the local-terminal and workflow-handoff owner wrappers are the sanctioned
+  frontend submission windows
 - `UiTaskOwner` and `WebTaskOwner` are the only sanctioned frontend
   task-ownership surfaces
 

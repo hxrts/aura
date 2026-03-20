@@ -96,9 +96,11 @@ fn fact_envelope_roundtrip() {
 /// and used by CI governance checks.
 #[test]
 fn ownership_category_roundtrip() {
-    let json = serde_json::to_string(&OwnershipCategory::ActorOwned).expect("serialize");
+    let json = serde_json::to_string(&OwnershipCategory::ActorOwned)
+        .unwrap_or_else(|error| panic!("serialize ownership category: {error}"));
     assert_eq!(json, "\"actor_owned\"");
-    let round_trip: OwnershipCategory = serde_json::from_str(&json).expect("deserialize");
+    let round_trip: OwnershipCategory = serde_json::from_str(&json)
+        .unwrap_or_else(|error| panic!("deserialize ownership category: {error}"));
     assert_eq!(round_trip, OwnershipCategory::ActorOwned);
 }
 

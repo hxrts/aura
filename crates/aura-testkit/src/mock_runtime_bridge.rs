@@ -46,6 +46,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+type AmpChannelParticipants = Arc<RwLock<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>;
+type ModerationStatuses =
+    Arc<RwLock<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>;
+
 /// Mock RuntimeBridge for testing
 ///
 /// This provides a functional mock of the RuntimeBridge trait that:
@@ -79,14 +83,13 @@ pub struct MockRuntimeBridge {
     /// Whether canonical AMP channel state should be reported as available.
     amp_channel_state_exists: Arc<RwLock<bool>>,
     /// Mock authoritative AMP participants keyed by (context, channel).
-    amp_channel_participants: Arc<RwLock<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>,
+    amp_channel_participants: AmpChannelParticipants,
     /// Mock authoritative AMP contexts keyed by channel.
     amp_channel_contexts: Arc<RwLock<HashMap<ChannelId, ContextId>>>,
     /// Mock authoritative channel-name matches keyed by normalized name.
     authoritative_channel_name_matches: Arc<RwLock<HashMap<String, Vec<ChannelId>>>>,
     /// Authoritative moderation statuses keyed by (context, channel, authority).
-    moderation_statuses:
-        Arc<RwLock<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>,
+    moderation_statuses: ModerationStatuses,
 }
 
 // Manual Debug impl since ReactiveHandler doesn't derive Debug

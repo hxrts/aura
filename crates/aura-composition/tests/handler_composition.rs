@@ -21,7 +21,7 @@ fn full_composition_produces_working_system() {
 
     handler
         .register_all(RegisterAllOptions::allow_impure())
-        .expect("register_all should succeed");
+        .unwrap_or_else(|error| panic!("register_all should succeed: {error}"));
 
     // Core effect types should all be supported
     assert!(handler.has_handler(EffectType::Crypto));

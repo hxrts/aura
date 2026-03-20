@@ -157,9 +157,13 @@ Frontend-specific flows may still have scenario coverage, but they are not part 
    event-driven contract used by scenarios 12 and 13: invitation/device codes
    come from typed runtime-event payloads, and chat assertions bind to the
    selected shared channel rather than frontend-specific ordering.
-5. Changes to renderer-specific control wiring should add or update
+5. Browser shared-flow bridge changes should preserve the explicit runtime
+   identity staging handoff and the page-owned semantic command queue used by
+   the Playwright lane; coverage remains anchored in the shared semantic
+   scenarios rather than DOM-driving fallback mechanics.
+6. Changes to renderer-specific control wiring should add or update
    frontend-conformance coverage rather than weakening the shared semantic lane.
-6. Changes to OTA or module release/update architecture should update the
+7. Changes to OTA or module release/update architecture should update the
    planned release/update matrix above when they add, remove, or reorder
    mechanism-validation or release-rehearsal coverage.
 

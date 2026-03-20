@@ -519,10 +519,8 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
         required_capabilities.as_slice(),
     )
     .await;
-    if open_result.is_err() {
-        if claimed_session_id.is_some() {
-            let _ = effects.release_vm_fragments(&claimed_fragments);
-        }
+    if open_result.is_err() && claimed_session_id.is_some() {
+        let _ = effects.release_vm_fragments(&claimed_fragments);
     }
     open_result
 }

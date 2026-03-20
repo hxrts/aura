@@ -35,7 +35,9 @@ fn test_device_id(seed: &[u8]) -> DeviceId {
     use aura_core::hash::hash;
     use uuid::Uuid;
     let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .unwrap_or_else(|_| panic!("hash prefix should fit into UUID bytes"));
     DeviceId(Uuid::from_bytes(uuid_bytes))
 }
 
@@ -44,7 +46,9 @@ fn test_authority_id(seed: &[u8]) -> AuthorityId {
     use aura_core::hash::hash;
     use uuid::Uuid;
     let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .unwrap_or_else(|_| panic!("hash prefix should fit into UUID bytes"));
     AuthorityId(Uuid::from_bytes(uuid_bytes))
 }
 
@@ -55,7 +59,7 @@ fn build_populated_handler(device_id: DeviceId) -> CompositeHandler {
     let mut handler = CompositeHandler::for_testing(device_id);
     handler
         .register_all(RegisterAllOptions::allow_impure())
-        .expect("register_all should succeed");
+        .unwrap_or_else(|error| panic!("register_all should succeed: {error}"));
     handler
 }
 
@@ -69,7 +73,7 @@ fn test_effect_coverage_completeness() {
     let simulation_handler = {
         let mut h = CompositeHandler::for_simulation(device_id, 42);
         h.register_all(RegisterAllOptions::allow_impure())
-            .expect("register_all should succeed");
+            .unwrap_or_else(|error| panic!("register_all should succeed: {error}"));
         h
     };
 
@@ -345,7 +349,7 @@ async fn test_complete_handler_system_integration() {
     let simulation_handler = {
         let mut h = CompositeHandler::for_simulation(device_id, 123);
         h.register_all(RegisterAllOptions::allow_impure())
-            .expect("register_all should succeed");
+            .unwrap_or_else(|error| panic!("register_all should succeed: {error}"));
         h
     };
 

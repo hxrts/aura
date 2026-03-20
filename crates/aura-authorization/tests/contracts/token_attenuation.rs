@@ -19,12 +19,12 @@ fn attenuated_read_token_blocks_write() {
     let authority = TokenAuthority::new(issuer);
     let token = authority
         .create_token(recipient)
-        .expect("token creation should succeed");
+        .unwrap_or_else(|err| panic!("token creation should succeed: {err:?}"));
     let manager = BiscuitTokenManager::new(recipient, token.clone());
 
     let attenuated = manager
         .attenuate_read("/context/")
-        .expect("attenuation should succeed");
+        .unwrap_or_else(|err| panic!("attenuation should succeed: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
     let scope = ResourceScope::Context {
@@ -34,16 +34,16 @@ fn attenuated_read_token_blocks_write() {
 
     let base_write = bridge
         .authorize(&token, AuthorizationOp::Write, &scope)
-        .expect("base token should authorize");
+        .unwrap_or_else(|err| panic!("base token authorization should evaluate: {err:?}"));
     assert!(base_write.authorized);
 
     let read_result = bridge
         .authorize(&attenuated, AuthorizationOp::Read, &scope)
-        .expect("attenuated token should authorize read");
+        .unwrap_or_else(|err| panic!("attenuated read authorization should evaluate: {err:?}"));
     assert!(read_result.authorized);
 
     let write_result = bridge
         .authorize(&attenuated, AuthorizationOp::Write, &scope)
-        .expect("attenuated token should evaluate");
+        .unwrap_or_else(|err| panic!("attenuated write authorization should evaluate: {err:?}"));
     assert!(!write_result.authorized);
 }

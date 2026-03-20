@@ -1359,8 +1359,16 @@ mod tests {
             "browser bridge should reject malformed semantic requests with typed context"
         );
         assert!(
-            bridge_source.contains("request_rebootstrap().await"),
-            "browser semantic bridge should own create-account bootstrap rebootstrap scheduling locally"
+            bridge_source.contains("BootstrapHandoff::PendingAccountBootstrap {"),
+            "browser semantic bridge should stage create-account bootstrap through the owned bootstrap handoff"
+        );
+        assert!(
+            bridge_source.contains("&JsValue::from_str(\"stage_runtime_identity\")"),
+            "browser harness bridge should expose an explicit runtime identity staging entrypoint"
+        );
+        assert!(
+            !bridge_source.contains("&JsValue::from_str(\"submit_bootstrap_handoff\")"),
+            "browser harness bridge must not expose a generic bootstrap trigger"
         );
         assert!(
             bridge_source.contains("unsupported screen"),
@@ -1373,6 +1381,18 @@ mod tests {
         assert!(
             driver_source.contains("resetObservationState(session, \"submit_semantic_command\")"),
             "browser driver should invalidate stale observation state after semantic submission"
+        );
+        assert!(
+            driver_source.contains("window.__AURA_HARNESS__?.stage_runtime_identity"),
+            "browser driver should stage runtime identity through the explicit owned bridge entrypoint"
+        );
+        assert!(
+            !driver_source.contains("window.localStorage?.setItem"),
+            "browser driver must not own browser runtime-identity storage layout"
+        );
+        assert!(
+            driver_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__"),
+            "browser driver should submit semantic commands through the owned in-page semantic queue"
         );
         assert!(
             backend_source.contains("failed to decode browser semantic command response"),

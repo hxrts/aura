@@ -497,14 +497,15 @@ impl ChatCallbacks {
             move |message_id: String, channel: String, content: String| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
+                let dispatch_ctx = ctx.clone();
                 let msg_id = message_id.clone();
                 let cmd = EffectCommand::RetryMessage {
                     message_id,
                     channel,
                     content,
                 };
-                spawn_ctx(ctx.clone(), async move {
-                    match ctx.dispatch(cmd).await {
+                spawn_ctx(ctx, async move {
+                    match dispatch_ctx.dispatch(cmd).await {
                         Ok(_) => {
                             send_ui_update_required(
                                 &tx,
@@ -527,7 +528,7 @@ impl ChatCallbacks {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let app_core = ctx.app_core_raw().clone();
-                spawn_ctx(ctx.clone(), async move {
+                spawn_ctx(ctx, async move {
                     let operation_instance_id = operation
                         .as_ref()
                         .map(|operation| operation.harness_handle().instance_id().clone());

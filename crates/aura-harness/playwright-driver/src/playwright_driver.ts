@@ -1059,7 +1059,8 @@ function isUiStateRecoveryCandidate(error) {
   return (
     isUiStateWaitInvalidation(error) ||
     isNavigationTransitionError(error) ||
-    message.includes("root structure export unavailable during ui_state")
+    message.includes("root structure export unavailable during ui_state") ||
+    (message.includes("root_structure_") && message.includes("timed out"))
   );
 }
 
@@ -2440,28 +2441,50 @@ async function snapshot(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
   const screenshot = params?.screenshot !== false;
+  let usedDomFallback = false;
 
-  let payload;
+  let payload = null;
   try {
-    payload =
-      (await withOperationTimeout(
-        "snapshot",
-        session.page.evaluate(() => {
-          if (window.__AURA_HARNESS_OBSERVE__?.snapshot) {
-            return window.__AURA_HARNESS_OBSERVE__.snapshot();
-          }
-          return null;
-        }),
-      )) ?? (await readDomSnapshot(session.page));
-  } catch (error) {
-    throw new Error(
-      `${error}\nBrowser console tail:\n${consoleTailText(session)}`,
+    payload = await withOperationTimeout(
+      "snapshot",
+      session.page.evaluate(() => {
+        if (window.__AURA_HARNESS_OBSERVE__?.snapshot) {
+          return window.__AURA_HARNESS_OBSERVE__.snapshot();
+        }
+        return null;
+      }),
     );
+  } catch (error) {
+    console.error(
+      `[driver] snapshot observer timeout instance=${instanceId} falling back to dom snapshot error=${
+        error?.message ?? String(error)
+      }`,
+    );
+  }
+
+  if (payload == null) {
+    usedDomFallback = true;
+    const cachedDomSnapshot = domSnapshotFromCache(session);
+    if (
+      cachedDomSnapshot.screen ||
+      cachedDomSnapshot.raw_screen ||
+      cachedDomSnapshot.authoritative_screen
+    ) {
+      payload = cachedDomSnapshot;
+    } else {
+      try {
+        payload = await readDomSnapshot(session.page);
+      } catch (error) {
+        throw new Error(
+          `${error}\nBrowser console tail:\n${consoleTailText(session)}`,
+        );
+      }
+    }
   }
   const normalized = parseSnapshotPayload(payload);
 
   let screenshotPath = null;
-  if (screenshot && session.artifactDir) {
+  if (screenshot && session.artifactDir && !usedDomFallback) {
     screenshotPath = path.join(
       session.artifactDir,
       `${instanceId}-${Date.now()}.png`,
@@ -2499,42 +2522,12 @@ async function uiState(params) {
     );
   }
 
-  try {
-    await assertRootStructure(session, "ui_state");
-  } catch (error) {
-    if (!isUiStateRecoveryCandidate(error)) {
-      throw new Error(
-        `ui_state observation failed before recovery instance=${instanceId} error=${error?.message ?? String(error)}`,
-      );
-    }
-
-    const recovered = await readStructuredUiStateWithNavigationRecovery(
-      session,
-      instanceId,
-      "ui_state_root_structure",
-      recoveryTimeoutMs,
-    ).catch((recoveryError) => {
-      throw new Error(
-        `ui_state observation failed before recovery instance=${instanceId} error=${error?.message ?? String(error)} recovery_error=${recoveryError?.message ?? String(recoveryError)}`,
-      );
-    });
-    const staleReason = uiStateStalenessReason(session, recovered);
-    if (staleReason) {
-      throw new Error(`structured_ui_state_stale:${staleReason}`);
-    }
-    storeUiState(session, recovered, "ui_state_root_structure_recovery");
-    return recovered;
-  }
-
   console.error(`[driver] ui_state cache_miss instance=${instanceId}`);
-  const observed = await readStructuredUiState(
+  const observed = await readStructuredUiStateWithNavigationRecovery(
     session,
     instanceId,
     "observation",
-    UI_STATE_TIMEOUT_MS,
-    {
-      storeResult: false,
-    },
+    recoveryTimeoutMs,
   ).catch((error) => {
     throw new Error(
       `structured ui_state observation failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`,
@@ -2709,40 +2702,14 @@ async function stageRuntimeIdentity(params) {
     throw new Error("runtime_identity_json is required");
   }
 
-  const storageDetails = await session.page.evaluate(
-    ({ serializedIdentity }) => {
-      const sanitizeStorageSegment = (raw) =>
-        String(raw ?? "")
-          .split("")
-          .map((ch) => (/^[A-Za-z0-9]$/.test(ch) ? ch.toLowerCase() : "_"))
-          .join("");
-      const query = String(window.location.search ?? "").replace(/^\?/, "");
-      let prefix = "aura_";
-      for (const pair of query.split("&")) {
-        const [key, value] = pair.split("=", 2);
-        if (key === "__aura_harness_instance" && value) {
-          const sanitized = sanitizeStorageSegment(value);
-          if (sanitized.length > 0) {
-            prefix = `aura_${sanitized}_`;
-            break;
-          }
-        }
-      }
-      const storageKey = `${prefix}selected_runtime_identity`;
-      window.localStorage?.setItem(storageKey, serializedIdentity);
-      return { storageKey, payload: serializedIdentity };
-    },
-    { serializedIdentity: runtimeIdentityJson },
-  );
-
-  const rebootstrapResult = await session.page.evaluate(async () => {
-    const requestRebootstrap = window.__AURA_HARNESS__?.request_rebootstrap;
-    if (typeof requestRebootstrap !== "function") {
-      return { ok: false, reason: "request_rebootstrap_missing" };
+  const rebootstrapResult = await session.page.evaluate(async (serializedIdentity) => {
+    const stageRuntimeIdentity = window.__AURA_HARNESS__?.stage_runtime_identity;
+    if (typeof stageRuntimeIdentity !== "function") {
+      return { ok: false, reason: "stage_runtime_identity_missing" };
     }
-    await requestRebootstrap();
+    await stageRuntimeIdentity(serializedIdentity);
     return { ok: true };
-  });
+  }, runtimeIdentityJson);
   if (!rebootstrapResult?.ok) {
     throw new Error(
       `stage_runtime_identity_rebootstrap_failed:${rebootstrapResult?.reason ?? "unknown"}`,
@@ -2752,7 +2719,7 @@ async function stageRuntimeIdentity(params) {
   return {
     status: "staged",
     runtime_identity_json: runtimeIdentityJson,
-    storage_key: storageDetails?.storageKey ?? null,
+    storage_key: null,
   };
 }
 
@@ -2974,12 +2941,16 @@ async function submitSemanticCommand(params) {
     throw new Error("semantic command request is required");
   }
   const requestJson = JSON.stringify(request);
+  const commandId = `${instanceId}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
+    session.semanticResultCache = Object.create(null);
+  }
+  delete session.semanticResultCache[commandId];
   console.error(
     `[driver] submit_semantic_command preflight instance=${instanceId}`,
   );
   const bridgeType = await session.page.evaluate(() => {
-    const bridgeType =
-      typeof window.__AURA_HARNESS__?.__submit_semantic_command_raw;
+    const bridgeType = typeof window.__AURA_DRIVER_SEMANTIC_ENQUEUE__;
     console.log(
       `[driver-page] submit_semantic_command preflight type=${bridgeType}`,
     );
@@ -2991,42 +2962,86 @@ async function submitSemanticCommand(params) {
   console.error(
     `[driver] submit_semantic_command invoke_start instance=${instanceId}`,
   );
-  const response = await session.page.evaluate(
-    async ({ serializedRequest, timeoutMs }) => {
-      console.log("[driver-page] submit_semantic_command invoke_start");
-      const harness = window.__AURA_HARNESS__;
-      if (
-        !harness ||
-        typeof harness.__submit_semantic_command_raw !== "function"
-      ) {
-        throw new Error(
-          "window.__AURA_HARNESS__.__submit_semantic_command_raw is unavailable",
-        );
-      }
-      const timeout = new Promise((_, reject) => {
-        window.setTimeout(() => {
-          const semanticDebug = window.__AURA_SEMANTIC_DEBUG__ ?? null;
-          reject(
-            new Error(
-              `browser semantic bridge timed out debug=${JSON.stringify(semanticDebug)}`,
-            ),
+  await withOperationTimeout(
+    `submit_semantic_command_enqueue_${instanceId}`,
+    session.page.evaluate(
+      (payloadJson) => {
+        console.log("[driver-page] submit_semantic_command invoke_start");
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            window,
+            "__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__",
+          )
+        ) {
+          throw new Error(
+            "window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ is unavailable",
           );
-        }, timeoutMs);
-      });
-      const result = await Promise.race([
-        harness.__submit_semantic_command_raw(serializedRequest),
-        timeout,
-      ]);
-      console.log("[driver-page] submit_semantic_command invoke_done");
-      return result;
-    },
-    { serializedRequest: requestJson, timeoutMs: 10000 },
+        }
+        window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ = payloadJson;
+        console.log("[driver-page] submit_semantic_command invoke_done");
+        return null;
+      },
+      JSON.stringify({
+        command_id: commandId,
+        request_json: requestJson,
+      }),
+    ),
+    2000,
   );
+
+  const deadline = Date.now() + 10000;
+  let lastDebug = null;
+  let response = null;
+  while (Date.now() < deadline) {
+    if (session.semanticResultCache?.[commandId]) {
+      response = session.semanticResultCache[commandId];
+      delete session.semanticResultCache[commandId];
+      break;
+    }
+    const pageStatus = await withOperationTimeout(
+      `submit_semantic_command_result_${instanceId}`,
+      session.page.evaluate((activeCommandId) => {
+        const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
+        const debug = window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null;
+        let result = null;
+        if (
+          semanticResults &&
+          Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
+        ) {
+          result = semanticResults[activeCommandId];
+          delete semanticResults[activeCommandId];
+        }
+        return JSON.stringify({ result, debug });
+      }, commandId),
+      1000,
+    );
+    const parsedStatus =
+      typeof pageStatus === "string" ? JSON.parse(pageStatus) : pageStatus;
+    lastDebug = parsedStatus?.debug ?? lastDebug;
+    if (parsedStatus?.result) {
+      response = parsedStatus.result;
+      break;
+    }
+    await delay(50);
+  }
+  if (!response) {
+    throw new Error(
+      `submit_semantic_command timed out instance=${instanceId} command_id=${commandId} last_debug=${JSON.stringify(lastDebug)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      response.error ?? `semantic command ${commandId} failed without error`,
+    );
+  }
   console.error(
     `[driver] submit_semantic_command resolved instance=${instanceId}`,
   );
   resetObservationState(session, "submit_semantic_command");
-  return response;
+  if (typeof response.result === "string") {
+    return JSON.parse(response.result);
+  }
+  return response.result;
 }
 
 async function getAuthorityId(params) {
@@ -3102,9 +3117,25 @@ async function tailLog(params): Promise<TailLogResult> {
     ? Math.max(1, Math.floor(lines))
     : 20;
 
-  const harnessLines = await session.page.evaluate((count) => {
-    return window.__AURA_HARNESS_OBSERVE__.tail_log(count);
-  }, requested);
+  let harnessLines = [];
+  try {
+    const result = await withOperationTimeout(
+      "tail_log",
+      session.page.evaluate((count) => {
+        return window.__AURA_HARNESS_OBSERVE__.tail_log(count);
+      }, requested),
+      1000,
+    );
+    if (Array.isArray(result)) {
+      harnessLines = result;
+    }
+  } catch (error) {
+    console.error(
+      `[driver] tail_log fallback_to_console instance=${instanceId} error=${
+        error?.message ?? String(error)
+      }`,
+    );
+  }
 
   const merged = [
     ...(Array.isArray(harnessLines) ? harnessLines.map(String) : []),

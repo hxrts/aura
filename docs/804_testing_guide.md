@@ -171,7 +171,7 @@ final CI entrypoints:
 - `just ci-harness-ownership-policy` for the harness-specific ownership policy
 - `just ci-user-flow-policy` for shared UX governance and documentation sync
 
-The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
 ### Shared Semantic Ownership Inventory
 
@@ -200,10 +200,14 @@ Reactive subscription policy for tests:
   should target eventual newer snapshots, not lossless delivery
 - move-owned handles/tokens invalidate stale holders by construction
 - observed layers render and assert, but do not author semantic truth
-- TUI-local semantic submission is limited to the sanctioned
-  `LocalTerminalOperationOwner` and `WorkflowHandoffOperationOwner` wrappers
+- TUI-local semantic submission is limited to the sanctioned local-terminal and
+  workflow-handoff owner wrappers
 - browser bridge concurrency is limited to `WebTaskOwner`; it does not own
   parity-critical lifecycle
+- Playwright stages browser runtime identity through the explicit bridge
+  entrypoint before rebootstrap and submits semantic commands through the
+  page-owned semantic queue instead of mutating browser lifecycle state
+  directly
 - authoritative readiness refresh remains private to `aura-app::workflows` and
   is compile-fail tested in both default and `signals` configurations
 

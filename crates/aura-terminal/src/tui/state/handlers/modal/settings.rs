@@ -299,7 +299,9 @@ pub(super) fn handle_device_import_key_queue(
                     .settings
                     .demo_mobile_authority_id
                     .parse()
-                    .expect("demo mobile authority id should already be validated"),
+                    .unwrap_or_else(|error| {
+                        panic!("demo mobile authority id should already be validated: {error}")
+                    }),
             }));
             state.next_toast_id += 1;
             state.toast_queue.enqueue(QueuedToast::new(

@@ -4,6 +4,7 @@
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
 use crate::workflows::channel_ref::ChannelSelector;
+use crate::workflows::error::WorkflowError;
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
@@ -210,9 +211,9 @@ pub async fn set_channel_mode_resolved(
         .await
         .map_err(|e| super::error::runtime_call("resolve channel context for mode update", e))?
         .ok_or_else(|| {
-            AuraError::not_found(format!(
-                "Set channel mode requires an authoritative context for {resolved_channel}"
-            ))
+            AuraError::from(WorkflowError::MissingAuthoritativeContext {
+                channel: resolved_channel.to_string(),
+            })
         })?;
     let mut homes = homes_state_signal_snapshot(app_core).await?;
 
@@ -227,9 +228,11 @@ pub async fn set_channel_mode_resolved(
     };
 
     if target_home_id.is_none() {
-        return Err(AuraError::not_found(format!(
-            "Set channel mode requires an authoritative home projection for context {context_id}"
-        )));
+        return Err(AuraError::from(
+            WorkflowError::MissingAuthoritativeHomeProjection {
+                context: context_id.to_string(),
+            },
+        ));
     }
 
     let Some(home_id) = target_home_id else {

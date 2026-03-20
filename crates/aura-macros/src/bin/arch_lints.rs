@@ -721,12 +721,13 @@ fn is_integer_type(ty: &syn::Type) -> bool {
 }
 
 fn is_integer_literal(expr: &Expr) -> bool {
-    match expr {
+    matches!(
+        expr,
         Expr::Lit(ExprLit {
-            lit: Lit::Int(_), ..
-        }) => true,
-        _ => false,
-    }
+            lit: Lit::Int(_),
+            ..
+        })
+    )
 }
 
 fn has_allowed_constant_suffix(name: &str) -> bool {

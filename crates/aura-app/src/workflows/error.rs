@@ -100,6 +100,10 @@ pub enum WorkflowError {
     #[error("Missing authoritative context for channel {channel}")]
     MissingAuthoritativeContext { channel: String },
 
+    /// Authoritative home projection for a resolved context is missing.
+    #[error("Missing authoritative home projection for context {context}")]
+    MissingAuthoritativeHomeProjection { context: String },
+
     /// Authoritative participant lookup failed.
     #[error(
         "Authoritative participant lookup for channel {channel} in context {context}: {source}"

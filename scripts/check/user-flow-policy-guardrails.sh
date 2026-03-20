@@ -150,6 +150,8 @@ is_row_index_guard_path() {
 
 is_allowlisted_harness_entrypoint_file() {
   case "$1" in
+    crates/aura-harness/src/backend/playwright_browser.rs|\
+    crates/aura-harness/playwright-driver/src/playwright_driver.ts|\
     justfile|\
     .github/workflows/ci.yml|\
     .github/workflows/harness.yml|\

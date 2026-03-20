@@ -29,7 +29,7 @@ cfg_if! {
             WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
             WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
         };
-        use aura_core::{types::identifiers::AuthorityId, DeviceId};
+        use aura_core::types::identifiers::AuthorityId;
         use aura_app::ui::contract::{
             ControlId, FieldId, ScreenId, UiReadiness,
         };
@@ -48,22 +48,11 @@ cfg_if! {
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
-        const LEGACY_SELECTED_AUTHORITY_STORAGE_SUFFIX: &str = "selected_authority";
-        const LEGACY_SELECTED_DEVICE_STORAGE_SUFFIX: &str = "selected_device";
-
         fn selected_runtime_identity_key(storage_prefix: &str) -> String {
             format!(
                 "{storage_prefix}{}",
                 WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX
             )
-        }
-
-        fn legacy_selected_authority_key(storage_prefix: &str) -> String {
-            format!("{storage_prefix}{LEGACY_SELECTED_AUTHORITY_STORAGE_SUFFIX}")
-        }
-
-        fn legacy_selected_device_key(storage_prefix: &str) -> String {
-            format!("{storage_prefix}{LEGACY_SELECTED_DEVICE_STORAGE_SUFFIX}")
         }
 
         fn pending_device_enrollment_code_key(storage_prefix: &str) -> String {
@@ -152,72 +141,8 @@ cfg_if! {
             }
         }
 
-        fn load_selected_authority(storage_key: &str) -> Result<Option<AuthorityId>, WebUiError> {
-            let Some(window) = web_sys::window() else {
-                return Ok(None);
-            };
-            let Some(storage) = window.local_storage().map_err(|error| {
-                WebUiError::config(
-                    WebUiOperation::LoadSelectedAuthority,
-                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
-                    format!("failed to access localStorage: {:?}", error),
-                )
-            })? else {
-                return Ok(None);
-            };
-            let Some(raw) = storage.get_item(storage_key).map_err(|error| {
-                WebUiError::config(
-                    WebUiOperation::LoadSelectedAuthority,
-                    "WEB_SELECTED_AUTHORITY_READ_FAILED",
-                    format!("failed to read selected authority: {:?}", error),
-                )
-            })? else {
-                return Ok(None);
-            };
-            raw.parse::<AuthorityId>().map(Some).map_err(|error| {
-                WebUiError::config(
-                    WebUiOperation::LoadSelectedAuthority,
-                    "WEB_SELECTED_AUTHORITY_PARSE_FAILED",
-                    format!("failed to parse selected authority: {error}"),
-                )
-            })
-        }
-
-        fn load_selected_device(storage_key: &str) -> Result<Option<DeviceId>, WebUiError> {
-            let Some(window) = web_sys::window() else {
-                return Ok(None);
-            };
-            let Some(storage) = window.local_storage().map_err(|error| {
-                WebUiError::config(
-                    WebUiOperation::LoadSelectedDevice,
-                    "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
-                    format!("failed to access localStorage: {:?}", error),
-                )
-            })? else {
-                return Ok(None);
-            };
-            let Some(raw) = storage.get_item(storage_key).map_err(|error| {
-                WebUiError::config(
-                    WebUiOperation::LoadSelectedDevice,
-                    "WEB_SELECTED_DEVICE_READ_FAILED",
-                    format!("failed to read selected device: {:?}", error),
-                )
-            })? else {
-                return Ok(None);
-            };
-            raw.parse::<DeviceId>().map(Some).map_err(|error| {
-                WebUiError::config(
-                    WebUiOperation::LoadSelectedDevice,
-                    "WEB_SELECTED_DEVICE_PARSE_FAILED",
-                    format!("failed to parse selected device: {error}"),
-                )
-            })
-        }
-
         fn load_selected_runtime_identity(
             storage_key: &str,
-            legacy_authority_key: &str,
-            legacy_device_key: &str,
         ) -> Result<Option<BootstrapRuntimeIdentity>, WebUiError> {
             let Some(window) = web_sys::window() else {
                 return Ok(None);
@@ -249,20 +174,7 @@ cfg_if! {
                     })?;
                 return Ok(Some(identity));
             }
-
-            let authority_id = load_selected_authority(legacy_authority_key)?;
-            let device_id = load_selected_device(legacy_device_key)?;
-            match (authority_id, device_id) {
-                (Some(authority_id), Some(device_id)) => {
-                    Ok(Some(BootstrapRuntimeIdentity::new(authority_id, device_id)))
-                }
-                (None, None) => Ok(None),
-                _ => Err(WebUiError::config(
-                    WebUiOperation::LoadSelectedRuntimeIdentity,
-                    "WEB_RUNTIME_IDENTITY_LEGACY_PARTIAL_STATE",
-                    "legacy selected authority/device state is incomplete",
-                )),
-            }
+            Ok(None)
         }
 
         fn persist_selected_runtime_identity(
@@ -460,6 +372,7 @@ cfg_if! {
             if !harness_mode_enabled() {
                 return;
             }
+            let initial_snapshot = controller.ui_snapshot();
             controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
                 harness_bridge::publish_ui_snapshot(&snapshot);
             }));
@@ -475,6 +388,7 @@ cfg_if! {
                     ),
                 );
             }
+            harness_bridge::publish_ui_snapshot(&initial_snapshot);
         }
 
         fn load_pending_device_enrollment_code(
@@ -570,12 +484,16 @@ cfg_if! {
             })
         }
 
-        async fn request_runtime_rebootstrap() -> Result<(), WebUiError> {
-            harness_bridge::request_rebootstrap().await.map_err(|error| {
+        async fn submit_runtime_bootstrap_handoff(
+            handoff: harness_bridge::BootstrapHandoff,
+        ) -> Result<(), WebUiError> {
+            harness_bridge::submit_bootstrap_handoff(handoff)
+            .await
+            .map_err(|error| {
                 WebUiError::operation(
-                    WebUiOperation::ReloadPage,
-                    "WEB_REBOOTSTRAP_REQUEST_FAILED",
-                    format!("failed to request in-process rebootstrap: {:?}", error),
+                    WebUiOperation::SubmitBootstrapHandoff,
+                    "WEB_BOOTSTRAP_HANDOFF_FAILED",
+                    format!("failed to submit web bootstrap handoff: {:?}", error),
                 )
             })
         }
@@ -589,14 +507,9 @@ cfg_if! {
         async fn bootstrap_controller() -> Result<BootstrapState, WebUiError> {
             let storage_prefix = active_storage_prefix();
             let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-            let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
-            let legacy_device_key = legacy_selected_device_key(&storage_prefix);
             let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
-            let selected_runtime_identity = logged_optional(load_selected_runtime_identity(
-                &runtime_identity_key,
-                &legacy_authority_key,
-                &legacy_device_key,
-            ));
+            let selected_runtime_identity =
+                logged_optional(load_selected_runtime_identity(&runtime_identity_key));
             let pending_account_bootstrap =
                 logged_optional(load_pending_account_bootstrap(&pending_account_key));
             web_sys::console::log_1(
@@ -726,12 +639,6 @@ cfg_if! {
                 ) {
                     log_web_error("warn", &error);
                 }
-                if let Err(error) = clear_storage_key(&legacy_authority_key) {
-                    log_web_error("warn", &error);
-                }
-                if let Err(error) = clear_storage_key(&legacy_device_key) {
-                    log_web_error("warn", &error);
-                }
 
                 let current_device_id = current_runtime_identity.device_id;
                 let controller = Arc::new(UiController::with_authority_switcher(
@@ -740,13 +647,7 @@ cfg_if! {
                     Some(Arc::new(move |authority_id: AuthorityId| {
                         let storage_prefix = active_storage_prefix();
                         let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-                        let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
-                        let legacy_device_key = legacy_selected_device_key(&storage_prefix);
-                        let runtime_identity = load_selected_runtime_identity(
-                            &runtime_identity_key,
-                            &legacy_authority_key,
-                            &legacy_device_key,
-                        );
+                        let runtime_identity = load_selected_runtime_identity(&runtime_identity_key);
                         let runtime_identity =
                             logged_optional(runtime_identity).unwrap_or_else(|| {
                                 BootstrapRuntimeIdentity::new(
@@ -765,14 +666,16 @@ cfg_if! {
                             log_web_error("error", &error);
                             return;
                         }
-                        if let Err(error) = clear_storage_key(&legacy_authority_key) {
-                            log_web_error("warn", &error);
-                        }
-                        if let Err(error) = clear_storage_key(&legacy_device_key) {
-                            log_web_error("warn", &error);
-                        }
                         shared_web_task_owner().spawn_local(async move {
-                            if let Err(error) = request_runtime_rebootstrap().await {
+                            if let Err(error) = submit_runtime_bootstrap_handoff(
+                                harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
+                                    authority_id,
+                                    device_id: updated_identity.device_id,
+                                    source: harness_bridge::RuntimeIdentityStageSource::AuthoritySwitch,
+                                },
+                            )
+                            .await
+                            {
                                 log_web_error("error", &error);
                             }
                         });
@@ -860,18 +763,6 @@ cfg_if! {
                     account_ready,
                 })
             } else {
-                if logged_optional(load_selected_authority(&legacy_authority_key)).is_some()
-                    || logged_optional(load_selected_device(&legacy_device_key)).is_some()
-                {
-                    log_web_error(
-                        "warn",
-                        &WebUiError::config(
-                            WebUiOperation::BootstrapController,
-                            "WEB_BOOTSTRAP_LEGACY_IDENTITY_INCOMPLETE",
-                            "incomplete persisted bootstrap identity; starting without runtime",
-                        ),
-                    );
-                }
                 let app_core = Arc::new(RwLock::new(
                     AppCore::new(AppConfig::default())
                         .map_err(|error| {
@@ -937,73 +828,109 @@ cfg_if! {
             });
 
             use_effect(move || {
-                let trigger: Arc<dyn Fn() -> js_sys::Promise> = Arc::new({
+                let submitter: Arc<
+                    dyn Fn(harness_bridge::BootstrapHandoff) -> js_sys::Promise,
+                > = Arc::new({
                     let rebootstrap_lock = rebootstrap_lock.clone();
                     let bootstrap_epoch = bootstrap_epoch;
                     let committed_bootstrap = committed_bootstrap;
                     let bootstrap_error = bootstrap_error;
-                    move || {
+                    move |handoff| {
                         let rebootstrap_lock = rebootstrap_lock.clone();
                         let mut bootstrap_epoch = bootstrap_epoch;
                         let mut committed_bootstrap = committed_bootstrap;
                         let mut bootstrap_error = bootstrap_error;
                         future_to_promise(async move {
-                            let _guard = rebootstrap_lock.lock().await;
-                            let epoch = bootstrap_epoch() + 1;
-                            web_sys::console::log_1(
-                                &format!("[web-bootstrap] trigger start epoch={epoch}").into(),
-                            );
-                            bootstrap_epoch.set(epoch);
+                            shared_web_task_owner().spawn_local(async move {
+                                let _guard = rebootstrap_lock.lock().await;
+                                let epoch = bootstrap_epoch() + 1;
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-bootstrap] handoff start epoch={epoch} detail={}",
+                                        handoff.detail()
+                                    )
+                                    .into(),
+                                );
+                                bootstrap_epoch.set(epoch);
 
-                            web_sys::console::log_1(
-                                &format!("[web-bootstrap] runner start epoch={epoch}").into(),
-                            );
-                            match bootstrap_controller().await {
-                                Ok(state) => {
-                                    web_sys::console::log_1(
-                                        &format!("[web-bootstrap] runner ok epoch={epoch}").into(),
-                                    );
-                                    bootstrap_error.set(None);
-                                    committed_bootstrap.set(Some(state));
-                                    web_sys::console::log_1(&"[web-bootstrap] trigger done".into());
-                                    Ok(JsValue::UNDEFINED)
-                                }
-                                Err(error) => {
-                                    web_sys::console::error_1(
-                                        &format!(
-                                            "[web-bootstrap] runner error epoch={epoch} error={}",
-                                            error.user_message()
-                                        )
-                                        .into(),
-                                    );
-                                    if committed_bootstrap().is_none() {
-                                        bootstrap_error.set(Some(error.clone()));
-                                    } else {
-                                        log_web_error("error", &error);
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-bootstrap] runner start epoch={epoch} detail={}",
+                                        handoff.detail()
+                                    )
+                                    .into(),
+                                );
+                                match bootstrap_controller().await {
+                                    Ok(state) => {
+                                        web_sys::console::log_1(
+                                            &format!(
+                                                "[web-bootstrap] runner ok epoch={epoch} detail={}",
+                                                handoff.detail()
+                                            )
+                                            .into(),
+                                        );
+                                        bootstrap_error.set(None);
+                                        committed_bootstrap.set(Some(state));
                                     }
-                                    Err(JsValue::from_str(&error.user_message()))
+                                    Err(error) => {
+                                        web_sys::console::error_1(
+                                            &format!(
+                                                "[web-bootstrap] runner error epoch={epoch} detail={} error={}",
+                                                handoff.detail(),
+                                                error.user_message()
+                                            )
+                                            .into(),
+                                        );
+                                        if committed_bootstrap().is_none() {
+                                            bootstrap_error.set(Some(error.clone()));
+                                        } else {
+                                            log_web_error("error", &error);
+                                        }
+                                    }
                                 }
-                            }
+                            });
+                            Ok(JsValue::UNDEFINED)
                         })
                     }
                 });
 
-                harness_bridge::set_rebootstrap_trigger(trigger.clone());
+                harness_bridge::set_bootstrap_handoff_submitter(submitter.clone());
+                let runtime_identity_submitter = submitter.clone();
+                harness_bridge::set_runtime_identity_stager(Arc::new(move |serialized_identity| {
+                    let runtime_identity_submitter = runtime_identity_submitter.clone();
+                    future_to_promise(async move {
+                        let runtime_identity: BootstrapRuntimeIdentity =
+                            serde_json::from_str(&serialized_identity).map_err(|error| {
+                                JsValue::from_str(&format!(
+                                    "failed to parse staged runtime identity: {error}"
+                                ))
+                            })?;
+                        let storage_prefix = active_storage_prefix();
+                        let runtime_identity_key =
+                            selected_runtime_identity_key(&storage_prefix);
+                        persist_selected_runtime_identity(
+                            &runtime_identity_key,
+                            &runtime_identity,
+                        )
+                        .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                        let handoff =
+                            harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
+                                authority_id: runtime_identity.authority_id,
+                                device_id: runtime_identity.device_id,
+                                source:
+                                    harness_bridge::RuntimeIdentityStageSource::HarnessStaging,
+                            };
+                        let _ = wasm_bindgen_futures::JsFuture::from(
+                            runtime_identity_submitter(handoff),
+                        )
+                        .await?;
+                        Ok(JsValue::UNDEFINED)
+                    })
+                }));
 
                 if !bootstrap_started.get() {
                     bootstrap_started.set(true);
-                    let trigger = trigger.clone();
-                    shared_web_task_owner().spawn_local(async move {
-                        if let Err(error) = wasm_bindgen_futures::JsFuture::from(trigger()).await {
-                            web_sys::console::error_1(
-                                &format!(
-                                    "[web-bootstrap] initial bootstrap request failed: {:?}",
-                                    error
-                                )
-                                .into(),
-                            );
-                        }
-                    });
+                    let _ = submitter(harness_bridge::BootstrapHandoff::InitialBootstrap);
                 }
             });
 
@@ -1137,8 +1064,6 @@ cfg_if! {
 
                     let storage_prefix = active_storage_prefix();
                     let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-                    let legacy_authority_key = legacy_selected_authority_key(&storage_prefix);
-                    let legacy_device_key = legacy_selected_device_key(&storage_prefix);
                     let pending_code_storage_key =
                         pending_device_enrollment_code_key(&storage_prefix);
                     importing_code.set(true);
@@ -1184,13 +1109,10 @@ cfg_if! {
                                     )
                                 })?;
                             let current_authority = runtime.authority_id();
-                            let selected_runtime_identity = logged_optional(
-                                load_selected_runtime_identity(
+                            let selected_runtime_identity =
+                                logged_optional(load_selected_runtime_identity(
                                     &runtime_identity_key,
-                                    &legacy_authority_key,
-                                    &legacy_device_key,
-                                ),
-                            );
+                                ));
                             if current_authority != subject_authority
                                 || selected_runtime_identity
                                     .as_ref()
@@ -1225,12 +1147,6 @@ cfg_if! {
                                         WebUiOperation::ImportDeviceEnrollmentCode,
                                     )
                                 })?;
-                                if let Err(error) = clear_storage_key(&legacy_authority_key) {
-                                    log_web_error("warn", &error);
-                                }
-                                if let Err(error) = clear_storage_key(&legacy_device_key) {
-                                    log_web_error("warn", &error);
-                                }
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staged_rebootstrap subject_authority={};device_id={}",
@@ -1239,7 +1155,15 @@ cfg_if! {
                                     .into(),
                                 );
                                 requires_rebootstrap = true;
-                                request_runtime_rebootstrap().await.map_err(|error| {
+                                submit_runtime_bootstrap_handoff(
+                                    harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
+                                        authority_id: subject_authority,
+                                        device_id,
+                                        source: harness_bridge::RuntimeIdentityStageSource::ImportDeviceEnrollment,
+                                    },
+                                )
+                                .await
+                                .map_err(|error| {
                                     error.with_operation(
                                         WebUiOperation::ImportDeviceEnrollmentCode,
                                     )
@@ -1442,7 +1366,15 @@ cfg_if! {
                             })
                         } else {
                             match stage_initial_web_account_bootstrap(&nickname).await {
-                                Ok(()) => request_runtime_rebootstrap().await,
+                                Ok(()) => {
+                                    submit_runtime_bootstrap_handoff(
+                                        harness_bridge::BootstrapHandoff::PendingAccountBootstrap {
+                                            account_name: nickname.clone(),
+                                            source: harness_bridge::PendingAccountBootstrapSource::OnboardingUi,
+                                        },
+                                    )
+                                    .await
+                                }
                                 Err(error) => Err(error),
                             }
                         };

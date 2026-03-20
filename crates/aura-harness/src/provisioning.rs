@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{anyhow, bail, Result};
+use nix::unistd::getpid;
 
 use crate::config::{InstanceMode, RunConfig};
 use crate::determinism::{build_seed_bundle, DEFAULT_HARNESS_SEED};
@@ -128,7 +129,7 @@ pub(crate) fn run_token() -> Option<String> {
         return Some(token);
     }
 
-    let pid = std::process::id();
+    let pid = getpid().as_raw();
     let counter = RUN_TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed);
     Some(format!("pid{pid}-run{counter}"))
 }

@@ -302,16 +302,13 @@ fn scan_item(mode: LintMode, file: &Path, source: &str, item: &Item, violations:
             if has_cfg_test_attr(&item_fn.attrs) {
                 return;
             }
-            scan_function(
-                mode,
-                file,
-                source,
-                &item_fn.attrs,
-                &item_fn.sig.ident.to_string(),
-                item_fn.sig.ident.span().start().line,
-                &item_fn.block,
-                violations,
-            )
+            let function = ScannedFunction {
+                attrs: &item_fn.attrs,
+                function_name: item_fn.sig.ident.to_string(),
+                function_line: item_fn.sig.ident.span().start().line,
+                block: &item_fn.block,
+            };
+            scan_function(mode, file, source, function, violations)
         }
         Item::Impl(item_impl) => {
             for impl_item in &item_impl.items {
@@ -344,16 +341,20 @@ fn scan_impl_function(
     item_fn: &ImplItemFn,
     violations: &mut Vec<String>,
 ) {
-    scan_function(
-        mode,
-        file,
-        source,
-        &item_fn.attrs,
-        &item_fn.sig.ident.to_string(),
-        item_fn.sig.ident.span().start().line,
-        &item_fn.block,
-        violations,
-    );
+    let function = ScannedFunction {
+        attrs: &item_fn.attrs,
+        function_name: item_fn.sig.ident.to_string(),
+        function_line: item_fn.sig.ident.span().start().line,
+        block: &item_fn.block,
+    };
+    scan_function(mode, file, source, function, violations);
+}
+
+struct ScannedFunction<'a> {
+    attrs: &'a [syn::Attribute],
+    function_name: String,
+    function_line: usize,
+    block: &'a Block,
 }
 
 fn scan_proof_issuer_authoritative_source(file: &Path, syntax: &File) -> Vec<String> {
@@ -445,12 +446,15 @@ fn scan_function(
     mode: LintMode,
     file: &Path,
     source: &str,
-    attrs: &[syn::Attribute],
-    function_name: &str,
-    function_line: usize,
-    block: &Block,
+    function: ScannedFunction<'_>,
     violations: &mut Vec<String>,
 ) {
+    let ScannedFunction {
+        attrs,
+        function_name,
+        function_line,
+        block,
+    } = function;
     let contains_handoff = function_contains_call(block, "handoff_to_app_workflow");
     let should_scan = match mode {
         LintMode::WorkflowNoViewReadsForDecisions
@@ -475,9 +479,9 @@ fn scan_function(
         LintMode::WorkflowProofBearingSuccess => {
             file.to_string_lossy()
                 .contains("crates/aura-app/src/workflows/")
-                && !file
+                && file
                     .file_name()
-                    .is_some_and(|name| name == "semantic_facts.rs")
+                    .is_none_or(|name| name != "semantic_facts.rs")
         }
         LintMode::ProofIssuerAuthoritativeSource => false,
         LintMode::ParityCriticalIgnoredResults => {
@@ -504,7 +508,7 @@ fn scan_function(
         mode,
         file,
         source,
-        function_name,
+        function_name: &function_name,
         violations: Vec::new(),
         has_handoff: contains_handoff,
         first_await_line: None,
@@ -705,9 +709,7 @@ impl OwnershipVisitor<'_> {
             && self.function_name.contains("readiness")
             && self.violations.is_empty()
             && self.function_name.contains("authoritative")
-        {
-            return;
-        }
+        {}
     }
 
     fn check_post_terminal_call(&mut self, span: Span, call_name: &str, rendered: String) {
@@ -1145,7 +1147,10 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                 .and_then(|init| ignored_result_call_name(&init.expr))
                 .is_some_and(|call_name| is_parity_critical_call_name(&call_name))
         {
-            let call_name = ignored_result_call_name(&node.init.as_ref().unwrap().expr)
+            let call_name = node
+                .init
+                .as_ref()
+                .and_then(|init| ignored_result_call_name(&init.expr))
                 .unwrap_or_else(|| "<unknown>".to_string());
             self.push_violation(
                 node.span(),

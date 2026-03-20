@@ -7,17 +7,18 @@ use aura_app::ui::contract::{ListId, ModalId, RenderHeartbeat, ScreenId, UiSnaps
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
 };
+use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui_contract::RuntimeFact;
-use aura_core::{types::identifiers::ChannelId, AuthorityId};
+use aura_core::{types::identifiers::ChannelId, AuthorityId, DeviceId};
 use aura_ui::UiController;
 use futures::channel::oneshot;
-use js_sys::{Array, Function, Object, Promise, Reflect, JSON};
-use serde_json::from_str;
+use js_sys::{Array, Function, Object, Reflect, JSON};
+use serde_json::{from_str, to_string};
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell as StdRefCell;
 use std::cell::{Cell, RefCell};
@@ -25,7 +26,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::{future_to_promise, JsFuture};
+use wasm_bindgen_futures::future_to_promise;
 
 use crate::task_owner::shared_web_task_owner;
 
@@ -43,38 +44,8 @@ thread_local! {
     static PENDING_UI_PUBLISH: RefCell<Option<PendingUiPublish>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
     static UI_PUBLISH_RAF_PENDING: Cell<bool> = const { Cell::new(false) };
-    static REBOOTSTRAP_TRIGGER: RefCell<Option<Arc<dyn Fn() -> js_sys::Promise>>> = const { RefCell::new(None) };
-}
-
-const WEB_STORAGE_PREFIX: &str = "aura_";
-const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
-
-fn sanitize_storage_segment(raw: &str) -> String {
-    raw.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-fn harness_storage_prefix(window: &web_sys::Window) -> String {
-    let search = window.location().search().ok().unwrap_or_default();
-    let query = search.strip_prefix('?').unwrap_or(&search);
-    for pair in query.split('&') {
-        if let Some((key, value)) = pair.split_once('=') {
-            if key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty() {
-                let sanitized = sanitize_storage_segment(value);
-                if !sanitized.is_empty() {
-                    return format!("{WEB_STORAGE_PREFIX}{sanitized}_");
-                }
-            }
-        }
-    }
-    WEB_STORAGE_PREFIX.to_string()
+    static BOOTSTRAP_HANDOFF_SUBMITTER: RefCell<Option<Arc<dyn Fn(BootstrapHandoff) -> js_sys::Promise>>> = const { RefCell::new(None) };
+    static RUNTIME_IDENTITY_STAGER: RefCell<Option<Arc<dyn Fn(String) -> js_sys::Promise>>> = const { RefCell::new(None) };
 }
 
 fn submit_create_account_in_background(controller: Arc<UiController>, nickname: String) {
@@ -95,13 +66,6 @@ fn submit_create_account_in_background(controller: Arc<UiController>, nickname: 
         match result {
             Ok(()) => {
                 if has_runtime {
-                    if let Some(window) = web_sys::window() {
-                        if let Ok(Some(storage)) = window.local_storage() {
-                            let storage_key =
-                                format!("{}selected_authority", harness_storage_prefix(&window));
-                            let _ = storage.set_item(&storage_key, &controller.authority_id());
-                        }
-                    }
                     controller.set_account_setup_state(true, "", None);
                 }
                 web_sys::console::log_1(
@@ -117,19 +81,107 @@ fn submit_create_account_in_background(controller: Arc<UiController>, nickname: 
     });
 }
 
-pub fn set_rebootstrap_trigger(trigger: Arc<dyn Fn() -> js_sys::Promise>) {
-    REBOOTSTRAP_TRIGGER.with(|slot| {
-        *slot.borrow_mut() = Some(trigger);
+#[derive(Clone, Debug)]
+pub enum BootstrapHandoff {
+    InitialBootstrap,
+    PendingAccountBootstrap {
+        account_name: String,
+        source: PendingAccountBootstrapSource,
+    },
+    RuntimeIdentityStaged {
+        authority_id: AuthorityId,
+        device_id: DeviceId,
+        source: RuntimeIdentityStageSource,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PendingAccountBootstrapSource {
+    HarnessSemanticBridge,
+    OnboardingUi,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum RuntimeIdentityStageSource {
+    HarnessStaging,
+    AuthoritySwitch,
+    ImportDeviceEnrollment,
+}
+
+impl BootstrapHandoff {
+    #[must_use]
+    pub fn detail(&self) -> String {
+        match self {
+            Self::InitialBootstrap => "initial_bootstrap".to_string(),
+            Self::PendingAccountBootstrap {
+                account_name,
+                source,
+            } => format!(
+                "pending_account_bootstrap:{}:{}",
+                match source {
+                    PendingAccountBootstrapSource::HarnessSemanticBridge =>
+                        "harness_semantic_bridge",
+                    PendingAccountBootstrapSource::OnboardingUi => "onboarding_ui",
+                },
+                account_name
+            ),
+            Self::RuntimeIdentityStaged {
+                authority_id,
+                device_id,
+                source,
+            } => format!(
+                "runtime_identity_staged:{}:{}:{}",
+                match source {
+                    RuntimeIdentityStageSource::HarnessStaging => "harness_staging",
+                    RuntimeIdentityStageSource::AuthoritySwitch => "authority_switch",
+                    RuntimeIdentityStageSource::ImportDeviceEnrollment =>
+                        "import_device_enrollment",
+                },
+                authority_id,
+                device_id
+            ),
+        }
+    }
+}
+
+pub fn set_bootstrap_handoff_submitter(
+    submitter: Arc<dyn Fn(BootstrapHandoff) -> js_sys::Promise>,
+) {
+    BOOTSTRAP_HANDOFF_SUBMITTER.with(|slot| {
+        *slot.borrow_mut() = Some(submitter);
     });
 }
 
-pub async fn request_rebootstrap() -> Result<(), JsValue> {
-    web_sys::console::log_1(&"[web-harness] request_rebootstrap start".into());
-    let trigger = REBOOTSTRAP_TRIGGER.with(|slot| slot.borrow().clone());
-    let trigger = trigger.ok_or_else(|| JsValue::from_str("rebootstrap trigger is unavailable"))?;
-    let promise = trigger();
-    let _ = JsFuture::from(promise).await?;
-    web_sys::console::log_1(&"[web-harness] request_rebootstrap done".into());
+pub fn set_runtime_identity_stager(stager: Arc<dyn Fn(String) -> js_sys::Promise>) {
+    RUNTIME_IDENTITY_STAGER.with(|slot| {
+        *slot.borrow_mut() = Some(stager);
+    });
+}
+
+pub async fn submit_bootstrap_handoff(handoff: BootstrapHandoff) -> Result<(), JsValue> {
+    let detail = handoff.detail();
+    web_sys::console::log_1(
+        &format!("[web-harness] submit_bootstrap_handoff start detail={detail}").into(),
+    );
+    let submitter = BOOTSTRAP_HANDOFF_SUBMITTER.with(|slot| slot.borrow().clone());
+    let submitter =
+        submitter.ok_or_else(|| JsValue::from_str("bootstrap handoff submitter is unavailable"))?;
+    let promise = submitter(handoff);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await?;
+    web_sys::console::log_1(
+        &format!("[web-harness] submit_bootstrap_handoff done detail={detail}").into(),
+    );
+    Ok(())
+}
+
+pub async fn stage_runtime_identity(serialized_identity: String) -> Result<(), JsValue> {
+    web_sys::console::log_1(&"[web-harness] stage_runtime_identity start".into());
+    let stager = RUNTIME_IDENTITY_STAGER.with(|slot| slot.borrow().clone());
+    let stager =
+        stager.ok_or_else(|| JsValue::from_str("runtime identity stager is unavailable"))?;
+    let promise = stager(serialized_identity);
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await?;
+    web_sys::console::log_1(&"[web-harness] stage_runtime_identity done".into());
     Ok(())
 }
 
@@ -273,33 +325,13 @@ async fn submit_semantic_command(
                 web_sys::console::log_1(
                     &format!("[web-harness] create_account staged nickname={account_name}").into(),
                 );
-                update_semantic_debug("create_account_rebootstrap_scheduled", Some(&account_name));
-                let rebootstrap_account_name = account_name.clone();
-                shared_web_task_owner().spawn_local(async move {
-                    update_semantic_debug(
-                        "create_account_rebootstrap_start",
-                        Some(&rebootstrap_account_name),
-                    );
-                    match request_rebootstrap().await {
-                        Ok(()) => update_semantic_debug(
-                            "create_account_rebootstrap_done",
-                            Some(&rebootstrap_account_name),
-                        ),
-                        Err(error) => {
-                            update_semantic_debug(
-                                "create_account_rebootstrap_error",
-                                Some(&format!("{}: {error:?}", rebootstrap_account_name)),
-                            );
-                            web_sys::console::error_1(
-                                &format!(
-                                    "[web-harness] create_account rebootstrap error nickname={} error={error:?}",
-                                    rebootstrap_account_name
-                                )
-                                .into(),
-                            );
-                        }
-                    }
-                });
+                update_semantic_debug("create_account_handoff_start", Some(&account_name));
+                submit_bootstrap_handoff(BootstrapHandoff::PendingAccountBootstrap {
+                    account_name: account_name.clone(),
+                    source: PendingAccountBootstrapSource::HarnessSemanticBridge,
+                })
+                .await?;
+                update_semantic_debug("create_account_handoff_done", Some(&account_name));
             }
             update_semantic_debug("create_account_return", Some(&account_name));
             Ok(SemanticCommandResponse::accepted_without_value())
@@ -820,18 +852,31 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
     )?;
     send_key.forget();
 
-    let request_rebootstrap_fn = Closure::wrap(Box::new(move || -> js_sys::Promise {
-        future_to_promise(async move {
-            request_rebootstrap().await?;
-            Ok(JsValue::UNDEFINED)
-        })
-    }) as Box<dyn FnMut() -> js_sys::Promise>);
+    let stage_runtime_identity_fn = Closure::wrap(Box::new(
+        move |serialized_identity: JsValue| -> js_sys::Promise {
+            let serialized_identity = serialized_identity
+                .as_string()
+                .ok_or_else(|| JsValue::from_str("runtime identity payload must be a string"));
+            future_to_promise(async move {
+                let serialized_identity = serialized_identity?;
+                let _ = serde_json::from_str::<BootstrapRuntimeIdentity>(&serialized_identity)
+                    .map_err(|error| {
+                        JsValue::from_str(&format!(
+                            "invalid staged runtime identity payload: {error}"
+                        ))
+                    })?;
+                stage_runtime_identity(serialized_identity).await?;
+                Ok(JsValue::UNDEFINED)
+            })
+        },
+    )
+        as Box<dyn FnMut(JsValue) -> js_sys::Promise>);
     Reflect::set(
         &harness,
-        &JsValue::from_str("request_rebootstrap"),
-        request_rebootstrap_fn.as_ref().unchecked_ref(),
+        &JsValue::from_str("stage_runtime_identity"),
+        stage_runtime_identity_fn.as_ref().unchecked_ref(),
     )?;
-    request_rebootstrap_fn.forget();
+    stage_runtime_identity_fn.forget();
 
     let navigate_screen = Closure::wrap(Box::new(move |screen: JsValue| -> JsValue {
         let Some(screen_name) = screen.as_string() else {
@@ -959,11 +1004,13 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
                         .into(),
                     );
                     let response = submit_semantic_command(controller, request).await?;
-                    to_value(&response).map_err(|error| {
-                        JsValue::from_str(&format!(
-                            "failed to encode semantic command response: {error}"
-                        ))
-                    })
+                    to_string(&response)
+                        .map(|response_json| JsValue::from_str(&response_json))
+                        .map_err(|error| {
+                            JsValue::from_str(&format!(
+                                "failed to serialize semantic command response: {error}"
+                            ))
+                        })
                 }
                 .await;
 

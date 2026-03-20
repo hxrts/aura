@@ -185,7 +185,7 @@ fn materialized_channel_binding(
 }
 
 struct RunningSession {
-    child: std::sync::Mutex<Box<dyn Child + Send>>,
+    child: Mutex<Box<dyn Child + Send>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: Arc<Mutex<vt100::Parser>>,
     parse_generation: Arc<AtomicU64>,
@@ -241,10 +241,9 @@ impl LocalPtyBackend {
     }
 
     fn child_process_alive(session: &RunningSession) -> bool {
-        let mut child = session
-            .child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Ok(mut child) = session.child.try_lock() else {
+            return true;
+        };
         match child.try_wait() {
             Ok(Some(_)) => return false,
             Ok(None) => {}
@@ -771,7 +770,7 @@ impl InstanceBackend for LocalPtyBackend {
         });
 
         self.session = Some(RunningSession {
-            child: std::sync::Mutex::new(child),
+            child: Mutex::new(child),
             writer: Arc::new(Mutex::new(writer)),
             parser,
             parse_generation,
@@ -798,8 +797,8 @@ impl InstanceBackend for LocalPtyBackend {
             {
                 let mut child = session
                     .child
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    .try_lock()
+                    .unwrap_or_else(|_| panic!("pty child mutex already locked during stop"));
                 let _ = child.kill();
                 let _ = child.wait();
             }
@@ -1049,7 +1048,9 @@ impl InstanceBackend for LocalPtyBackend {
         if !running {
             return Ok(false);
         }
-        let session = self.session.as_ref().expect("checked above");
+        let Some(session) = self.session.as_ref() else {
+            return Ok(false);
+        };
         Ok(Self::reader_thread_alive(session) && Self::child_process_alive(session))
     }
 

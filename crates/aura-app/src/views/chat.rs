@@ -1066,7 +1066,7 @@ mod tests {
 
         let mut canonical_message = make_test_message("msg-canonical", None);
         canonical_message.channel_id = canonical_id;
-        canonical_message.id = stale_message.id.clone();
+        canonical_message.id = stale_message.id;
         canonical_message.content = "Canonical".to_string();
         state.apply_message(canonical_id, canonical_message);
 

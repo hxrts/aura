@@ -29,10 +29,16 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser-only APIs stay in this crate.
 - Shared UI behavior remains in `aura-ui`.
 - Harness bridge methods are deterministic and backwards-compatible.
+- Browser bootstrap handoff stays explicit: runtime identity is staged through
+  the dedicated `stage_runtime_identity` bridge entrypoint rather than through
+  ambient storage or a generic bootstrap trigger.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
 - Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
 - Harness mode may change instrumentation and render stability, but not business-flow semantics.
 - Shared browser-flow execution must go through the semantic command bridge and real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
+- Playwright-to-page semantic submission uses the page-owned semantic queue
+  (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
+  browser semantic lifecycle or runtime/bootstrap state.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
@@ -72,7 +78,7 @@ Verification hooks:
 
 Reference: [docs/122_ownership_model.md](../../docs/122_ownership_model.md)
 
-For shared semantic flows, `aura-web` uses `Observed` for browser-side projection publication, render-convergence publication, and compatibility/version metadata. Narrow `ActorOwned` bridge ownership is permitted for browser bridge installation and command ingress (long-lived mutable async browser surfaces). The browser shell must not own terminal semantic lifecycle truth; browser code must not allocate local semantic owners for parity-critical operations or keep browser-local `Submitting` state after handoff to shared workflow ownership per docs/122 section 16.
+For shared semantic flows, `aura-web` uses `Observed` for browser-side projection publication, render-convergence publication, and compatibility/version metadata. Narrow `ActorOwned` bridge ownership is permitted for browser bridge installation and command ingress (long-lived mutable async browser surfaces). The browser shell must not own terminal semantic lifecycle truth; browser code must not allocate local semantic owners for parity-critical operations or keep browser-local `OperationState::Submitting` state after handoff to shared workflow ownership per docs/122 section 16.
 
 ### Inventory
 
@@ -101,6 +107,9 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 ### Compatibility Policy
 
 - The harness bridge request/response surface carries explicit compatibility metadata so callers can detect versioned behavior changes.
+- Explicit bridge entrypoints currently include semantic command submission,
+  observed snapshot/render publication, and runtime identity staging for
+  owned browser rebootstrap during create-account style flows.
 - Additive fields and additive non-breaking methods are allowed when old callers continue to observe the same behavior.
 - Breaking request/response or observation-shape changes must update explicit compatibility metadata and tests.
 

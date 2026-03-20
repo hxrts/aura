@@ -59,6 +59,7 @@ pub async fn update_chat_projection_observed<T>(
 
 /// Apply an authoritative chat fact to the local chat projection through the
 /// sanctioned chat reducer, then mirror the reduced state into `CHAT_SIGNAL`.
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 pub async fn reduce_chat_fact_observed(
     app_core: &Arc<RwLock<AppCore>>,
     fact: &ChatFact,
@@ -91,16 +92,19 @@ pub async fn reduce_chat_fact_observed(
     Ok(())
 }
 
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 fn parse_channel_id(raw: &str) -> Result<ChannelId, AuraError> {
     raw.parse::<ChannelId>()
         .map_err(|_| AuraError::invalid(format!("Invalid channel ID in chat delta: {raw}")))
 }
 
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 fn parse_authority_id(raw: &str) -> Result<AuthorityId, AuraError> {
     parse_workflow_authority_id(raw)
         .map_err(|_| AuraError::invalid(format!("Invalid authority ID in chat delta: {raw}")))
 }
 
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(), AuraError> {
     match delta {
         ChatDelta::ChannelAdded {
@@ -204,10 +208,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                     channel.member_ids = member_ids;
                 }
             } else {
-                let initial_member_ids = match member_ids {
-                    Some(member_ids) => member_ids,
-                    None => Vec::new(),
-                };
+                let initial_member_ids: Vec<AuthorityId> = member_ids.unwrap_or_default();
                 let initial_member_count = member_count.unwrap_or(1);
                 let canonical = Channel {
                     id: channel_id,

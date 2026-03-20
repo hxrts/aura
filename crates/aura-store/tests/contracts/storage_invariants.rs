@@ -122,8 +122,11 @@ fn storage_fact_encoding_roundtrip() {
         added_at: test_time(1000),
     };
 
-    let encoded = fact.try_encode().expect("encode should succeed");
-    let decoded = StorageFact::try_decode(&encoded).expect("decode should succeed");
+    let encoded = fact
+        .try_encode()
+        .unwrap_or_else(|error| panic!("encode should succeed: {error}"));
+    let decoded = StorageFact::try_decode(&encoded)
+        .unwrap_or_else(|error| panic!("decode should succeed: {error}"));
     assert_eq!(decoded, fact, "roundtrip must preserve all fields");
 }
 
@@ -138,8 +141,12 @@ fn storage_fact_encoding_deterministic() {
         removed_at: test_time(2000),
     };
 
-    let bytes1 = fact.try_encode().expect("encode 1");
-    let bytes2 = fact.try_encode().expect("encode 2");
+    let bytes1 = fact
+        .try_encode()
+        .unwrap_or_else(|error| panic!("encode 1: {error}"));
+    let bytes2 = fact
+        .try_encode()
+        .unwrap_or_else(|error| panic!("encode 2: {error}"));
     assert_eq!(bytes1, bytes2, "encoding must be deterministic");
 }
 
