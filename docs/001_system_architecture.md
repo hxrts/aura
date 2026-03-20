@@ -260,7 +260,9 @@ Journal state converges through anti-entropy after network partitions. Each peer
 
 ### 7.1 Ownership model
 
-Aura uses four ownership categories to prevent multiple layers from co-owning the same semantic truth: `Pure` for reducers and validators, `MoveOwned` for handle and session transfer, `ActorOwned` for long-lived mutable runtime state, and `Observed` for projections and UI reads. Parity-critical mutation must be capability-gated. Parity-critical operations must terminate explicitly with typed success, failure, or cancellation. See [Ownership Model](122_ownership_model.md) for the full contract.
+Aura uses four ownership categories to prevent multiple layers from co-owning the same semantic truth: `Pure` for reducers and validators, `MoveOwned` for handle and session transfer, `ActorOwned` for long-lived mutable runtime state, and `Observed` for projections and UI reads. Parity-critical mutation must be capability-gated. Parity-critical operations must terminate explicitly with typed success, failure, or cancellation.
+
+Actor-owned state is managed through a hierarchical task supervisor. Each service owns a rooted task group, child tasks inherit cancellation from parents, and all mutation flows through bounded typed ingress. Session and endpoint transfer uses move-owned capabilities with monotone generation counters that reject stale access. See [Ownership Model](122_ownership_model.md) for the full contract and [Runtime](104_runtime.md) for the structured concurrency model.
 
 ### 7.2 Workflow ownership boundary
 
