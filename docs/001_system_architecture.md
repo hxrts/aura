@@ -270,7 +270,7 @@ Session and endpoint transfer uses move-owned capabilities with monotone generat
 
 ### 7.3 Workflow ownership boundary
 
-Each parity-critical operation has one authoritative lifecycle owner. Frontend and harness layers may submit commands and observe results, but they do not publish terminal truth. Ownership transfers through explicit handoff before the workflow begins awaited work. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
+User-facing operations such as sending a message, accepting an invitation, or rotating a key are executed as workflows that progress through typed lifecycle phases to a terminal outcome. Each workflow has one authoritative lifecycle owner. Frontend and harness layers may submit commands and observe results, but they do not publish terminal truth. Ownership transfers through explicit handoff before the workflow begins awaited work. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
 
 ### 7.3 Reactive state
 
