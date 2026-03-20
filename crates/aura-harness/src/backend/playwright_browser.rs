@@ -1335,8 +1335,8 @@ mod tests {
             "browser bridge should reject malformed semantic requests with typed context"
         );
         assert!(
-            bridge_source.contains("schedule_page_reload()"),
-            "browser semantic bridge should own create-account bootstrap reload scheduling locally"
+            bridge_source.contains("request_rebootstrap().await"),
+            "browser semantic bridge should own create-account bootstrap rebootstrap scheduling locally"
         );
         assert!(
             bridge_source.contains("unsupported screen"),

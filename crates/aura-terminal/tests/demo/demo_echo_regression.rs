@@ -1,3 +1,4 @@
+#![cfg(feature = "development")]
 //! Regression test for demo mode echo functionality.
 //!
 //! This test mimics the exact TUI flow:

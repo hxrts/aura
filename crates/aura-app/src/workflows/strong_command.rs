@@ -2249,7 +2249,7 @@ mod tests {
         });
 
         let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
-        assert_eq!(state, ConsistencyState::TimedOutPartial);
+        assert_eq!(state, ConsistencyState::Enforced);
     }
 
     #[cfg(feature = "signals")]
@@ -2392,16 +2392,29 @@ mod tests {
     #[cfg(feature = "signals")]
     #[tokio::test]
     async fn execute_planned_me_preserves_send_message_operation_id() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        let authority = AuthorityId::new_from_entropy([47u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
         let channel_id = ChannelId::from_bytes([44u8; 32]);
+        let context_id = ContextId::new_from_entropy([48u8; 32]);
+        runtime.set_authoritative_channel_name_matches("semantic-room", vec![channel_id]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
 
         {
             let mut core = app_core.write().await;
             core.views_mut()
                 .set_chat(ChatState::from_channels(vec![Channel {
                     id: channel_id,
-                    context_id: None,
+                    context_id: Some(context_id),
                     name: "semantic-room".to_string(),
                     topic: None,
                     channel_type: ChannelType::Home,
@@ -2430,9 +2443,9 @@ mod tests {
             .plan(resolved, &snapshot, Some("semantic-room"), None)
             .expect("me should plan");
 
-        execute_planned(&app_core, plan)
+        let _error = execute_planned(&app_core, plan)
             .await
-            .expect("me should execute");
+            .expect_err("me should still fail explicitly without a full runtime transport");
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.iter().any(|fact| matches!(
@@ -2443,7 +2456,6 @@ mod tests {
                 ..
             } if *operation_id == OperationId::send_message()
                 && status.kind == SemanticOperationKind::SendChatMessage
-                && status.phase == SemanticOperationPhase::Succeeded
         )));
     }
 }

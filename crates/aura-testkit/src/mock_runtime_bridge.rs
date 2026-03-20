@@ -30,6 +30,7 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::hash::hash;
 use aura_core::threshold::ThresholdConfig;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
@@ -325,6 +326,10 @@ impl MockRuntimeBridge {
         CeremonyId::new(self.next_string_id())
     }
 
+    fn next_channel_id(&self) -> ChannelId {
+        ChannelId::from_bytes(hash(self.next_string_id().as_bytes()))
+    }
+
     fn now_ms(&self) -> u64 {
         self.current_time_ms.load(Ordering::SeqCst)
     }
@@ -403,9 +408,15 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn amp_create_channel(
         &self,
-        _params: ChannelCreateParams,
+        params: ChannelCreateParams,
     ) -> Result<ChannelId, IntentError> {
-        Ok(ChannelId::new(Hash32::default()))
+        let channel_id = params.channel.unwrap_or_else(|| self.next_channel_id());
+        self.amp_channel_contexts
+            .write()
+            .await
+            .insert(channel_id, params.context);
+        *self.amp_channel_state_exists.write().await = true;
+        Ok(channel_id)
     }
 
     async fn amp_create_channel_bootstrap(
@@ -504,7 +515,19 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
-    async fn amp_join_channel(&self, _params: ChannelJoinParams) -> Result<(), IntentError> {
+    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError> {
+        self.amp_channel_contexts
+            .write()
+            .await
+            .insert(params.channel, params.context);
+        let mut participants = self.amp_channel_participants.write().await;
+        let entry = participants
+            .entry((params.context, params.channel))
+            .or_default();
+        if !entry.contains(&params.participant) {
+            entry.push(params.participant);
+        }
+        *self.amp_channel_state_exists.write().await = true;
         Ok(())
     }
 
@@ -653,6 +676,14 @@ impl RuntimeBridge for MockRuntimeBridge {
     }
 
     async fn sync_with_peer(&self, _peer_id: &str) -> Result<(), IntentError> {
+        Ok(())
+    }
+
+    async fn ensure_peer_channel(
+        &self,
+        _context: ContextId,
+        _peer: AuthorityId,
+    ) -> Result<(), IntentError> {
         Ok(())
     }
 

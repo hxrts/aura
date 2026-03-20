@@ -1,3 +1,4 @@
+#![cfg(feature = "development")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 //! Demo-mode peer count regression test.
 //!
@@ -241,7 +242,7 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
 
         aura_app::ui::workflows::invitation::accept_invitation(
             initialized.raw(),
-            &invitation.invitation_id,
+            invitation.invitation_id(),
         )
         .await
         .expect("accept_invitation should succeed");

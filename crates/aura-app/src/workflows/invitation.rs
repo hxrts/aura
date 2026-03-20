@@ -2636,7 +2636,7 @@ mod tests {
     use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain};
     use crate::views::invitations::InvitationType;
     #[cfg(feature = "signals")]
-    use crate::workflows::messaging::project_channel_peer_membership_with_context;
+    use crate::workflows::messaging::apply_authoritative_membership_projection;
     use crate::workflows::semantic_facts::{
         assert_succeeded_with_postcondition, assert_terminal_failure_or_cancelled,
         assert_terminal_failure_status,

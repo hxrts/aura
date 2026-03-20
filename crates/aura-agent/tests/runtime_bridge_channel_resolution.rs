@@ -50,16 +50,16 @@ async fn create_channel_produces_runtime_resolvable_channel_context() -> Result<
         resolved.is_some(),
         "runtime should resolve context for created channel {channel_id}"
     );
-    let homes = {
+    let chat = {
         let core = app_core.read().await;
-        core.snapshot().homes
+        core.snapshot().chat
     };
-    let home = homes
-        .home_state(&channel_id)
-        .unwrap_or_else(|| panic!("expected created channel {channel_id} to materialize in homes"));
+    let channel = chat
+        .channel(&channel_id)
+        .unwrap_or_else(|| panic!("expected created channel {channel_id} to materialize in chat"));
     assert!(
-        home.context_id.is_some(),
-        "expected created channel {channel_id} home projection to carry context"
+        channel.context_id.is_some(),
+        "expected created channel {channel_id} chat projection to carry context"
     );
 
     Ok(())

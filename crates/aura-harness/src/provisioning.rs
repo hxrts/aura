@@ -152,11 +152,14 @@ fn namespace_port(port: u16, offset: u16) -> u16 {
     }
 
     let normalized = if port >= ISOLATED_PORT_MIN {
-        port - ISOLATED_PORT_MIN
+        u32::from(port - ISOLATED_PORT_MIN)
     } else {
-        port % ISOLATED_PORT_SPAN
+        u32::from(port % ISOLATED_PORT_SPAN)
     };
-    ISOLATED_PORT_MIN + ((normalized + offset) % ISOLATED_PORT_SPAN)
+    let offset = u32::from(offset);
+    let span = u32::from(ISOLATED_PORT_SPAN);
+    let min = u32::from(ISOLATED_PORT_MIN);
+    (min + ((normalized + offset) % span)) as u16
 }
 
 fn ensure_env_path(env: &mut Vec<String>, key: &str, value: PathBuf) {
@@ -201,8 +204,10 @@ fn materialize_bind_address(
 
     let base = DETERMINISTIC_PORT_MIN as u64 + (instance_seed % u64::from(DETERMINISTIC_PORT_SPAN));
     for offset in 0..DETERMINISTIC_PORT_SPAN {
-        let candidate = DETERMINISTIC_PORT_MIN
-            + (((base as u16 - DETERMINISTIC_PORT_MIN) + offset) % DETERMINISTIC_PORT_SPAN);
+        let candidate = u32::from(DETERMINISTIC_PORT_MIN)
+            + (((base as u32 - u32::from(DETERMINISTIC_PORT_MIN)) + u32::from(offset))
+                % u32::from(DETERMINISTIC_PORT_SPAN));
+        let candidate = candidate as u16;
         if used_ports.insert(candidate) {
             return Ok(format!("{host}:{candidate}"));
         }

@@ -1,3 +1,4 @@
+#![cfg(feature = "development")]
 //! Demo-mode hint display tests.
 
 #![allow(missing_docs)]

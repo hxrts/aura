@@ -34,14 +34,30 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
         }
     }
 
-    let runtime = require_runtime(app_core).await?;
-    runtime
-        .resolve_authoritative_channel_ids_by_name(normalized_name)
-        .await
-        .map_err(|error| error::runtime_call("resolve authoritative channel ids by name", error))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
+    if let Ok(runtime) = require_runtime(app_core).await {
+        return runtime
+            .resolve_authoritative_channel_ids_by_name(normalized_name)
+            .await
+            .map_err(|error| {
+                error::runtime_call("resolve authoritative channel ids by name", error)
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| AuraError::not_found(normalized_name.to_string()));
+    }
+
+    // OWNERSHIP: observed
+    // Local-only fallback when no authoritative runtime exists.
+    let chat = chat_snapshot(app_core).await;
+    if let Some(channel_id) = chat
+        .all_channels()
+        .find(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
+        .map(|channel| channel.id)
+    {
+        return Ok(channel_id);
+    }
+
+    Ok(selector.to_channel_id())
 }
 
 #[aura_macros::authoritative_source(kind = "runtime")]
@@ -68,13 +84,20 @@ pub(super) async fn matching_chat_channel_ids(
         }
     }
 
-    let Ok(runtime) = require_runtime(app_core).await else {
-        return Vec::new();
-    };
-    runtime
-        .resolve_authoritative_channel_ids_by_name(normalized_name)
-        .await
-        .unwrap_or_default()
+    if let Ok(runtime) = require_runtime(app_core).await {
+        return runtime
+            .resolve_authoritative_channel_ids_by_name(normalized_name)
+            .await
+            .unwrap_or_default();
+    }
+
+    // OWNERSHIP: observed
+    // Local-only fallback when no authoritative runtime exists.
+    let chat = chat_snapshot(app_core).await;
+    chat.all_channels()
+        .filter(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
+        .map(|channel| channel.id)
+        .collect()
 }
 
 pub(super) async fn resolve_target_authority_for_invite(

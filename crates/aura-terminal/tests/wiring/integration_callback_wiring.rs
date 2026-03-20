@@ -85,6 +85,13 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .await
         .expect("Failed to create account");
 
+    if let Some(runtime_authority) = {
+        let core = app_core.read().await;
+        core.runtime().map(|runtime| runtime.authority_id())
+    } {
+        app_core.write().await.set_authority(runtime_authority);
+    }
+
     // Refresh settings from mock runtime to populate signal
     aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
         .await

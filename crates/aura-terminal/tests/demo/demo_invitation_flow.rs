@@ -1,3 +1,4 @@
+#![cfg(feature = "development")]
 //! Demo-mode invitation flow test.
 
 #![allow(

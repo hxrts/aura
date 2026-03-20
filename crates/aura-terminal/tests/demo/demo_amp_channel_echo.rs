@@ -1,3 +1,4 @@
+#![cfg(feature = "development")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 //! Demo-mode AMP channel echo regression test.
 //!

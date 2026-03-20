@@ -1851,13 +1851,17 @@ fn scan_time_domain_usage(file: &Path, syntax: &File) -> Vec<String> {
         fn visit_expr_call(&mut self, node: &'ast ExprCall) {
             if let Some(path) = call_path_string(&node.func) {
                 let path = path.replace(' ', "");
+                let segments = path.split("::").collect::<Vec<_>>();
+                let direct_clock_now = matches!(
+                    segments.as_slice(),
+                    [.., "SystemTime", "now"] | [.., "Instant", "now"]
+                );
                 if matches!(
                     path.as_str(),
                     "tokio::time::timeout"
                         | "tokio::time::sleep"
-                        | "SystemTime::now"
-                        | "Instant::now"
-                ) {
+                ) || direct_clock_now
+                {
                     self.push_violation(
                         node.span(),
                         format!("direct wall-clock primitive in semantic layer: {path}"),

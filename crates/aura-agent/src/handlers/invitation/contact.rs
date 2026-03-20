@@ -523,22 +523,22 @@ impl<'a> InvitationContactHandler<'a> {
                 continue;
             }
 
-            if !matches!(
-                invitation_type,
-                aura_invitation::InvitationType::Contact { .. }
-            ) {
+            let aura_invitation::InvitationType::Contact { nickname } = invitation_type else {
                 return Ok(None);
-            }
+            };
 
             if receiver_id != own_id {
                 return Ok(None);
             }
 
-            let nickname = message
-                .as_deref()
-                .and_then(|m| m.split("from ").nth(1))
-                .and_then(|s| s.split_whitespace().next())
-                .map(|s| s.to_string())
+            let nickname = nickname
+                .or_else(|| {
+                    message
+                        .as_deref()
+                        .and_then(|m| m.split("from ").nth(1))
+                        .and_then(|s| s.split_whitespace().next())
+                        .map(|s| s.to_string())
+                })
                 .unwrap_or_else(|| sender_id.to_string());
 
             return Ok(Some((sender_id, nickname)));

@@ -99,6 +99,7 @@ mod tests {
         let view_deltas = vec![
             ChatDelta::ChannelAdded {
                 channel_id: "chan".to_string(),
+                context_id: None,
                 name: "general".to_string(),
                 topic: None,
                 is_dm: false,

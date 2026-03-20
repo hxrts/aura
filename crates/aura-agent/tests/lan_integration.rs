@@ -378,7 +378,7 @@ async fn accept_pending_channel_invitation(
 ) -> TestResult<bool> {
     timeout(CHANNEL_INVITE_TIMEOUT, async {
         loop {
-            let pending = invitation_workflow::list_pending_invitations(app).await;
+            let pending = invitation_workflow::list_pending_invitations(app).await?;
             if let Some(invitation) = pending.into_iter().find(|invitation| {
                 matches!(
                     &invitation.invitation_type,
@@ -386,7 +386,13 @@ async fn accept_pending_channel_invitation(
                         if home_id.parse::<ChannelId>().ok() == Some(channel_id)
                 )
             }) {
-                invitation_workflow::accept_invitation(app, &invitation.invitation_id).await?;
+                let invitation =
+                    invitation_workflow::resolve_pending_invitation_handle(
+                        app,
+                        invitation.invitation_id.as_str(),
+                    )
+                    .await?;
+                invitation_workflow::accept_invitation(app, invitation).await?;
                 return Ok(true);
             }
 
@@ -443,9 +449,9 @@ async fn setup_lan_group_channel_pair(
         None,
     )
     .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
-    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
+    let invite_code = invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
+    let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
+    invitation_workflow::accept_invitation(&app_b, imported).await?;
 
     let effects_a = agent_a.runtime().effects();
     timeout(DESCRIPTOR_CACHE_TIMEOUT, async {
@@ -634,11 +640,11 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
         None,
     )
     .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
+    let invite_code = invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
 
     // Bob imports and accepts the invite code.
-    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
+    let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
+    invitation_workflow::accept_invitation(&app_b, imported).await?;
 
     // Wait for Alice to receive Bob's acceptance and cache Bob's descriptor.
     let effects_a = agent_a.runtime().effects();
@@ -807,10 +813,10 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
         None,
     )
     .await?;
-    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
+    let invite_code = invitation_workflow::export_invitation(&app_a, invite.invitation_id()).await?;
 
-    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
-    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
+    let imported = invitation_workflow::import_invitation_details(&app_b, &invite_code).await?;
+    invitation_workflow::accept_invitation(&app_b, imported).await?;
 
     // Intentionally do not wait for sender-side descriptor cache.
     // The workflow should still bootstrap DM channel delivery robustly.

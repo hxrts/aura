@@ -176,9 +176,8 @@ impl ChannelReadinessState {
         let member_count = channel
             .member_count
             .max(channel.member_ids.len() as u32 + 1);
-        let delivery_supported = !channel.name.eq_ignore_ascii_case("note to self")
-            && !channel.is_dm
-            && !recipients.is_empty();
+        let delivery_supported =
+            !channel.name.eq_ignore_ascii_case("note to self") && !recipients.is_empty();
         Self {
             fact_key: ChannelFactKey {
                 id: Some(channel.id.to_string()),
@@ -1646,6 +1645,17 @@ pub async fn create_channel_with_authoritative_binding(
 
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
+        let context_id = channel_context.ok_or_else(|| {
+            AuraError::internal("Missing channel context after runtime channel creation")
+        })?;
+        apply_authoritative_membership_projection(
+            app_core,
+            channel_id,
+            context_id,
+            true,
+            Some(name),
+        )
+        .await?;
         wait_for_runtime_channel_state(app_core, &runtime, channel_id).await?;
     }
 
@@ -1954,7 +1964,22 @@ async fn join_channel_by_name_owned(
         return Ok(());
     }
 
-    let channel_id = resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?;
+    let channel_id = match resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await
+    {
+        Ok(channel_id) => channel_id,
+        Err(error) => {
+            owner
+                .publish_failure(
+                    SemanticOperationError::new(
+                        SemanticFailureDomain::Command,
+                        SemanticFailureCode::InternalError,
+                    )
+                    .with_detail(error.to_string()),
+                )
+                .await?;
+            return Err(error);
+        }
+    };
     if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
@@ -2748,7 +2773,7 @@ pub async fn start_direct_chat_with_authority(
             .await
             .map_err(|error| super::error::runtime_call("add contact to direct channel", error))?;
 
-        let fact = ChatFact::channel_created_ms(
+        let chat_fact = ChatFact::channel_created_ms(
             context_id,
             channel_id,
             channel_name.clone(),
@@ -2756,15 +2781,26 @@ pub async fn start_direct_chat_with_authority(
             true,
             timestamp_ms,
             runtime.authority_id(),
-        )
-        .to_generic();
+        );
+        let fact = chat_fact.to_generic();
 
         runtime
             .commit_relational_facts(std::slice::from_ref(&fact))
             .await
             .map_err(|error| super::error::runtime_call("persist direct channel", error))?;
 
+        reduce_chat_fact_observed(app_core, &chat_fact).await?;
         send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
+        wait_for_runtime_channel_state(app_core, &runtime, channel_id).await?;
+        refresh_authoritative_channel_membership_readiness(app_core).await?;
+        refresh_authoritative_recipient_resolution_readiness(app_core).await?;
+        refresh_authoritative_delivery_readiness_for_channel(
+            app_core,
+            &runtime,
+            channel_id,
+            context_id,
+        )
+        .await?;
 
         return Ok(channel_id);
     }
@@ -3269,7 +3305,7 @@ mod tests {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        app_core.write().await.init_signals().await.unwrap();
 
         let _channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42)
             .await
@@ -3295,7 +3331,7 @@ mod tests {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        app_core.write().await.init_signals().await.unwrap();
 
         join_channel_by_name_with_instance(
             &app_core,
@@ -3330,15 +3366,14 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(config, runtime_bridge).unwrap(),
         ));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
         let channel_id = ChannelId::from_bytes(hash(b"home-context-preferred"));
         let authoritative_context = ContextId::new_from_entropy([92u8; 32]);
         let stale_chat_context = ContextId::new_from_entropy([93u8; 32]);
         runtime.set_amp_channel_context(channel_id, authoritative_context);
 
-        update_chat_projection_observed(&app_core, |chat| {
-            chat.upsert_channel(Channel {
+        {
+            let mut core = app_core.write().await;
+            core.views_mut().set_chat(ChatState::from_channels(vec![Channel {
                 id: channel_id,
                 context_id: Some(stale_chat_context),
                 name: "shared-parity-lab".to_string(),
@@ -3352,10 +3387,8 @@ mod tests {
                 last_message_time: None,
                 last_activity: 0,
                 last_finalized_epoch: 0,
-            });
-        })
-        .await
-        .unwrap();
+            }]));
+        }
 
         assert_eq!(
             authoritative_context_id_for_channel(&app_core, channel_id).await,
@@ -3424,25 +3457,8 @@ mod tests {
         runtime.set_amp_channel_context(channel_id, context_id);
         runtime.set_amp_channel_participants(context_id, channel_id, Vec::new());
         let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
-        let recipients = authoritative_recipient_peers_for_channel(
-            &runtime_bridge,
-            &Channel {
-                id: channel_id,
-                context_id: Some(context_id),
-                name: "shared-parity-lab".to_string(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: vec![projected_peer],
-                member_count: 2,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            },
-            local,
-        )
+        let recipients =
+            authoritative_recipient_peers_for_channel_id(&runtime_bridge, channel_id, local)
         .await
         .expect("authoritative recipient query should succeed");
 
@@ -3460,25 +3476,7 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
         let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
 
-        let error = authoritative_recipient_peers_for_channel(
-            &runtime_bridge,
-            &Channel {
-                id: channel_id,
-                context_id: None,
-                name: "shared-parity-lab".to_string(),
-                topic: None,
-                channel_type: ChannelType::Home,
-                unread_count: 0,
-                is_dm: false,
-                member_ids: vec![projected_peer],
-                member_count: 2,
-                last_message: None,
-                last_message_time: None,
-                last_activity: 0,
-                last_finalized_epoch: 0,
-            },
-            local,
-        )
+        let error = authoritative_recipient_peers_for_channel_id(&runtime_bridge, channel_id, local)
         .await
         .expect_err("missing authoritative context must fail explicitly");
 
@@ -4491,8 +4489,6 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(config, runtime_bridge).unwrap(),
         ));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
         let authoritative_channel_id = ChannelId::from_bytes(hash(b"authoritative-home-id"));
         let context_id = ContextId::new_from_entropy([20u8; 32]);
         runtime.set_authoritative_channel_name_matches(
@@ -4521,8 +4517,6 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(config, runtime_bridge).unwrap(),
         ));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
-
         let canonical_channel_id = ChannelId::from_bytes(hash(b"canonical-accepted-home-id"));
         let context_id = ContextId::new_from_entropy([22u8; 32]);
         runtime.set_authoritative_channel_name_matches(

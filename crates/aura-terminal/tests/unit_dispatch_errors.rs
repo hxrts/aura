@@ -12,6 +12,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
+use aura_testkit::MockRuntimeBridge;
 
 async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
@@ -52,9 +53,33 @@ async fn test_ctx(
     (raw_app_core, ctx, dir)
 }
 
+async fn test_ctx_with_runtime(
+    has_existing_account: bool,
+) -> (Arc<RwLock<AppCore>>, IoContext, tempfile::TempDir) {
+    let runtime = Arc::new(MockRuntimeBridge::new());
+    let app_core =
+        AppCore::with_runtime(AppConfig::default(), runtime).expect("Failed to create test AppCore");
+    let app_core = Arc::new(RwLock::new(app_core));
+    let app_core = InitializedAppCore::new(app_core)
+        .await
+        .expect("Failed to init signals");
+    let raw_app_core = app_core.raw().clone();
+
+    let dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let ctx = IoContext::builder()
+        .with_app_core(app_core)
+        .with_existing_account(has_existing_account)
+        .with_base_path(dir.path().to_path_buf())
+        .with_device_id("test-device".to_string())
+        .with_mode(TuiMode::Production)
+        .build()
+        .expect("IoContext builder should succeed for tests");
+    (raw_app_core, ctx, dir)
+}
+
 #[tokio::test]
 async fn invalid_moderation_request_emits_error_signal() {
-    let (app_core, ctx, _dir) = test_ctx(true).await;
+    let (app_core, ctx, _dir) = test_ctx_with_runtime(true).await;
 
     let _ = ctx
         .dispatch(EffectCommand::KickUser {

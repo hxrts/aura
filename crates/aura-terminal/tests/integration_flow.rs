@@ -58,6 +58,7 @@ use aura_effects::{
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
+use aura_testkit::MockRuntimeBridge;
 
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -91,7 +92,13 @@ impl TestAgent {
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
+        let runtime_authority =
+            AuthorityId::new_from_entropy(aura_core::crypto::hash::hash(
+                format!("flow-runtime:{name}:{unique_id}").as_bytes(),
+            ));
+        let runtime = Arc::new(MockRuntimeBridge::with_authority(runtime_authority));
+        let app_core = AppCore::with_runtime(AppConfig::default(), runtime)
+            .expect("Failed to create AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let initialized_app_core = InitializedAppCore::new(app_core.clone())
             .await
@@ -121,6 +128,14 @@ impl TestAgent {
             .create_account(&self.name)
             .await
             .map_err(|e| format!("Failed to create account for {}: {:?}", self.name, e))?;
+
+        if let Some(runtime_authority) = {
+            let core = self.app_core.read().await;
+            core.runtime().map(|runtime| runtime.authority_id())
+        } {
+            self.app_core.write().await.set_authority(runtime_authority);
+            return Ok(runtime_authority);
+        }
 
         let storage = EncryptedStorage::new(
             FilesystemStorageHandler::from_path(self.test_dir.clone()),

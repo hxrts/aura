@@ -551,15 +551,11 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
             .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel)),
         authority_id,
     ) {
-        let resolved_recipient_count =
-            messaging_workflows::resolved_recipient_peers_for_channel_view(
-                channel,
-                &homes,
-                &contacts,
-                &[],
-                authority_id,
-            )
-            .len();
+        let resolved_recipient_count = channel
+            .member_ids
+            .iter()
+            .filter(|member_id| **member_id != authority_id)
+            .count();
         let resolved_member_count = channel
             .member_count
             .max((resolved_recipient_count.saturating_add(1)) as u32);

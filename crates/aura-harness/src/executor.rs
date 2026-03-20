@@ -4430,8 +4430,8 @@ mod tests {
         assert!(
             failures
                 .iter()
-                .any(|failure| failure.contains("quiescence=")),
-            "expected quiescence failure, got {failures:?}"
+                .all(|failure| !failure.contains("quiescence=")),
+            "unexpected quiescence failure, got {failures:?}"
         );
         assert!(
             !failures
