@@ -83,7 +83,7 @@ Reduction runs on demand or is cached for performance. Cached views are invalida
 
 ### 1.4 Content addressing
 
-All Aura artifacts are identified by the hash of their canonical encoding. This includes facts, snapshot blobs, cache metadata, and upgrade manifests. Structures are serialized using canonical CBOR with sorted maps and deterministic integer width.
+All Aura artifacts are identified by the hash of their canonical encoding. This includes facts, snapshot blobs, cache metadata, and upgrade manifests. Structures are serialized using DAG-CBOR with sorted maps and deterministic integer width.
 
 Once a digest is published, the bytes for that artifact cannot change. New content requires a new digest and a new fact in the journal. Downloaders verify digests before accepting payloads. Journal merges compare digests and reject mismatches before updating state. See [Theoretical Model](002_theoretical_model.md) for the content addressing contract.
 
