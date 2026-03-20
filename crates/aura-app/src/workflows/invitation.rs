@@ -1167,7 +1167,7 @@ async fn reconcile_accepted_channel_invitation(
         authoritative_context = Some(
             execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
                 if let Some(context_id) =
-                    crate::workflows::messaging::authoritative_context_id_for_channel(
+                    crate::workflows::messaging::resolve_authoritative_context_id_for_channel(
                         app_core, channel_id,
                     )
                     .await
@@ -1191,13 +1191,35 @@ async fn reconcile_accepted_channel_invitation(
             "Accepted channel invitation but no authoritative context was materialized",
         ))
     })?;
+    let authoritative_channel = crate::workflows::messaging::AuthoritativeChannelRef::new(
+        channel_id,
+        authoritative_context,
+    );
+    reconcile_accepted_channel_invitation_authoritative(
+        app_core,
+        runtime,
+        authoritative_channel,
+        channel_name_hint,
+        stage_tracker,
+    )
+    .await
+}
+
+#[cfg(feature = "signals")]
+// OWNERSHIP: authoritative-ref-only
+async fn reconcile_accepted_channel_invitation_authoritative(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    authoritative_channel: crate::workflows::messaging::AuthoritativeChannelRef,
+    channel_name_hint: Option<&str>,
+    stage_tracker: &ChannelInvitationStageTracker,
+) -> Result<(), AuraError> {
     update_accept_reconcile_stage(
         stage_tracker,
         "reconcile_channel_invitation:resolve_local_channel_id",
     );
-    // Shared channel invitation acceptance is keyed by the invited canonical
-    // channel id. Do not remap it through a context-local home identity.
-    let local_channel_id = channel_id;
+    let local_channel_id = authoritative_channel.channel_id();
+    let authoritative_context = authoritative_channel.context_id();
     update_accept_reconcile_stage(
         stage_tracker,
         "reconcile_channel_invitation:project_channel_peer_membership",
@@ -1214,12 +1236,8 @@ async fn reconcile_accepted_channel_invitation(
         stage_tracker,
         "reconcile_channel_invitation:ensure_runtime_channel_state",
     );
-    if !crate::workflows::messaging::runtime_channel_state_exists(
-        app_core,
-        runtime,
-        local_channel_id,
-    )
-    .await?
+    if !crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
+        .await?
     {
         update_accept_reconcile_stage(
             stage_tracker,
@@ -1242,12 +1260,8 @@ async fn reconcile_accepted_channel_invitation(
         stage_tracker,
         "reconcile_channel_invitation:wait_for_runtime_channel_state",
     );
-    crate::workflows::messaging::wait_for_runtime_channel_state(
-        app_core,
-        runtime,
-        local_channel_id,
-    )
-    .await?;
+    crate::workflows::messaging::wait_for_runtime_channel_state(app_core, runtime, authoritative_channel)
+        .await?;
     update_accept_reconcile_stage(
         stage_tracker,
         "reconcile_channel_invitation:refresh_channel_membership_readiness",
@@ -1668,7 +1682,7 @@ pub async fn export_invitation(
     Ok(code)
 }
 
-/// Export an invitation by string ID (legacy/convenience API).
+/// Export an invitation by string ID for callers that only carry string keys.
 pub async fn export_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
@@ -2155,13 +2169,18 @@ pub async fn accept_device_enrollment_invitation(
 
     let expected_min_devices = 2_usize;
     let policy = device_enrollment_accept_retry_policy()?;
-    let enrollment_result = execute_with_runtime_retry_budget(&runtime, &policy, |attempt| async {
+    let invitation_id = invitation.invitation_id.clone();
+    let enrollment_result =
+        execute_with_runtime_retry_budget(&runtime, &policy, |attempt| {
+        let runtime = Arc::clone(&runtime);
+        let invitation_id = invitation_id.clone();
+        async move {
         #[cfg(not(feature = "instrumented"))]
-        let _ = attempt;
+        let _ = (attempt, &invitation_id);
         if let Err(_error) = runtime.process_ceremony_messages().await {
             #[cfg(feature = "instrumented")]
             tracing::info!(
-                invitation_id = %invitation.invitation_id,
+                invitation_id = %invitation_id,
                 attempt,
                 error = %_error,
                 "device enrollment process_ceremony_messages failed during convergence"
@@ -2178,7 +2197,7 @@ pub async fn accept_device_enrollment_invitation(
         let settings_device_count = settings::get_settings(app_core).await?.devices.len();
         #[cfg(feature = "instrumented")]
         tracing::info!(
-            invitation_id = %invitation.invitation_id,
+            invitation_id = %invitation_id,
             attempt,
             runtime_device_count,
             settings_device_count,
@@ -2195,25 +2214,25 @@ pub async fn accept_device_enrollment_invitation(
                 #[cfg(feature = "instrumented")]
                 tracing::warn!(
                     error = %_error,
-                    invitation_id = %invitation.invitation_id,
+                    invitation_id = %invitation_id,
                     "device enrollment acceptance completed without reachable peers"
                 );
             }
-
-            owner
-                .publish_success_with(issue_device_enrollment_imported_proof(
-                    invitation.invitation_id.clone(),
-                ))
-                .await?;
             return Ok(());
         }
         Err(AuraError::from(super::error::WorkflowError::Precondition(
             "device enrollment acceptance not yet converged",
         )))
-    })
-    .await;
+        }
+        })
+        .await;
     match enrollment_result {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            owner
+                .publish_success_with(issue_device_enrollment_imported_proof(invitation_id))
+                .await?;
+            Ok(())
+        }
         Err(error) => {
             #[cfg(feature = "instrumented")]
             tracing::warn!(
@@ -2233,7 +2252,7 @@ pub async fn accept_device_enrollment_invitation(
     }
 }
 
-/// Accept an invitation by string ID (legacy/convenience API).
+/// Accept an invitation by string ID for callers that only carry string keys.
 pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
@@ -2259,7 +2278,7 @@ pub async fn decline_invitation(
         .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
 }
 
-/// Decline an invitation by string ID (legacy/convenience API).
+/// Decline an invitation by string ID for callers that only carry string keys.
 pub async fn decline_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
@@ -2285,7 +2304,7 @@ pub async fn cancel_invitation(
         .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
 }
 
-/// Cancel an invitation by string ID (legacy/convenience API).
+/// Cancel an invitation by string ID for callers that only carry string keys.
 pub async fn cancel_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
@@ -3131,6 +3150,42 @@ mod tests {
         .await
         .expect_err("unmaterialized channel must fail reconciliation");
         assert!(matches!(error, AcceptInvitationError::AcceptFailed { .. }));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn channel_reconcile_uses_known_authoritative_context_without_reresolving_it() {
+        let our_authority = AuthorityId::new_from_entropy([88u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority));
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime_bridge.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let channel_id = ChannelId::from_bytes([89u8; 32]);
+        let context_id = ContextId::new_from_entropy([90u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([91u8; 32]);
+
+        runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
+
+        reconcile_channel_invitation_acceptance(
+            &app_core,
+            &runtime_bridge,
+            None,
+            None,
+            channel_id,
+            sender_id,
+            Some(context_id),
+            Some("shared-parity-lab"),
+        )
+        .await
+        .expect("known authoritative context should avoid re-resolution");
     }
 
     #[tokio::test]

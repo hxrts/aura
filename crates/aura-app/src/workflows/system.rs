@@ -19,7 +19,7 @@ use crate::signal_defs::{
 };
 use crate::workflows::runtime::workflow_best_effort;
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::snapshot_policy::contacts_snapshot;
+use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -339,7 +339,7 @@ pub async fn refresh_connection_status_from_contacts(
         core.runtime().cloned()
     };
     // OWNERSHIP: observed
-    let mut contacts_state = contacts_snapshot(app_core).await;
+    let mut contacts_state = observed_contacts_snapshot(app_core).await;
     if let Ok(state) = read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await {
         contacts_state = state;
     }

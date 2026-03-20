@@ -36,6 +36,7 @@ enum LintMode {
     HarnessRecoveryOwnership,
     TimeoutPolicyBoundary,
     TimeDomainUsage,
+    AuthoritativeRefNoReresolution,
 }
 
 impl LintMode {
@@ -64,6 +65,7 @@ impl LintMode {
             "harness-recovery-ownership" => Ok(Self::HarnessRecoveryOwnership),
             "timeout-policy-boundary" => Ok(Self::TimeoutPolicyBoundary),
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
+            "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
             other => Err(format!("unknown lint mode: {other}")),
         }
     }
@@ -93,6 +95,7 @@ impl LintMode {
             Self::HarnessRecoveryOwnership => "harness-recovery-ownership",
             Self::TimeoutPolicyBoundary => "timeout-policy-boundary",
             Self::TimeDomainUsage => "time-domain-usage",
+            Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
         }
     }
 }
@@ -211,6 +214,10 @@ fn run() -> Result<(), String> {
                 "semantic layers are using direct wall-clock time primitives instead of typed time domains"
                     .to_string()
             }
+            LintMode::AuthoritativeRefNoReresolution => {
+                "authoritative-ref-only functions still downgrade back to resolver or fallback helpers"
+                    .to_string()
+            }
         });
     }
 
@@ -267,6 +274,7 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         }
         LintMode::TimeoutPolicyBoundary => return scan_timeout_policy_boundary(file, syntax),
         LintMode::TimeDomainUsage => return scan_time_domain_usage(file, syntax),
+        LintMode::AuthoritativeRefNoReresolution => {}
         LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
         | LintMode::WorkflowNoFallbackDefaults
@@ -479,6 +487,9 @@ fn scan_function(
         LintMode::ParityCriticalIgnoredResults => {
             has_marker_attr(attrs, "semantic_owner")
                 || has_marker_attr(attrs, "best_effort_boundary")
+        }
+        LintMode::AuthoritativeRefNoReresolution => {
+            file.to_string_lossy().contains("crates/aura-app/src/workflows/")
         }
         LintMode::ActorOwnedTaskSpawn
         | LintMode::AsyncSessionOwnership
@@ -805,6 +816,23 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     );
                 }
             }
+            LintMode::AuthoritativeRefNoReresolution => {
+                if self
+                    .function_ownership_tags
+                    .iter()
+                    .any(|tag| tag == "authoritative-ref-only")
+                    && (method_name.contains("_or_fallback")
+                        || method_name.contains("fallback"))
+                {
+                    self.push_violation(
+                        node.span(),
+                        format!(
+                            "authoritative-ref-only workflow `{}` may not use fallback helpers: {}",
+                            self.function_name, tokens
+                        ),
+                    );
+                }
+            }
             _ => {}
         }
         self.note_terminal_publication(node.span(), &method_name, &tokens);
@@ -931,6 +959,24 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                             node.span(),
                             format!(
                                 "recipient/delivery workflow `{}` depends on projected state: {}",
+                                self.function_name, tokens
+                            ),
+                        );
+                    }
+                }
+                LintMode::AuthoritativeRefNoReresolution => {
+                    if self
+                        .function_ownership_tags
+                        .iter()
+                        .any(|tag| tag == "authoritative-ref-only")
+                        && (is_authority_downgrade_call_name(&call_name)
+                            || call_name.contains("_or_fallback")
+                            || call_name.contains("fallback"))
+                    {
+                        self.push_violation(
+                            node.span(),
+                            format!(
+                                "authoritative-ref-only workflow `{}` re-derives stronger truth from weaker inputs: {}",
                                 self.function_name, tokens
                             ),
                         );
@@ -1085,7 +1131,8 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::HarnessReadinessOwnership
             | LintMode::HarnessRecoveryOwnership
             | LintMode::TimeoutPolicyBoundary
-            | LintMode::TimeDomainUsage => {}
+            | LintMode::TimeDomainUsage
+            | LintMode::AuthoritativeRefNoReresolution => {}
         }
 
         visit::visit_expr_await(self, node);
@@ -1236,6 +1283,16 @@ fn is_fallback_heuristic_call_name(call_name: &str) -> bool {
         call_name,
         "fallback_home" | "homes_state_signal_fallback" | "current_home_context_or_fallback"
     )
+}
+
+fn is_authority_downgrade_call_name(call_name: &str) -> bool {
+    matches!(
+        call_name,
+        "resolve_authoritative_context_id_for_channel"
+            | "resolve_chat_channel_id_from_state_or_input"
+            | "matching_chat_channel_ids"
+            | "context_id_for_channel"
+    ) || call_name.starts_with("resolve_")
 }
 
 fn semantic_owner_terminal_helpers(attrs: &[syn::Attribute]) -> Vec<String> {

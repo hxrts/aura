@@ -161,7 +161,7 @@ impl TestAgent {
         Ok(authority_id)
     }
 
-    /// Create account for this agent (legacy method without authority)
+    /// Create account for this agent using the default authority context.
     async fn create_account(&self) -> Result<(), String> {
         self.ctx
             .create_account(&self.name)

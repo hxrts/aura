@@ -146,11 +146,11 @@ pub async fn start_device_threshold_ceremony(
 ///
 /// # Arguments
 /// * `nickname_suggestion` - Suggested name for the device
-/// * `invitee_authority_id` - The authority ID of the new device (if known)
+/// * `invitee_authority_id` - The authority ID of the new device
 pub async fn start_device_enrollment_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
-    invitee_authority_id: Option<AuthorityId>,
+    invitee_authority_id: AuthorityId,
 ) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,

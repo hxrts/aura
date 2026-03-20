@@ -31,22 +31,19 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         {
             if let InvitationType::DeviceEnrollment {
                 subject_authority,
-                initiator_device_id,
                 device_id,
                 nickname_suggestion: _,
-                ceremony_id,
                 pending_epoch,
                 key_package,
                 threshold_config,
                 public_key_package,
                 baseline_tree_ops,
+                ..
             } = &inv.invitation_type
             {
                 return Ok(Some(DeviceEnrollmentInvitation {
                     subject_authority: *subject_authority,
-                    initiator_device_id: *initiator_device_id,
                     device_id: *device_id,
-                    ceremony_id: ceremony_id.clone(),
                     pending_epoch: *pending_epoch,
                     key_package: key_package.clone(),
                     threshold_config: threshold_config.clone(),
@@ -61,22 +58,19 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         {
             if let InvitationType::DeviceEnrollment {
                 subject_authority,
-                initiator_device_id,
                 device_id,
                 nickname_suggestion: _,
-                ceremony_id,
                 pending_epoch,
                 key_package,
                 threshold_config,
                 public_key_package,
                 baseline_tree_ops,
+                ..
             } = shareable.invitation_type
             {
                 return Ok(Some(DeviceEnrollmentInvitation {
                     subject_authority,
-                    initiator_device_id,
                     device_id,
-                    ceremony_id,
                     pending_epoch,
                     key_package,
                     threshold_config,

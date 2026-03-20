@@ -166,7 +166,10 @@ async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
     let start = agent
         .clone()
         .as_runtime_bridge()
-        .initiate_device_enrollment_ceremony("WebApp".to_string(), None)
+        .initiate_device_enrollment_ceremony(
+            "WebApp".to_string(),
+            AuthorityId::new_from_entropy([0x61; 32]),
+        )
         .await?;
 
     let sender_hint = aura_agent::handlers::invitation::ShareableInvitation::sender_addr_from_code(
@@ -499,8 +502,10 @@ async fn setup_lan_group_channel_pair(
     })
     .await?;
     let _accepted_channel_invite = accept_pending_channel_invitation(&app_b, channel_id).await?;
-    messaging_workflow::join_channel(&app_a, channel_id).await?;
-    messaging_workflow::join_channel(&app_b, channel_id).await?;
+    let channel_a = messaging_workflow::resolve_authoritative_channel_ref(&app_a, channel_id).await?;
+    let channel_b = messaging_workflow::resolve_authoritative_channel_ref(&app_b, channel_id).await?;
+    messaging_workflow::join_channel(&app_a, channel_a).await?;
+    messaging_workflow::join_channel(&app_b, channel_b).await?;
 
     wait_for_channel_signal(&app_a, channel_id).await?;
     wait_for_channel_signal(&app_b, channel_id).await?;

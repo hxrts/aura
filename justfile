@@ -645,6 +645,7 @@ ci-ownership-policy:
     just ci-semantic-owner-proof-success
     just ci-workflow-proof-bearing-success
     just ci-proof-issuer-authoritative-source
+    just ci-device-enrollment-authority-contract
     just ci-workflow-no-view-reads
     just ci-workflow-no-view-writes
     just ci-workflow-no-fallback-defaults
@@ -694,6 +695,9 @@ ci-workflow-proof-bearing-success:
 
 ci-proof-issuer-authoritative-source:
     bash scripts/check/proof-issuer-authoritative-source.sh
+
+ci-device-enrollment-authority-contract:
+    bash scripts/check/device-enrollment-authority-contract.sh
 
 ci-workflow-no-view-reads:
     bash scripts/check/workflow-no-view-reads-for-decisions.sh

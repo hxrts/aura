@@ -835,13 +835,13 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// # Arguments
     /// * `nickname_suggestion` - Suggested name for the device
-    /// * `invitee_authority_id` - The authority ID of the new device (if known).
-    ///   When provided, creates an addressed invitation to that authority.
-    ///   When None, falls back to legacy self-addressed behavior.
+    /// * `invitee_authority_id` - The authority ID of the new device.
+    ///   Device enrollment always creates an addressed invitation bound to this
+    ///   authority.
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: Option<AuthorityId>,
+        invitee_authority_id: AuthorityId,
     ) -> Result<DeviceEnrollmentStart, IntentError>;
 
     /// Initiate a device removal ("remove device") ceremony.
@@ -1194,6 +1194,22 @@ impl OfflineRuntimeBridge {
             .lock()
             .expect("amp channel contexts mutex")
             .insert(channel_id, context_id);
+        self.amp_channel_states
+            .lock()
+            .expect("amp channel states mutex")
+            .insert((context_id, channel_id), exists);
+    }
+
+    #[cfg(test)]
+    /// Configure authoritative AMP channel state without populating channel ->
+    /// context resolution. This is used to prove parity-critical flows do not
+    /// re-derive context after authoritative context is already known.
+    pub fn set_amp_channel_state_exists_without_resolution(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        exists: bool,
+    ) {
         self.amp_channel_states
             .lock()
             .expect("amp channel states mutex")
@@ -1618,7 +1634,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         _nickname_suggestion: String,
-        _invitee_authority_id: Option<AuthorityId>,
+        _invitee_authority_id: AuthorityId,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Err(IntentError::no_agent(
             "Device enrollment not available in offline mode",

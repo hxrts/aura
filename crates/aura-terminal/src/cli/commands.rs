@@ -26,7 +26,7 @@ use crate::ScenarioAction;
 #[cfg(feature = "terminal")]
 use crate::TuiArgs;
 
-/// Threshold command arguments (legacy CLI compatibility).
+/// Threshold command arguments for the terminal CLI surface.
 #[derive(Debug, Clone)]
 pub struct ThresholdArgs {
     pub configs: String,

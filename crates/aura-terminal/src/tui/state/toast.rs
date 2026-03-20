@@ -183,20 +183,6 @@ impl ToastQueue {
     }
 }
 
-/// Toast notification (legacy struct for compatibility)
-#[derive(Clone, Debug)]
-pub struct Toast {
-    pub id: u64,
-    pub message: String,
-    pub level: ToastLevel,
-    pub duration_ms: u64,
-    pub created_at: u64,
-    /// Ticks remaining before auto-dismiss (decremented on each Tick event)
-    /// Default: 50 ticks (~5 seconds at 100ms/tick)
-    /// Error toasts use u32::MAX and never auto-dismiss.
-    pub ticks_remaining: u32,
-}
-
 /// Toast severity level
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ToastLevel {

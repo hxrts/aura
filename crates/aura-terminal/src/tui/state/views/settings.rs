@@ -84,22 +84,17 @@ pub enum AddDeviceField {
 ///
 /// For secure device enrollment, the invitee device must first create its own
 /// authority and share it with the initiator. The `invitee_authority_id` field
-/// enables this two-step exchange:
+/// is required for this addressed exchange:
 ///
 /// 1. Invitee creates authority and shows their authority ID (via QR/text)
 /// 2. Initiator enters the invitee's authority ID here
 /// 3. Invitation is cryptographically bound to that specific authority
 ///
-/// If `invitee_authority_id` is empty, falls back to legacy bearer token mode.
 #[derive(Clone, Debug, Default)]
 pub struct AddDeviceModalState {
     /// Device name input
     pub name: String,
-    /// Invitee's authority ID for two-step exchange (optional)
-    ///
-    /// If provided, the enrollment invitation will be addressed to this
-    /// specific authority, enabling the DeviceEnrollment choreography.
-    /// If empty, falls back to legacy self-addressed (bearer token) mode.
+    /// Invitee's authority ID for addressed device enrollment.
     pub invitee_authority_id: String,
     /// Which field is currently focused
     pub focused_field: AddDeviceField,
@@ -122,17 +117,12 @@ impl AddDeviceModalState {
     }
 
     pub fn can_submit(&self) -> bool {
-        !self.name.trim().is_empty()
+        !self.name.trim().is_empty() && !self.invitee_authority_id.trim().is_empty()
     }
 
-    /// Get the invitee authority ID if provided, or None for legacy mode
-    pub fn invitee_authority(&self) -> Option<&str> {
-        let trimmed = self.invitee_authority_id.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
+    /// Get the required invitee authority ID input.
+    pub fn invitee_authority(&self) -> &str {
+        self.invitee_authority_id.trim()
     }
 }
 

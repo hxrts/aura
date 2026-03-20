@@ -48,7 +48,7 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
 
     // OWNERSHIP: observed
     // Local-only fallback when no authoritative runtime exists.
-    let chat = chat_snapshot(app_core).await;
+    let chat = observed_chat_snapshot(app_core).await;
     if let Some(channel_id) = chat
         .all_channels()
         .find(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
@@ -93,7 +93,7 @@ pub(super) async fn matching_chat_channel_ids(
 
     // OWNERSHIP: observed
     // Local-only fallback when no authoritative runtime exists.
-    let chat = chat_snapshot(app_core).await;
+    let chat = observed_chat_snapshot(app_core).await;
     chat.all_channels()
         .filter(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
         .map(|channel| channel.id)

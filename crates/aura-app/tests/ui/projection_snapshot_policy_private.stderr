@@ -1,8 +1,8 @@
 error[E0603]: module `workflows` is private
  --> tests/ui/projection_snapshot_policy_private.rs:2:23
   |
-2 |     let _ = aura_app::workflows::snapshot_policy::chat_snapshot;
-  |                       ^^^^^^^^^ private module    ------------- function `chat_snapshot` is not publicly re-exported
+2 |     let _ = aura_app::workflows::observed_snapshot::observed_chat_snapshot;
+  |                       ^^^^^^^^^ private module      ---------------------- function `observed_chat_snapshot` is not publicly re-exported
   |
 note: the module `workflows` is defined here
  --> src/lib.rs
@@ -13,8 +13,8 @@ note: the module `workflows` is defined here
 error[E0603]: module `workflows` is private
  --> tests/ui/projection_snapshot_policy_private.rs:3:23
   |
-3 |     let _ = aura_app::workflows::snapshot_policy::contacts_snapshot;
-  |                       ^^^^^^^^^ private module    ----------------- function `contacts_snapshot` is not publicly re-exported
+3 |     let _ = aura_app::workflows::observed_snapshot::observed_contacts_snapshot;
+  |                       ^^^^^^^^^ private module      -------------------------- function `observed_contacts_snapshot` is not publicly re-exported
   |
 note: the module `workflows` is defined here
  --> src/lib.rs

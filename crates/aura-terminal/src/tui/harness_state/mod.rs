@@ -408,6 +408,9 @@ mod tests {
     #[test]
     fn harness_command_start_device_enrollment_emits_add_device_followup() {
         let mut state = TuiState::new();
+        state.settings.demo_mobile_authority_id =
+            "authority:77db4f5338665ea95d89d4d0c23176af2bc06e0d7f5f761ad0bbf04f6bcb0f43"
+                .to_string();
         let followup = apply_harness_command(
             &mut state,
             HarnessUiCommand::StartDeviceEnrollment {
@@ -429,8 +432,12 @@ mod tests {
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name,
-                invitee_authority_id: None
+                invitee_authority_id
             })] if name == "Mobile"
+                && *invitee_authority_id
+                    == "authority:77db4f5338665ea95d89d4d0c23176af2bc06e0d7f5f761ad0bbf04f6bcb0f43"
+                        .parse()
+                        .unwrap()
         ));
     }
 

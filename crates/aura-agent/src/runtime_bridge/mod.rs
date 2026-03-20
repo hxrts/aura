@@ -2628,7 +2628,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: Option<AuthorityId>,
+        invitee_authority_id: AuthorityId,
     ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
@@ -2964,17 +2964,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         }
 
-        // Create a shareable device enrollment invitation.
-        //
-        // For the two-step exchange flow, the invitee's authority_id is provided
-        // so the invitation is addressed to that specific authority. Otherwise,
-        // fall back to self-addressed (legacy bearer token behavior).
+        // Create a shareable addressed device enrollment invitation.
         let invitation_service = self
             .agent
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let receiver_id = invitee_authority_id.unwrap_or(authority_id);
         let baseline_tree_ops = effects
             .export_tree_ops()
             .await
@@ -2991,7 +2986,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let invitation = invitation_service
             .invite_device_enrollment(
-                receiver_id,
+                invitee_authority_id,
                 authority_id,
                 current_device_id,
                 new_device_id,

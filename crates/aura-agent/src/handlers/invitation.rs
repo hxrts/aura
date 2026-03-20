@@ -714,13 +714,8 @@ impl InvitationHandler {
                     .await?;
             }
             InvitationType::DeviceEnrollment { .. } => {
-                // For the two-step exchange flow (when invitee has their own authority),
-                // run the device enrollment choreography. For legacy self-addressed
-                // invitations, skip (invitee will accept via import).
-                if invitation.receiver_id != invitation.sender_id {
-                    self.execute_device_enrollment_initiator(effects.clone(), &invitation)
-                        .await?;
-                }
+                self.execute_device_enrollment_initiator(effects.clone(), &invitation)
+                    .await?;
             }
             InvitationType::Channel { .. } => {}
         }
@@ -971,73 +966,9 @@ impl InvitationHandler {
                     })?;
             }
 
-            if let Some(invitation) = self
+            let _ = self
                 .load_invitation_for_choreography(effects.as_ref(), invitation_id)
-                .await
-            {
-                if invitation.receiver_id == invitation.sender_id {
-                    // Legacy self-addressed device enrollment still relies on a direct
-                    // acceptance envelope because there is no cross-authority invitee
-                    // choreography to drive the response.
-                    let context_entropy = {
-                        let mut h = aura_core::hash::hasher();
-                        h.update(b"DEVICE_ENROLLMENT_CONTEXT");
-                        h.update(&enrollment.subject_authority.to_bytes());
-                        h.update(enrollment.ceremony_id.as_str().as_bytes());
-                        h.finalize()
-                    };
-                    let ceremony_context =
-                        aura_core::types::identifiers::ContextId::new_from_entropy(context_entropy);
-
-                    let mut metadata = std::collections::HashMap::new();
-                    metadata.insert(
-                        "content-type".to_string(),
-                        "application/aura-device-enrollment-acceptance".to_string(),
-                    );
-                    metadata.insert(
-                        "ceremony-id".to_string(),
-                        enrollment.ceremony_id.to_string(),
-                    );
-                    metadata.insert(
-                        "acceptor-device-id".to_string(),
-                        enrollment.device_id.to_string(),
-                    );
-                    metadata.insert(
-                        "aura-destination-device-id".to_string(),
-                        enrollment.initiator_device_id.to_string(),
-                    );
-
-                    let envelope = aura_core::effects::TransportEnvelope {
-                        destination: enrollment.subject_authority,
-                        source: self.context.authority.authority_id(),
-                        context: ceremony_context,
-                        payload: Vec::new(),
-                        metadata,
-                        receipt: None,
-                    };
-
-                    if let Err(error) = attempt_network_send_envelope(
-                        &effects,
-                        "device enrollment acceptance envelope send failed",
-                        envelope,
-                    )
-                    .await
-                    {
-                        tracing::warn!(
-                            invitation_id = %invitation_id,
-                            error = %error,
-                            "Device enrollment acceptance envelope send failed; continuing with convergence path"
-                        );
-                    }
-                } else {
-                    tracing::debug!(
-                        invitation_id = %invitation_id,
-                        receiver_id = %invitation.receiver_id,
-                        sender_id = %invitation.sender_id,
-                        "Skipping legacy direct device enrollment acceptance envelope for addressed invitation"
-                    );
-                }
-            }
+                .await;
         }
 
         // Update cache if we have this invitation
@@ -1083,14 +1014,9 @@ impl InvitationHandler {
                         .await;
                 }
                 InvitationType::DeviceEnrollment { .. } => {
-                    // For the two-step exchange flow (when invitee has their own authority),
-                    // run the device enrollment choreography as invitee. For legacy self-addressed
-                    // invitations, acceptance was already sent via direct envelope.
-                    if invitation.receiver_id != invitation.sender_id {
-                        let _ = self
-                            .execute_device_enrollment_invitee(effects.clone(), &invitation)
-                            .await;
-                    }
+                    let _ = self
+                        .execute_device_enrollment_invitee(effects.clone(), &invitation)
+                        .await;
                 }
                 InvitationType::Channel { .. } => {
                     if let Err(error) = self
@@ -2230,9 +2156,7 @@ impl InvitationHandler {
 #[derive(Debug, Clone)]
 struct DeviceEnrollmentInvitation {
     subject_authority: AuthorityId,
-    initiator_device_id: aura_core::DeviceId,
     device_id: aura_core::DeviceId,
-    ceremony_id: aura_core::types::identifiers::CeremonyId,
     pending_epoch: u64,
     key_package: Vec<u8>,
     threshold_config: Vec<u8>,

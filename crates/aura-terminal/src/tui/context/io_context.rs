@@ -793,7 +793,7 @@ impl IoContext {
     pub async fn start_device_enrollment(
         &self,
         nickname_suggestion: &str,
-        invitee_authority_id: Option<AuthorityId>,
+        invitee_authority_id: AuthorityId,
     ) -> TerminalResult<DeviceEnrollmentStartInfo> {
         let start = ceremony_workflows::start_device_enrollment_ceremony(
             self.app_core.raw(),

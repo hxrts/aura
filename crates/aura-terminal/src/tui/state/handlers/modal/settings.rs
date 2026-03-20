@@ -85,13 +85,10 @@ pub(super) fn handle_settings_add_device_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                let invitee_authority_id = if let Some(raw) = modal_state.invitee_authority() {
-                    match parse_authority_id(state, raw, "device enrollment invitee") {
-                        Some(id) => Some(id),
+                let invitee_authority_id =
+                    match parse_authority_id(state, modal_state.invitee_authority(), "device enrollment invitee") {
+                        Some(id) => id,
                         None => return,
-                    }
-                } else {
-                    None
                 };
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                     name: modal_state.name,
@@ -284,10 +281,22 @@ pub(super) fn handle_device_import_key_queue(
             });
         } else {
             state.settings.pending_mobile_enrollment_autofill = true;
-            // Demo mode: Mobile agent is simulated, use legacy bearer token mode
+            if state.settings.demo_mobile_authority_id.is_empty() {
+                state.next_toast_id += 1;
+                state.toast_queue.enqueue(QueuedToast::new(
+                    state.next_toast_id,
+                    "Mobile enrollment requires a configured invitee authority ID",
+                    ToastLevel::Error,
+                ));
+                return;
+            }
             commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name: "Mobile".to_string(),
-                invitee_authority_id: None,
+                invitee_authority_id: state
+                    .settings
+                    .demo_mobile_authority_id
+                    .parse()
+                    .expect("demo mobile authority id should already be validated"),
             }));
             state.next_toast_id += 1;
             state.toast_queue.enqueue(QueuedToast::new(

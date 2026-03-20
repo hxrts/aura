@@ -1422,7 +1422,9 @@ async fn execute_membership(
             channel,
         } => match channel {
             ChannelResolveOutcome::Existing { channel_id, .. } => {
-                messaging::join_channel(app_core, channel_id.0)
+                let authoritative_channel =
+                    messaging::resolve_authoritative_channel_ref(app_core, channel_id.0).await?;
+                messaging::join_channel(app_core, authoritative_channel)
                     .await
                     .map(|_| ())
             }

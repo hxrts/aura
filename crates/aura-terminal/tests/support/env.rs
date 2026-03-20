@@ -206,10 +206,10 @@ impl Drop for FullTestEnv {
 }
 
 // ============================================================================
-// Legacy Compatibility Functions
+// Test Environment Convenience Functions
 // ============================================================================
 
-/// Create a simple test environment (legacy compatibility).
+/// Create a simple test environment.
 ///
 /// Returns (ctx, app_core) for tests that use this pattern.
 pub async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
@@ -219,7 +219,7 @@ pub async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>
     (env.ctx.clone(), env.app_core.clone())
 }
 
-/// Clean up a test directory (legacy compatibility).
+/// Clean up a test directory.
 pub fn cleanup_test_dir(name: &str) {
     let test_dir = std::env::temp_dir().join(format!("aura-test-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);

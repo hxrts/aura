@@ -47,7 +47,7 @@ impl SnapshotHelper {
 //
 // Production TUI screens should subscribe to signals (reactive) rather than
 // relying on snapshots for rendering; snapshot accessors exist primarily for
-// deterministic tests and a few legacy utilities.
+// deterministic tests and a few explicit non-reactive helpers.
 impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_chat(&self) -> ChatSnapshot {

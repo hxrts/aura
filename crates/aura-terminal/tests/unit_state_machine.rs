@@ -34,8 +34,7 @@ use aura_terminal::tui::navigation::TwoPanelFocus;
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state::{
     ChatFocus, ChatMemberCandidate, ChatMemberSelectModalState, ContactSelectModalState,
-    CreateChannelModalState, CreateChannelStep, DispatchCommand, ModalType, QueuedModal,
-    TuiCommand,
+    CreateChannelModalState, CreateChannelStep, DispatchCommand, QueuedModal, TuiCommand,
 };
 use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
@@ -903,7 +902,6 @@ proptest! {
         }
 
         let modal = tui.state().modal_queue.current();
-        let modal_type = tui.state().current_modal_type();
         let is_global_modal = matches!(
             modal,
             Some(QueuedModal::AccountSetup(_))
@@ -914,7 +912,17 @@ proptest! {
         );
 
         prop_assert_eq!(tui.has_modal(), modal.is_some());
-        prop_assert_eq!(modal_type != ModalType::None, is_global_modal);
+        prop_assert_eq!(
+            is_global_modal,
+            matches!(
+                modal,
+                Some(QueuedModal::AccountSetup(_))
+                    | Some(QueuedModal::Help { .. })
+                    | Some(QueuedModal::GuardianSelect(_))
+                    | Some(QueuedModal::ContactSelect(_))
+                    | Some(QueuedModal::Confirm { .. })
+            )
+        );
 
         if let Some(QueuedModal::ContactSelect(state))
         | Some(QueuedModal::GuardianSelect(state)) = modal

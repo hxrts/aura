@@ -130,8 +130,8 @@ async fn setup_demo_env(seed: u64) -> DemoTestEnv {
 ///
 /// This test reproduces the bug that occurs when pressing Ctrl+M in the
 /// device import modal during demo mode. The Ctrl+M handler triggers
-/// `DispatchCommand::AddDevice { name: "Mobile" }` which calls
-/// `start_device_enrollment()`.
+/// `DispatchCommand::AddDevice { name: "Mobile", invitee_authority_id }` which
+/// calls `start_device_enrollment()`.
 ///
 /// Expected behavior: The device enrollment ceremony should start successfully
 /// and return an enrollment code.
@@ -151,11 +151,14 @@ async fn regression_demo_mode_mobile_device_enrollment_should_start() {
     // device import modal when no enrollment code exists yet:
     // 1. The modal handler detects Ctrl+M
     // 2. Since `last_device_enrollment_code` is empty, it dispatches:
-    //    `DispatchCommand::AddDevice { name: "Mobile".to_string(), invitee_authority_id: None }`
-    // 3. This calls `ctx.start_device_enrollment("Mobile", None)`
+    //    `DispatchCommand::AddDevice { name: "Mobile".to_string(), invitee_authority_id: demo mobile authority }`
+    // 3. This calls `ctx.start_device_enrollment("Mobile", invitee_authority_id)`
     //
     // The bug causes this to fail with "Internal error: Failed to start devi..."
-    let result = env.ctx.start_device_enrollment("Mobile", None).await;
+    let result = env
+        .ctx
+        .start_device_enrollment("Mobile", aura_core::AuthorityId::new_from_entropy([9u8; 32]))
+        .await;
 
     match result {
         Ok(start) => {
@@ -205,7 +208,10 @@ async fn demo_mode_sequential_device_enrollments() {
         .expect("refresh_settings_from_runtime should succeed");
 
     // First enrollment
-    let result1 = env.ctx.start_device_enrollment("Mobile", None).await;
+    let result1 = env
+        .ctx
+        .start_device_enrollment("Mobile", aura_core::AuthorityId::new_from_entropy([10u8; 32]))
+        .await;
     assert!(
         result1.is_ok(),
         "First enrollment should succeed: {:?}",
@@ -216,7 +222,10 @@ async fn demo_mode_sequential_device_enrollments() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Second enrollment (should supersede the first if not completed)
-    let result2 = env.ctx.start_device_enrollment("Tablet", None).await;
+    let result2 = env
+        .ctx
+        .start_device_enrollment("Tablet", aura_core::AuthorityId::new_from_entropy([11u8; 32]))
+        .await;
     assert!(
         result2.is_ok(),
         "Second enrollment should succeed: {:?}",
@@ -302,7 +311,9 @@ async fn demo_mode_enrollment_immediately_after_account_creation() {
 
     // Don't refresh settings - try enrollment immediately
     // This is a more aggressive test of the initialization sequence
-    let result = ctx.start_device_enrollment("Mobile", None).await;
+    let result = ctx
+        .start_device_enrollment("Mobile", aura_core::AuthorityId::new_from_entropy([12u8; 32]))
+        .await;
 
     // Clean up
     let _ = std::fs::remove_dir_all(&test_dir);

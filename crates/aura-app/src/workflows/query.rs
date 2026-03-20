@@ -5,7 +5,7 @@
 
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
+use crate::workflows::observed_snapshot::{observed_chat_snapshot, observed_contacts_snapshot};
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
@@ -26,8 +26,8 @@ pub async fn list_participants(
     channel: &str,
 ) -> Result<Vec<String>, AuraError> {
     // OWNERSHIP: observed
-    let contacts = contacts_snapshot(app_core).await;
-    let chat = chat_snapshot(app_core).await;
+    let contacts = observed_contacts_snapshot(app_core).await;
+    let chat = observed_chat_snapshot(app_core).await;
 
     let mut participants = vec!["You".to_string()];
     let mut seen = BTreeSet::new();
@@ -115,7 +115,7 @@ pub async fn get_user_info_by_authority_id(
     authority_id: AuthorityId,
 ) -> Result<Contact, AuraError> {
     // OWNERSHIP: observed
-    let contacts = contacts_snapshot(app_core).await;
+    let contacts = observed_contacts_snapshot(app_core).await;
     contacts
         .contact(&authority_id)
         .cloned()
@@ -133,7 +133,7 @@ pub async fn resolve_contact(
     target: &str,
 ) -> Result<Contact, AuraError> {
     // OWNERSHIP: observed
-    let contacts = contacts_snapshot(app_core).await;
+    let contacts = observed_contacts_snapshot(app_core).await;
     let target = target.trim();
     if target.is_empty() {
         return Err(AuraError::invalid("User target cannot be empty"));
@@ -195,7 +195,7 @@ pub async fn resolve_contact(
 /// reactive pipeline. Falls back to ViewState snapshot if the signal is not available.
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
     // OWNERSHIP: observed
-    contacts_snapshot(app_core)
+    observed_contacts_snapshot(app_core)
         .await
         .all_contacts()
         .cloned()

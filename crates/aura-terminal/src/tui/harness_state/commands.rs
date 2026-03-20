@@ -323,19 +323,13 @@ pub(crate) fn apply_harness_command(
         }
         HarnessUiCommand::StartDeviceEnrollment { device_name } => {
             select_settings_section(state, SettingsSection::Devices);
-            let invitee_authority_id = if state.settings.demo_mobile_authority_id.is_empty() {
-                None
-            } else {
-                Some(
-                    state
-                        .settings
-                        .demo_mobile_authority_id
-                        .parse::<aura_core::AuthorityId>()
-                        .map_err(|error| {
-                            format!("invalid demo mobile authority id in settings state: {error}")
-                        })?,
-                )
-            };
+            let invitee_authority_id = state
+                .settings
+                .demo_mobile_authority_id
+                .parse::<aura_core::AuthorityId>()
+                .map_err(|error| {
+                    format!("invalid or missing demo mobile authority id in settings state: {error}")
+                })?;
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name: device_name,
                 invitee_authority_id,

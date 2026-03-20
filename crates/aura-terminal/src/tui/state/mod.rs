@@ -34,17 +34,16 @@ pub mod toast;
 mod transition;
 pub mod views;
 
-// Re-export all public types for backwards compatibility
+// Re-export the sanctioned public TUI state surface.
 pub use commands::{
     DispatchCommand, HomeCapabilityConfig, HomeTarget, InvitationKind, ThresholdK, TuiCommand,
 };
 pub use form::{FormDraft, FormPhase, Validatable, ValidationError};
 pub use ids::{AuthorityRef, CeremonyId, ChannelId, ContactId, DeviceId, HomeId, InvitationId};
 pub use modal_queue::{
-    ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, ModalType,
-    QueuedModal,
+    ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, QueuedModal,
 };
-pub use toast::{QueuedToast, Toast, ToastLevel, ToastQueue};
+pub use toast::{QueuedToast, ToastLevel, ToastQueue};
 pub use transition::transition;
 pub use views::*;
 pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep};
@@ -509,20 +508,6 @@ impl TuiState {
     #[must_use]
     pub fn has_modal(&self) -> bool {
         self.has_queued_modal()
-    }
-
-    /// Get the current modal type (for backwards compatibility in tests)
-    #[must_use]
-    pub fn current_modal_type(&self) -> ModalType {
-        match self.modal_queue.current() {
-            Some(QueuedModal::AccountSetup(_)) => ModalType::AccountSetup,
-            Some(QueuedModal::Help { .. }) => ModalType::Help,
-            Some(QueuedModal::GuardianSelect(_)) => ModalType::GuardianSelect,
-            Some(QueuedModal::ContactSelect(_)) => ModalType::ContactSelect,
-            Some(QueuedModal::Confirm { .. }) => ModalType::Confirm,
-            Some(_) => ModalType::None, // Screen-specific modals
-            None => ModalType::None,
-        }
     }
 
     /// Get reference to account setup state if it's the active modal

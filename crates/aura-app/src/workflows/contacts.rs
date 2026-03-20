@@ -8,7 +8,7 @@ use crate::views::contacts::ReadReceiptPolicy;
 use crate::workflows::context::default_relational_context;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::require_runtime;
-use crate::workflows::snapshot_policy::contacts_snapshot;
+use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
@@ -225,7 +225,7 @@ pub async fn emit_read_receipts(
     timestamp_ms: u64,
 ) -> Result<u32, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let contacts = contacts_snapshot(app_core).await;
+    let contacts = observed_contacts_snapshot(app_core).await;
     let reader_id = runtime.authority_id();
 
     let mut facts = Vec::new();

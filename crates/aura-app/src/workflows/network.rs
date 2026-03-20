@@ -8,7 +8,7 @@
 
 use crate::workflows::signals::emit_signal;
 use crate::workflows::signals::read_signal_or_default;
-use crate::workflows::state_helpers::update_neighborhood_projection_observed;
+use crate::workflows::observed_projection::update_neighborhood_projection_observed;
 use crate::{
     signal_defs::{
         ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, DiscoveredPeersState,

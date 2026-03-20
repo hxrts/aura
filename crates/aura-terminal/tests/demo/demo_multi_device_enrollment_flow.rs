@@ -148,10 +148,9 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
     // Enroll device B.
-    // Use legacy bearer token mode (None for invitee_authority_id)
     let start_b = env
         .ctx_a
-        .start_device_enrollment("Laptop", None)
+        .start_device_enrollment("Laptop", aura_core::AuthorityId::new_from_entropy([2u8; 32]))
         .await
         .expect("start_device_enrollment should succeed");
 
@@ -214,10 +213,9 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
     wait_for_device(&env.app_core_a, &start_b.device_id).await;
 
     // Enroll device C (now there is an existing non-initiator device B).
-    // Use legacy bearer token mode (None for invitee_authority_id)
     let start_c = env
         .ctx_a
-        .start_device_enrollment("Phone", None)
+        .start_device_enrollment("Phone", aura_core::AuthorityId::new_from_entropy([3u8; 32]))
         .await
         .expect("start_device_enrollment should succeed");
 

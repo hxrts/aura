@@ -28,7 +28,7 @@ use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state::{
     transition, ChannelInfoModalState, ChatFocus, CreateChannelModalState, CreateChannelStep,
-    DetailFocus, DispatchCommand, ModalType, QueuedModal, TopicModalState, TuiCommand, TuiState,
+    DetailFocus, DispatchCommand, QueuedModal, TopicModalState, TuiCommand, TuiState,
 };
 use aura_terminal::tui::types::SettingsSection;
 use proptest::prelude::*;
@@ -128,18 +128,8 @@ impl TestTui {
         self.state.has_modal()
     }
 
-    fn modal_type(&self) -> ModalType {
-        self.state.current_modal_type()
-    }
-
-    fn assert_modal(&self, expected: ModalType) {
-        assert_eq!(
-            self.modal_type(),
-            expected,
-            "Expected modal {:?}, got {:?}",
-            expected,
-            self.modal_type()
-        );
+    fn current_modal(&self) -> Option<&QueuedModal> {
+        self.state.modal_queue.current()
     }
 
     fn assert_no_modal(&self) {
@@ -819,7 +809,7 @@ mod modals {
         // '?' opens help modal from any screen
         tui.send_char('?');
         assert!(tui.has_modal());
-        assert_eq!(tui.modal_type(), ModalType::Help);
+        assert!(matches!(tui.current_modal(), Some(QueuedModal::Help { .. })));
 
         // Set up scroll max for navigation to work
         tui.state.help.scroll_max = 50;
@@ -839,7 +829,10 @@ mod modals {
         let mut tui = TestTui::with_account_setup();
 
         assert!(tui.has_modal());
-        assert_eq!(tui.modal_type(), ModalType::AccountSetup);
+        assert!(matches!(
+            tui.current_modal(),
+            Some(QueuedModal::AccountSetup(_))
+        ));
 
         // Type account name
         tui.type_text("MyAccount");
@@ -1043,7 +1036,7 @@ mod global_behavior {
             tui.send_char('?');
 
             assert!(tui.has_modal(), "? should open help from {screen:?}");
-            assert_eq!(tui.modal_type(), ModalType::Help);
+            assert!(matches!(tui.current_modal(), Some(QueuedModal::Help { .. })));
 
             // Clean up for next iteration
             tui.send_escape();
@@ -1351,7 +1344,7 @@ proptest! {
         tui.send_char('?');
 
         prop_assert!(tui.has_modal());
-        prop_assert_eq!(tui.modal_type(), ModalType::Help);
+        prop_assert!(matches!(tui.current_modal(), Some(QueuedModal::Help { .. })));
     }
 
     /// Resize always updates terminal size

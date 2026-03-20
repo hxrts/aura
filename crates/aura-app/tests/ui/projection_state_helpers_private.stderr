@@ -1,20 +1,20 @@
-error[E0425]: cannot find value `with_chat_state` in `aura_app::workflows::state_helpers`
- --> tests/ui/projection_state_helpers_private.rs:2:49
+error[E0425]: cannot find value `with_chat_state` in `aura_app::workflows::observed_projection`
+ --> tests/ui/projection_state_helpers_private.rs:2:55
   |
-2 |     let _ = aura_app::workflows::state_helpers::with_chat_state::<()>;
-  |                                                 ^^^^^^^^^^^^^^^ not found in `aura_app::workflows::state_helpers`
+2 |     let _ = aura_app::workflows::observed_projection::with_chat_state::<()>;
+  |                                                       ^^^^^^^^^^^^^^^ not found in `aura_app::workflows::observed_projection`
 
-error[E0425]: cannot find value `with_contacts_state` in `aura_app::workflows::state_helpers`
- --> tests/ui/projection_state_helpers_private.rs:3:49
+error[E0425]: cannot find value `with_contacts_state` in `aura_app::workflows::observed_projection`
+ --> tests/ui/projection_state_helpers_private.rs:3:55
   |
-3 |     let _ = aura_app::workflows::state_helpers::with_contacts_state::<()>;
-  |                                                 ^^^^^^^^^^^^^^^^^^^ not found in `aura_app::workflows::state_helpers`
+3 |     let _ = aura_app::workflows::observed_projection::with_contacts_state::<()>;
+  |                                                       ^^^^^^^^^^^^^^^^^^^ not found in `aura_app::workflows::observed_projection`
 
 error[E0603]: module `workflows` is private
  --> tests/ui/projection_state_helpers_private.rs:2:23
   |
-2 |     let _ = aura_app::workflows::state_helpers::with_chat_state::<()>;
-  |                       ^^^^^^^^^  ------------- module `state_helpers` is not publicly re-exported
+2 |     let _ = aura_app::workflows::observed_projection::with_chat_state::<()>;
+  |                       ^^^^^^^^^  ------------------- module `observed_projection` is not publicly re-exported
   |                       |
   |                       private module
   |
@@ -27,8 +27,8 @@ note: the module `workflows` is defined here
 error[E0603]: module `workflows` is private
  --> tests/ui/projection_state_helpers_private.rs:3:23
   |
-3 |     let _ = aura_app::workflows::state_helpers::with_contacts_state::<()>;
-  |                       ^^^^^^^^^  ------------- module `state_helpers` is not publicly re-exported
+3 |     let _ = aura_app::workflows::observed_projection::with_contacts_state::<()>;
+  |                       ^^^^^^^^^  ------------------- module `observed_projection` is not publicly re-exported
   |                       |
   |                       private module
   |

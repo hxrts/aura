@@ -320,27 +320,3 @@ impl ModalQueue {
         }
     }
 }
-
-/// Type of modal currently displayed (legacy enum for backwards compatibility)
-///
-/// ## Compile-Time Safety: Screen-Specific Modals
-///
-/// Many modal types that were previously here have been **intentionally removed**
-/// to prevent a class of bugs where the generic modal system is used but the
-/// props extraction expects screen-specific modal state.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum ModalType {
-    /// No modal displayed
-    #[default]
-    None,
-    /// Account setup wizard (global, shown before any screen is active)
-    AccountSetup,
-    /// Guardian selection from contacts (global modal)
-    GuardianSelect,
-    /// Contact selection (global modal)
-    ContactSelect,
-    /// Help modal (global, can be shown from any screen)
-    Help,
-    /// Confirm action modal (generic confirmation dialog)
-    Confirm,
-}

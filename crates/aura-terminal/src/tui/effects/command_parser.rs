@@ -91,10 +91,8 @@ pub enum EffectCommand {
     AddDevice {
         /// Nickname suggestion (what the device wants to be called)
         nickname_suggestion: String,
-        /// Invitee's authority ID for two-step exchange (optional).
-        /// If Some, creates an addressed invitation enabling DeviceEnrollment choreography.
-        /// If None, falls back to legacy bearer token mode.
-        invitee_authority_id: Option<AuthorityId>,
+        /// Invitee's authority ID for addressed device enrollment.
+        invitee_authority_id: AuthorityId,
     },
     /// Remove a device from the account
     RemoveDevice {

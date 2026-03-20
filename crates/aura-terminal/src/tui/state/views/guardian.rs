@@ -120,7 +120,7 @@ impl GuardianSetupPhase {
         }
     }
 
-    /// Check which step we're on (for backward compatibility)
+    /// Return the coarse wizard step for rendering and input routing.
     #[must_use]
     pub fn step(&self) -> GuardianSetupStep {
         match self {
@@ -133,7 +133,7 @@ impl GuardianSetupPhase {
     }
 }
 
-/// Step identifier for backward compatibility and simple step checks
+/// Coarse guardian setup wizard step used by render and input layers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum GuardianSetupStep {
     #[default]
@@ -252,7 +252,7 @@ impl GuardianSetupModalState {
         &mut self.phase
     }
 
-    /// Get the current step (for backward compatibility)
+    /// Get the current coarse wizard step.
     #[must_use]
     pub fn step(&self) -> GuardianSetupStep {
         self.phase.step()

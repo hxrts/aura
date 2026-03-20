@@ -185,8 +185,8 @@ async fn test_account_creation_callback_flow() {
 ///    via FROST threshold signatures - NOT via device_id derivation
 ///
 /// This test validates a DIFFERENT property: device_id determinism
-/// - Same device_id → Same authority_id (reproducible across restarts)
-/// - This is useful for development/testing but NOT for production recovery
+/// - Fresh first-run bootstrap mints a new authority each time
+/// - Recovery/bootstrap identity handoff, not device_id reuse, is how identity is preserved
 ///
 /// For the full guardian-based recovery test, run:
 /// ```bash
@@ -206,7 +206,7 @@ async fn test_device_id_determinism() {
     use std::sync::Arc;
 
     println!("\n=== Device ID Determinism Test ===\n");
-    println!("NOTE: This tests device_id → authority_id derivation, NOT guardian recovery.\n");
+    println!("NOTE: This tests fresh first-run identity minting, NOT guardian recovery.\n");
 
     let device_id = "demo:bob";
     let test_dir =
@@ -292,12 +292,12 @@ async fn test_device_id_determinism() {
 
     let recreated_authority_id = read_authority_id(&test_dir).await;
 
-    // Same device_id should produce same authority_id
-    assert_eq!(
+    // Fresh account bootstrap now mints a fresh authority even on the same device.
+    assert_ne!(
         original_authority_id, recreated_authority_id,
-        "Same device_id should produce same authority_id"
+        "Fresh account creation should mint a new authority even on the same device"
     );
-    println!("  ✓ Same device_id → Same authority_id (deterministic)");
+    println!("  ✓ Same device_id does not reuse authority_id on fresh account creation");
 
     // =========================================================================
     // Phase 3: Verify DIFFERENT device_id produces DIFFERENT authority_id
@@ -339,7 +339,7 @@ async fn test_device_id_determinism() {
     let _ = std::fs::remove_dir_all(&test_dir);
 
     println!("\n=== Device ID Determinism Test PASSED ===");
-    println!("This validates device_id → authority_id is deterministic.");
+    println!("This validates first-run bootstrap mints fresh identities.");
     println!("\nFor REAL catastrophic recovery (guardian-based), see:");
     println!("  docs/117_cli_tui.md (Recovery scenario walkthrough section)");
     println!("  cargo run -p aura-terminal -- scenarios run --pattern cli_recovery_demo");
@@ -506,14 +506,10 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     // This exercises the real recovery completion flow via IoContext
     println!("\n  [Using restore_recovered_account() - actual code path]");
 
-    // Parse the original authority_id back into an AuthorityId (16 bytes = UUID)
-    let original_authority_bytes: [u8; 16] = hex::decode(&original_authority_id)
-        .expect("Invalid hex")
-        .try_into()
-        .expect("Invalid length - expected 16 bytes");
-    let original_authority = aura_core::types::identifiers::AuthorityId::from_uuid(
-        uuid::Uuid::from_bytes(original_authority_bytes),
-    );
+    // Parse the original authority_id back into the canonical AuthorityId type.
+    let original_authority = original_authority_id
+        .parse::<aura_core::types::identifiers::AuthorityId>()
+        .expect("Invalid AuthorityId string");
 
     // Create a new context on the new device
     let app_core_recovered =
@@ -717,7 +713,7 @@ fn test_effect_commands() {
 
     // CreateInvitation
     let cmd = EffectCommand::CreateInvitation {
-        receiver_id: "receiver".to_string(),
+        receiver_id: aura_core::AuthorityId::new_from_entropy([21u8; 32]),
         invitation_type: "Guardian".to_string(),
         message: Some("Be my guardian".to_string()),
         ttl_secs: Some(3600),
@@ -725,7 +721,7 @@ fn test_effect_commands() {
     assert_matches!(
         cmd,
         EffectCommand::CreateInvitation { receiver_id, invitation_type, message, ttl_secs }
-            if receiver_id == "receiver"
+            if receiver_id == aura_core::AuthorityId::new_from_entropy([21u8; 32])
                 && invitation_type == "Guardian"
                 && message == Some("Be my guardian".to_string())
                 && ttl_secs == Some(3600)
@@ -1099,12 +1095,12 @@ async fn test_lan_peer_invitation_flow() {
 
     // Phase 2: Test InviteLanPeer command dispatch
     println!("\nPhase 2: Testing InviteLanPeer command");
-    let test_authority_id = "0123456789abcdef0123456789abcdef";
+    let test_authority_id = aura_core::AuthorityId::new_from_entropy([22u8; 32]);
     let test_address = "192.168.1.100:8080";
 
     let invite_result = ctx
         .dispatch(EffectCommand::InviteLanPeer {
-            authority_id: test_authority_id.to_string(),
+            authority_id: test_authority_id,
             address: test_address.to_string(),
         })
         .await;
@@ -1118,12 +1114,12 @@ async fn test_lan_peer_invitation_flow() {
 
     // Phase 3: Test mark_peer_invited
     println!("\nPhase 3: Testing mark_peer_invited");
-    ctx.mark_peer_invited(test_authority_id).await;
+    ctx.mark_peer_invited(&test_authority_id.to_string()).await;
     println!("  ✓ Peer marked as invited");
 
     // Phase 4: Verify is_peer_invited returns true
     println!("\nPhase 4: Verify is_peer_invited");
-    let is_invited = ctx.is_peer_invited(test_authority_id).await;
+    let is_invited = ctx.is_peer_invited(&test_authority_id.to_string()).await;
     assert!(is_invited, "Peer should be marked as invited");
     println!("  ✓ is_peer_invited returns true for invited peer");
 
@@ -1139,7 +1135,7 @@ async fn test_lan_peer_invitation_flow() {
     println!("\nPhase 5: Verify get_invited_peer_ids");
     let invited_peers = ctx.get_invited_peer_ids().await;
     assert!(
-        invited_peers.contains(test_authority_id),
+        invited_peers.contains(&test_authority_id.to_string()),
         "Should contain the invited peer"
     );
     assert_eq!(
@@ -1151,18 +1147,19 @@ async fn test_lan_peer_invitation_flow() {
 
     // Phase 6: Test inviting multiple peers
     println!("\nPhase 6: Testing multiple peer invitations");
-    let second_authority = "abcdef0123456789abcdef0123456789";
-    ctx.mark_peer_invited(second_authority).await;
+    let second_authority = aura_core::AuthorityId::new_from_entropy([23u8; 32]);
+    let second_authority = second_authority.to_string();
+    ctx.mark_peer_invited(&second_authority).await;
 
     let all_invited = ctx.get_invited_peer_ids().await;
     assert_eq!(all_invited.len(), 2, "Should have two invited peers");
-    assert!(all_invited.contains(test_authority_id));
-    assert!(all_invited.contains(second_authority));
+    assert!(all_invited.contains(&test_authority_id.to_string()));
+    assert!(all_invited.contains(&second_authority));
     println!("  ✓ Multiple peer invitations tracked correctly");
 
     // Phase 7: Test that re-inviting same peer is idempotent
     println!("\nPhase 7: Testing idempotent re-invitation");
-    ctx.mark_peer_invited(test_authority_id).await;
+    ctx.mark_peer_invited(&test_authority_id.to_string()).await;
     let after_reinvite = ctx.get_invited_peer_ids().await;
     assert_eq!(
         after_reinvite.len(),
@@ -1478,8 +1475,11 @@ async fn test_home_messaging_flow() {
 
     // SendMessage is journaled, verify the command path is processed
     if let Err(ref e) = result {
+        let error_text = e.to_string();
         assert!(
-            e.contains("Unauthorized") || e.contains("authority") || e.contains("failed"),
+            error_text.contains("Unauthorized")
+                || error_text.contains("authority")
+                || error_text.contains("failed"),
             "Error should be auth-related for journaled intent"
         );
         println!("  ✓ UUID home channel naming convention validated (auth required)");
@@ -1644,12 +1644,15 @@ async fn test_set_context_flow() {
 #[tokio::test]
 async fn test_moderator_role_flow() {
     use async_lock::RwLock;
+    use aura_app::signal_defs::HOMES_SIGNAL;
     use aura_app::views::home::{HomeMember, HomeRole, HomeState};
     use aura_app::AppCore;
+    use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
     use aura_terminal::tui::context::InitializedAppCore;
     use aura_terminal::tui::effects::EffectCommand;
+    use aura_testkit::MockRuntimeBridge;
     use std::sync::Arc;
 
     println!("\n=== Moderator Role Flow Test ===\n");
@@ -1661,7 +1664,9 @@ async fn test_moderator_role_flow() {
     // Phase 1: Create AppCore and IoContext
     println!("Phase 1: Setting up test environment");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mock_bridge = Arc::new(MockRuntimeBridge::new());
+    let app_core = AppCore::with_runtime(aura_app::AppConfig::default(), mock_bridge)
+        .expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
@@ -1684,7 +1689,7 @@ async fn test_moderator_role_flow() {
     // Phase 2: Set up a home with members
     println!("\nPhase 2: Setting up home with members");
 
-    let home_id = "test-home-1".parse::<ChannelId>().unwrap_or_default();
+    let home_id = ChannelId::from_bytes([0x41; 32]);
     let home_context_id = ContextId::new_from_entropy([9u8; 32]);
     let owner_id = AuthorityId::new_from_entropy([1u8; 32]);
     let member1_id = AuthorityId::new_from_entropy([2u8; 32]);
@@ -1692,7 +1697,7 @@ async fn test_moderator_role_flow() {
     let missing_id = AuthorityId::new_from_entropy([4u8; 32]);
 
     {
-        let core = app_core.write().await;
+        let mut core = app_core.write().await;
 
         // Create a home with the current user as owner
         let mut home = HomeState::new(
@@ -1707,7 +1712,7 @@ async fn test_moderator_role_flow() {
         let member1 = HomeMember {
             id: member1_id.clone(),
             name: "Alice".to_string(),
-            role: HomeRole::Participant,
+            role: HomeRole::Member,
             is_online: true,
             joined_at: 0,
             last_seen: None,
@@ -1717,7 +1722,7 @@ async fn test_moderator_role_flow() {
         let member2 = HomeMember {
             id: member2_id.clone(),
             name: "Bob".to_string(),
-            role: HomeRole::Participant,
+            role: HomeRole::Member,
             is_online: true,
             joined_at: 0,
             last_seen: None,
@@ -1727,12 +1732,18 @@ async fn test_moderator_role_flow() {
         home.add_member(member1);
         home.add_member(member2);
 
-        // Set as owner so we have permission to grant/revoke
-        home.my_role = HomeRole::Member;
+        // Grant/revoke moderator requires elevated home privileges.
+        home.my_role = HomeRole::Moderator;
 
-        // Add home and select it
-        core.views().add_home(home);
-        core.views().select_home(Some(home_id.clone()));
+        // Add home and publish it through the homes signal path used by workflows.
+        let mut homes = aura_app::views::home::HomesState::default();
+        homes.add_home(home);
+        homes.select_home(Some(home_id));
+        core.views().set_homes(homes.clone());
+        core.set_active_home_selection(Some(home_id));
+        core.emit(&*HOMES_SIGNAL, homes)
+            .await
+            .expect("Failed to emit homes state");
     }
 
     println!("  ✓ Home created with 3 members (1 owner, 2 members)");
@@ -1742,7 +1753,7 @@ async fn test_moderator_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: None,
+            channel: Some(home_id.to_string()),
             target: member1_id.to_string(),
         })
         .await;
@@ -1772,7 +1783,7 @@ async fn test_moderator_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::RevokeModerator {
-            channel: None,
+            channel: Some(home_id.to_string()),
             target: member1_id.to_string(),
         })
         .await;
@@ -1791,36 +1802,54 @@ async fn test_moderator_role_flow() {
         let home = homes.current_home().expect("Home should exist");
         let member = home.member(&member1_id).expect("Member should exist");
         assert!(
-            matches!(member.role, HomeRole::Participant),
-            "Member should now be back to Participant role"
+            matches!(member.role, HomeRole::Member),
+            "Member should now be back to Member role"
         );
-        println!("  ✓ Member role changed back to Participant");
+        println!("  ✓ Member role changed back to Member");
     }
 
     // Phase 5: Test error cases
     println!("\nPhase 5: Testing error cases");
 
-    // Can't grant moderator to creator (already a member)
+    // Creator is a threshold member, so granting moderator is allowed.
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: None,
+            channel: Some(home_id.to_string()),
+            target: owner_id.to_string(),
+        })
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "GrantModerator should succeed for creator/member: {:?}",
+        result
+    );
+    println!("  ✓ Creator can be designated as moderator");
+
+    // Can't grant moderator to someone who is already a moderator.
+    let result = ctx
+        .dispatch(EffectCommand::GrantModerator {
+            channel: Some(home_id.to_string()),
             target: owner_id.to_string(),
         })
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when granting moderator to creator");
+        panic!("Expected error when granting moderator to existing moderator");
     };
+    let error_text = e.to_string();
     assert!(
-        e.contains("moderator") || e.contains("modify") || e.contains("already"),
-        "Should fail for member who is already moderator or can't be modified"
+        error_text.contains("moderator")
+            || error_text.contains("modify")
+            || error_text.contains("already"),
+        "Should fail for member who already has moderator designation"
     );
-    println!("  ✓ Cannot grant moderator to creator (expected error)");
+    println!("  ✓ Cannot grant moderator to an existing moderator (expected error)");
 
     // Can't revoke non-Moderator
     let result = ctx
         .dispatch(EffectCommand::RevokeModerator {
-            channel: None,
+            channel: Some(home_id.to_string()),
             target: member2_id.to_string(), // Still a Participant, not Moderator
         })
         .await;
@@ -1828,8 +1857,11 @@ async fn test_moderator_role_flow() {
     let Err(e) = result else {
         panic!("Expected error when revoking moderator from non-Moderator");
     };
+    let error_text = e.to_string();
     assert!(
-        e.contains("not a moderator") || e.contains("revoke") || e.contains("Moderator"),
+        error_text.contains("not a moderator")
+            || error_text.contains("revoke")
+            || error_text.contains("Moderator"),
         "Should fail for non-Moderator"
     );
     println!("  ✓ Cannot revoke moderator from non-Moderator (expected error)");
@@ -1837,7 +1869,7 @@ async fn test_moderator_role_flow() {
     // Can't find non-existent member
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: None,
+            channel: Some(home_id.to_string()),
             target: missing_id.to_string(),
         })
         .await;
@@ -1845,9 +1877,13 @@ async fn test_moderator_role_flow() {
     let Err(e) = result else {
         panic!("Expected error when granting moderator to non-existent member");
     };
+    let error_text = e.to_string();
+    let error_text_lower = error_text.to_lowercase();
     assert!(
-        e.contains("not found") || e.contains("Member"),
-        "Should fail for non-existent member"
+        error_text_lower.contains("not found")
+            || error_text_lower.contains("member")
+            || error_text.contains(&missing_id.to_string()),
+        "Should fail for non-existent member: {error_text}"
     );
     println!("  ✓ Cannot grant moderator to non-existent member (expected error)");
 
@@ -1912,10 +1948,10 @@ async fn test_neighborhood_navigation_flow() {
     // Phase 2: Set up neighborhood with homes
     println!("\nPhase 2: Setting up neighborhood with homes");
 
-    let home_home_id = "home-main".parse::<ChannelId>().unwrap_or_default();
-    let alice_home_id = "alice-home".parse::<ChannelId>().unwrap_or_default();
-    let bob_home_id = "bob-home".parse::<ChannelId>().unwrap_or_default();
-    let locked_home_id = "locked-home".parse::<ChannelId>().unwrap_or_default();
+    let home_home_id = ChannelId::from_bytes([0x51; 32]);
+    let alice_home_id = ChannelId::from_bytes([0x52; 32]);
+    let bob_home_id = ChannelId::from_bytes([0x53; 32]);
+    let locked_home_id = ChannelId::from_bytes([0x54; 32]);
 
     {
         let core = app_core.write().await;
@@ -1971,7 +2007,7 @@ async fn test_neighborhood_navigation_flow() {
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
-            home_id: "alice-home".to_string(),
+            home_id: alice_home_id.to_string(),
             depth: "Full".to_string(),
         })
         .await;
@@ -2036,7 +2072,7 @@ async fn test_neighborhood_navigation_flow() {
     // First enter a home
     ctx.dispatch(EffectCommand::MovePosition {
         neighborhood_id: "current".to_string(),
-        home_id: "bob-home".to_string(),
+        home_id: bob_home_id.to_string(),
         depth: "Full".to_string(),
     })
     .await
@@ -2325,9 +2361,12 @@ async fn test_channel_mode_operations() {
     println!("\nPhase 5: Testing IoContext channel mode storage");
 
     use async_lock::RwLock;
+    use aura_app::signal_defs::HOMES_SIGNAL;
     use aura_app::views::home::{HomeRole, HomeState};
     use aura_app::AppCore;
+    use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_testkit::MockRuntimeBridge;
     use std::sync::Arc;
 
     let test_dir =
@@ -2335,7 +2374,9 @@ async fn test_channel_mode_operations() {
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
+    let mock_bridge = Arc::new(MockRuntimeBridge::new());
+    let app_core = AppCore::with_runtime(aura_app::AppConfig::default(), mock_bridge.clone())
+        .expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core = InitializedAppCore::new(app_core.clone())
         .await
@@ -2369,9 +2410,21 @@ async fn test_channel_mode_operations() {
             home_context_id,
         );
         home.my_role = HomeRole::Member;
-        core.views().add_home(home);
-        core.views().select_home(Some(home_id.clone()));
+        let mut homes = aura_app::views::home::HomesState::default();
+        homes.add_home(home);
+        homes.select_home(Some(home_id));
+        core.views().set_homes(homes.clone());
+        core.emit(&*HOMES_SIGNAL, homes)
+            .await
+            .expect("Failed to emit homes state");
     }
+
+    mock_bridge
+        .set_amp_channel_context(home_id, home_context_id)
+        .await;
+    mock_bridge
+        .set_authoritative_channel_name_matches("another-channel", vec![home_id])
+        .await;
 
     // Initially no mode set
     let initial_mode = ctx.get_channel_mode("test-channel").await;
@@ -2520,7 +2573,7 @@ async fn test_help_screen_shortcuts() {
         );
         // Shortcuts should be short (1-5 chars typically)
         assert!(
-            cmd.name.len() <= 10,
+            cmd.name.chars().count() <= 10,
             "Command name '{}' should be short keyboard shortcut",
             cmd.name
         );
@@ -2586,10 +2639,9 @@ async fn test_context_sensitive_help() {
     println!("\nPhase 2: Testing Chat screen context");
 
     let chat_commands = get_help_commands_for_screen(Some("Chat"));
-    assert_eq!(
-        chat_commands.len(),
-        all_commands.len(),
-        "Should return same total commands"
+    assert!(
+        chat_commands.len() < all_commands.len(),
+        "Context-sensitive help should return a focused subset"
     );
 
     // First commands should be Navigation
@@ -2627,20 +2679,29 @@ async fn test_context_sensitive_help() {
     );
     println!("  ✓ Neighborhood commands appear second when on Neighborhood screen");
 
-    // Phase 4: Test that other categories still exist
-    println!("\nPhase 4: Verifying all categories preserved");
+    // Phase 4: Test that unrelated screen categories are filtered out
+    println!("\nPhase 4: Verifying unrelated categories are filtered out");
 
     let chat_categories: std::collections::HashSet<_> =
         chat_commands.iter().map(|c| c.category.as_str()).collect();
     assert!(
-        chat_categories.contains("Settings"),
-        "Should still include Settings"
+        chat_categories.contains("Navigation"),
+        "Navigation commands should still be present"
+    );
+    assert!(chat_categories.contains("Chat"), "Chat commands should be present");
+    assert!(
+        chat_categories.contains("Slash Commands"),
+        "Chat context should include slash commands"
     );
     assert!(
-        chat_categories.contains("Notifications"),
-        "Should still include Notifications"
+        !chat_categories.contains("Settings"),
+        "Settings commands should be filtered out of Chat help"
     );
-    println!("  ✓ All categories preserved in context-sensitive view");
+    assert!(
+        !chat_categories.contains("Notifications"),
+        "Notifications commands should be filtered out of Chat help"
+    );
+    println!("  ✓ Context-sensitive help keeps only relevant categories");
 
     println!("\n=== Context-Sensitive Help Test PASSED ===\n");
 }
@@ -2908,18 +2969,19 @@ async fn test_authorization_checking() {
         "Admin commands should be denied for non-Moderator"
     );
     let ban_err = ban_result.unwrap_err();
+    let ban_err_text = ban_err.to_string();
     assert!(
-        ban_err.contains("Permission denied"),
+        ban_err_text.contains("Permission denied"),
         "Error should mention permission denied"
     );
     assert!(
-        ban_err.contains("Ban user") || ban_err.contains("administrator"),
+        ban_err_text.contains("Ban user") || ban_err_text.contains("administrator"),
         "Error should mention the command or required privileges"
     );
     println!("  ✓ BanUser denied for non-Moderator: {}", ban_err);
 
     let kick_result = ctx.check_authorization(&EffectCommand::KickUser {
-        channel: "test".to_string(),
+        channel: String::new(),
         target: "user".to_string(),
         reason: None,
     });
@@ -2962,8 +3024,9 @@ async fn test_authorization_checking() {
         "Dispatch of Admin command should fail for non-Moderator"
     );
     let dispatch_err = dispatch_result.unwrap_err();
+    let dispatch_err_text = dispatch_err.to_string();
     assert!(
-        dispatch_err.contains("Permission denied"),
+        dispatch_err_text.contains("Permission denied"),
         "Dispatch error should mention permission denied"
     );
     println!("  ✓ dispatch() returns permission error: {}", dispatch_err);
@@ -3235,6 +3298,7 @@ async fn test_device_management() {
     let add_result = ctx
         .dispatch(EffectCommand::AddDevice {
             nickname_suggestion: "TestPhone".to_string(),
+            invitee_authority_id: aura_core::AuthorityId::new_from_entropy([19u8; 32]),
         })
         .await;
     // AddDevice dispatch should succeed (creates a pending fact)

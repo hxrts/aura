@@ -7,9 +7,10 @@
 //!
 //! ## Note on Domain Prefixes
 //!
-//! This module uses "aura-terminal/" domain prefixes for backwards compatibility
-//! with existing demo scenarios and tests. For new portable code, consider using
-//! `aura_app::ui::workflows::ids` which uses generic "aura/" prefixes.
+//! This module uses stable `"aura-terminal/"` domain prefixes so Layer 7 tests,
+//! demos, and fixtures derive the same identifiers across runs. For new
+//! portable code, prefer `aura_app::ui::workflows::ids`, which uses generic
+//! `"aura/"` prefixes.
 //!
 //! The two modules produce DIFFERENT IDs for the same seed due to different domains.
 

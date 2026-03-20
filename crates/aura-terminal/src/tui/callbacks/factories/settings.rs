@@ -130,7 +130,7 @@ impl SettingsCallbacks {
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
         Arc::new(
-            move |nickname_suggestion: String, invitee_authority_id: Option<AuthorityId>| {
+            move |nickname_suggestion: String, invitee_authority_id: AuthorityId| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {

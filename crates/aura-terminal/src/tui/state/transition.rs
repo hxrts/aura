@@ -63,7 +63,7 @@ mod tests {
     use crate::tui::screens::Screen;
     use crate::tui::state::commands::DispatchCommand;
     use crate::tui::state::views::ChatFocus;
-    use crate::tui::state::ModalType;
+    use crate::tui::state::modal_queue::QueuedModal;
     use aura_core::effects::terminal::events;
 
     #[test]
@@ -125,7 +125,10 @@ mod tests {
         // Press '?' to open help
         let (new_state, _) = transition(&state, events::char('?'));
         assert!(new_state.has_modal());
-        assert_eq!(new_state.current_modal_type(), ModalType::Help);
+        assert!(matches!(
+            new_state.modal_queue.current(),
+            Some(QueuedModal::Help { .. })
+        ));
 
         // Press Escape to close
         let (new_state, _) = transition(&new_state, events::escape());
@@ -308,7 +311,10 @@ mod tests {
 
         // Modal should be visible
         assert!(state.has_modal());
-        assert_eq!(state.current_modal_type(), ModalType::AccountSetup);
+        assert!(matches!(
+            state.modal_queue.current(),
+            Some(QueuedModal::AccountSetup(_))
+        ));
 
         // Type a name
         let (state, _) = transition(&state, events::char('A'));
