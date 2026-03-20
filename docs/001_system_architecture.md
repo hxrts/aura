@@ -8,8 +8,6 @@ Aura distributes identity and trust across devices and social relationships to e
 
 The system is designed to operate without dedicated servers. Discovery, availability, and recovery are provided by the web of trust. Peers relay messages for one another based on social proximity. Without centralized routing, no single party can observe all traffic or deny service.
 
-Aura separates key generation from agreement. Fast paths provide immediate usability while durable shared state is always consensus-finalized.
-
 ```mermaid
 flowchart TB
     subgraph Authorities
