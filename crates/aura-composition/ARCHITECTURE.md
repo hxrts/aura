@@ -1,37 +1,61 @@
-# Aura Composition (Layer 3) - Architecture and Invariants
+# Aura Composition (Layer 3)
 
 ## Purpose
+
 Assemble individual effect handlers into cohesive effect systems. Provides registry,
 builder, and lifecycle infrastructure for composing stateless handlers.
 
-## Inputs
-- Individual effect handler implementations from aura-effects.
-- Handler definitions implementing `RegistrableHandler` trait.
-- Configuration and lifecycle signals.
+## Scope
 
-## Outputs
-- `EffectRegistry`: Type-indexed storage of handler instances.
-- `CompositeHandler`, `CompositeHandlerBuilder`: Unified handler composition.
-- `ViewDeltaReducer`, `ViewDeltaRegistry`, `ViewDelta`: View reduction infrastructure.
-- Adapter patterns for handler registration and delegation.
+| Belongs here | Does not belong here |
+|--------------|----------------------|
+| `EffectRegistry`: type-indexed storage of handler instances | Handler implementations (aura-effects) |
+| `CompositeHandler`, `CompositeHandlerBuilder`: unified handler composition | Multi-party coordination (aura-protocol) |
+| `ViewDeltaReducer`, `ViewDeltaRegistry`, `ViewDelta`: view reduction infrastructure | Domain crates or higher layers |
+| Adapter patterns for handler registration and delegation | Runtime lifecycle management (aura-agent) |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Down | `aura-core` | Effect trait definitions |
+| Down | `aura-effects` | Individual effect handler implementations |
 
 ## Invariants
+
 - Does NOT implement handlers (implementations live in aura-effects).
 - Does NOT do multi-party coordination (that belongs in aura-protocol).
 - Effect registry is type-indexed for compile-time safety.
 - Handler composition is stateless.
 
+### InvariantCompositionTypeSafeRegistry
+
+Handler composition must remain type-safe and free of protocol semantics.
+
+Enforcement locus:
+- src registry and composition helpers assemble handlers by trait contract.
+- No coordination logic is introduced in composition modules.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- `just check-arch` and `just test-crate aura-composition`
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines layer placement.
+- [Effect System and Runtime](../../docs/103_effect_system.md) defines handler assembly rules.
+
 ## Ownership Model
 
-- `aura-composition` is primarily `Pure` assembly and wiring.
-- It may coordinate construction and configuration, but it is not the
-  `ActorOwned` owner of parity-critical runtime state.
-- `MoveOwned` transfer semantics should be surfaced in higher-layer contracts,
-  not hidden in composition utilities.
-- Capability gating belongs in the assembled contract and owner modules rather
-  than in composition-local shortcuts.
-- `Observed` tooling may inspect assembled systems, but composition should not
-  author semantic lifecycle.
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-composition` is primarily `Pure` assembly and wiring. It coordinates
+construction and configuration but is not the `ActorOwned` owner of
+parity-critical runtime state. Capability gating belongs in the assembled
+contracts and owner modules. See [Ownership Model §9](../../docs/122_ownership_model.md)
+for reactive contract details.
 
 ### Allowed Assembly Mechanics
 
@@ -54,34 +78,9 @@ system.
 
 ### Capability-Gated Points
 
-- none local; capability gating belongs in the assembled contracts and owner
-  modules that consume composition output
+- None local; capability gating belongs in the assembled contracts and owner
+  modules that consume composition output.
 
-### Verification Hooks
-
-- `cargo check -p aura-composition`
-- `just check-arch`
-- `cargo test -p aura-composition -- --nocapture`
-
-### Detailed Specifications
-
-### InvariantCompositionTypeSafeRegistry
-Handler composition must remain type-safe and free of protocol semantics.
-
-Enforcement locus:
-- src registry and composition helpers assemble handlers by trait contract.
-- No coordination logic is introduced in composition modules.
-
-Failure mode:
-- Behavior diverges from the crate contract and produces non-reproducible outcomes.
-- Cross-layer assumptions drift and break composition safety.
-
-Verification hooks:
-- just check-arch and just test-crate aura-composition
-
-Contract alignment:
-- [Aura System Architecture](../../docs/001_system_architecture.md) defines layer placement.
-- [Effect System and Runtime](../../docs/103_effect_system.md) defines handler assembly rules.
 ## Testing
 
 ### Strategy
@@ -90,10 +89,11 @@ All tests are inline — appropriate for a composition utility crate whose tests
 exercise type-safe registry wiring and builder patterns. No integration test
 surface is needed.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-composition
+just check-arch
 ```
 
 ### Coverage matrix
@@ -107,7 +107,8 @@ cargo test -p aura-composition
 | Reducer dispatch to wrong handler | `src/view_delta.rs` (inline) | Covered |
 | HandlerContext operation_id non-deterministic | `src/registry.rs` (inline) | Covered |
 
-## Boundaries
-- Depends only on aura-core and aura-effects.
-- No domain crates or higher layers.
-- Runtime lifecycle management belongs in aura-agent.
+## References
+
+- [Aura System Architecture](../../docs/001_system_architecture.md)
+- [Effect System and Runtime](../../docs/103_effect_system.md)
+- [Ownership Model](../../docs/122_ownership_model.md)

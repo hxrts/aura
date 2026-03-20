@@ -1,59 +1,38 @@
-# Aura Relational (Layer 5) - Architecture and Invariants
+# Aura Relational (Layer 5)
 
 ## Purpose
+
 Contact and relationship management providing cross-authority relationship facts,
 guardian request handling, and consensus-backed relationship establishment.
 
-## Inputs
-- aura-core (effect traits, identifiers, relational types).
-- aura-journal (fact infrastructure, reduction).
-- aura-consensus (for cross-authority agreement).
+## Scope
 
-## Outputs
-- `ContactFact`, `ContactFactReducer` for contact relationship facts.
-- `GuardianRequest`, `GuardianRequestState` for guardian binding requests.
-- `GuardianService` for guardian relationship management.
-- Direct `aura-consensus` integration for consensus-backed operations.
-- `RelationalContext` for cross-authority context.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Contact and guardian binding facts and reducers | Recovery protocol logic (aura-recovery) |
+| Guardian request handling and service | Consensus coordination (aura-consensus) |
+| Cross-authority relational context | Runtime relationship cache (aura-agent) |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | aura-core | Effect traits, identifiers, relational types |
+| Incoming | aura-journal | Fact infrastructure, reduction |
+| Incoming | aura-consensus | Cross-authority agreement |
+| Outgoing | — | `ContactFact`, `ContactFactReducer` for contact relationship facts |
+| Outgoing | — | `GuardianRequest`, `GuardianRequestState` for guardian binding requests |
+| Outgoing | — | `GuardianService` for guardian relationship management |
+| Outgoing | — | `RelationalContext` for cross-authority context |
 
 ## Invariants
+
 - Facts must be reduced under their matching `ContextId`.
 - Cross-authority relationships are established through explicit consensus flows.
 - Guardian bindings require mutual agreement.
 
-## Ownership Model
-
-- `aura-relational` is primarily `Pure` relational-domain logic.
-- Relationship establishment or transfer semantics that require exclusivity
-  should be explicit and `MoveOwned`.
-- Long-lived coordination for relationship workflows belongs in higher-layer
-  single-owner coordinators rather than hidden mutable crate state.
-- Capability-gated publication is required for parity-critical relational facts.
-- `Observed` views may inspect relationship state but not author it.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| facts/reducers/context/domain types | `Pure` | Deterministic relational fact reduction and context-scoped relationship semantics. |
-| relationship establishment, guardian binding requests, mutual-agreement flows | `MoveOwned` | Exclusive relationship authority and agreement handoff remain explicit. |
-| cross-authority consensus-backed operations | typed workflow boundary | Direct consensus integration is explicit; no hidden adapter layer remains. |
-| long-lived coordination | none local | Runtime relationship workflow ownership belongs in higher layers. |
-| Observed-only surfaces | downstream relational views only | Observation does not author relational truth. |
-
-### Capability-Gated Points
-
-- parity-critical relational fact publication
-- consensus-backed relationship establishment and guardian binding transitions
-
-### Verification Hooks
-
-- `cargo check -p aura-relational`
-- `cargo test -p aura-relational -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantRelationalMutualAgreement
+
 Relational state activation requires explicit mutual agreement across authorities.
 
 Enforcement locus:
@@ -70,6 +49,28 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines context-bound relational state.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines operation-scoped agreement.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-relational` is primarily `Pure` relational-domain logic.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/context/domain types | `Pure` | Deterministic relational fact reduction and context-scoped relationship semantics. |
+| relationship establishment, guardian binding requests, mutual-agreement flows | `MoveOwned` | Exclusive relationship authority and agreement handoff remain explicit. |
+| cross-authority consensus-backed operations | typed workflow boundary | Direct consensus integration is explicit; no hidden adapter layer remains. |
+| long-lived coordination | none local | Runtime relationship workflow ownership belongs in higher layers. |
+| Observed-only surfaces | `Observed` | Observation does not author relational truth. |
+
+### Capability-Gated Points
+
+- parity-critical relational fact publication
+- consensus-backed relationship establishment and guardian binding transitions
+
 ## Testing
 
 ### Strategy
@@ -79,7 +80,7 @@ integration test surface. Tests verify fact reduction, guardian binding,
 and context scoping. Mutual agreement enforcement is consensus-gated
 (Category C) and tested at the consensus layer.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-relational
@@ -98,10 +99,13 @@ cargo test -p aura-relational
 | Emergency op not distinguished | `src/guardian.rs` `test_recovery_op_emergency` | Covered |
 | Mutual agreement bypassed | Consensus-gated (Category C, tested at L4) | Cross-crate |
 
-## Boundaries
-- Recovery protocol logic lives in aura-recovery.
-- Consensus coordination lives in aura-consensus.
-- Runtime relationship cache lives in aura-agent.
-
 ## Operation Categories
+
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+
+## References
+
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Relational Contexts](../../docs/114_relational_contexts.md)
+- [Operation Categories](../../docs/109_operation_categories.md)

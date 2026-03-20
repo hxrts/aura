@@ -1,37 +1,65 @@
-# Aura Effects (Layer 3) - Architecture and Invariants
+# Aura Effects (Layer 3)
 
 ## Purpose
+
 Production-grade stateless effect handlers implementing infrastructure effect traits.
 Delegates to OS services for crypto, storage, networking, and time.
 
-## Inputs
-- aura-core (effect trait definitions).
-- External libraries (crypto, networking, filesystem).
+## Scope
 
-## Outputs
-- Infrastructure handlers: `RealCryptoHandler`, `RealTransportHandler`, `FilesystemStorageHandler`.
-- Time providers: `PhysicalTimeHandler`, `LogicalClockHandler`, `OrderClockHandler`.
-- Encrypted storage: `EncryptedStorage` wrapper with transparent encryption.
-- Query handler: `QueryHandler` for Datalog-style queries.
-- Leakage handler: `ProductionLeakageHandler`.
+| Belongs here | Does not belong here |
+|--------------|----------------------|
+| Infrastructure handlers: `RealCryptoHandler`, `RealTransportHandler`, `FilesystemStorageHandler` | Stateful caches (Layer 6 services) |
+| Time providers: `PhysicalTimeHandler`, `LogicalClockHandler`, `OrderClockHandler` | Multi-party coordination (aura-protocol) |
+| Encrypted storage: `EncryptedStorage` wrapper with transparent encryption | Application-specific handlers (domain crates) |
+| Query handler: `QueryHandler` for Datalog-style queries | Domain semantics or business logic |
+| Leakage handler: `ProductionLeakageHandler` | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Down | `aura-core` | Effect trait definitions |
+| External | crypto, networking, filesystem libraries | OS integration |
 
 ## Invariants
+
 - Handlers must be stateless (no shared mutable state).
 - Handlers must be single-party (each handler independent).
 - Handlers must be context-free (no assumptions about caller context).
 - No dependencies on domain crates or aura-protocol.
 
+### InvariantStatelessHandlerBoundary
+
+Infrastructure handlers remain stateless, single-party, and isolated from domain semantics.
+
+Enforcement locus:
+- src handler implementations map effect traits to operating system integration points.
+- No domain crate dependencies are introduced in handler modules.
+- `just lint-arch-syntax` owns the syntax-level checks for stateless handler
+  boundaries, raw impure/runtime escape hatches, and direct crypto/time/random
+  usage; `just check-arch` keeps the integration/governance checks.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- `just check-arch` and `just test-crate aura-effects`
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines handler placement.
+- [Effect System and Runtime](../../docs/103_effect_system.md) defines stateless handler rules.
+
 ## Ownership Model
 
-- `aura-effects` is primarily a stateless adapter layer, not an `ActorOwned`
-  semantic owner.
-- It should not grow long-lived mutable async ownership beyond narrow low-level
-  adapter mechanics.
-- `MoveOwned` authority transfer is not defined here; higher layers own those
-  contracts.
-- Capability-gated semantic mutation and publication remain upstream.
-- `Observed` and runtime layers consume handler behavior; handlers must not
-  silently redefine semantic ownership.
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-effects` is primarily a stateless adapter layer, not an `ActorOwned`
+semantic owner. Handlers implement effects only; semantic lifecycle, readiness,
+and `MoveOwned` authority transfer are defined in higher layers. See
+[Ownership Model §9](../../docs/122_ownership_model.md) for reactive contract
+details.
 
 ### Allowed Adapter Mechanics
 
@@ -62,39 +90,10 @@ coordination.
 
 ### Capability-Gated Points
 
-- upstream capability-gated effect entrypoints consumed through handler
-  implementations
-- no handler-local semantic lifecycle or readiness publication
+- Upstream capability-gated effect entrypoints consumed through handler
+  implementations.
+- No handler-local semantic lifecycle or readiness publication.
 
-### Verification Hooks
-
-- `cargo check -p aura-effects`
-- `just lint-arch-syntax`
-- `just check-arch`
-- `cargo test -p aura-effects -- --nocapture`
-
-### Detailed Specifications
-
-### InvariantStatelessHandlerBoundary
-Infrastructure handlers remain stateless, single-party, and isolated from domain semantics.
-
-Enforcement locus:
-- src handler implementations map effect traits to operating system integration points.
-- No domain crate dependencies are introduced in handler modules.
-- `just lint-arch-syntax` owns the syntax-level checks for stateless handler
-  boundaries, raw impure/runtime escape hatches, and direct crypto/time/random
-  usage; `just check-arch` keeps the integration/governance checks.
-
-Failure mode:
-- Behavior diverges from the crate contract and produces non-reproducible outcomes.
-- Cross-layer assumptions drift and break composition safety.
-
-Verification hooks:
-- just check-arch and just test-crate aura-effects
-
-Contract alignment:
-- [Aura System Architecture](../../docs/001_system_architecture.md) defines handler placement.
-- [Effect System and Runtime](../../docs/103_effect_system.md) defines stateless handler rules.
 ## Testing
 
 ### Strategy
@@ -104,11 +103,13 @@ must be stateless between calls and confined to infrastructure-only concerns.
 Integration tests live in `tests/handlers/`; build-configuration guards live
 at `tests/` top level.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-effects
 cargo test -p aura-effects -- --nocapture   # with handler output
+just lint-arch-syntax
+just check-arch
 ```
 
 ### Coverage matrix
@@ -126,7 +127,8 @@ cargo test -p aura-effects -- --nocapture   # with handler output
 | Crypto FROST key gen/sign/verify incorrect | `src/crypto.rs` (inline, 14 tests) | Covered |
 | Leakage budget accumulation wrong | `src/leakage.rs` (inline) | Covered |
 
-## Boundaries
-- Stateful caches belong in Layer 6 services.
-- Multi-party coordination belongs in aura-protocol.
-- Application-specific handlers belong in domain crates.
+## References
+
+- [Aura System Architecture](../../docs/001_system_architecture.md)
+- [Effect System and Runtime](../../docs/103_effect_system.md)
+- [Ownership Model](../../docs/122_ownership_model.md)

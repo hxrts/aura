@@ -471,7 +471,7 @@ check_invariants() {
       info "Invariants section: $arch"
     fi
 
-    if rg -q "^### Detailed Specifications$|^## Detailed Invariant Specifications$" "$arch"; then
+    if rg -q "^### Detailed Specifications$|^## Detailed Invariant Specifications$|^### Invariant" "$arch"; then
       ((with_detailed+=1))
       local missing=()
       rg -qi "Enforcement locus:" "$arch" || missing+=("Enforcement locus")

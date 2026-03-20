@@ -1,65 +1,41 @@
-# Aura Rendezvous (Layer 5) - Architecture and Invariants
+# Aura Rendezvous (Layer 5)
 
 ## Purpose
+
 Peer discovery and channel establishment protocol including descriptor exchange,
 flood propagation, and LAN discovery for P2P connectivity.
 
-## Inputs
-- aura-core (effect traits, identifiers, capability types).
-- aura-journal (fact infrastructure, capability refs).
+## Scope
 
-## Outputs
-- `RendezvousFact`, `RendezvousFactReducer` for descriptor facts.
-- `RendezvousProtocol` for discovery message exchange.
-- `RendezvousService` for descriptor lifecycle management.
-- `RendezvousDescriptor` for peer addressing.
-- `NewChannelProtocol` for channel establishment.
-- `FloodPropagation`, `PacketBuilder`, `PacketCrypto` for flood-based discovery.
-- `LanDiscovery` for local network peer discovery.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Descriptor facts, reducers, and validation | Transport-level connections (aura-transport) |
+| Channel establishment and handshake protocol | Runtime descriptor cache (aura-agent) |
+| Flood propagation and replay protection | Network effect implementations (aura-effects) |
+| LAN discovery | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | aura-core | Effect traits, identifiers, capability types |
+| Incoming | aura-journal | Fact infrastructure, capability refs |
+| Outgoing | — | `RendezvousFact`, `RendezvousFactReducer` for descriptor facts |
+| Outgoing | — | `RendezvousProtocol` for discovery message exchange |
+| Outgoing | — | `RendezvousService` for descriptor lifecycle management |
+| Outgoing | — | `RendezvousDescriptor` for peer addressing |
+| Outgoing | — | `NewChannelProtocol` for channel establishment |
+| Outgoing | — | `FloodPropagation`, `PacketBuilder`, `PacketCrypto` for flood-based discovery |
+| Outgoing | — | `LanDiscovery` for local network peer discovery |
 
 ## Invariants
+
 - Descriptor facts must reduce under their matching `ContextId`.
 - Channel establishment requires valid, non-expired descriptors.
 - Flood packets use nonce-based replay protection.
 
-## Ownership Model
-
-- `aura-rendezvous` combines `Pure` descriptor semantics with explicit
-  `MoveOwned` channel-establishment authority where exclusivity matters.
-- Long-lived peer/discovery runtime ownership belongs in explicit `ActorOwned`
-  runtime services, not hidden in rendezvous helpers.
-- Descriptor and channel-establishment publication must remain capability-gated
-  and typed.
-- Retry/lifecycle outcomes should terminate explicitly rather than relying on
-  implicit background ownership.
-- Rendezvous/channel-establishment lifecycle state must use typed terminal
-  failure enums rather than stringly `Failed { reason }` or `Error(String)`
-  payloads.
-- `Observed` consumers may render rendezvous state but not author it.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| descriptor facts/reducers and validation logic | `Pure` | Deterministic descriptor semantics and reduction. |
-| channel establishment, handshake, and protocol state | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed. |
-| `RendezvousService` local caches/handshakers | local service-owned mutation | Local descriptor cache and handshake registry are service-local state, not shared semantic ownership across layers. |
-| `FloodPropagation` topology/budget/nonce state | bounded coordination state | Uses injected topology references and local flood bookkeeping without becoming a global runtime owner. |
-| long-lived discovery runtime ownership | none local | Ongoing peer/discovery ownership belongs in higher-layer runtime services. |
-
-### Capability-Gated Points
-
-- descriptor publication and channel-establishment publication
-- retry/lifecycle outcomes consumed by higher-layer runtime/interface flows
-
-### Verification Hooks
-
-- `cargo check -p aura-rendezvous`
-- `cargo test -p aura-rendezvous -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantSecureChannelLifecycle
+
 Secure channels are bound to `(context_id, peer, epoch)` and follow a strict lifecycle state machine.
 
 Enforcement locus:
@@ -83,6 +59,28 @@ Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) requires receipt validity windows and replay prevention.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) requires epoch validity and transport safety properties.
 
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-rendezvous` combines `Pure` descriptor semantics with explicit `MoveOwned`
+channel-establishment authority where exclusivity matters.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| descriptor facts/reducers and validation logic | `Pure` | Deterministic descriptor semantics and reduction. |
+| channel establishment, handshake, and protocol state | `MoveOwned` | Exclusive channel-establishment authority remains explicit and typed. |
+| `RendezvousService` local caches/handshakers | local service-owned mutation | Local descriptor cache and handshake registry are service-local state. |
+| `FloodPropagation` topology/budget/nonce state | bounded coordination state | Uses injected topology references and local flood bookkeeping. |
+| long-lived discovery runtime ownership | none local | Ongoing peer/discovery ownership belongs in higher-layer runtime services. |
+
+### Capability-Gated Points
+
+- descriptor publication and channel-establishment publication
+- retry/lifecycle outcomes consumed by higher-layer runtime/interface flows
+
 ## Testing
 
 ### Strategy
@@ -93,7 +91,7 @@ publication through handshake completion. Inline tests verify channel state
 machine transitions, fact reduction, flood deduplication, and protocol
 serialization.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-rendezvous
@@ -119,10 +117,14 @@ cargo test -p aura-rendezvous
 | E2E discovery → channel flow broken | `tests/channel/` `test_complete_discovery_to_channel_flow` | Covered |
 | Flood key derivation non-unique | `src/flood/packet.rs` `test_derive_key_different_inputs` | Covered |
 
-## Boundaries
-- Transport-level connections live in aura-transport.
-- Runtime descriptor cache lives in aura-agent.
-- Network effect implementations live in aura-effects.
-
 ## Operation Categories
+
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+
+## References
+
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Rendezvous](../../docs/113_rendezvous.md)
+- [Operation Categories](../../docs/109_operation_categories.md)

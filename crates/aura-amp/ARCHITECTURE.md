@@ -1,33 +1,65 @@
-# Aura AMP (Layer 4) - Architecture and Invariants
+# Aura AMP (Layer 4)
 
 ## Purpose
+
 Orchestrate AMP channel lifecycle and message transport coordination on top of
 relational journal facts.
 
-## Inputs
-- JournalEffects + OrderClockEffects for canonical fact storage and ordering.
-- Guard chain effects from callers for send authorization and budgeting.
-- Transport effects for envelope delivery (via higher-level protocols).
+## Scope
 
-## Outputs
-- Relational facts (channel checkpoints, epoch bumps, policies).
-- Deterministic channel state via reduction.
-- Non-canonical evidence cache for consensus provenance (explicitly scoped).
+| Belongs here | Does not belong here |
+|--------------|----------------------|
+| Relational facts (channel checkpoints, epoch bumps, policies) | Direct StorageEffects for channel facts (journal only) |
+| Deterministic channel state via reduction | Pure state derived outside `aura-journal` reduction |
+| Non-canonical evidence cache for consensus provenance (explicitly scoped) | Hidden semantic ownership of evidence |
+| AMP message serialization and wire format | Runtime composition or lifecycle management |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Down | `aura-core` | Effect trait definitions, domain types |
+| Down | `aura-journal` | Fact storage and reduction |
+| In | JournalEffects + OrderClockEffects | Canonical fact storage and ordering |
+| In | Guard chain effects | Send authorization and budgeting (from callers) |
+| In | Transport effects | Envelope delivery (via higher-level protocols) |
+| Out | Relational facts | Channel checkpoints, epoch bumps, policies |
+| Out | Deterministic channel state | Via reduction |
 
 ## Invariants
+
 - AMP facts are stored in the context journal using OrderClock ordering.
 - Channel epochs are monotone; committed bumps supersede proposals.
 - Evidence is optional and does not affect channel state reconstruction.
 
+### InvariantAmpEpochMonotonic
+
+AMP channel epochs must advance monotonically and committed bumps must supersede proposals.
+
+Enforcement locus:
+- src channel and fact reducers apply epoch transitions.
+- Operation category gates protect high-risk transitions.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- `just test-crate aura-amp`
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone transition laws.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines epoch validity expectations.
+
 ## Ownership Model
 
-- `aura-amp` combines `Pure` channel-state reduction with `MoveOwned`
-  coordination where channel/session authority must be exclusive.
-- It should avoid implicit shared ownership of channel lifecycle.
-- Long-lived coordination should be `ActorOwned` only when explicitly
-  supervised by higher layers.
-- Capability-gated message and checkpoint publication must remain explicit.
-- `Observed` consumers may render AMP state but not author it.
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-amp` combines `Pure` channel-state reduction with `MoveOwned`
+coordination where channel/session authority must be exclusive. Long-lived
+coordination is `ActorOwned` only when explicitly supervised by higher layers.
+
+See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
 
 ### Ownership Inventory
 
@@ -41,34 +73,10 @@ relational journal facts.
 
 ### Capability-Gated Points
 
-- message publication and checkpoint publication boundaries
-- channel-policy and epoch-advancement operations consumed by higher-layer
-  guards/runtime
+- Message publication and checkpoint publication boundaries.
+- Channel-policy and epoch-advancement operations consumed by higher-layer
+  guards/runtime.
 
-### Verification Hooks
-
-- `cargo check -p aura-amp`
-- `cargo test -p aura-amp -- --nocapture`
-
-### Detailed Specifications
-
-### InvariantAmpEpochMonotonic
-AMP channel epochs must advance monotonically and committed bumps must supersede proposals.
-
-Enforcement locus:
-- src channel and fact reducers apply epoch transitions.
-- Operation category gates protect high-risk transitions.
-
-Failure mode:
-- Behavior diverges from the crate contract and produces non-reproducible outcomes.
-- Cross-layer assumptions drift and break composition safety.
-
-Verification hooks:
-- just test-crate aura-amp
-
-Contract alignment:
-- [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone transition laws.
-- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines epoch validity expectations.
 ## Testing
 
 ### Strategy
@@ -77,7 +85,7 @@ Wire format stability and epoch monotonicity are the primary concerns.
 Integration tests in `tests/wire/` validate serialization roundtrips with
 property-based testing. Inline tests verify pure helper determinism.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-amp
@@ -94,11 +102,9 @@ cargo test -p aura-amp
 | Nonce derivation non-deterministic | — | Covered (`src/core.rs` inline) |
 | Ratchet state conversion lossy | — | Covered (`src/core.rs` inline) |
 
-## Boundaries
-- No direct StorageEffects for channel facts (journal only).
-- Evidence storage is isolated behind AmpEvidenceEffects.
-- Pure state is derived via `aura-journal` reduction.
+## References
 
-## Core + Orchestrator Rule
-- Pure helpers live under `amp/core`.
-- Orchestrators must depend on effects explicitly.
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Ownership Model](../../docs/122_ownership_model.md)
+- [System Internals Guide](../../docs/807_system_internals_guide.md)

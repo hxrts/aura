@@ -1,62 +1,36 @@
-# Aura Authorization (Layer 2) - Architecture and Invariants
+# Aura Authorization (Layer 2)
 
 ## Purpose
+
 Define authorization semantics and capability refinement using Biscuit tokens
 for cryptographically verifiable capability delegation.
 
-## Inputs
-- aura-core (domain types, effect traits, resource scopes).
+## Scope
 
-## Outputs
-- Biscuit token model and verification semantics.
-- Authorization handler: `WotAuthorizationHandler`.
-- Fact types: `WotFact`, `ProposalFact`.
-- Flow budget handler: `JournalBackedFlowBudgetHandler`.
-- Storage authorization: `StoragePermission`, `AccessDecision`.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Biscuit token model and verification semantics | Cryptographic signing (use aura-signature) |
+| Authorization handler: `WotAuthorizationHandler` | Transport operations (use effect traits) |
+| Fact types: `WotFact`, `ProposalFact` | Runtime handler composition |
+| Flow budget handler: `JournalBackedFlowBudgetHandler` | |
+| Storage authorization: `StoragePermission`, `AccessDecision` | |
+| Policy evaluation (pure; I/O via effects) | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Inbound | `aura-core` | Domain types, effect traits, resource scopes |
 
 ## Invariants
+
 - Authority-centric resource scopes (AuthorityOp, ContextOp).
 - Capability refinement via meet-semilattice: `C₁ ⊓ C₂ ≤ min(C₁, C₂)`.
 - Biscuit tokens for cryptographic delegation.
 - Policies are Datalog-based for flexible evaluation.
 
-## Ownership Model
-
-- `aura-authorization` is primarily `Pure`.
-- It defines capability and policy semantics rather than owning `ActorOwned`
-  runtime state.
-- Transfer or attenuation semantics should remain explicit and `MoveOwned`
-  rather than implicit shared mutation.
-- Capability evaluation here is authoritative input to higher-layer mutation and
-  publication gates.
-- `Observed` layers may inspect authorization results but must not invent their
-  own authority.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| `src/capabilities.rs`, `src/facts.rs`, `src/flow_budget.rs`, `src/view.rs` | `Pure` | Capability semantics, fact reduction, and derived authorization state. |
-| `src/storage_authorization.rs` | `Pure`, `MoveOwned` | Storage-token and budget handling remain synchronous and typed; no async owner state or runtime locks. |
-| `src/effects.rs` | `Pure` | Authorization effect contracts and pure capability-facing adapters. |
-| Actor-owned runtime state | none | Layer 2 authorization must not accumulate background owner tasks. |
-| Observed-only surfaces | none | Observation belongs in higher layers that consume authorization results. |
-
-### Capability-Gated Points
-
-- Biscuit validation and attenuation issuance
-- storage authorization admission and budget charging
-- capability evaluation surfaces consumed by higher-layer mutation/publication
-  gates
-
-### Verification Hooks
-
-- `cargo check -p aura-authorization`
-- `cargo test -p aura-authorization storage_authorization -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantCapabilityMeetMonotonicity
+
 Capability refinement must be monotone in the meet semilattice and remain context scoped.
 
 Enforcement locus:
@@ -73,6 +47,32 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines meet monotonicity.
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) depends on capability checks before send.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-authorization` is primarily `Pure`. Capability and policy semantics do not
+require `ActorOwned` runtime state. Transfer or attenuation semantics remain
+explicit and `MoveOwned`. `Observed` layers may inspect authorization results but
+must not invent their own authority.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/capabilities.rs`, `src/facts.rs`, `src/flow_budget.rs`, `src/view.rs` | `Pure` | Capability semantics, fact reduction, and derived authorization state. |
+| `src/storage_authorization.rs` | `Pure`, `MoveOwned` | Storage-token and budget handling remain synchronous and typed; no async owner state or runtime locks. |
+| `src/effects.rs` | `Pure` | Authorization effect contracts and pure capability-facing adapters. |
+| Actor-owned runtime state | none | Layer 2 authorization must not accumulate background owner tasks. |
+| Observed-only surfaces | none | Observation belongs in higher layers that consume authorization results. |
+
+### Capability-Gated Points
+
+- Biscuit validation and attenuation issuance
+- Storage authorization admission and budget charging
+- Capability evaluation surfaces consumed by higher-layer mutation/publication gates
+
 ## Testing
 
 ### Strategy
@@ -89,7 +89,7 @@ possible. Testing priorities:
    capabilities
 4. **Scope isolation**: resource scopes must bind to the correct authority
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-authorization --test contracts  # authorization contracts
@@ -110,7 +110,8 @@ cargo test -p aura-authorization --lib             # inline unit tests
 | Scope conversion loses authority binding | `src/storage_authorization.rs` inline | covered |
 | Flow cost calculation wrong | `src/storage_authorization.rs` inline | covered |
 
-## Boundaries
-- No cryptographic signing (use aura-signature).
-- No transport operations (use effect traits).
-- Policy evaluation is pure; I/O via effects.
+## References
+
+- [Authorization & Biscuit](../../docs/106_authorization.md)
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)

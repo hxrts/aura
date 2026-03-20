@@ -144,6 +144,15 @@ impl AuraAgent {
 - Testable with mock effects
 - Consistent pattern across crates
 
+### Core + Orchestrator Rule
+
+Layer 4 crates (guards, protocol, amp, anti-entropy) split their logic into two parts:
+
+- **Pure core**: Guard evaluation, reconciliation, channel reduction, and policy computation. These modules take snapshots and return typed results. No I/O, no long-lived state.
+- **Effectful orchestrator**: Applies the core's output by executing effect commands, driving retries, and managing transport. Lives in executor or coordinator modules.
+
+This rule keeps the decision logic testable and deterministic while confining I/O to well-defined interpreter boundaries. See [Guard Chain Internals](#1-guard-chain-internals) for the concrete three-phase pattern.
+
 ## 3. Type Reference
 
 ### ProtocolType
@@ -346,6 +355,28 @@ Workflow operations in `aura-app` use `WorkflowError` (`aura-app::workflows::err
 - `Precondition` — static invariant violation
 
 `From<WorkflowError> for AuraError` enables workflows to keep `Result<T, AuraError>` signatures while constructing typed errors internally.
+
+## 7. Instrumentation Contract
+
+Runtime instrumentation in `aura-agent` is structured and consistent across services. All long-lived services emit events from the following families:
+
+**Required event families**:
+- Runtime startup/shutdown
+- Service lifecycle transition
+- Task spawn/completion/failure/abort
+- Session claim/release/failure
+- Ingress accepted/rejected/dropped
+- Delegation start/commit/rollback/reject
+- Link boundary route/reject
+- Concurrency profile select/fallback
+- Invariant violation
+
+**Required fields** (where applicable):
+- `service`, `task`, `session_id`, `fragment_key`
+- `owner`, `from_owner`, `to_owner`
+- `profile`, `error_kind`, `correlation_id`
+
+These families and fields ensure that runtime behavior is reconstructible from structured logs. Envelope admission, delegation witnesses, and fallback decisions must all be visible in instrumentation output.
 
 ## Related Documentation
 

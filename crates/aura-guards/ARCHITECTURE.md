@@ -1,61 +1,53 @@
-# Aura Guards (Layer 4) - Architecture and Invariants
+# Aura Guards (Layer 4)
 
 ## Purpose
+
 Provide the guard chain that enforces authorization, flow budgets, leakage budgets, and
 journal coupling for every network-visible send. Guards are pure evaluators that return
 EffectCommands; no guard performs I/O directly.
 
-## Inputs
-- GuardSnapshot prepared from effect system state.
-- GuardChain configuration (capability requirement, flow cost, leakage policy, journal facts).
-- EffectContext metadata (authority/context/session).
+## Scope
 
-## Outputs
-- EffectCommands describing the required side effects (budget charge, journal commit, etc.).
-- GuardDecision with optional receipt metadata.
+| Belongs here | Does not belong here |
+|--------------|----------------------|
+| Pure guard evaluation and chain ordering | Direct transport or storage calls inside guards |
+| GuardSnapshot preparation and decision types | Effect execution (happens via interpreters) |
+| EffectCommands describing required side effects | Time/random access (only via effect traits in interpreter layer) |
+| GuardDecision with optional receipt metadata | Runtime composition or lifecycle management |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Down | `aura-core` | Effect trait definitions, domain types |
+| In | GuardSnapshot | Prepared from effect system state |
+| In | GuardChain configuration | Capability requirement, flow cost, leakage policy, journal facts |
+| In | EffectContext metadata | Authority/context/session |
+| Out | EffectCommands | Budget charge, journal commit, etc. |
+| Out | GuardDecision | With optional receipt metadata |
+
+## Key Modules
+
+- `guards/pure.rs`: Pure guard chain ordering and evaluation.
+- `guards/chain.rs`: Guard chain composition.
+- `guards/types.rs`: Guard types and decision structures.
+- `guards/policy.rs`: Policy defaults and configuration.
+- `guards/biscuit_evaluator.rs`: Biscuit-based authorization evaluation.
+- `guards/capability_guard.rs`: Capability requirement checks.
+- `guards/flow.rs`: Flow budget guard.
+- `guards/journal.rs`: Journal coupling guard.
+- `guards/executor.rs`: Effectful execution of guard decisions.
 
 ## Invariants
+
 - Charge-before-send: no transport side effects without successful guard evaluation.
 - Authorization precedes budgeting: CapGuard runs before FlowGuard.
 - Journal coupling is atomic with budget charge.
 - Leakage accounting is recorded as journal facts (RelationalFact::LeakageEvent).
 - Guards are pure and deterministic given the snapshot.
 
-## Ownership Model
-
-- `aura-guards` is primarily `Pure` guard evaluation.
-- Any effectful execution around guards should remain outside the pure decision
-  core and should not turn guards into `ActorOwned` semantic owners.
-- Capability requirements are first-class input here and must not be bypassed
-  by higher-layer shortcuts.
-- Guard execution outcomes should participate in typed terminal failure rather
-  than hidden fail-open or silent blocking behavior.
-- `Observed` consumers may inspect decisions and receipts but not redefine them.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| `guards/pure.rs`, `guards/chain.rs`, `guards/types.rs`, `guards/policy.rs` | `Pure` | Canonical guard ordering, policy, and typed guard results. |
-| `guards/biscuit_evaluator.rs`, `guards/capability_guard.rs`, `guards/flow.rs`, `guards/journal.rs` | `Pure`, `MoveOwned` | Guard inputs/results remain explicit values; no hidden ownership transfer or fail-open mutation. |
-| `guards/executor.rs` | effectful orchestrator | Applies effect commands without becoming a long-lived semantic owner. |
-| Actor-owned runtime state | none | Guard chain ownership stays outside this crate. |
-| Observed-only surfaces | none | Observation of decisions/receipts belongs downstream. |
-
-### Capability-Gated Points
-
-- guard capability requirements and Biscuit-based authorization input
-- typed guard outcomes consumed by higher-layer send/journal/flow execution
-
-### Verification Hooks
-
-- `cargo check -p aura-guards`
-- `cargo test -p aura-guards --lib -- --nocapture`
-- `just check-arch`
-
-### Detailed Specifications
-
 ### InvariantSentMessagesHaveFacts
+
 No observable network behavior may occur before capability validation, flow budget charging, and journal coupling succeed.
 
 Enforcement locus:
@@ -79,6 +71,32 @@ Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines charge-before-send and flow budget invariants.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantSentMessagesHaveFacts` and `InvariantFlowBudgetNonNegative`.
 
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-guards` is primarily `Pure` guard evaluation. Effectful execution around
+guards remains outside the pure decision core and does not turn guards into
+`ActorOwned` semantic owners. Guard execution outcomes participate in typed
+terminal failure rather than hidden fail-open or silent blocking behavior.
+
+See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `guards/pure.rs`, `guards/chain.rs`, `guards/types.rs`, `guards/policy.rs` | `Pure` | Canonical guard ordering, policy, and typed guard results. |
+| `guards/biscuit_evaluator.rs`, `guards/capability_guard.rs`, `guards/flow.rs`, `guards/journal.rs` | `Pure`, `MoveOwned` | Guard inputs/results remain explicit values; no hidden ownership transfer or fail-open mutation. |
+| `guards/executor.rs` | effectful orchestrator | Applies effect commands without becoming a long-lived semantic owner. |
+| Actor-owned runtime state | none | Guard chain ownership stays outside this crate. |
+| Observed-only surfaces | none | Observation of decisions/receipts belongs downstream. |
+
+### Capability-Gated Points
+
+- Guard capability requirements and Biscuit-based authorization input.
+- Typed guard outcomes consumed by higher-layer send/journal/flow execution.
+
 ## Testing
 
 ### Strategy
@@ -87,10 +105,11 @@ Guard chain ordering and the charge-before-send invariant are the primary
 testing concerns. Integration tests in `tests/chain/` verify end-to-end chain
 behavior; inline tests verify individual guard correctness.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-guards
+just check-arch
 ```
 
 ### Coverage matrix
@@ -108,11 +127,10 @@ cargo test -p aura-guards
 | GuardPlan drifts from choreography | `tests/chain/guard_plan_golden.rs` | Covered |
 | Policy defaults incorrect | `src/guards/policy.rs` (inline) | Covered |
 
-## Boundaries
-- No direct transport or storage calls inside guards.
-- Effect execution happens via interpreters (production, simulation, test).
-- Time/random access only via effect traits in interpreter layer.
+## References
 
-## Core + Orchestrator Rule
-- Pure guard evaluation logic belongs in core/pure modules.
-- Effectful execution and I/O belong in orchestrator/executor modules.
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Ownership Model](../../docs/122_ownership_model.md)
+- [System Internals Guide](../../docs/807_system_internals_guide.md)

@@ -1,25 +1,28 @@
-# Aura UI Architecture
+# Aura UI (Layer 7)
 
 ## Purpose
 
-`aura-ui` is the Layer 7 shared Dioxus UI core for Aura.
-It provides platform-agnostic UI state, deterministic key routing, and canonical
-text snapshot rendering used by harness automation.
+Shared Dioxus UI core for Aura providing platform-agnostic UI state, deterministic
+key routing, and canonical text snapshot rendering used by harness automation.
 
-## Responsibilities
+## Scope
 
-- Host shared Dioxus component tree and UI state model.
-- Provide deterministic keyboard routing for harness-driven scenarios.
-- Render canonical snapshot text compatible with harness introspection.
-- Expose platform-neutral harness bridge primitives and clipboard adapter boundary.
-- Materialize the shared semantic UI contract from `aura-app` into typed screen,
-  modal, operation, toast, list, and runtime-event state.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Shared Dioxus component tree and UI state model | Browser API usage (`web_sys`, `wasm_bindgen`, `js_sys`) |
+| Deterministic keyboard routing for harness-driven scenarios | Desktop/mobile shell integration code |
+| Canonical snapshot text rendering for harness introspection | Runtime/effect handler implementation ownership |
+| Platform-neutral harness bridge primitives and clipboard adapter boundary | Parity-critical semantic lifecycle authorship |
+| Shared semantic UI contract materialization from `aura-app` | Callback-owned readiness synthesis |
 
-## Non-Goals
+## Dependencies
 
-- No browser API usage (`web_sys`, `wasm_bindgen`, `js_sys`, etc.).
-- No desktop/mobile shell integration code.
-- No runtime/effect handler implementation ownership.
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | aura-app | Semantic UI contract (`ui_contract`), authoritative workflow publication |
+| Outgoing | — | Typed screen, modal, operation, toast, list, and runtime-event state |
+| Outgoing | — | `UiSnapshot` for canonical semantic projection export |
+| Outgoing | — | Platform-neutral harness bridge primitives |
 
 ## Invariants
 
@@ -33,39 +36,66 @@ text snapshot rendering used by harness automation.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from
   `aura-app::ui_contract`; they are not locally reinvented here.
 - Published observed semantic projections must support stale-state detection
-  through shared
-  revision/sequence and render-convergence semantics.
+  through shared revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every
   other screen.
-- `aura-ui` is an `Observed` shared UI core for parity-critical semantic flows.
-  It may render lifecycle and submit frontend-local UI transitions, but terminal
-  semantic truth stays in authoritative workflow/runtime ownership upstream.
+
+### InvariantUiSnapshotReflectsSemanticState
+
+`aura-ui` exports observed semantic projections that match the shared contract
+rather than frontend-local incidental structure.
+
+Enforcement locus:
+- `model.rs` owns typed selection, operation, toast, and runtime-event state.
+- `semantic_snapshot()` exports the canonical `UiSnapshot`.
+
+Failure mode:
+- Harness assertions depend on renderer text or row order instead of semantic ids.
+- Browser and TUI drift in observable state despite sharing the same flows.
+
+Verification hooks:
+- `cargo test -p aura-ui semantic_snapshot_includes_runtime_events`
+- `cargo test -p aura-ui restarting_operation_generates_new_operation_instance_id`
+
+Contract alignment:
+- [Testing Guide](../../docs/804_testing_guide.md) defines harness snapshot expectations.
+
+### InvariantSharedFlowShapesAreUniform
+
+Shared screens and modals expose consistent semantic structure for frontends
+and the harness.
+
+Enforcement locus:
+- shared modal/button/field ids are driven from the `aura-app` contract.
+- keyboard and click flows resolve through shared control ids and typed modal
+  state.
+
+Failure mode:
+- Harness execution requires per-screen or per-frontend special cases.
+- Shared scenarios regress back to raw mechanics.
+
+Verification hooks:
+- `just ci-shared-flow-policy`
+
+Contract alignment:
+- [Testing Guide](../../docs/804_testing_guide.md) defines shared flow uniformity requirements.
 
 ## Ownership Model
 
-For shared semantic flows, `aura-ui` should use:
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
 
-- `Observed`
-  - semantic snapshot rendering
-  - operation/runtime-event presentation state
-  - keyboard/focus/modal state
-- narrow `ActorOwned` shell ownership only at the frontend boundary
-  - shell crates may own command ingress/event-loop mechanics around `aura-ui`
-
-It must not use:
-
-- shared-UI-local terminal lifecycle authorship for parity-critical operations
-- callback-owned readiness synthesis
-- browser-only or TUI-only owner fields shadowing authoritative operation state
+`aura-ui` is an `Observed` shared UI core for parity-critical semantic flows.
+It may render lifecycle and submit frontend-local UI transitions, but terminal
+semantic truth stays in authoritative workflow/runtime ownership upstream.
 
 ### Ownership Inventory
 
-| Path | Category | Authoritative owner | May mutate | Observe only |
-|------|----------|---------------------|------------|--------------|
-| Semantic snapshot shaping and projection export | `Observed` | authoritative facts and shared UI state reducers | `model.rs` presentation state only | harness, web shell, users |
-| Keyboard/focus/modal state | `Observed` | shared UI model | `keyboard.rs`, `model.rs` | harness, shells |
-| Parity-critical operation rendering | `Observed` | authoritative semantic facts from `aura-app` | `model.rs` projection state only | harness, shells |
-| Shared-flow completion helpers | `Observed` | upstream workflow/runtime coordinators | auxiliary UI facts/toasts/modal dismissal only | harness, shells |
+| Surface | Category | Notes |
+|---------|----------|-------|
+| Semantic snapshot shaping and projection export | `Observed` | Authoritative facts and shared UI state reducers own truth; `model.rs` shapes presentation. |
+| Keyboard/focus/modal state | `Observed` | Shared UI model owns state; `keyboard.rs`, `model.rs` update it. |
+| Parity-critical operation rendering | `Observed` | Authoritative semantic facts from `aura-app` own truth; `model.rs` projects. |
+| Shared-flow completion helpers | `Observed` | Upstream workflow/runtime coordinators own truth; helpers dismiss UI state only. |
 
 ### Capability-Gated Points
 
@@ -77,49 +107,30 @@ It must not use:
 - keyboard and focus routing may trigger frontend-local transitions, but parity-
   critical command ownership remains upstream in shell/workflow boundaries
 
-### Verification Hooks
+## Testing
 
-- `cargo check -p aura-ui`
-- `cargo test -p aura-ui semantic_snapshot_includes_runtime_events -- --nocapture`
-- `cargo test -p aura-ui restarting_operation_generates_new_operation_instance_id -- --nocapture`
-- `just ci-observed-layer-boundaries`
-- `just ci-shared-flow-policy`
+### Strategy
 
-### InvariantUiSnapshotReflectsSemanticState
-`aura-ui` exports observed semantic projections that match the shared contract
-rather than frontend-local incidental structure.
+Snapshot determinism and shared-flow shape uniformity are the primary concerns.
+Tests verify semantic snapshot correctness, operation instance lifecycle, and
+shared screen/modal structure.
 
-Enforcement locus:
-- `model.rs` owns typed selection, operation, toast, and runtime-event state.
-- `semantic_snapshot()` exports the canonical `UiSnapshot`.
+### Commands
 
-Failure mode:
-- Harness assertions depend on renderer text or row order instead of semantic
-  ids.
-- Browser and TUI drift in observable state despite sharing the same flows.
+```
+cargo test -p aura-ui
+just ci-shared-flow-policy
+just ci-observed-layer-boundaries
+```
 
-Verification hooks:
-- `cargo test -p aura-ui semantic_snapshot_includes_runtime_events`
-- `cargo test -p aura-ui restarting_operation_generates_new_operation_instance_id`
+### Coverage matrix
 
-### InvariantSharedFlowShapesAreUniform
-Shared screens and modals expose consistent semantic structure for frontends
-and the harness.
+| What breaks if wrong | Invariant | Test location | Status |
+|---------------------|-----------|--------------|--------|
+| Snapshot missing runtime events | UiSnapshotReflectsSemanticState | `semantic_snapshot_includes_runtime_events` | Covered |
+| Restarted operation reuses stale id | UiSnapshotReflectsSemanticState | `restarting_operation_generates_new_operation_instance_id` | Covered |
+| Shared flow shapes diverge per frontend | SharedFlowShapesAreUniform | `just ci-shared-flow-policy` | Covered |
 
-Enforcement locus:
-- shared modal/button/field ids are driven from the `aura-app` contract.
-- keyboard and click flows resolve through shared control ids and typed modal
-  state.
+## References
 
-Uniform shared-flow shape means:
-- canonical ids for screens, modals, lists, controls, and operations
-- shared focus and selection semantics
-- stable list/entity shape keyed by semantic ids rather than renderer order
-- shared operation and runtime-event shape at the `UiSnapshot` boundary
-
-Failure mode:
-- Harness execution requires per-screen or per-frontend special cases.
-- Shared scenarios regress back to raw mechanics.
-
-Verification hooks:
-- `just ci-shared-flow-policy`
+- [Testing Guide](../../docs/804_testing_guide.md)

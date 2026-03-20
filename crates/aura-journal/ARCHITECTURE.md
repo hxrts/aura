@@ -1,22 +1,35 @@
-# Aura Journal (Layer 2) - Architecture and Invariants
+# Aura Journal (Layer 2)
 
 ## Purpose
-Define fact-based journal semantics using join-semilattice CRDTs for deterministic
+
+Fact-based journal semantics using join-semilattice CRDTs for deterministic
 conflict-free state reduction across distributed replicas.
 
-## Inputs
-- `aura-core`: Effect traits, domain types, semilattice traits, tree primitives.
+## Scope
 
-## Outputs
-- Fact types: `Fact`, `FactContent`, `RelationalFact`, `ProtocolRelationalFact`.
-- Journal operations: `Journal`, `FactJournal`, `JournalNamespace`.
-- Reduction engine: `reduce_authority()`, `reduce_context()`.
-- Commitment tree: `TreeState`, `reduce()`, `apply_verified()`.
-- CRDT handlers: `CvHandler`, `MvHandler`, `CmHandler`, `DeltaHandler`.
-- Extensibility: `DomainFact`, `FactReducer`, `FactRegistry`.
-- Application effect: `JournalHandler` implementing `JournalEffects`.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Fact model, journal operations, namespace scoping | Storage implementations (`StorageEffects`) |
+| Deterministic state reduction from facts | Multi-party coordination (`aura-protocol`) |
+| Commitment tree state machine and compaction | Runtime composition (`aura-agent`) |
+| CRDT handlers (join/meet/operation-based) | Direct OS access (use effect traits) |
+| Extensibility: `DomainFact`, `FactReducer`, `FactRegistry` | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| consumes | `aura-core` | Effect traits, domain types, semilattice traits, tree primitives |
+| produces | Fact types | `Fact`, `FactContent`, `RelationalFact`, `ProtocolRelationalFact` |
+| produces | Journal operations | `Journal`, `FactJournal`, `JournalNamespace` |
+| produces | Reduction engine | `reduce_authority()`, `reduce_context()` |
+| produces | Commitment tree | `TreeState`, `reduce()`, `apply_verified()` |
+| produces | CRDT handlers | `CvHandler`, `MvHandler`, `CmHandler`, `DeltaHandler` |
+| produces | Extensibility | `DomainFact`, `FactReducer`, `FactRegistry` |
+| produces | Application effect | `JournalHandler` implementing `JournalEffects` |
 
 ## Key Modules
+
 - `fact.rs`: Fact model, journal operations, namespace scoping.
 - `reduction.rs`: Deterministic state derivation from facts.
 - `commitment_tree/`: Tree state machine, reduction, compaction.
@@ -26,6 +39,7 @@ conflict-free state reduction across distributed replicas.
 - `effects.rs`: `JournalHandler` application effect implementation.
 
 ## Invariants
+
 - Monotonic growth: `Journal_{t+1} = Journal_t ⊔ δ` (facts append-only).
 - Deterministic reduction: Same facts → identical state on all replicas.
 - Immutability: Facts immutable; metadata updates monotonic.
@@ -33,43 +47,8 @@ conflict-free state reduction across distributed replicas.
 - Content addressing: Facts identified by hash (CID).
 - Nonce uniqueness per namespace (`InvariantNonceUnique`).
 
-## Ownership Model
-
-- `aura-journal` is primarily `Pure`.
-- It owns fact reduction and journal-domain semantics, not `ActorOwned` runtime
-  state.
-- Any exclusive authority semantics exposed here should remain typed and
-  `MoveOwned`, never hidden behind shared mutable rewrites.
-- Capability checks that gate acceptance or interpretation should remain
-  explicit in typed journal/domain surfaces.
-- Downstream projections are `Observed` consumers of reduced journal state and
-  must not become semantic owners.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| `src/fact.rs`, `src/reduction.rs`, `src/extensibility.rs` | `Pure` | Canonical fact encoding, reduction, and registry semantics. |
-| `src/algebra/`, `src/crdt/`, `src/commitment_tree/` | `Pure` | Deterministic algebra/CRDT/tree-state transitions with no long-lived async owner. |
-| `src/effect_api/` | `MoveOwned` | Typed journal append/intent/capability records and effect-facing handoff surfaces. |
-| Actor-owned runtime state | none | Journal semantics must not accumulate background owner tasks in Layer 2. |
-| Observed-only surfaces | none | Observation belongs in higher layers that consume reduced journal state. |
-
-### Capability-Gated Points
-
-- journal append capability/effect surfaces in `src/effect_api/`
-- fact acceptance and interpretation gates that remain explicit in typed
-  journal/domain APIs
-
-### Verification Hooks
-
-- `cargo check -p aura-journal`
-- `cargo test -p aura-journal convergence -- --nocapture`
-- `cargo test -p aura-journal nonce -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantCRDTConvergence
+
 Identical fact sets must reduce to identical state across replicas, independent of arrival order.
 
 Enforcement locus:
@@ -94,6 +73,7 @@ Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines journal CRDT safety, deterministic reduction order, and `InvariantNonceUnique`.
 
 ### InvariantNonceUnique
+
 No two accepted facts may share the same nonce within the same journal namespace.
 
 Enforcement locus:
@@ -112,9 +92,10 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantNonceUnique`.
-- [Project Structure](../../docs/999_project_structure.md#invariant-traceability) indexes canonical naming used by tests and proofs.
+- [Project Structure](../../docs/999_project_structure.md#invariant-traceability) indexes canonical naming.
 
 ### InvariantAuthorityTreeTopologyCommitmentCoherence
+
 Authority tree topology and commitment caches must remain coherent after every mutation.
 
 Enforcement locus:
@@ -137,6 +118,26 @@ Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) requires deterministic state transitions.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) requires safety under replay and anti-entropy.
 
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-journal` is primarily `Pure`. Fact reduction and journal-domain semantics
+are deterministic. It does not own `ActorOwned` runtime state.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/fact.rs`, `src/reduction.rs`, `src/extensibility.rs` | `Pure` | Canonical fact encoding, reduction, and registry semantics. |
+| `src/algebra/`, `src/crdt/`, `src/commitment_tree/` | `Pure` | Deterministic algebra/CRDT/tree-state transitions. |
+| `src/effect_api/` | `MoveOwned` | Typed journal append/intent/capability records and effect-facing handoff surfaces. |
+
+### Capability-Gated Points
+
+- journal append capability/effect surfaces in `src/effect_api/`
+- fact acceptance and interpretation gates in typed journal/domain APIs
+
 ## Testing
 
 ### Strategy
@@ -150,7 +151,7 @@ replica disagrees on state irrecoverably. Testing priorities:
 4. **Tree state machine integrity**: incremental updates match full recompute
 5. **Fact encoding stability**: serialization doesn't drift between releases
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-journal --test convergence  # CRDT convergence + determinism
@@ -162,30 +163,28 @@ cargo test -p aura-journal --lib               # inline unit tests
 
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
-| Context reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered (proptest: shuffled insertion) |
-| Authority reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered (3 insertion orders) |
+| Context reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
+| Authority reducer non-deterministic | `tests/convergence/journal_join_laws.rs` | covered |
 | Tree reduction non-deterministic | `tests/convergence/tree_reduction_determinism.rs` | covered (proptest) |
 | Journal join not associative/commutative | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
 | Journal join not idempotent | `tests/convergence/journal_join_laws.rs` | covered (proptest) |
-| Adding fact removes existing facts | `tests/convergence/journal_join_laws.rs` | covered (add monotonicity + join preserves all) |
+| Adding fact removes existing facts | `tests/convergence/journal_join_laws.rs` | covered |
 | Convergence certificates not emitted | `tests/convergence/convergence_cert.rs` | covered |
 | Tree topology incoherent after mutation | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
 | Incremental update diverges from recompute | `tests/contracts/authority_tree_integrity.rs` | covered (proptest) |
 | Merkle proofs invalid after mutation | `tests/contracts/authority_tree_integrity.rs` | covered |
-| Fact encoding changes between releases | `tests/contracts/fact_encoding_stability.rs` | covered (roundtrip) |
-| Fact encoding bytes drift silently | `tests/contracts/fact_encoding_stability.rs` | covered (determinism + differential + pinned hash) |
+| Fact encoding changes between releases | `tests/contracts/fact_encoding_stability.rs` | covered |
+| Fact encoding bytes drift silently | `tests/contracts/fact_encoding_stability.rs` | covered |
 | Fact deduplication via BTreeSet identity | `src/fact.rs` inline | covered |
 | Wrong namespace type accepted by reducer | `src/reduction.rs` inline | covered |
 | AMP epoch reduction order-dependent | `src/reduction.rs` inline | covered |
 | Recovery AMP reconstruction fails | `tests/contracts/recovery_amp_reconstruction.rs` | covered |
 
-## Boundaries
-- No storage implementations (use `StorageEffects`).
-- No multi-party coordination (use `aura-protocol`).
-- No runtime composition (use `aura-agent`).
-- No direct OS access (use effect traits).
+## References
 
-## Fact Pattern Summary
-- **Protocol facts** (`ProtocolRelationalFact`): Core protocol, stay in aura-journal.
-- **Domain facts** (`Generic` + registry): Layer 4/5 crates, register with `FactRegistry`.
-- **Layer 2 crates**: Use `aura_core::types::facts`, no aura-journal dependency.
+- [Theoretical Model](../../docs/002_theoretical_model.md) — join-semilattice semantics, deterministic reduction
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) — CRDT safety, `InvariantNonceUnique`
+- [Journal](../../docs/105_journal.md) — full journal specification
+- [Project Structure](../../docs/999_project_structure.md) — fact pattern selection, invariant traceability
+- [Ownership Model](../../docs/122_ownership_model.md) — ownership taxonomy
+- [Testing Guide](../../docs/804_testing_guide.md) — test patterns and ownership testing requirements

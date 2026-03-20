@@ -1,100 +1,79 @@
-# Aura Terminal (Layer 7) - Architecture and Invariants
+# Aura Terminal (Layer 7)
 
 ## Purpose
+
 Terminal-based CLI and TUI interfaces for account management, authentication,
 recovery, and diagnostics. Uses AppCore as unified backend while remaining
 platform-agnostic.
 
-## Inputs
-- aura-app (pure application core: `AppCore`, `Intent`, `ViewState`).
-- aura-agent (runtime layer: `AuraAgent`, `EffectContext`, services).
-- aura-core (types only: errors, identifiers, execution modes).
+## Scope
 
-## Outputs
-- CLI handlers and command implementations.
-- TUI screens, components, and layouts.
-- Terminal-specific rendering and input handling.
-- Human-friendly error messages and visualization.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| CLI handlers and command implementations | Effect implementations or handlers |
+| TUI screens, components, and layouts | Business logic (lives in aura-app) |
+| Terminal-specific rendering and input handling | Runtime composition (lives in aura-agent) |
+| Human-friendly error messages and visualization | Shared-flow command contract ownership |
+| Shared-flow command ingress and projection export | Parity-critical semantic lifecycle publication |
+| Parse/validation at UI/input boundaries | Direct import by Layer 1-6 crates |
+
+## Dependencies
+
+| Direction | Crate | What is consumed / produced |
+|-----------|-------|-----------------------------|
+| Consumes | `aura-app` | `AppCore`, `Intent`, `ViewState`, `ui_contract`, `workflows::semantic_facts` |
+| Consumes | `aura-agent` | `AuraAgent`, `EffectContext`, services |
+| Consumes | `aura-core` | Types only: errors, identifiers, execution modes |
+| Produces | — | CLI handlers, TUI screens, terminal rendering |
 
 ## Invariants
-- Must NOT create effect implementations or handlers.
-- Must NOT be imported by Layer 1-6 crates.
-- Uses dependency inversion: imports from both aura-app and aura-agent.
-- Terminal-specific rendering must stay in this layer.
-- Parse/validation failures for identifiers and thresholds are handled at UI/input boundaries.
-- Internal command and modal contracts should prefer typed IDs/domain values over raw `String`.
-- Operational responses for core flows should use structured variants instead of free-form strings.
+
+- Terminal interfaces must remain a presentation layer over aura-app.
 - Parity-critical IDs, focus semantics, and action metadata must come from
   `aura-app::ui_contract`, not frontend-local derivation.
-- Harness mode may add instrumentation or render-stability hooks, but it must
-  not bypass normal user-visible execution semantics for parity-critical flows.
+- Harness mode may add instrumentation or render-stability hooks but must not
+  bypass normal execution semantics for parity-critical flows.
 - The TUI must expose shared semantic command ingress through its real
-  update/event loop for shared-flow execution; command handling may not depend
-  on render-time polling or PTY timing.
-- Renderer-specific key driving is frontend-conformance-only and must not be
-  the primary shared-flow execution path.
+  update/event loop; command handling may not depend on render-time polling.
 - Parity-critical semantic export must not depend on placeholder IDs,
   override-backed lists, or heuristic runtime-event inference.
 - The TUI is an `Observed` plus command-ingress surface for shared semantic
   flows. It may submit commands and render lifecycle, but it must not own
   terminal semantic truth for parity-critical operations.
 
+### InvariantTerminalUiBoundary
+
+Terminal interfaces must remain a presentation layer over aura-app and must not introduce runtime effect implementations.
+
+Enforcement locus:
+- `src/tui/` and command handlers map user intents to app workflows.
+- User interface state changes are derived from reactive app signals.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+- Shared harness execution depends on TUI render timing or PTY choreography
+  instead of the normal command/update path.
+
+Verification hooks:
+- `just check-arch` and `just test-crate aura-terminal`
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines interface layer boundaries.
+- [Effect System and Runtime](../../docs/103_effect_system.md) defines signal and workflow integration.
+
 ## Ownership Model
 
-For shared semantic flows, `aura-terminal` should use:
+Reference: [docs/122_ownership_model.md](../../docs/122_ownership_model.md)
 
-- `Observed`
-  - render state
-  - projections
-  - snapshots
-  - user-visible progress/status
-- narrow `ActorOwned` ingress only where necessary
-  - the TUI command/update loop may own command application mechanics because it
-    is a long-lived mutable async frontend loop
+For shared semantic flows, `aura-terminal` uses `Observed` for render state,
+projections, snapshots, and user-visible progress. Narrow `ActorOwned` ingress
+is permitted only for the TUI command/update loop (a long-lived mutable async
+frontend loop). The frontend must not own terminal semantic truth for
+parity-critical operations; frontend-local submission ownership must hand off
+before the first awaited app/runtime workflow step per docs/122 section 16.
 
-It must not use:
-
-- frontend-local `MoveOwned` semantic ownership for parity-critical operation
-  truth
-- callback-owned terminal success/failure
-- shell-owned readiness synthesis
-
-The correct split is:
-
-- the TUI ingress loop is allowed to be actor-like because it is a real
-  long-lived mutable event loop
-- semantic operation ownership remains upstream in authoritative workflow/runtime
-  coordinators
-- the shell observes and renders lifecycle but does not decide it
-
-The frontend handoff rule is strict:
-
-- if a callback or shell-local owner settles the operation, it must publish a
-  local terminal state itself
-- if `aura-app` or runtime workflow ownership is required, the frontend must
-  relinquish local ownership before awaiting that workflow
-- there is no supported mixed state where the frontend keeps a local
-  `Submitting` record alive while an app-owned workflow is running
-
-The sanctioned frontend ownership boundary is also structural:
-
-- local semantic-owner allocation is allowed only at the shell/update-loop
-  submission boundary
-- handoff into `aura-app` ownership is allowed only in callback factory
-  boundaries
-- authoritative operation-state mutation is allowed only in the shell/state
-  reducer path that consumes authoritative updates
-- TUI tests may exercise these helpers in
-  [src/tui/semantic_lifecycle.rs](/Users/hxrts/projects/aura/crates/aura-terminal/src/tui/semantic_lifecycle.rs),
-  but production code must not introduce new allocation/handoff sites outside
-  the sanctioned boundary modules
-
-The frontend also may not place best-effort work on the primary semantic-owner
-path. Any best-effort local adaptation must happen after authoritative terminal
-publication or under a different explicitly-owned local task that does not own
-parity-critical lifecycle truth.
-
-### Ownership Inventory
+### Inventory
 
 | Path | Category | Authoritative owner | May mutate | Observe only |
 |------|----------|---------------------|------------|--------------|
@@ -103,30 +82,15 @@ parity-critical lifecycle truth.
 | Callback/subscription bridges for parity-critical flows | `Observed` | upstream workflow/runtime coordinators | local UI adaptation only; never terminal semantic truth | harness, shell |
 | Local focus/selection and nonsemantic view state | `Observed` | TUI shell/model | shell/update-loop code | harness snapshots |
 
-### Required Ownership Tests
-
-Changes to parity-critical TUI ownership boundaries should ship with:
-
-- dynamic tests proving dropped semantic-operation owners publish explicit
-  terminal failure rather than hanging
-- invariant tests proving authoritative and local operation snapshots do not
-  regress terminal state on the same logical instance
-- handle/instance tests proving stale or replaced operation handles do not
-  match the wrong lifecycle record
-- boundary tests showing relinquished callback ownership does not continue to
-  author semantic truth after handoff
-- invariant tests showing local `Submitting` state cannot mask authoritative
-  terminal publication after required handoff
-
 ### Capability-Gated Points
 
-- shared semantic command ingress and receipt handling through the real TUI
-  update/event loop
-- authoritative semantic lifecycle/readiness mirroring consumed from
+- Shared semantic command ingress and receipt handling through the real TUI
+  update/event loop.
+- Authoritative semantic lifecycle/readiness mirroring consumed from
   `aura-app::ui_contract` and `aura-app::workflows::semantic_facts`, never
-  authored locally
-- callback factories and subscription bridges that may adapt authoritative
-  operation state for rendering, but may not publish terminal semantic truth
+  authored locally.
+- Callback factories and subscription bridges that may adapt authoritative
+  operation state for rendering, but may not publish terminal semantic truth.
 
 ### Verification Hooks
 
@@ -138,36 +102,6 @@ Changes to parity-critical TUI ownership boundaries should ship with:
 - `just ci-frontend-handoff-boundary`
 - `just ci-actor-lifecycle`
 
-Architecture/tooling split:
-- direct import and boundary-shape violations should be pushed toward module
-  visibility, sanctioned facade APIs, compile-fail tests, and Rust-native lints
-- `just check-arch` remains the right place for repo-wide frontend integration
-  checks, docs traceability, and semantic/reactive heuristics that depend on
-  workspace context
-- `just lint-arch-syntax` owns syntax-only frontend escape hatches such as raw
-  wall-clock usage and other Rust-native policy checks
-
-### Detailed Specifications
-
-### InvariantTerminalUiBoundary
-Terminal interfaces must remain a presentation layer over aura-app and must not introduce runtime effect implementations.
-
-Enforcement locus:
-- src tui and command handlers map user intents to app workflows.
-- User interface state changes are derived from reactive app signals.
-
-Failure mode:
-- Behavior diverges from the crate contract and produces non-reproducible outcomes.
-- Cross-layer assumptions drift and break composition safety.
-- Shared harness execution depends on TUI render timing or PTY choreography
-  instead of the normal command/update path.
-
-Verification hooks:
-- just check-arch and just test-crate aura-terminal
-
-Contract alignment:
-- [Aura System Architecture](../../docs/001_system_architecture.md) defines interface layer boundaries.
-- [Effect System and Runtime](../../docs/103_effect_system.md) defines signal and workflow integration.
 ## Testing
 
 ### Strategy
@@ -177,7 +111,7 @@ Tests are organized into `tests/demo/` for demo-mode flows, `tests/wiring/`
 for callback and signal dispatch, `tests/regression/` for bug regressions,
 and top-level files for integration, unit, and verification tests.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-terminal
@@ -202,9 +136,10 @@ cargo test -p aura-terminal
 | Guardian ceremony no-peers regression | `tests/regression/regression_guardian_ceremony_no_peers.rs` | Covered |
 | ITF trace verification wrong | `tests/verification_demo_itf.rs` | Covered |
 
-## Boundaries
-- Business logic lives in aura-app.
-- Effect implementations live in aura-effects.
-- Runtime composition lives in aura-agent.
-- Shared-flow command ingress and projection export belong here; shared command
-  contract ownership does not.
+## References
+
+- [Aura System Architecture](../../docs/001_system_architecture.md)
+- [Effect System and Runtime](../../docs/103_effect_system.md)
+- [Ownership Model](../../docs/122_ownership_model.md)
+- [Testing Guide](../../docs/804_testing_guide.md)
+- [Project Structure](../../docs/999_project_structure.md)

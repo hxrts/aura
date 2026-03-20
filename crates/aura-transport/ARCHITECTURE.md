@@ -1,22 +1,30 @@
-# Aura Transport (Layer 2) - Architecture and Invariants
+# Aura Transport (Layer 2)
 
 ## Purpose
+
 Define P2P communication abstractions and transport semantics with privacy-by-design
 and authority-centric messaging.
 
-## Inputs
-- aura-core (domain types, effect traits, identifiers).
+## Scope
 
-## Outputs
-- Transport types: `Envelope`, `ScopedEnvelope`, `TransportConfig`.
-- Connection types: `ConnectionId`, `ConnectionInfo`, `ConnectionState`.
-- Privacy types: `PrivacyLevel`, `FrameHeader`, `FrameType`.
-- Peer management: `PeerInfo`, `BlindedPeerCapabilities`.
-- Context-scoped transport: `ContextTransportMessage`, `ContextTransportSession`.
-- Fact types: `TransportFact` (state changes).
-- AMP types: `AmpHeader`, `AmpRatchetState`.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Transport types: `Envelope`, `ScopedEnvelope`, `TransportConfig` | Actual network I/O (use `TransportEffects`) |
+| Connection types: `ConnectionId`, `ConnectionInfo`, `ConnectionState` | Transport handler implementations (live in `aura-effects`) |
+| Privacy types: `PrivacyLevel`, `FrameHeader`, `FrameType` | Coordination logic (use `aura-protocol`) |
+| Peer management: `PeerInfo`, `BlindedPeerCapabilities` | |
+| Context-scoped transport: `ContextTransportMessage`, `ContextTransportSession` | |
+| Fact types: `TransportFact` (state changes) | |
+| AMP types: `AmpHeader`, `AmpRatchetState` | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Inbound | `aura-core` | Domain types, effect traits, identifiers |
 
 ## Invariants
+
 - Privacy-by-design: mechanisms integrated into core types.
 - Authority-centric: uses `AuthorityId` for cross-authority communication.
 - Context-scoped: uses `ContextId` for relational context scoping.
@@ -25,42 +33,8 @@ and authority-centric messaging.
   `InvariantContextIsolation`, `InvariantReceiptValidityWindow`, and
   `InvariantCrossEpochReplayPrevention`.
 
-## Ownership Model
-
-- `aura-transport` is primarily `Pure`.
-- It defines transport-domain semantics and typed receipts, not `ActorOwned`
-  connection ownership.
-- Channel/session transfer semantics that require exclusivity should be carried
-  as `MoveOwned` contracts in higher layers.
-- Capability-gated send and receive authority should remain explicit at the
-  typed boundary.
-- Runtime services and `Observed` projections consume these contracts
-  downstream; they do not redefine them here.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| `src/types.rs`, `src/envelope.rs`, `src/receipt.rs`, `src/privacy.rs` | `Pure` | Transport message, receipt, and privacy semantics. |
-| `src/protocols/` | `Pure`, `MoveOwned` | Session/channel descriptors and protocol state are explicit values; protocol timeout/retry settings here are configuration data, not owner-run loops. |
-| `src/facts.rs` | `Pure` | Fact-backed transport state transitions. |
-| Actor-owned runtime state | none | Connection ownership and live peer state belong in higher layers. |
-| Observed-only surfaces | none | Observation of transport state belongs in runtime/interface layers. |
-
-### Capability-Gated Points
-
-- typed send/receive authority surfaces consumed by higher-layer guards
-- receipt and transport fact semantics used by higher-layer mutation/publication
-  gates
-
-### Verification Hooks
-
-- `cargo check -p aura-transport`
-- `cargo test -p aura-transport -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantSequenceMonotonic
+
 Transport sequencing and context scoping must remain monotone with fact-backed send observability.
 
 Enforcement locus:
@@ -77,6 +51,31 @@ Verification hooks:
 Contract alignment:
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines `InvariantReceiptValidityWindow` and `InvariantCrossEpochReplayPrevention`.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantSequenceMonotonic` and `InvariantContextIsolation`.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-transport` is primarily `Pure`. It defines transport-domain semantics and
+typed receipts, not `ActorOwned` connection ownership. Channel/session transfer
+semantics requiring exclusivity are carried as `MoveOwned` contracts in higher
+layers. `Observed` projections consume these contracts downstream.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `src/types.rs`, `src/envelope.rs`, `src/receipt.rs`, `src/privacy.rs` | `Pure` | Transport message, receipt, and privacy semantics. |
+| `src/protocols/` | `Pure`, `MoveOwned` | Session/channel descriptors and protocol state are explicit values; protocol timeout/retry settings here are configuration data, not owner-run loops. |
+| `src/facts.rs` | `Pure` | Fact-backed transport state transitions. |
+| Actor-owned runtime state | none | Connection ownership and live peer state belong in higher layers. |
+| Observed-only surfaces | none | Observation of transport state belongs in runtime/interface layers. |
+
+### Capability-Gated Points
+
+- Typed send/receive authority surfaces consumed by higher-layer guards
+- Receipt and transport fact semantics used by higher-layer mutation/publication gates
+
 ## Testing
 
 ### Strategy
@@ -85,7 +84,7 @@ aura-transport defines wire protocol types. If serialization breaks, peers
 can't communicate. If context isolation breaks, messages leak across
 relationships. If epoch validation breaks, replay attacks succeed.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-transport --test wire  # wire protocol contracts
@@ -107,7 +106,8 @@ cargo test -p aura-transport --lib        # inline unit tests
 | Message key derivation non-deterministic | — | `src/amp.rs` inline | covered |
 | Privacy level semantics wrong | — | `src/types/envelope.rs` inline | covered |
 
-## Boundaries
-- No actual network I/O (use TransportEffects).
-- Transport handlers live in aura-effects.
-- Coordination lives in aura-protocol.
+## References
+
+- [Transport and Information Flow](../../docs/111_transport_and_information_flow.md)
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)

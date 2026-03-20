@@ -1,58 +1,39 @@
-# Aura Chat (Layer 5) - Architecture and Invariants
+# Aura Chat (Layer 5)
 
 ## Purpose
+
 Secure messaging domain providing channel management, message facts, and chat
 state reduction for encrypted group and direct messaging.
 
-## Inputs
-- aura-core (effect traits, identifiers: ChannelId, ContextId).
-- aura-journal (fact infrastructure, reduction pipeline).
+## Scope
 
-## Outputs
-- `ChatFact`, `ChatFactReducer`, `ChatDelta` for journal integration.
-- `ChatFactService` for message and channel operations.
-- `ChatGroup` for group membership management.
-- `ChatViewReducer` for deriving chat state views.
-- `ChatGuards` for message authorization.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Chat facts, reducers, and view derivation | Encryption/decryption (aura-effects crypto handlers) |
+| Channel creation and membership management | Transport coordination (aura-protocol) |
+| Message authorization guards | Runtime caching (aura-agent services) |
+| Chat group membership logic | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | aura-core | Effect traits, identifiers (`ChannelId`, `ContextId`) |
+| Incoming | aura-journal | Fact infrastructure, reduction pipeline |
+| Outgoing | — | `ChatFact`, `ChatFactReducer`, `ChatDelta` for journal integration |
+| Outgoing | — | `ChatFactService` for message and channel operations |
+| Outgoing | — | `ChatGroup` for group membership management |
+| Outgoing | — | `ChatViewReducer` for deriving chat state views |
+| Outgoing | — | `ChatGuards` for message authorization |
 
 ## Invariants
+
 - Facts must be reduced under their matching `ContextId`.
 - Message payloads are opaque bytes; decryption is a higher-layer concern.
 - Channel creation and membership changes are journaled as facts.
 
-## Ownership Model
-
-- `aura-chat` is primarily `Pure` fact, reducer, and workflow-domain logic.
-- Chat/channel authority transfer and operation handles should be explicit and
-  `MoveOwned` where exclusivity matters.
-- Long-lived mutable chat runtime ownership belongs in explicit `ActorOwned`
-  services in higher layers, not hidden in chat helpers.
-- Message and membership publication must remain capability-gated and typed.
-- `Observed` chat views are downstream and must not author chat truth.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| facts/reducers/view reduction | `Pure` | Deterministic chat fact reduction and derived state. |
-| message/channel/membership workflow-domain operations | `MoveOwned` | Exclusive channel/message authority and operation handles remain explicit. |
-| long-lived mutable chat ownership | none local | Runtime chat coordination and caches belong in higher layers. |
-| capability-gated publication | typed domain/workflow boundary | Message and membership publication stay explicit and auditable. |
-| Observed-only surfaces | chat view consumers only | UI/runtime views remain downstream. |
-
-### Capability-Gated Points
-
-- message publication and membership-change admission
-- chat/channel operations consumed by higher-layer guards and runtime services
-
-### Verification Hooks
-
-- `cargo check -p aura-chat`
-- `cargo test -p aura-chat -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantChatContextReduction
+
 Chat facts reduce only within their context and preserve deterministic replay order.
 
 Enforcement locus:
@@ -69,6 +50,28 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines context isolation and deterministic reduction.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines consistency expectations.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-chat` is primarily `Pure` fact, reducer, and workflow-domain logic.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/view reduction | `Pure` | Deterministic chat fact reduction and derived state. |
+| message/channel/membership workflow-domain operations | `MoveOwned` | Exclusive channel/message authority and operation handles remain explicit. |
+| long-lived mutable chat ownership | none local | Runtime chat coordination and caches belong in higher layers. |
+| capability-gated publication | typed domain/workflow boundary | Message and membership publication stay explicit and auditable. |
+| Observed-only surfaces | `Observed` | UI/runtime views remain downstream. |
+
+### Capability-Gated Points
+
+- message publication and membership-change admission
+- chat/channel operations consumed by higher-layer guards and runtime services
+
 ## Testing
 
 ### Strategy
@@ -77,7 +80,7 @@ All tests are inline — appropriate for a messaging domain crate whose tests
 verify fact reduction, guard evaluation, and view derivation. No integration
 test surface is needed.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-chat
@@ -98,10 +101,12 @@ cargo test -p aura-chat
 | Group membership check incorrect | `src/group.rs` `test_group_membership` | Covered |
 | Message lifecycle timestamps wrong | `src/facts.rs` `test_message_lifecycle_facts` | Covered |
 
-## Boundaries
-- Encryption/decryption lives in aura-effects (crypto handlers).
-- Transport coordination lives in aura-protocol.
-- Runtime caching lives in aura-agent services.
-
 ## Operation Categories
+
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+
+## References
+
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Operation Categories](../../docs/109_operation_categories.md)

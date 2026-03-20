@@ -1,26 +1,36 @@
-# Aura Maintenance (Layer 2) - Architecture and Invariants
+# Aura Maintenance (Layer 2)
 
 ## Purpose
+
 Define maintenance domain facts, release metadata, and reduction helpers for
 snapshots, cache invalidation, OTA upgrades, and admin replacement.
 
-## Inputs
-- `aura-core`: Domain types, effect traits, fact encoding.
+## Scope
 
-## Outputs
-- Fact types: `MaintenanceFact` (snapshots, cache, upgrades, admin replacement).
-- Release-domain types: release ids, provenance, signed manifests, deterministic build certificates.
-- Reducer: `MaintenanceFactReducer` producing `MaintenanceFactDelta`.
-- GC planning: `TranscriptGcPlan` for DKG transcript cleanup.
-- Operation categories: `MaintenanceOperation`, `OperationCategory` (A/B/C).
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Fact types: `MaintenanceFact` (snapshots, cache, upgrades, admin replacement) | Storage operations (use `StorageEffects`) |
+| Release-domain types: release ids, provenance, signed manifests, deterministic build certificates | Coordination logic (use `aura-protocol`) |
+| Reducer: `MaintenanceFactReducer` producing `MaintenanceFactDelta` | Runtime composition (use `aura-agent`) |
+| GC planning: `TranscriptGcPlan` for DKG transcript cleanup | |
+| Operation categories: `MaintenanceOperation`, `OperationCategory` (A/B/C) | |
+| Pure domain logic; uses Layer 2 fact pattern (no aura-journal dependency) | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Inbound | `aura-core` | Domain types, effect traits, fact encoding |
 
 ## Key Modules
+
 - `facts.rs`: `MaintenanceFact` enum with all maintenance fact variants.
 - `gc.rs`: `plan_dkg_transcript_gc()` for transcript garbage collection.
 - `release.rs`: Pure OTA release identity, provenance, artifact, manifest, and certificate types.
 - `scope.rs`: Pure OTA activation and policy scope types, intentionally without any global-network scope.
 
 ## Invariants
+
 - Facts are immutable and merge via join-semilattice semantics.
 - Maintenance facts scoped to issuing authority's journal.
 - Reduction is deterministic: no clocks, randomness, or external state.
@@ -28,39 +38,8 @@ snapshots, cache invalidation, OTA upgrades, and admin replacement.
 - Category B: Medium-risk (snapshot operations).
 - Category C: High-risk (upgrades, admin replacement).
 
-## Ownership Model
-
-- `aura-maintenance` is primarily `Pure`.
-- It defines maintenance facts, release identity, and policy scope rather than
-  `ActorOwned` staging or activation services.
-- Any exclusive cutover or replacement authority should be modeled as
-  `MoveOwned` higher-layer contracts.
-- Capability-gated publication of maintenance facts must remain explicit.
-- `Observed` layers may display maintenance state but must not author lifecycle
-  truth.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| `facts.rs`, `reducer.rs` | `Pure` | Fact schemas and deterministic maintenance reduction. |
-| `release.rs`, `scope.rs`, `gc.rs` | `Pure`, `MoveOwned` | Release/scope/GC planning surfaces are value-level contracts; any exclusive cutover authority stays explicit for higher layers. |
-| Actor-owned runtime state | none | Staging, rollout, and activation services belong in higher layers. |
-| Observed-only surfaces | none | Observation of maintenance state belongs in runtime/interface layers. |
-
-### Capability-Gated Points
-
-- maintenance fact publication and high-risk operation admission consumed by
-  higher-layer guards and consensus paths
-
-### Verification Hooks
-
-- `cargo check -p aura-maintenance`
-- `cargo test -p aura-maintenance -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantMaintenanceReducerDeterminism
+
 Maintenance reducers must remain deterministic and high-risk operations must preserve consensus evidence requirements.
 
 Enforcement locus:
@@ -77,6 +56,31 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic reduction.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines agreement constraints for high-risk operations.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-maintenance` is primarily `Pure`. It defines maintenance facts, release
+identity, and policy scope rather than `ActorOwned` staging or activation
+services. Exclusive cutover or replacement authority is modeled as `MoveOwned`
+higher-layer contracts. `Observed` layers may display maintenance state but must
+not author lifecycle truth.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `facts.rs`, `reducer.rs` | `Pure` | Fact schemas and deterministic maintenance reduction. |
+| `release.rs`, `scope.rs`, `gc.rs` | `Pure`, `MoveOwned` | Release/scope/GC planning surfaces are value-level contracts; any exclusive cutover authority stays explicit for higher layers. |
+| Actor-owned runtime state | none | Staging, rollout, and activation services belong in higher layers. |
+| Observed-only surfaces | none | Observation of maintenance state belongs in runtime/interface layers. |
+
+### Capability-Gated Points
+
+- Maintenance fact publication and high-risk operation admission consumed by
+  higher-layer guards and consensus paths
+
 ## Testing
 
 ### Strategy
@@ -85,7 +89,7 @@ aura-maintenance defines upgrade, snapshot, and admin replacement facts.
 The critical concern is reducer determinism — if replicas disagree on
 maintenance state, some may run different software versions (split-brain).
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-maintenance --test determinism  # reducer determinism
@@ -102,8 +106,9 @@ cargo test -p aura-maintenance --lib               # inline unit tests
 | Cache invalidation additive accounting | `tests/determinism/` | covered |
 | Upgrade activations independently counted | `tests/determinism/` | covered |
 
-## Boundaries
-- No storage operations (use `StorageEffects`).
-- No coordination logic (use `aura-protocol`).
-- No runtime composition (use `aura-agent`).
-- Uses Layer 2 fact pattern (no aura-journal dependency).
+## References
+
+- [Maintenance & OTA](../../docs/116_maintenance.md)
+- [Maintenance Guide](../../docs/808_maintenance_guide.md)
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)

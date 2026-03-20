@@ -1,58 +1,40 @@
-# Aura Anti-Entropy (Layer 4) - Architecture and Invariants
+# Aura Anti-Entropy (Layer 4)
 
 ## Purpose
+
 Provide digest-based reconciliation and broadcast coordination for OpLog sync,
 with explicit guard chain enforcement on network operations.
 
-## Inputs
-- BloomDigest values for reconciliation.
-- GuardChainEffects + TransportEffects for effectful sync paths.
-- StorageEffects for persistent OpLog caching.
+## Scope
 
-## Outputs
-- Merged OpLog updates (pure set union semantics).
-- Guarded network operations (digest requests, op requests, announcements).
+| Belongs here | Does not belong here |
+|--------------|----------------------|
+| Pure reconciliation logic (`sync/pure.rs`) | Guardless network sends |
+| Guarded network operations (digest requests, op requests, announcements) | Long-lived background reconciliation ownership (higher-layer runtime) |
+| Persistent OpLog caching via shared commitment tree storage keys | Application-specific protocol logic |
+| Vector-clock metadata and causal consistency | Runtime composition or lifecycle management |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Down | `aura-core` | Effect trait definitions, domain types |
+| Down | `aura-journal` | Commitment tree storage keys |
+| In | BloomDigest values | Reconciliation input |
+| In | GuardChainEffects + TransportEffects | Effectful sync paths |
+| In | StorageEffects | Persistent OpLog caching |
+| Out | Merged OpLog updates | Pure set union semantics |
+| Out | Guarded network operations | Digest requests, op requests, announcements |
 
 ## Invariants
+
 - Reconciliation logic is pure (see `sync/pure.rs`).
 - Network-visible operations must be guard-chain approved.
 - Persistent storage uses shared commitment tree storage keys.
 - Vector-clock metadata remains causally consistent (`InvariantVectorClockConsistent`).
 
-## Ownership Model
-
-- `aura-anti-entropy` keeps reconciliation logic `Pure`.
-- Any exclusive sync-session or reconciliation ownership should remain
-  `MoveOwned` in higher-layer coordination surfaces.
-- Long-lived background reconciliation ownership belongs in explicit
-  `ActorOwned` runtime services, not hidden here.
-- Guarded sync publication must remain capability-aware and typed.
-- `Observed` tooling may inspect reconciliation outcomes but not define them.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| `pure.rs` and digest/reconciliation helpers | `Pure` | Deterministic anti-entropy decisions and digest math. |
-| sync-session and request/response orchestration | `MoveOwned` | Reconciliation/session authority remains explicit and value-oriented. |
-| `anti_entropy.rs`, `broadcast.rs`, `persistent.rs` | orchestration with typed errors | Effectful sync/broadcast orchestration stays explicit and does not become a hidden long-lived owner. |
-| long-lived background reconciliation | none local | Ongoing reconciliation ownership belongs in higher-layer runtime services. |
-| Observed-only surfaces | none | Observation of reconciliation results belongs downstream. |
-
-### Capability-Gated Points
-
-- guard-approved digest/op request publication
-- typed sync/broadcast outcomes consumed by higher-layer runtime and testing
-  lanes
-
-### Verification Hooks
-
-- `cargo check -p aura-anti-entropy`
-- `cargo test -p aura-anti-entropy -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantAntiEntropyReconciliationPurity
+
 Anti-entropy reconciliation remains pure and deterministic for identical inputs.
 
 Enforcement locus:
@@ -64,13 +46,14 @@ Failure mode:
 - Cross-layer assumptions drift and break composition safety.
 
 Verification hooks:
-- just test-crate aura-anti-entropy
+- `just test-crate aura-anti-entropy`
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic reduction.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines eventual convergence and vector-clock consistency.
 
 ### InvariantVectorClockConsistent
+
 Anti-entropy reconciliation must preserve causal ordering metadata so merged views never violate vector-clock partial order.
 
 Enforcement locus:
@@ -88,6 +71,34 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantVectorClockConsistent`.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-anti-entropy` keeps reconciliation logic `Pure`. Exclusive sync-session
+or reconciliation ownership remains `MoveOwned` in higher-layer coordination.
+Long-lived background reconciliation belongs in explicit `ActorOwned` runtime
+services, not hidden here.
+
+See [System Internals Guide](../../docs/807_system_internals_guide.md) §Core + Orchestrator Rule.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| `pure.rs` and digest/reconciliation helpers | `Pure` | Deterministic anti-entropy decisions and digest math. |
+| sync-session and request/response orchestration | `MoveOwned` | Reconciliation/session authority remains explicit and value-oriented. |
+| `anti_entropy.rs`, `broadcast.rs`, `persistent.rs` | orchestration with typed errors | Effectful sync/broadcast orchestration stays explicit and does not become a hidden long-lived owner. |
+| long-lived background reconciliation | none local | Ongoing reconciliation ownership belongs in higher-layer runtime services. |
+| Observed-only surfaces | none | Observation of reconciliation results belongs downstream. |
+
+### Capability-Gated Points
+
+- Guard-approved digest/op request publication.
+- Typed sync/broadcast outcomes consumed by higher-layer runtime and testing
+  lanes.
+
 ## Testing
 
 ### Strategy
@@ -97,7 +108,7 @@ Integration tests in `tests/reconciliation/` validate digest computation,
 serialization roundtrips, and config defaults. Inline tests cover pure
 reconciliation helpers and broadcast rate limiting.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-anti-entropy
@@ -115,12 +126,10 @@ cargo test -p aura-anti-entropy
 | Broadcast rate limiting broken | — | Covered (`src/broadcast.rs` inline) |
 | Back pressure threshold ignored | — | Covered (`src/broadcast.rs` inline) |
 | Sync error codes collide | — | Covered (`tests/reconciliation/`) |
-| Sync error codes collide | — | Covered (`tests/reconciliation/`) |
 
-## Boundaries
-- No guardless network sends.
-- Storage helpers are shared via `aura_journal::commitment_tree::storage`.
+## References
 
-## Core + Orchestrator Rule
-- Pure reconciliation lives in `sync/pure.rs`.
-- Effectful orchestration must accept explicit effect traits.
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Ownership Model](../../docs/122_ownership_model.md)
+- [System Internals Guide](../../docs/807_system_internals_guide.md)

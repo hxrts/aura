@@ -1,64 +1,42 @@
-# Aura Quint (Layer 8) - Architecture and Invariants
+# Aura Quint (Layer 8)
 
 ## Purpose
+
 Native Rust interface to the Quint formal verification language using the Quint
 Rust evaluator directly. Eliminates Node.js dependency while providing full
 verification capabilities.
 
-## Inputs
-- Quint specifications (`.qnt` files parsed to JSON IR).
-- Property specifications (`PropertySpec`: invariants, context, safety properties).
-- `quint_evaluator` crate (native evaluator for JSON IR simulation).
+## Scope
 
-## Outputs
-- `VerificationResult` for property verification outcomes.
-- `SimulationResult` from Quint simulation engine.
-- `PropertySuite` for organizing verification properties.
-- Parsed AST and IR for Aura protocol specifications.
-- `QuintRunner` and `QuintEvaluator` for verification workflows.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Bridge schema types and import/export transforms | Quint specification files (verification/quint/) |
+| Bridge cross-validation logic | Runtime simulation (aura-simulator) |
+| Verification runners and evaluators | Protocol implementations (feature crates) |
+| Property suite organization | Runtime VM execution or transport-level conformance replay |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | — | Quint specifications (`.qnt` files parsed to JSON IR) |
+| Incoming | — | Property specifications (`PropertySpec`: invariants, context, safety properties) |
+| Incoming | quint_evaluator | Native evaluator for JSON IR simulation |
+| Outgoing | — | `VerificationResult` for property verification outcomes |
+| Outgoing | — | `SimulationResult` from Quint simulation engine |
+| Outgoing | — | `PropertySuite` for organizing verification properties |
+| Outgoing | — | Parsed AST and IR for Aura protocol specifications |
+| Outgoing | — | `QuintRunner` and `QuintEvaluator` for verification workflows |
 
 ## Invariants
+
 - Hybrid architecture: TypeScript parser generates JSON IR; native Rust evaluator consumes it.
 - Integrates with aura-core error system (`AuraError`, `AuraResult`).
 - Used for protocol specification verification, not runtime.
 - Re-exports `quint_evaluator` types for interop.
 
-## Ownership Model
-
-- `aura-quint` is primarily `Pure` plus `Observed`.
-- It owns verification bridge schemas and analysis logic, not `ActorOwned`
-  runtime semantic ownership.
-- Any artifact handoff or verification-result transfer should remain explicit
-  and typed rather than hidden mutable state.
-- Verification outputs are downstream observations over modeled behavior; they
-  do not author runtime truth.
-- Capability semantics may be modeled and checked here, but runtime mutation
-  remains outside this crate.
-
-### Ownership Inventory
-
-| Path | Category | Authoritative owner | May mutate | Observe only |
-|------|----------|---------------------|------------|--------------|
-| Quint bridge schema/import/export logic | `Pure` | `aura-quint` bridge modules | bridge transforms only | verification callers |
-| Verification runners/evaluators/results | `Observed` | evaluation workflow entrypoints | local workflow state only | tests, reports, callers |
-| Verification artifact handoff and result transfer | `MoveOwned` | explicit caller/return path | typed transfer points only | diagnostics and reports |
-
-### Capability-Gated Points
-
-- capability semantics may be modeled in verification inputs/results, but
-  `aura-quint` must not expose runtime mutation shortcuts
-- bridge validation and artifact transfer should stay explicit and typed rather
-  than relying on hidden mutable ownership
-
-### Verification Hooks
-
-- `cargo check -p aura-quint`
-- `cargo test -p aura-quint -- --nocapture`
-- `just test-crate aura-quint`
-
-### Detailed Specifications
-
 ### InvariantQuintIrDeterminism
+
 Quint bridge import and export must produce stable intermediate representation for identical inputs.
 
 Enforcement locus:
@@ -75,6 +53,48 @@ Verification hooks:
 Contract alignment:
 - [Verification](../../docs/120_verification.md) defines model-checking expectations.
 - [Project Structure](../../docs/999_project_structure.md#invariant-traceability) defines canonical invariant naming.
+
+### InvariantBridgeOwnershipQuint
+
+Bridge schema and validation ownership stays centralized in `aura-quint`.
+
+Enforcement locus:
+- `src/bridge_format.rs` defines versioned interchange types.
+- `src/bridge_export.rs`, `src/bridge_import.rs`, and `src/bridge_validate.rs` implement translation and discrepancy checks.
+
+Failure mode:
+- Duplicate bridge transforms appear in runtime crates and drift from schema.
+- Cross-validation results differ across lanes for the same bundle.
+
+Verification hooks:
+- just test-crate aura-quint
+
+Contract alignment:
+- [Formal Verification Reference](../../docs/120_verification.md) defines cross-validation boundaries.
+- [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks bridge module inventory.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-quint` is primarily `Pure` plus `Observed`. It owns verification bridge
+schemas and analysis logic, not runtime semantic ownership.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| Quint bridge schema/import/export logic | `Pure` | Bridge transforms are deterministic and owned by `aura-quint` bridge modules. |
+| Verification runners/evaluators/results | `Observed` | Evaluation workflow entrypoints own local workflow state; tests/reports/callers observe. |
+| Verification artifact handoff and result transfer | `MoveOwned` | Explicit caller/return path owns typed transfer points; diagnostics and reports observe. |
+
+### Capability-Gated Points
+
+- capability semantics may be modeled in verification inputs/results, but
+  `aura-quint` must not expose runtime mutation shortcuts
+- bridge validation and artifact transfer should stay explicit and typed rather
+  than relying on hidden mutable ownership
+
 ## Testing
 
 ### Strategy
@@ -84,7 +104,7 @@ The single integration test (`tests/bridge_pipeline.rs`) verifies the full
 pipeline. Inline tests verify each bridge stage independently: import,
 export, validation, and format roundtrip.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-quint
@@ -101,30 +121,8 @@ cargo test -p aura-quint
 | Cross-validation false positive | BridgeOwnershipQuint | `src/bridge_validate.rs` `cross_validation_passes_when_outcomes_match` | Covered |
 | Full pipeline broken | — | `tests/bridge_pipeline.rs` | Covered |
 
-## Boundaries
-- Quint specifications live in verification/quint/.
-- Runtime simulation lives in aura-simulator.
-- Protocol implementations live in feature crates.
+## References
 
-## Bridge Ownership
-- `aura-quint` owns bridge schema types and import/export transforms.
-- `aura-quint` owns bridge cross-validation logic between model checks and certificates.
-- `aura-quint` must not own runtime VM execution or transport-level conformance replay.
-
-### InvariantBridgeOwnershipQuint
-Bridge schema and validation ownership stays centralized in `aura-quint`.
-
-Enforcement locus:
-- `src/bridge_format.rs` defines versioned interchange types.
-- `src/bridge_export.rs`, `src/bridge_import.rs`, and `src/bridge_validate.rs` implement translation and discrepancy checks.
-
-Failure mode:
-- Duplicate bridge transforms appear in runtime crates and drift from schema.
-- Cross-validation results differ across lanes for the same bundle.
-
-Verification hooks:
-- `just test-crate aura-quint`
-
-Contract alignment:
-- [Formal Verification Reference](../../docs/120_verification.md) defines cross-validation boundaries.
-- [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks bridge module inventory.
+- [Verification](../../docs/120_verification.md)
+- [Project Structure](../../docs/999_project_structure.md)
+- [Verification Coverage Report](../../docs/998_verification_coverage.md)

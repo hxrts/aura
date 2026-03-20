@@ -1,62 +1,43 @@
-# Aura Social (Layer 5) - Architecture and Invariants
+# Aura Social (Layer 5)
 
 ## Purpose
+
 Social topology and moderation layer providing home management, neighborhood
 discovery, relay selection, and content moderation for the social graph.
 
-## Inputs
-- aura-core (effect traits, identifiers).
-- aura-journal (fact infrastructure, social facts from journal).
+## Scope
 
-## Outputs
-- `SocialFact`, `SocialFactReducer` for social state facts.
-- `Home`, `Neighborhood` for social graph structure.
-- `SocialTopology`, `DiscoveryLayer` for graph traversal.
-- `TraversalService` for path finding.
-- `ModerationPolicy`, `ModerationAction` for content moderation.
-- `RelayCandidateBuilder`, `ReachabilityChecker` for relay selection.
-- `HomeAvailability`, `NeighborhoodAvailability` for availability tracking.
-- `StorageService` for social data persistence.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Social facts, reducers, and topology derivation | Chat message handling (aura-chat) |
+| Home and neighborhood management | Transport coordination (aura-protocol) |
+| Moderation policy and actions | Runtime social state (aura-agent) |
+| Relay candidate selection and reachability | |
+| Access level computation and role enforcement | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | aura-core | Effect traits, identifiers |
+| Incoming | aura-journal | Fact infrastructure, social facts from journal |
+| Outgoing | — | `SocialFact`, `SocialFactReducer` for social state facts |
+| Outgoing | — | `Home`, `Neighborhood` for social graph structure |
+| Outgoing | — | `SocialTopology`, `DiscoveryLayer` for graph traversal |
+| Outgoing | — | `TraversalService` for path finding |
+| Outgoing | — | `ModerationPolicy`, `ModerationAction` for content moderation |
+| Outgoing | — | `RelayCandidateBuilder`, `ReachabilityChecker` for relay selection |
+| Outgoing | — | `HomeAvailability`, `NeighborhoodAvailability` for availability tracking |
+| Outgoing | — | `StorageService` for social data persistence |
 
 ## Invariants
+
 - Facts must be reduced under their matching `ContextId`.
 - Membership and moderatorship changes should follow approved workflows.
 - Home relationships define trust boundaries.
 
-## Ownership Model
-
-- `aura-social` is primarily `Pure` social-topology and view/reducer logic.
-- Any exclusive moderation or topology transition semantics should remain
-  explicit and `MoveOwned`.
-- Long-lived topology/discovery ownership belongs in explicit `ActorOwned`
-  higher-layer coordinators rather than hidden mutable crate state.
-- Capability-gated publication is required for parity-critical social facts.
-- `Observed` social views are downstream and must not author semantic truth.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| facts/reducers/topology/view logic | `Pure` | Deterministic social fact reduction and topology derivation. |
-| moderation and topology-transition semantics | `MoveOwned` | Exclusive moderation or trust-boundary transitions remain explicit. |
-| long-lived topology/discovery ownership | none local | Runtime discovery/topology coordination belongs in higher-layer services. |
-| capability-gated publication | typed social workflow boundary | Social fact publication remains explicit and auditable. |
-| Observed-only surfaces | topology/view consumers only | UI/runtime views stay downstream of authoritative social state. |
-
-### Capability-Gated Points
-
-- parity-critical social fact publication
-- moderation and membership transition flows consumed by higher-layer runtime
-  services
-
-### Verification Hooks
-
-- `cargo check -p aura-social`
-- `cargo test -p aura-social -- --nocapture`
-
-### Detailed Specifications
-
 ### InvariantSocialBoundaryScopedMembership
+
 Social topology membership and moderatorship updates remain scoped to explicit trust boundaries.
 
 Enforcement locus:
@@ -73,6 +54,29 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines boundary isolation semantics.
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines relationship and neighborhood boundaries.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-social` is primarily `Pure` social-topology and view/reducer logic.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| facts/reducers/topology/view logic | `Pure` | Deterministic social fact reduction and topology derivation. |
+| moderation and topology-transition semantics | `MoveOwned` | Exclusive moderation or trust-boundary transitions remain explicit. |
+| long-lived topology/discovery ownership | none local | Runtime discovery/topology coordination belongs in higher-layer services. |
+| capability-gated publication | typed social workflow boundary | Social fact publication remains explicit and auditable. |
+| Observed-only surfaces | `Observed` | UI/runtime views stay downstream of authoritative social state. |
+
+### Capability-Gated Points
+
+- parity-critical social fact publication
+- moderation and membership transition flows consumed by higher-layer runtime
+  services
+
 ## Testing
 
 ### Strategy
@@ -83,7 +87,7 @@ role enforcement, and simulation scenarios. General integration tests stay
 top-level. Inline tests verify individual components (home, neighborhood,
 topology, access, storage).
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-social
@@ -106,10 +110,13 @@ cargo test -p aura-social
 | Partition causes topology divergence | `tests/topology/simulation_tests.rs` (23 tests) | Covered |
 | Access level properties violated | `tests/topology/property_access_levels.rs` (4 proptests) | Covered |
 
-## Boundaries
-- Chat message handling lives in aura-chat.
-- Transport coordination lives in aura-protocol.
-- Runtime social state lives in aura-agent.
-
 ## Operation Categories
+
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+
+## References
+
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
+- [Social Architecture](../../docs/115_social_architecture.md)
+- [Operation Categories](../../docs/109_operation_categories.md)

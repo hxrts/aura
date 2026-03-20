@@ -1,73 +1,40 @@
-# Aura Sync (Layer 5) - Architecture and Invariants
+# Aura Sync (Layer 5)
 
 ## Purpose
+
 Synchronization protocol providing fact exchange, merkle verification, anti-entropy
 coordination, and writer fence semantics for distributed journal consistency.
 
-## Inputs
-- aura-core (effect traits, identifiers, session types).
-- aura-journal (fact infrastructure, commitment trees).
-- Lower-layer protocols for transport coordination.
+## Scope
 
-## Outputs
-- `SyncCore` types for synchronization state.
-- `SyncProtocol`, `FactSyncProtocol`, `AuthorityJournalSync` for sync flows.
-- `MerkleVerifier`, `MerkleComparison`, `VerificationResult` for integrity checks.
-- `WriterFence`, `WriterFenceGuard` for write ordering.
-- `MaintenanceService` for background sync operations.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| Sync core types and protocol definitions | Fact storage (aura-journal) |
+| Merkle verification and integrity checks | Transport effects (aura-effects) |
+| Writer fence semantics | Runtime sync manager (aura-agent) |
+| Maintenance service for background sync | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Incoming | aura-core | Effect traits, identifiers, session types |
+| Incoming | aura-journal | Fact infrastructure, commitment trees |
+| Incoming | lower-layer protocols | Transport coordination |
+| Outgoing | — | `SyncCore` types for synchronization state |
+| Outgoing | — | `SyncProtocol`, `FactSyncProtocol`, `AuthorityJournalSync` for sync flows |
+| Outgoing | — | `MerkleVerifier`, `MerkleComparison`, `VerificationResult` for integrity checks |
+| Outgoing | — | `WriterFence`, `WriterFenceGuard` for write ordering |
+| Outgoing | — | `MaintenanceService` for background sync operations |
 
 ## Invariants
+
 - Sync operations must not bypass guard chain checks in runtime.
 - Protocols should operate on explicit inputs (snapshot, budget, timestamp).
 - Merkle verification ensures fact integrity across peers.
 
-## Ownership Model
-
-- `aura-sync` combines `Pure` verification/reconciliation logic with explicit
-  `MoveOwned` sync-session authority where exclusivity matters.
-- Long-lived background sync ownership belongs in explicit `ActorOwned` runtime
-  managers, not hidden in sync helpers.
-- Sync mutation and publication must remain capability-gated and typed.
-- Retry and completion semantics should terminate explicitly rather than through
-  ambiguous background state.
-- Terminal lifecycle state in protocol coordinators must carry typed failure
-  causes rather than stringly `Failed(...)` payloads; epoch rotation is the
-  current reference pattern.
-- `Observed` consumers may inspect sync state but not author it.
-
-### Ownership Inventory
-
-- `Pure`
-  - merkle verification, reconciliation, writer-fence checks, protocol facts,
-    and reducers in `core/` and `protocols/`
-- `MoveOwned`
-  - sync-session identifiers, fence guards, and proposal/ceremony transitions
-    that invalidate stale owners on handoff
-- `ActorOwned`
-  - long-lived runtime orchestration belongs in Layer 6; within this crate,
-    `SyncService` and `MaintenanceService` keep service-local mutable state
-    behind a single service-owned lock boundary rather than shared `Arc` state
-- `Observed`
-  - health, metrics, verification outputs, and status inspection surfaces
-
-### Capability-Gated Points
-
-- typed terminal protocol/service failure is required at async boundaries
-- readiness and publication are expected to flow through owning runtime/service
-  coordinators rather than ambient callers
-- timeout and retry behavior must use the shared timeout/retry model rather than
-  crate-local wall-clock ownership
-
-### Verification Hooks
-
-- `cargo check -p aura-sync`
-- `just ci-timeout-policy`
-- `just ci-timeout-backoff`
-- targeted service/protocol tests in `cargo test -p aura-sync ...`
-
-### Detailed Specifications
-
 ### InvariantSyncMerkleVerification
+
 Synchronization must reject unverifiable merkle evidence and preserve guard-aware transport constraints.
 
 Enforcement locus:
@@ -84,6 +51,31 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic replication semantics.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines anti-entropy and integrity guarantees.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-sync` combines `Pure` verification/reconciliation logic with explicit
+`MoveOwned` sync-session authority where exclusivity matters.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| merkle verification, reconciliation, writer-fence checks, protocol facts, and reducers | `Pure` | Deterministic verification and reconciliation logic. |
+| sync-session identifiers, fence guards, and proposal/ceremony transitions | `MoveOwned` | Invalidate stale owners on handoff. |
+| `SyncService` and `MaintenanceService` local mutable state | `ActorOwned` | Service-local mutable state behind a single service-owned lock boundary. |
+| health, metrics, verification outputs, and status inspection | `Observed` | Downstream inspection surfaces. |
+
+### Capability-Gated Points
+
+- typed terminal protocol/service failure is required at async boundaries
+- readiness and publication are expected to flow through owning runtime/service
+  coordinators rather than ambient callers
+- timeout and retry behavior must use the shared timeout/retry model rather than
+  crate-local wall-clock ownership
+
 ## Testing
 
 ### Strategy
@@ -93,7 +85,7 @@ Tests are organized into three groups: `tests/integrity/` for data integrity
 and digest stability, `tests/protocol/` for sync protocol integration, and
 `tests/integration/` for multi-device and network partition scenarios.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-sync
@@ -114,10 +106,12 @@ cargo test -p aura-sync
 | Multi-device coordination fails | `tests/integration/multi_device_scenarios.rs` (5 tests) | Covered |
 | Anti-entropy under packet loss | `tests/integration/anti_entropy.rs` (8 tests) | Covered |
 
-## Boundaries
-- Fact storage lives in aura-journal.
-- Transport effects live in aura-effects.
-- Runtime sync manager lives in aura-agent.
-
 ## Operation Categories
+
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+
+## References
+
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+- [Operation Categories](../../docs/109_operation_categories.md)

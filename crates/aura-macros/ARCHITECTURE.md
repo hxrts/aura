@@ -1,74 +1,41 @@
-# Aura Macros (Layer 2) - Architecture and Invariants
+# Aura Macros (Layer 2)
 
 ## Purpose
+
 Compile-time DSL parser for choreographies with Aura-specific annotations. Generates
-type-safe Rust code for distributed protocols.
+type-safe Rust code for distributed protocols. Also hosts Rust-native syntax lints
+via `src/bin/arch_lints.rs`.
 
-## Inputs
-- Choreography protocol specifications (token streams).
-- Domain fact enum definitions.
-- Effect trait declarations and handler specs.
-- Aura-specific annotations (`guard_capability`, `flow_cost`, `journal_facts`).
+## Scope
 
-## Outputs
-- `choreography!` macro: Full Telltale feature inheritance with Aura extensions.
-- `DomainFact` derive macro: Canonical encoding with schema versioning.
-- `aura_effect_handlers` macro: Mock/real handler variant boilerplate.
-- `aura_handler_adapters` macro: AuraHandler trait adapters.
-- `aura_test` attribute macro: Async test setup with tracing.
-- `src/bin/arch_lints.rs`: repo-local Rust-native syntax lints used by
-  `just lint-arch-syntax`.
+| Belongs here | Does not belong here |
+|-------------|---------------------|
+| `choreography!` macro: Full Telltale feature inheritance with Aura extensions | Runtime code or effect implementations |
+| `DomainFact` derive macro: Canonical encoding with schema versioning | Multi-party coordination (only generates code) |
+| `aura_effect_handlers` macro: Mock/real handler variant boilerplate | |
+| `aura_handler_adapters` macro: AuraHandler trait adapters | |
+| `aura_test` attribute macro: Async test setup with tracing | |
+| `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax` | |
+| `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints | |
+
+## Dependencies
+
+| Direction | Crate | What |
+|-----------|-------|------|
+| Inbound | `aura-core` | Domain types (compile-time only) |
+| Inbound | Choreography protocol specifications | Token streams |
+| Inbound | Domain fact enum definitions | Derive macro input |
+| Outbound | Generated choreography/fact/handler surfaces | Consumed by downstream crates |
 
 ## Invariants
+
 - Depends only on aura-core (pure compile-time code generation).
 - Is a proc-macro crate (no runtime code).
 - All work happens at compile time.
 - Uses empty extension registry (extensions handled by aura-macros itself).
 
-## Ownership Model
-
-- `aura-macros` is primarily `Pure`.
-- It owns compile-time translation, not `ActorOwned` runtime lifecycle.
-- Ownership transfer and capability requirements should appear in generated
-  typed surfaces rather than being inferred from ad hoc runtime conventions.
-- Macro output may expose `MoveOwned` or capability-gated contracts, but the
-  macro crate does not own those lifecycles at runtime.
-- `Observed` tooling may inspect expansions, not mutate semantic truth.
-
-### Ownership Inventory
-
-| Surface | Category | Notes |
-|---------|----------|-------|
-| proc-macro parsers and expanders in `src/` | `Pure` | Compile-time parsing and code generation only. |
-| generated choreography/fact/handler surfaces | `Pure` producer | Macro output may encode `MoveOwned` and capability-gated contracts, but the macro crate does not own them at runtime. |
-| Actor-owned runtime state | none | Proc-macro crates must not own runtime lifecycle or background tasks. |
-| Observed-only surfaces | none | Macro inspection tooling lives outside the crate. |
-
-### Capability-Gated Points
-
-- generated typed capability surfaces and ownership contracts consumed by
-  downstream crates
-
-### Verification Hooks
-
-- `cargo check -p aura-macros`
-- `cargo test -p aura-macros -- --nocapture`
-
-### Enforcement Split
-
-- `aura-macros` is part of the compile-time enforcement path for boundary-shape
-  rules that can be expressed through generated surfaces or Rust-native linting.
-- `src/bin/arch_lints.rs` owns the Rust-native lint path for grep-heavy syntax
-  rules that moved out of `scripts/check/arch.sh` in the architecture upgrade.
-- `scripts/check/arch.sh` should not remain the primary enforcement path for a
-  rule when macro expansion, visibility, or linting can reject the pattern
-  earlier and more precisely.
-- Repo-wide topology, docs/governance, and semantic integration checks still
-  belong to `just check-arch`.
-
-### Detailed Specifications
-
 ### InvariantChoreographyAnnotationProjection
+
 Choreography annotations must project deterministically into runtime metadata.
 
 Enforcement locus:
@@ -86,6 +53,30 @@ Verification hooks:
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.
 - [MPST and Choreography](../../docs/110_mpst_and_choreography.md) defines projection expectations.
+
+## Ownership Model
+
+> Taxonomy: [Ownership Model](../../docs/122_ownership_model.md)
+
+`aura-macros` is primarily `Pure`. It owns compile-time translation, not
+`ActorOwned` runtime lifecycle. Macro output may expose `MoveOwned` or
+capability-gated contracts, but the macro crate does not own those lifecycles at
+runtime. `Observed` tooling may inspect expansions, not mutate semantic truth.
+
+### Ownership Inventory
+
+| Surface | Category | Notes |
+|---------|----------|-------|
+| proc-macro parsers and expanders in `src/` | `Pure` | Compile-time parsing and code generation only. |
+| generated choreography/fact/handler surfaces | `Pure` producer | Macro output may encode `MoveOwned` and capability-gated contracts, but the macro crate does not own them at runtime. |
+| Actor-owned runtime state | none | Proc-macro crates must not own runtime lifecycle or background tasks. |
+| Observed-only surfaces | none | Macro inspection tooling lives outside the crate. |
+
+### Capability-Gated Points
+
+- Generated typed capability surfaces and ownership contracts consumed by
+  downstream crates
+
 ## Testing
 
 ### Strategy
@@ -95,7 +86,7 @@ critical concern is that valid inputs compile and invalid inputs produce
 clear errors. If a valid choreography is rejected or an invalid one is
 silently accepted, the DSL contract is broken.
 
-### Running tests
+### Commands
 
 ```
 cargo test -p aura-macros --test compile_fail  # boundary tests
@@ -131,7 +122,8 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | capability_boundary missing category | `boundaries/capability_boundary_missing_category.rs` | covered (compile_fail) |
 | ownership_lifecycle invalid variant | `boundaries/ownership_lifecycle_invalid_variant.rs` | covered (compile_fail) |
 
-## Boundaries
-- No runtime code or effect implementations.
-- Generated code uses types from aura-mpst for choreographies.
-- No multi-party coordination (only generates code).
+## References
+
+- [MPST and Choreography](../../docs/110_mpst_and_choreography.md)
+- [Theoretical Model](../../docs/002_theoretical_model.md)
+- [Ownership Model](../../docs/122_ownership_model.md)

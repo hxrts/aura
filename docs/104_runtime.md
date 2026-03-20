@@ -538,6 +538,58 @@ Use this checklist for any change to the Aura and Telltale boundary:
 - Confirm that threaded or envelope-bounded execution is selected only through policy and admission.
 - Confirm that boundary changes add or update replay, conformance, and fault-path tests.
 
+## Concurrency Profiles and Envelope Admission
+
+`aura-agent` recognizes three runtime concurrency profiles for choreography work:
+
+- **Canonical**: Exact single-owner reference path. Telltale canonical execution at concurrency `n = 1` is the reference behavior.
+- **EnvelopeAdmitted**: Disjoint or admitted work preserving safety-visible meaning. Higher concurrency is a refinement only when it stays inside the admitted envelope relation.
+- **Fallback**: Immediate degradation to canonical execution when envelope admission fails.
+
+Correctness never depends on uncontrolled host scheduling. If the runtime cannot show that a path is envelope-safe, it serializes execution.
+
+### Envelope Admission Contract
+
+Operational envelope admission is a runtime gate, not a comment-level convention. The runtime must record and enforce:
+
+- which determinism / concurrency profile was requested
+- which evidence or certificate admitted the profile
+- whether execution stayed canonical or entered an admitted refinement
+- why fallback occurred when admission failed
+
+Safety-visible observations must remain equivalent to the canonical reference. Every admitted step must have a declared witness path. Profile-side obligations must be checked before execution widens.
+
+## Link and Delegate Boundaries
+
+### Link Boundary
+
+`link` is a static composition boundary. Linked bundles define ownership boundaries as well as composition boundaries. Linked protocols remain session-disjoint unless composition explicitly shares state. Cross-boundary effect routing is explicit. Ad hoc shared mutable state across linked boundaries is forbidden. `link` must preserve Telltale coherence and harmony obligations at runtime, not just compile-time compatibility.
+
+A boundary object must carry enough information to answer:
+
+- which bundle/fragment boundary this effect belongs to
+- which owner capability scope is valid at that boundary
+- whether a route crosses a boundary that requires explicit reconfiguration handling
+
+Wrong-boundary routing is a runtime error and must be rejected before the VM observes the step.
+
+### Delegate Boundary
+
+`delegate` is an ownership-transfer boundary. Endpoint/session ownership transfer is atomic. Capability/effect context transfers with the endpoint. Stale-owner access after delegation is forbidden. Ambiguous local ownership is rejected before the VM observes the transfer. Fragment ownership and session footprint state move with the transfer rather than lagging behind it.
+
+Transfer and attenuation are separate concepts:
+
+- transfer changes the authoritative owner
+- attenuation narrows the capability scope that moves with the new owner
+
+If the runtime cannot state which one is happening and under which protocol rule, it must reject the delegation path.
+
+A successful delegation must move one owned bundle: session owner record, owner capability, VM fragment ownership, runtime footprint / reconfiguration state, and delegation audit witness. If these do not move together, the transfer is incomplete and must be treated as a runtime error.
+
+### Theorem-pack / Invariant Alignment
+
+The runtime must preserve coherence-sensitive session and edge state, harmony-sensitive reconfiguration steps, adequacy-relevant observable traces, determinism-profile obligations, and replay / communication identity stability across async ingress. Advanced runtime modes should be capability- and evidence-gated. Missing invariant evidence must cause rejection or fallback, never silent widening.
+
 ## Fact Registry
 
 The `FactRegistry` provides domain-specific fact type registration and reduction for reactive scheduling. It lives in `aura-journal` and is integrated via `AuraEffectSystem::fact_registry()`.

@@ -92,7 +92,7 @@ for crate_dir in "${crate_dirs[@]}"; do
 
   case "$crate_name" in
     aura-agent|aura-app|aura-terminal|aura-web|aura-harness|aura-ui|aura-simulator|aura-testkit)
-      if ! rg -q '^## Ownership Inventory|^### Ownership Inventory' "$arch_file"; then
+      if ! rg -q '^## Ownership Inventory|^### Ownership Inventory|^### Inventory' "$arch_file"; then
         violations+=("$arch_file: high-risk crate missing Ownership Inventory section")
       fi
       ;;
