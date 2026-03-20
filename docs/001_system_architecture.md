@@ -268,17 +268,17 @@ Actor-owned state is managed through a hierarchical task supervisor. Each servic
 
 Session and endpoint transfer uses move-owned capabilities with monotone generation counters that reject stale access. Delegation atomically transfers the owner record and capability. This separation keeps supervision (who manages the lifecycle) distinct from session ownership (who may act on the state). See [Runtime](104_runtime.md) for the structured concurrency model.
 
-### 7.3 Workflow ownership boundary
-
-User-facing operations such as sending a message, accepting an invitation, or rotating a key are executed as workflows that progress through typed lifecycle phases to a terminal outcome. Each workflow has one authoritative lifecycle owner. Frontend and harness layers may submit commands and observe results, but they do not publish terminal truth. Ownership transfers through explicit handoff before the workflow begins awaited work. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
-
 ### 7.3 Reactive state
 
 The system uses reactive signals for state propagation. Journal fact changes flow through reducers to signals. Signals expose derived state to UI observers. The flow is unidirectional: facts are the source of truth, views are derived, and subscribers receive the latest state when they poll.
 
 Subscription to an unregistered signal is a typed failure. Lagging subscribers may miss intermediate updates and resume from a newer snapshot. Reactive delivery is a transport for authoritative snapshots, not an alternate owner of semantic truth.
 
-### 7.4 Error handling
+### 7.4 Workflow ownership
+
+User-facing operations such as sending a message, accepting an invitation, or rotating a key are executed as workflows that progress through typed lifecycle phases to a terminal outcome. Each workflow has one authoritative lifecycle owner. Frontend and harness layers may submit commands and observe results, but they do not publish terminal truth. Ownership transfers through explicit handoff before the workflow begins awaited work. See [Ownership Model](122_ownership_model.md) for the semantic owner protocol.
+
+### 7.5 Error handling
 
 Errors are unified through `AuraError` and classified by recoverability: transient errors may succeed on retry, permanent errors indicate invalid operations, and system errors indicate infrastructure failures. Effects propagate errors through `Result` types. The journal provides durability for recovery. Uncommitted facts are replayed after restart. Committed facts are immutable.
 
