@@ -555,7 +555,8 @@ impl JournalEffects for CompositeTestHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkCoreEffects for CompositeTestHandler {
     async fn send_to_peer(
         &self,
@@ -588,7 +589,8 @@ impl NetworkCoreEffects for CompositeTestHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for CompositeTestHandler {
     async fn receive_from(
         &self,

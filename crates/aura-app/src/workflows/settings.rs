@@ -22,17 +22,16 @@ use aura_core::AuraError;
 use std::sync::Arc;
 
 // OWNERSHIP: authoritative-source
-// OWNERSHIP: first-run-default
 async fn refresh_settings_signal_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let (settings, devices, authorities, authority_id) = {
         let core = app_core.read().await;
-        // OWNERSHIP: first-run-default
         let authority_id = core
             .runtime()
-            .map(|r| r.authority_id().to_string())
-            .unwrap_or_default();
+            .ok_or_else(|| AuraError::not_found("settings runtime missing"))?
+            .authority_id()
+            .to_string();
         match core.settings_snapshot().await {
             Ok(Some(snapshot)) => (snapshot.0, snapshot.1, snapshot.2, authority_id),
             Ok(None) => return Ok(()),
@@ -63,12 +62,19 @@ async fn refresh_settings_signal_from_runtime(
     state.authority_nickname = settings.nickname_suggestion;
     state.authorities = authorities
         .into_iter()
-        .map(|authority| AuthorityInfo {
-            id: authority.id,
-            nickname_suggestion: authority.nickname_suggestion.unwrap_or_default(),
-            is_current: authority.is_current,
+        .map(|authority| -> Result<AuthorityInfo, AuraError> {
+            Ok(AuthorityInfo {
+                id: authority.id,
+                nickname_suggestion: authority.nickname_suggestion.ok_or_else(|| {
+                    AuraError::not_found(format!(
+                        "authority {} has no nickname suggestion",
+                        authority.id
+                    ))
+                })?,
+                is_current: authority.is_current,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, AuraError>>()?;
 
     emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await
 }

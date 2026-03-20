@@ -82,7 +82,7 @@ async fn resolve_scope_by_channel_id(
     let home_id = if let Some(channel_id) = channel_hint {
         channel_id
     } else {
-        crate::workflows::context::current_home_id_or_fallback(app_core).await?
+        crate::workflows::context::current_home_id(app_core).await?
     };
 
     let home_state = homes

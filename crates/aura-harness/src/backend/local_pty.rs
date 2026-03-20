@@ -184,6 +184,32 @@ fn materialized_channel_binding(
     }
 }
 
+fn selected_new_channel_binding(
+    snapshot: &UiSnapshot,
+    previous_channel_ids: &BTreeSet<String>,
+) -> Option<ChannelBinding> {
+    let selected_channel_id = snapshot
+        .selections
+        .iter()
+        .find(|selection| selection.list == ListId::Channels)
+        .map(|selection| selection.item_id.clone())?;
+    if previous_channel_ids.contains(&selected_channel_id) {
+        return None;
+    }
+    let channel_exists = snapshot
+        .lists
+        .iter()
+        .find(|list| list.id == ListId::Channels)
+        .is_some_and(|list| list.items.iter().any(|item| item.id == selected_channel_id));
+    if !channel_exists {
+        return None;
+    }
+    Some(ChannelBinding {
+        channel_id: selected_channel_id,
+        context_id: None,
+    })
+}
+
 struct RunningSession {
     child: Mutex<Box<dyn Child + Send>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -1638,6 +1664,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
             if let Some(binding) = authoritative_channel_binding(&snapshot, channel_name) {
                 return Ok(SubmittedAction::with_ui_operation(binding, handle));
             }
+            if let Some(binding) = selected_new_channel_binding(&snapshot, &previous_channel_ids) {
+                return Ok(SubmittedAction::with_ui_operation(binding, handle));
+            }
             if let Some(binding) = materialized_channel_binding(&snapshot, &previous_channel_ids) {
                 return Ok(SubmittedAction::with_ui_operation(binding, handle));
             }
@@ -2072,6 +2101,29 @@ mod tests {
         ]);
         let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
         assert!(materialized_channel_binding(&snapshot, &previous).is_none());
+    }
+
+    #[test]
+    fn selected_new_channel_binding_uses_selected_new_channel_id() {
+        let snapshot = snapshot_with_channels(&[
+            ("channel:note-to-self", false),
+            ("channel:shared-parity-lab", true),
+        ]);
+        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
+        let binding = selected_new_channel_binding(&snapshot, &previous)
+            .unwrap_or_else(|| panic!("expected selected new channel binding"));
+        assert_eq!(binding.channel_id, "channel:shared-parity-lab");
+        assert_eq!(binding.context_id, None);
+    }
+
+    #[test]
+    fn selected_new_channel_binding_rejects_preexisting_selection() {
+        let snapshot = snapshot_with_channels(&[
+            ("channel:note-to-self", true),
+            ("channel:shared-parity-lab", false),
+        ]);
+        let previous = BTreeSet::from(["channel:note-to-self".to_string()]);
+        assert!(selected_new_channel_binding(&snapshot, &previous).is_none());
     }
 
     #[test]

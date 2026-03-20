@@ -315,9 +315,8 @@ fn channel_invitation_bootstrap_timeout(
     match deadline {
         Some(deadline) => {
             if deadline.timeout_ms() == 0 {
-                let context_detail = context_id
-                    .map(|context| format!(" in context {context}"))
-                    .unwrap_or_default();
+                let context_detail =
+                    context_id.map_or_else(String::new, |context| format!(" in context {context}"));
                 return Err(ChannelInvitationBootstrapError::BootstrapTransport {
                     channel_id,
                     detail: format!("create_channel_invitation deadline exhausted before {stage}{context_detail}"),

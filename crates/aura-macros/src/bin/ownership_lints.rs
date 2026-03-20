@@ -1266,7 +1266,6 @@ fn is_view_read_call_name(call_name: &str) -> bool {
             | "recovery_snapshot"
             | "fallback_home"
             | "homes_state_signal_fallback"
-            | "current_home_context_or_fallback"
     )
 }
 
@@ -1282,10 +1281,7 @@ fn is_view_write_call_name(call_name: &str) -> bool {
 }
 
 fn is_fallback_heuristic_call_name(call_name: &str) -> bool {
-    matches!(
-        call_name,
-        "fallback_home" | "homes_state_signal_fallback" | "current_home_context_or_fallback"
-    )
+    matches!(call_name, "fallback_home" | "homes_state_signal_fallback")
 }
 
 fn is_authority_downgrade_call_name(call_name: &str) -> bool {
@@ -1691,7 +1687,7 @@ fn scan_harness_move_ownership_boundary(file: &Path, source: &str) -> Vec<String
 }
 
 fn scan_harness_readiness_ownership(file: &Path, source: &str) -> Vec<String> {
-    source_line_violations(
+    let mut violations = source_line_violations(
         file,
         source,
         &[
@@ -1704,7 +1700,9 @@ fn scan_harness_readiness_ownership(file: &Path, source: &str) -> Vec<String> {
             "replace_authoritative_semantic_facts_of_kind(",
         ],
         &[],
-    )
+    );
+    violations.extend(scan_browser_shell_mutation_snapshot_boundary(file, source));
+    violations
 }
 
 fn scan_harness_recovery_ownership(file: &Path, source: &str) -> Vec<String> {
@@ -1721,6 +1719,51 @@ fn scan_harness_recovery_ownership(file: &Path, source: &str) -> Vec<String> {
         ],
         &[],
     )
+}
+
+fn scan_browser_shell_mutation_snapshot_boundary(file: &Path, source: &str) -> Vec<String> {
+    if !file_matches_suffix(
+        file,
+        &[
+            "crates/aura-web/src/harness_bridge.rs",
+            "crates/aura-web/src/main.rs",
+        ],
+    ) {
+        return Vec::new();
+    }
+
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut violations = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        if !trimmed.contains(".set_screen(") && !trimmed.contains(".set_settings_section(") {
+            continue;
+        }
+
+        let start = index.saturating_sub(4);
+        let end = usize::min(index + 5, lines.len());
+        let window = &lines[start..end];
+        let has_snapshot_publication = window.iter().any(|candidate| {
+            candidate.contains("publish_current_ui_snapshot(")
+                || candidate.contains(".set_ui_snapshot(")
+        });
+        let goes_through_owned_mutation_helper = window
+            .iter()
+            .any(|candidate| candidate.contains("schedule_browser_ui_mutation("));
+
+        if !has_snapshot_publication && !goes_through_owned_mutation_helper {
+            violations.push(format!(
+                "{}:{}:1: browser shell mutation must publish the post-mutation UiSnapshot or go through schedule_browser_ui_mutation",
+                file.display(),
+                index + 1
+            ));
+        }
+    }
+
+    violations
 }
 
 fn scan_frontend_semantic_handoff_boundary(file: &Path, syntax: &File) -> Vec<String> {

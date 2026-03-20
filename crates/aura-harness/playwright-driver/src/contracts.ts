@@ -91,6 +91,7 @@ export type DriverMethod =
   | 'send_keys'
   | 'send_key'
   | 'navigate_screen'
+  | 'open_settings_section'
   | 'click_button'
   | 'fill_input'
   | 'snapshot'

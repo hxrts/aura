@@ -127,7 +127,8 @@ impl MockEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl AmpChannelEffects for MockEffects {
     async fn create_channel(
         &self,
@@ -780,7 +781,8 @@ impl JournalEffects for MockEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkCoreEffects for MockEffects {
     async fn send_to_peer(&self, _peer_id: Uuid, _message: Vec<u8>) -> Result<(), NetworkError> {
         Ok(())
@@ -799,7 +801,8 @@ impl NetworkCoreEffects for MockEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for MockEffects {
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Ok(vec![])
@@ -835,7 +838,8 @@ impl NetworkExtendedEffects for MockEffects {
 #[derive(Debug, Default)]
 struct MockUdpSocket;
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl UdpEndpointEffects for MockUdpSocket {
     async fn set_broadcast(&self, _enabled: bool) -> Result<(), NetworkError> {
         Err(NetworkError::NotImplemented)
@@ -850,7 +854,8 @@ impl UdpEndpointEffects for MockUdpSocket {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl UdpEffects for MockEffects {
     async fn udp_bind(
         &self,

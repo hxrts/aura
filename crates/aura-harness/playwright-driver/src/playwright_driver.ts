@@ -100,6 +100,70 @@ function removeUiStateWaiter(session, waiter) {
   }
 }
 
+function resolveSemanticResultWaiter(session, payload) {
+  const commandId =
+    payload && typeof payload === "object" ? payload.command_id : null;
+  if (
+    typeof commandId !== "string" ||
+    !session.semanticResultWaiters ||
+    typeof session.semanticResultWaiters !== "object"
+  ) {
+    return;
+  }
+  const waiter = session.semanticResultWaiters[commandId];
+  if (!waiter) {
+    return;
+  }
+  delete session.semanticResultWaiters[commandId];
+  clearTimeout(waiter.timer);
+  waiter.resolve(payload);
+}
+
+function rejectSemanticResultWaiters(session, reason) {
+  if (
+    !session.semanticResultWaiters ||
+    typeof session.semanticResultWaiters !== "object"
+  ) {
+    return;
+  }
+  const waiters = Object.values(session.semanticResultWaiters);
+  session.semanticResultWaiters = Object.create(null);
+  for (const waiter of waiters) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new Error(`semantic_result_wait_invalidated:${reason}`));
+  }
+}
+
+function waitForSemanticResult(session, commandId, timeoutMs) {
+  if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
+    session.semanticResultCache = Object.create(null);
+  }
+  if (!session.semanticResultWaiters || typeof session.semanticResultWaiters !== "object") {
+    session.semanticResultWaiters = Object.create(null);
+  }
+  if (session.semanticResultCache[commandId]) {
+    const payload = session.semanticResultCache[commandId];
+    delete session.semanticResultCache[commandId];
+    return Promise.resolve(payload);
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (
+        session.semanticResultWaiters &&
+        session.semanticResultWaiters[commandId]
+      ) {
+        delete session.semanticResultWaiters[commandId];
+      }
+      reject(
+        new Error(
+          `semantic_result_wait_timeout:${commandId}:${timeoutMs}`,
+        ),
+      );
+    }, timeoutMs);
+    session.semanticResultWaiters[commandId] = { resolve, reject, timer };
+  });
+}
+
 function trySerializeUiState(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -150,6 +214,7 @@ function rejectUiStateWaiters(session, reason) {
 
 function resetObservationState(session, reason, options = {}) {
   rejectUiStateWaiters(session, reason);
+  rejectSemanticResultWaiters(session, reason);
   session.uiStateCache = null;
   session.uiStateCacheJson = null;
   session.uiStateVersion = 0;
@@ -719,58 +784,6 @@ async function installUiStateObserver(page, session) {
     });
     session.uiStateBindingsInstalled = true;
   }
-  await page.evaluate(() => {
-    if (window.__AURA_DRIVER_UI_STATE_OBSERVER_INSTALLED) {
-      return;
-    }
-
-    window.__AURA_DRIVER_LAST_PUSHED_UI_STATE_JSON__ = null;
-    const pushUiState = () => {
-      let payload = null;
-      if (typeof window.__AURA_UI_STATE_JSON__ === "string") {
-        payload = window.__AURA_UI_STATE_JSON__;
-      } else if (
-        window.__AURA_UI_STATE_CACHE__ &&
-        typeof window.__AURA_UI_STATE_CACHE__ === "object"
-      ) {
-        payload = window.__AURA_UI_STATE_CACHE__;
-      } else if (typeof window.__AURA_HARNESS_OBSERVE__?.ui_state === "function") {
-        payload = window.__AURA_HARNESS_OBSERVE__.ui_state();
-      } else if (typeof window.__AURA_UI_STATE__ === "function") {
-        payload = window.__AURA_UI_STATE__();
-      }
-
-      const nextJson =
-        typeof payload === "string"
-          ? payload
-          : payload && typeof payload === "object"
-            ? (() => {
-                try {
-                  return JSON.stringify(payload);
-                } catch {
-                  return null;
-                }
-              })()
-            : null;
-      if (!nextJson || nextJson === window.__AURA_DRIVER_LAST_PUSHED_UI_STATE_JSON__) {
-        return;
-      }
-
-      window.__AURA_DRIVER_LAST_PUSHED_UI_STATE_JSON__ = nextJson;
-      Promise.resolve(window.__AURA_DRIVER_PUSH_UI_STATE?.(nextJson)).catch(() => {});
-    };
-
-    const pump = () => {
-      try {
-        pushUiState();
-      } finally {
-        window.setTimeout(pump, 50);
-      }
-    };
-
-    window.__AURA_DRIVER_UI_STATE_OBSERVER_INSTALLED = true;
-    window.setTimeout(pump, 0);
-  });
 }
 
 async function installHarnessMutationQueue(page, session) {
@@ -780,6 +793,7 @@ async function installHarnessMutationQueue(page, session) {
     }
     if (payload && typeof payload === "object" && typeof payload.command_id === "string") {
       session.semanticResultCache[payload.command_id] = payload;
+      resolveSemanticResultWaiter(session, payload);
     }
   });
   await page.evaluate(() => {
@@ -788,11 +802,10 @@ async function installHarnessMutationQueue(page, session) {
     }
 
     window.__AURA_DRIVER_PENDING_NAV_SCREEN__ = null;
-    window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ = null;
     window.__AURA_DRIVER_SEMANTIC_QUEUE__ = [];
     window.__AURA_DRIVER_SEMANTIC_RESULTS__ = Object.create(null);
     window.__AURA_DRIVER_SEMANTIC_BUSY__ = false;
-    window.__AURA_DRIVER_SEMANTIC_POLL_COUNT__ = 0;
+    window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = false;
     window.__AURA_DRIVER_SEMANTIC_DEBUG__ = {
       last_event: "installed",
       active_command_id: null,
@@ -817,7 +830,24 @@ async function installHarnessMutationQueue(page, session) {
       ) {
         return;
       }
-      const next = semanticQueue.shift();
+      const nextJson = semanticQueue.shift();
+      if (typeof nextJson !== "string" || nextJson.length === 0) {
+        queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
+        return;
+      }
+      let next = null;
+      try {
+        next = JSON.parse(nextJson);
+      } catch (error) {
+        if (semanticDebug) {
+          semanticDebug.last_event = "queue_parse_error";
+          semanticDebug.last_error = error?.message ?? String(error);
+          semanticDebug.active_command_id = null;
+          semanticDebug.last_progress_at = Date.now();
+        }
+        queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
+        return;
+      }
       if (!next || typeof next.command_id !== "string") {
         queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
         return;
@@ -911,6 +941,17 @@ async function installHarnessMutationQueue(page, session) {
         });
     };
 
+    window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__ = () => {
+      if (window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__) {
+        return;
+      }
+      window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = true;
+      setTimeout(() => {
+        window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = false;
+        window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__?.();
+      }, 0);
+    };
+
     const enqueueSemanticCommand = (payloadJson) => {
       if (typeof payloadJson !== "string") {
         return {
@@ -920,25 +961,18 @@ async function installHarnessMutationQueue(page, session) {
           debug: window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null,
         };
       }
-      const payload = JSON.parse(payloadJson);
-      console.log(
-        `[driver-page] semantic enqueue begin id=${payload.command_id}`,
-      );
       if (!Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
         throw new Error("window.__AURA_DRIVER_SEMANTIC_QUEUE__ is unavailable");
       }
-      window.__AURA_DRIVER_SEMANTIC_QUEUE__.push(payload);
+      window.__AURA_DRIVER_SEMANTIC_QUEUE__.push(payloadJson);
       if (window.__AURA_DRIVER_SEMANTIC_DEBUG__) {
         window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_event = "enqueued";
-        window.__AURA_DRIVER_SEMANTIC_DEBUG__.active_command_id = payload.command_id;
+        window.__AURA_DRIVER_SEMANTIC_DEBUG__.active_command_id = null;
         window.__AURA_DRIVER_SEMANTIC_DEBUG__.queue_depth =
           window.__AURA_DRIVER_SEMANTIC_QUEUE__.length;
         window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_progress_at = Date.now();
       }
-      window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__?.();
-      console.log(
-        `[driver-page] semantic enqueue done id=${payload.command_id}`,
-      );
+      window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
       return {
         queue_depth: window.__AURA_DRIVER_SEMANTIC_QUEUE__.length,
         debug: window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null,
@@ -949,25 +983,6 @@ async function installHarnessMutationQueue(page, session) {
 
     const drain = () => {
       try {
-        if (window.__AURA_DRIVER_SEMANTIC_DEBUG__) {
-          window.__AURA_DRIVER_SEMANTIC_POLL_COUNT__ =
-            (window.__AURA_DRIVER_SEMANTIC_POLL_COUNT__ ?? 0) + 1;
-          if (window.__AURA_DRIVER_SEMANTIC_POLL_COUNT__ % 60 === 0) {
-            window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_event = "poll_tick";
-            window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_progress_at = Date.now();
-            console.log(
-              `[driver-page] semantic poll tick count=${window.__AURA_DRIVER_SEMANTIC_POLL_COUNT__}`,
-            );
-          }
-        }
-        const pendingSemantic = window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__;
-        if (typeof pendingSemantic === "string" && pendingSemantic.length > 0) {
-          window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ = null;
-          enqueueSemanticCommand(pendingSemantic);
-        } else if (window.__AURA_DRIVER_SEMANTIC_DEBUG__) {
-          window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_error =
-            pendingSemantic == null ? "no_pending_semantic_payload" : String(pendingSemantic);
-        }
         const pendingNav = window.__AURA_DRIVER_PENDING_NAV_SCREEN__;
         const harness = window.__AURA_HARNESS__;
         if (
@@ -1973,8 +1988,8 @@ async function startPage(params) {
         lastMutationReason: null,
         renderHeartbeat: null,
         clipboardCache: "",
-        pendingSemanticPayload: null,
         semanticResultCache: Object.create(null),
+        semanticResultWaiters: Object.create(null),
       };
       sessions.set(instanceId, session);
 
@@ -2227,7 +2242,7 @@ async function restartPageSession(session, reason) {
     `[driver] restart_page_session instance=${session.id} reason=${reason} data_dir=${options.dataDir}`,
   );
   await stop({ instance_id: session.id });
-  return startPage({
+  await startPage({
     instance_id: options.instanceId,
     app_url: options.appUrl,
     scenario_seed: options.scenarioSeed,
@@ -2242,6 +2257,7 @@ async function restartPageSession(session, reason) {
       reason !== "create_account_bootstrap" &&
       reason !== "stage_runtime_identity_bootstrap",
   });
+  return getSession(options.instanceId);
 }
 
 function getSession(instanceId) {
@@ -2482,10 +2498,13 @@ async function navigateScreen(params) {
     console.error(
       `[driver] navigate_screen restart_retry instance=${instanceId} screen=${screen} error=${error?.message ?? String(error)}`,
     );
-    await restartPageSession(session, `navigate_screen:${screen}`);
+    const restartedSession = await restartPageSession(
+      session,
+      `navigate_screen:${screen}`,
+    );
     result = await withOperationTimeout(
       `navigate_screen_restart:${instanceId}:${screen}`,
-      session.page.evaluate((targetScreen) => {
+      restartedSession.page.evaluate((targetScreen) => {
         if (!window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
           return { ok: false, reason: "mutation_queue_missing" };
         }
@@ -2501,6 +2520,56 @@ async function navigateScreen(params) {
     );
   }
   return { status: "navigated", screen };
+}
+
+async function openSettingsSection(params) {
+  const instanceId = normalizeInstanceId(params);
+  const section = String(params?.section ?? "").trim();
+  if (!section) {
+    throw new Error("section is required");
+  }
+  const session = getSession(instanceId);
+  let result;
+  try {
+    result = await withOperationTimeout(
+      `open_settings_section:${instanceId}:${section}`,
+      session.page.evaluate((targetSection) => {
+        const harness = window.__AURA_HARNESS__;
+        if (typeof harness?.open_settings_section !== "function") {
+          return { ok: false, reason: "open_settings_section_missing" };
+        }
+        const accepted = harness.open_settings_section(targetSection);
+        return { ok: accepted === true };
+      }, section),
+      1000,
+    );
+  } catch (error) {
+    console.error(
+      `[driver] open_settings_section restart_retry instance=${instanceId} section=${section} error=${error?.message ?? String(error)}`,
+    );
+    const restartedSession = await restartPageSession(
+      session,
+      `open_settings_section:${section}`,
+    );
+    result = await withOperationTimeout(
+      `open_settings_section_restart:${instanceId}:${section}`,
+      restartedSession.page.evaluate((targetSection) => {
+        const harness = window.__AURA_HARNESS__;
+        if (typeof harness?.open_settings_section !== "function") {
+          return { ok: false, reason: "open_settings_section_missing" };
+        }
+        const accepted = harness.open_settings_section(targetSection);
+        return { ok: accepted === true };
+      }, section),
+      2000,
+    );
+  }
+  if (!result?.ok) {
+    throw new Error(
+      `open_settings_section_failed section=${section} reason=${result?.reason ?? "unknown"}`,
+    );
+  }
+  return { status: "opened", section };
 }
 
 async function snapshot(params) {
@@ -3001,7 +3070,7 @@ async function readClipboard(params) {
 
 async function submitSemanticCommand(params) {
   const instanceId = normalizeInstanceId(params);
-  const session = getSession(instanceId);
+  let session = getSession(instanceId);
   const request = params?.request;
   if (!request || typeof request !== "object") {
     throw new Error("semantic command request is required");
@@ -3011,59 +3080,76 @@ async function submitSemanticCommand(params) {
   if (!session.semanticResultCache || typeof session.semanticResultCache !== "object") {
     session.semanticResultCache = Object.create(null);
   }
+  if (!session.semanticResultWaiters || typeof session.semanticResultWaiters !== "object") {
+    session.semanticResultWaiters = Object.create(null);
+  }
   delete session.semanticResultCache[commandId];
+  delete session.semanticResultWaiters[commandId];
+  const responsePromise = waitForSemanticResult(session, commandId, 10000);
   console.error(
     `[driver] submit_semantic_command preflight instance=${instanceId}`,
-  );
-  const bridgeType = await session.page.evaluate(() => {
-    const bridgeType = typeof window.__AURA_DRIVER_SEMANTIC_ENQUEUE__;
-    console.log(
-      `[driver-page] submit_semantic_command preflight type=${bridgeType}`,
-    );
-    return bridgeType;
-  });
-  console.error(
-    `[driver] submit_semantic_command bridge_type instance=${instanceId} type=${bridgeType}`,
   );
   console.error(
     `[driver] submit_semantic_command invoke_start instance=${instanceId}`,
   );
-  await withOperationTimeout(
-    `submit_semantic_command_enqueue_${instanceId}`,
-    session.page.evaluate(
-      (payloadJson) => {
-        console.log("[driver-page] submit_semantic_command invoke_start");
-        if (
-          !Object.prototype.hasOwnProperty.call(
-            window,
-            "__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__",
-          )
-        ) {
-          throw new Error(
-            "window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ is unavailable",
-          );
+  const enqueuePayload = JSON.stringify({
+    command_id: commandId,
+    request_json: requestJson,
+  });
+  const enqueueCommand = async (activeSession, label, timeoutMs) =>
+    withOperationTimeout(
+      label,
+      activeSession.page.evaluate((payloadJson) => {
+        if (typeof window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ !== "function") {
+          throw new Error("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ is unavailable");
         }
-        window.__AURA_DRIVER_PENDING_SEMANTIC_PAYLOAD__ = payloadJson;
-        console.log("[driver-page] submit_semantic_command invoke_done");
+        window.__AURA_DRIVER_SEMANTIC_ENQUEUE__(payloadJson);
         return null;
-      },
-      JSON.stringify({
-        command_id: commandId,
-        request_json: requestJson,
-      }),
-    ),
-    2000,
-  );
+      }, enqueuePayload),
+      timeoutMs,
+    );
+  try {
+    await enqueueCommand(
+      session,
+      `submit_semantic_command_enqueue_${instanceId}`,
+      2000,
+    );
+  } catch (error) {
+    console.error(
+      `[driver] submit_semantic_command enqueue_retry instance=${instanceId} error=${error?.message ?? String(error)}`,
+    );
+    try {
+      await waitForPageNavigationStabilization(
+        session,
+        `submit_semantic_command_enqueue:${instanceId}`,
+      );
+      await enqueueCommand(
+        session,
+        `submit_semantic_command_enqueue_retry_${instanceId}`,
+        4000,
+      );
+    } catch (retryError) {
+      console.error(
+        `[driver] submit_semantic_command enqueue_restart instance=${instanceId} error=${retryError?.message ?? String(retryError)}`,
+      );
+      const restartedSession = await restartPageSession(
+        session,
+        `submit_semantic_command_enqueue:${instanceId}`,
+      );
+      session = restartedSession;
+      await enqueueCommand(
+        restartedSession,
+        `submit_semantic_command_enqueue_restart_${instanceId}`,
+        4000,
+      );
+    }
+  }
 
-  const deadline = Date.now() + 10000;
   let lastDebug = null;
   let response = null;
-  while (Date.now() < deadline) {
-    if (session.semanticResultCache?.[commandId]) {
-      response = session.semanticResultCache[commandId];
-      delete session.semanticResultCache[commandId];
-      break;
-    }
+  try {
+    response = await responsePromise;
+  } catch (error) {
     const pageStatus = await withOperationTimeout(
       `submit_semantic_command_result_${instanceId}`,
       session.page.evaluate((activeCommandId) => {
@@ -3079,21 +3165,24 @@ async function submitSemanticCommand(params) {
         }
         return JSON.stringify({ result, debug });
       }, commandId),
-      1000,
-    );
-    const parsedStatus =
-      typeof pageStatus === "string" ? JSON.parse(pageStatus) : pageStatus;
-    lastDebug = parsedStatus?.debug ?? lastDebug;
-    if (parsedStatus?.result) {
-      response = parsedStatus.result;
-      break;
+      2000,
+    ).catch(() => null);
+    if (typeof pageStatus === "string") {
+      try {
+        const parsedStatus = JSON.parse(pageStatus);
+        lastDebug = parsedStatus?.debug ?? lastDebug;
+        if (parsedStatus?.result) {
+          response = parsedStatus.result;
+        }
+      } catch {
+        lastDebug = lastDebug;
+      }
     }
-    await delay(50);
-  }
-  if (!response) {
-    throw new Error(
-      `submit_semantic_command timed out instance=${instanceId} command_id=${commandId} last_debug=${JSON.stringify(lastDebug)}`,
-    );
+    if (!response) {
+      throw new Error(
+        `submit_semantic_command timed out instance=${instanceId} command_id=${commandId} last_debug=${JSON.stringify(lastDebug)} cause=${error?.message ?? String(error)}`,
+      );
+    }
   }
   if (!response.ok) {
     throw new Error(
@@ -3285,6 +3374,13 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
     typeof params.instance_id === "string"
       ? params.instance_id
       : null;
+  const shouldMarkActionMutation =
+    instanceId &&
+    ACTION_METHODS.has(method) &&
+    sessions.has(instanceId);
+  if (shouldMarkActionMutation) {
+    markObservationMutation(getSession(instanceId), method);
+  }
   let result;
   switch (method) {
     case "start_page":
@@ -3298,6 +3394,9 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
       break;
     case "navigate_screen":
       result = await navigateScreen(params);
+      break;
+    case "open_settings_section":
+      result = await openSettingsSection(params);
       break;
     case "click_button":
       result = await clickButton(params);
@@ -3359,7 +3458,12 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
     default:
       throw new Error(`unsupported method: ${method}`);
   }
-  if (instanceId && isMutatingMethod(method) && sessions.has(instanceId)) {
+  if (
+    instanceId &&
+    !ACTION_METHODS.has(method) &&
+    isMutatingMethod(method) &&
+    sessions.has(instanceId)
+  ) {
     markObservationMutation(getSession(instanceId), method);
   }
   return result;

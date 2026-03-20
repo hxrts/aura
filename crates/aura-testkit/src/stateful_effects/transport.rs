@@ -263,7 +263,8 @@ pub struct TransportStats {
     pub active_channels: usize,
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkCoreEffects for InMemoryTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         let peer_str = peer_id.to_string();
@@ -292,7 +293,8 @@ impl NetworkCoreEffects for InMemoryTransportHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for InMemoryTransportHandler {
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
         Err(NetworkError::ReceiveFailed {

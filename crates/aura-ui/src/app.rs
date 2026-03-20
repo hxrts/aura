@@ -2308,15 +2308,14 @@ fn submit_runtime_chat_input(
                         .map(|_| Some("home one-hop link linked".to_string()))
                 }
                 Ok(ChatCommand::HomeInvite { target }) => {
-                    let home_id =
-                        match context_workflows::current_home_id_or_fallback(&app_core).await {
-                            Ok(home_id) => home_id.to_string(),
-                            Err(error) => {
-                                controller_for_task.runtime_error_toast(error.to_string());
-                                rerender();
-                                return;
-                            }
-                        };
+                    let home_id = match context_workflows::current_home_id(&app_core).await {
+                        Ok(home_id) => home_id.to_string(),
+                        Err(error) => {
+                            controller_for_task.runtime_error_toast(error.to_string());
+                            rerender();
+                            return;
+                        }
+                    };
                     let target_authority =
                         match query_workflows::resolve_contact(&app_core, &target).await {
                             Ok(contact) => contact.id,

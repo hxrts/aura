@@ -7,12 +7,15 @@ use aura_app::ui::contract::{ListId, ModalId, RenderHeartbeat, ScreenId, UiSnaps
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
 };
-use aura_app::ui::types::BootstrapRuntimeIdentity;
+use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
 use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
+use aura_app::ui::workflows::runtime as runtime_workflows;
+use aura_app::ui::workflows::settings as settings_workflows;
+use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::RuntimeFact;
 use aura_core::{types::identifiers::ChannelId, AuthorityId, DeviceId};
 use aura_ui::UiController;
@@ -21,29 +24,24 @@ use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_json::{from_str, to_string};
 use serde_wasm_bindgen::to_value;
 use std::cell::RefCell as StdRefCell;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::future_to_promise;
 
-use crate::task_owner::shared_web_task_owner;
-
-struct PendingUiPublish {
-    value: JsValue,
-    json: String,
-    screen: ScreenId,
-    modal: Option<ModalId>,
-    operation_count: usize,
-}
+use crate::{
+    active_storage_prefix, clear_pending_device_enrollment_code, load_selected_runtime_identity,
+    pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
+    persist_selected_runtime_identity, selected_runtime_identity_key,
+    submit_runtime_bootstrap_handoff, task_owner::shared_web_task_owner,
+};
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
-    static PENDING_UI_PUBLISH: RefCell<Option<PendingUiPublish>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
-    static UI_PUBLISH_RAF_PENDING: Cell<bool> = const { Cell::new(false) };
     static BOOTSTRAP_HANDOFF_SUBMITTER: RefCell<Option<Arc<dyn Fn(BootstrapHandoff) -> js_sys::Promise>>> = const { RefCell::new(None) };
     static RUNTIME_IDENTITY_STAGER: RefCell<Option<Arc<dyn Fn(String) -> js_sys::Promise>>> = const { RefCell::new(None) };
 }
@@ -268,10 +266,20 @@ fn selected_authority_id(controller: &UiController) -> Option<String> {
         })
 }
 
-async fn schedule_browser_ui_mutation(action: impl FnOnce() + 'static) -> Result<(), JsValue> {
+fn publish_current_ui_snapshot(controller: &UiController) {
+    controller.set_ui_snapshot(controller.semantic_model_snapshot());
+}
+
+async fn schedule_browser_ui_mutation(
+    controller: Arc<UiController>,
+    action: impl FnOnce(&UiController) + 'static,
+) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("window unavailable"))?;
     let (tx, rx) = oneshot::channel::<()>();
-    let action = Rc::new(StdRefCell::new(Some(Box::new(action) as Box<dyn FnOnce()>)));
+    let action = Rc::new(StdRefCell::new(Some(Box::new(move || {
+        action(controller.as_ref());
+        publish_current_ui_snapshot(controller.as_ref());
+    }) as Box<dyn FnOnce()>)));
     let callback_action = action.clone();
     let callback = Closure::once(move || {
         if let Some(action) = callback_action.borrow_mut().take() {
@@ -298,8 +306,10 @@ async fn submit_semantic_command(
         IntentAction::OpenScreen(screen) => {
             let target =
                 browser_screen(screen).ok_or_else(|| JsValue::from_str("unsupported screen"))?;
-            let controller = controller.clone();
-            schedule_browser_ui_mutation(move || controller.set_screen(target)).await?;
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.set_screen(target);
+            })
+            .await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::CreateAccount { account_name } => {
@@ -366,11 +376,9 @@ async fn submit_semantic_command(
             invitee_authority_id,
             ..
         } => {
-            let controller_for_screen = controller.clone();
-            schedule_browser_ui_mutation(move || {
-                controller_for_screen.set_screen(ScreenId::Settings);
-                controller_for_screen
-                    .set_settings_section(browser_settings_section(SettingsSection::Devices));
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.set_screen(ScreenId::Settings);
+                controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
             })
             .await?;
             let invitee_authority_id =
@@ -400,14 +408,94 @@ async fn submit_semantic_command(
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             let invitation_info = invitation.info().clone();
+            let InvitationBridgeType::DeviceEnrollment {
+                subject_authority,
+                device_id,
+                ..
+            } = invitation_info.invitation_type.clone()
+            else {
+                return Err(JsValue::from_str(
+                    "code is not a device enrollment invitation",
+                ));
+            };
+            let runtime = runtime_workflows::require_runtime(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let current_authority = runtime.authority_id();
+            let storage_prefix = active_storage_prefix();
+            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
+            let pending_code_storage_key = pending_device_enrollment_code_key(&storage_prefix);
+            let selected_runtime_identity =
+                load_selected_runtime_identity(&runtime_identity_key)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            if current_authority != subject_authority
+                || selected_runtime_identity
+                    .as_ref()
+                    .map(|identity| identity.device_id)
+                    != Some(device_id)
+            {
+                persist_pending_device_enrollment_code(&pending_code_storage_key, &code)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                persist_selected_runtime_identity(
+                    &runtime_identity_key,
+                    &BootstrapRuntimeIdentity::new(subject_authority, device_id),
+                )
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                submit_runtime_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
+                    authority_id: subject_authority,
+                    device_id,
+                    source: RuntimeIdentityStageSource::ImportDeviceEnrollment,
+                })
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
+
+            if let Err(error) = clear_pending_device_enrollment_code(&pending_code_storage_key) {
+                web_sys::console::warn_1(
+                    &format!("[web-harness] clear_pending_device_enrollment_code failed: {error}")
+                        .into(),
+                );
+            }
+
+            for _ in 0..8 {
+                runtime_workflows::converge_runtime(&runtime).await;
+                if runtime_workflows::ensure_runtime_peer_connectivity(
+                    &runtime,
+                    "device_enrollment_accept",
+                )
+                .await
+                .is_ok()
+                {
+                    break;
+                }
+                time_workflows::sleep_ms(&app_core, 250)
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            }
+
             invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation_info)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let settings = settings_workflows::get_settings(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let nickname = settings.nickname_suggestion.trim();
+            let bootstrap_name = if nickname.is_empty() {
+                "Aura User".to_string()
+            } else {
+                nickname.to_string()
+            };
+            account_workflows::initialize_runtime_account(&app_core, bootstrap_name)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.set_account_setup_state(true, "", None);
+            controller.set_screen(ScreenId::Neighborhood);
+            publish_current_ui_snapshot(controller.as_ref());
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
-            let controller = controller.clone();
-            schedule_browser_ui_mutation(move || {
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.set_screen(ScreenId::Settings);
                 controller.set_settings_section(browser_settings_section(section));
             })
@@ -415,11 +503,9 @@ async fn submit_semantic_command(
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::RemoveSelectedDevice { device_id } => {
-            let controller_for_screen = controller.clone();
-            schedule_browser_ui_mutation(move || {
-                controller_for_screen.set_screen(ScreenId::Settings);
-                controller_for_screen
-                    .set_settings_section(browser_settings_section(SettingsSection::Devices));
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.set_screen(ScreenId::Settings);
+                controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
             })
             .await?;
             let device_id = match device_id {
@@ -432,11 +518,9 @@ async fn submit_semantic_command(
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::SwitchAuthority { authority_id } => {
-            let controller_for_screen = controller.clone();
-            schedule_browser_ui_mutation(move || {
-                controller_for_screen.set_screen(ScreenId::Settings);
-                controller_for_screen
-                    .set_settings_section(aura_ui::model::SettingsSection::Authority);
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.set_screen(ScreenId::Settings);
+                controller.set_settings_section(aura_ui::model::SettingsSection::Authority);
             })
             .await?;
             if selected_authority_id(&controller).as_deref() == Some(authority_id.as_str()) {
@@ -554,7 +638,7 @@ fn publish_ui_snapshot_now(
     screen: ScreenId,
     modal: Option<ModalId>,
     operation_count: usize,
-) {
+) -> bool {
     let should_publish = LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
         let mut last = slot.borrow_mut();
         if last.as_deref() == Some(json.as_str()) {
@@ -565,7 +649,7 @@ fn publish_ui_snapshot_now(
         }
     });
     if !should_publish {
-        return;
+        return false;
     }
 
     let _ = Reflect::set(
@@ -601,6 +685,7 @@ fn publish_ui_snapshot_now(
         )));
         web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
     }
+    true
 }
 
 fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbeat) {
@@ -651,52 +736,6 @@ fn log_js_callback_error(context: &str, error: &JsValue) {
     )));
 }
 
-fn flush_pending_ui_snapshot(window: &web_sys::Window) {
-    let Some(pending) = PENDING_UI_PUBLISH.with(|slot| slot.borrow_mut().take()) else {
-        return;
-    };
-    let render_seq = RENDER_SEQ.with(|slot| {
-        let mut seq = slot.borrow_mut();
-        *seq = seq.saturating_add(1);
-        *seq
-    });
-    publish_render_heartbeat(
-        window,
-        &RenderHeartbeat {
-            screen: pending.screen,
-            open_modal: pending.modal,
-            render_seq,
-        },
-    );
-    publish_ui_snapshot_now(
-        window,
-        pending.value,
-        pending.json,
-        pending.screen,
-        pending.modal,
-        pending.operation_count,
-    );
-}
-
-fn schedule_pending_ui_snapshot_flush(window: &web_sys::Window) {
-    let raf_window = window.clone();
-    let raf_callback = Closure::once_into_js(move || {
-        flush_pending_ui_snapshot(&raf_window);
-        let has_more_pending = PENDING_UI_PUBLISH.with(|slot| slot.borrow().is_some());
-        if has_more_pending {
-            schedule_pending_ui_snapshot_flush(&raf_window);
-        } else {
-            UI_PUBLISH_RAF_PENDING.with(|slot| slot.set(false));
-        }
-    });
-    let raf_function: &Function = raf_callback.unchecked_ref();
-    if let Err(error) = window.request_animation_frame(raf_function) {
-        UI_PUBLISH_RAF_PENDING.with(|slot| slot.set(false));
-        log_js_callback_error("requestAnimationFrame for UI snapshot publish", &error);
-        flush_pending_ui_snapshot(window);
-    }
-}
-
 pub fn set_controller(controller: Arc<UiController>) {
     CONTROLLER.with(|slot| {
         *slot.borrow_mut() = Some(controller);
@@ -704,10 +743,6 @@ pub fn set_controller(controller: Arc<UiController>) {
     LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
         *slot.borrow_mut() = None;
     });
-    PENDING_UI_PUBLISH.with(|slot| {
-        *slot.borrow_mut() = None;
-    });
-    UI_PUBLISH_RAF_PENDING.with(|slot| slot.set(false));
 }
 
 fn current_controller() -> Result<Arc<UiController>, JsValue> {
@@ -729,25 +764,27 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(json) = json.as_string() else {
         return;
     };
-    PENDING_UI_PUBLISH.with(|slot| {
-        *slot.borrow_mut() = Some(PendingUiPublish {
-            value,
-            json,
-            screen: snapshot.screen,
-            modal: snapshot.open_modal,
-            operation_count: snapshot.operations.len(),
+    if publish_ui_snapshot_now(
+        &window,
+        value,
+        json,
+        snapshot.screen,
+        snapshot.open_modal,
+        snapshot.operations.len(),
+    ) {
+        let render_seq = RENDER_SEQ.with(|slot| {
+            let mut seq = slot.borrow_mut();
+            *seq = seq.saturating_add(1);
+            *seq
         });
-    });
-    let should_schedule = UI_PUBLISH_RAF_PENDING.with(|slot| {
-        if slot.get() {
-            false
-        } else {
-            slot.set(true);
-            true
-        }
-    });
-    if should_schedule {
-        schedule_pending_ui_snapshot_flush(&window);
+        publish_render_heartbeat(
+            &window,
+            &RenderHeartbeat {
+                screen: snapshot.screen,
+                open_modal: snapshot.open_modal,
+                render_seq,
+            },
+        );
     }
 }
 
@@ -900,6 +937,7 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
         };
         if let Ok(controller) = current_controller() {
             controller.set_screen(target);
+            publish_current_ui_snapshot(controller.as_ref());
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
@@ -909,6 +947,28 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
         navigate_screen.as_ref().unchecked_ref(),
     )?;
     navigate_screen.forget();
+
+    let open_settings_section = Closure::wrap(Box::new(move |section: JsValue| -> JsValue {
+        let Some(section_name) = section.as_string() else {
+            return JsValue::FALSE;
+        };
+        let target = match section_name.as_str() {
+            "devices" => aura_ui::model::SettingsSection::Devices,
+            _ => return JsValue::FALSE,
+        };
+        if let Ok(controller) = current_controller() {
+            controller.set_screen(ScreenId::Settings);
+            controller.set_settings_section(target);
+            publish_current_ui_snapshot(controller.as_ref());
+        }
+        JsValue::TRUE
+    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("open_settings_section"),
+        open_settings_section.as_ref().unchecked_ref(),
+    )?;
+    open_settings_section.forget();
 
     let snapshot = Closure::wrap(Box::new(move || -> JsValue {
         let Ok(controller) = current_controller() else {

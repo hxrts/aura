@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
-use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse};
+use aura_app::ui::scenarios::{
+    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
+};
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
@@ -327,6 +329,46 @@ impl PlaywrightBrowserBackend {
         &mut self,
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
+        match &request.intent {
+            IntentAction::OpenScreen(screen) => {
+                let screen = match screen {
+                    aura_app::ui::contract::ScreenId::Onboarding => "onboarding",
+                    aura_app::ui::contract::ScreenId::Neighborhood => "neighborhood",
+                    aura_app::ui::contract::ScreenId::Chat => "chat",
+                    aura_app::ui::contract::ScreenId::Contacts => "contacts",
+                    aura_app::ui::contract::ScreenId::Notifications => "notifications",
+                    aura_app::ui::contract::ScreenId::Settings => "settings",
+                };
+                self.with_session(|session| {
+                    session.rpc_call(
+                        "navigate_screen",
+                        json!({
+                            "instance_id": self.config.id,
+                            "screen": screen,
+                        }),
+                    )?;
+                    Ok(())
+                })?;
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
+            IntentAction::OpenSettingsSection(section) => {
+                let section = match section {
+                    SettingsSection::Devices => "devices",
+                };
+                self.with_session(|session| {
+                    session.rpc_call(
+                        "open_settings_section",
+                        json!({
+                            "instance_id": self.config.id,
+                            "section": section,
+                        }),
+                    )?;
+                    Ok(())
+                })?;
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
+            _ => {}
+        }
         let payload = serde_json::to_value(&request)
             .context("failed to encode browser semantic command request")?;
         let response = self.with_session(|session| {

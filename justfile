@@ -806,11 +806,11 @@ ci-conformance-itf:
     AURA_CONSENSUS_ITF_TRACE="$trace_file" \
       AURA_CONSENSUS_ITF_TRACE_DIR="$trace_dir" \
       AURA_CONFORMANCE_ITF_TRACE="$trace_file" \
-      cargo test -p aura-testkit --test consensus_itf_conformance -- --nocapture
+      cargo test -p aura-testkit --test consensus -- --nocapture
 
 # Differential tests
 ci-conformance-diff:
-    cargo test -p aura-testkit --test consensus_differential -- --nocapture
+    cargo test -p aura-testkit --test consensus -- --nocapture
 
 # Strict native/WASM parity and threaded differential lane
 ci-conformance-strict:
@@ -851,7 +851,7 @@ ci-conformance: ci-conformance-policy
     just ci-conformance-contracts
     just ci-choreo-concurrency-contracts
     just ci-simulator-telltale-parity
-    cargo test -p aura-testkit --test conformance_golden_fixtures -- --nocapture
+    cargo test -p aura-testkit --test conformance -- --nocapture
     just ci-conformance-itf
     just ci-conformance-diff
 

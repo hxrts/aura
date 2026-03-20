@@ -359,15 +359,18 @@ pub async fn refresh_connection_status_from_contacts(
             core.sync_status()
                 .await
                 .map_err(|e| AuraError::from(super::error::runtime_call("get sync status", e)))?
-                .unwrap_or_default()
         };
-        if online_contacts == 0 && !contacts_state.is_empty() && sync_status.connected_peers > 0 {
-            let fallback_online =
-                std::cmp::min(contacts_state.contact_count(), sync_status.connected_peers);
-            for (idx, contact) in contacts_state.all_contacts_mut().enumerate() {
-                contact.is_online = idx < fallback_online;
+        if online_contacts == 0 && !contacts_state.is_empty() {
+            if let Some(sync_status) = sync_status.as_ref() {
+                if sync_status.connected_peers > 0 {
+                    let inferred_online =
+                        std::cmp::min(contacts_state.contact_count(), sync_status.connected_peers);
+                    for (idx, contact) in contacts_state.all_contacts_mut().enumerate() {
+                        contact.is_online = idx < inferred_online;
+                    }
+                    online_contacts = inferred_online;
+                }
             }
-            online_contacts = fallback_online;
         }
 
         let connection = if online_contacts > 0 {
@@ -377,7 +380,9 @@ pub async fn refresh_connection_status_from_contacts(
         } else {
             ConnectionStatus::Offline
         };
-        let network_status = compute_network_status(true, online_contacts, &sync_status);
+        let network_status = sync_status
+            .as_ref()
+            .map(|sync_status| compute_network_status(true, online_contacts, sync_status));
 
         let _ = emit_signal(
             app_core,
@@ -393,20 +398,24 @@ pub async fn refresh_connection_status_from_contacts(
             CONNECTION_STATUS_SIGNAL_NAME,
         )
         .await;
-        let _ = emit_signal(
-            app_core,
-            &*NETWORK_STATUS_SIGNAL,
-            network_status,
-            NETWORK_STATUS_SIGNAL_NAME,
-        )
-        .await;
-        let _ = emit_signal(
-            app_core,
-            &*TRANSPORT_PEERS_SIGNAL,
-            sync_status.connected_peers,
-            TRANSPORT_PEERS_SIGNAL_NAME,
-        )
-        .await;
+        if let Some(network_status) = network_status {
+            let _ = emit_signal(
+                app_core,
+                &*NETWORK_STATUS_SIGNAL,
+                network_status,
+                NETWORK_STATUS_SIGNAL_NAME,
+            )
+            .await;
+        }
+        if let Some(sync_status) = sync_status.as_ref() {
+            let _ = emit_signal(
+                app_core,
+                &*TRANSPORT_PEERS_SIGNAL,
+                sync_status.connected_peers,
+                TRANSPORT_PEERS_SIGNAL_NAME,
+            )
+            .await;
+        }
     } else {
         // No runtime - emit disconnected status
         let _ = emit_signal(

@@ -229,9 +229,7 @@ async fn resolve_scope_by_channel_id(
         return Err(AuraError::permission_denied(context_id.to_string()));
     }
 
-    if let Ok(active_home_id) =
-        crate::workflows::context::current_home_id_or_fallback(app_core).await
-    {
+    if let Ok(active_home_id) = crate::workflows::context::current_home_id(app_core).await {
         if let Some(home_state) = homes.home_state(&active_home_id) {
             let context_id = home_state
                 .context_id

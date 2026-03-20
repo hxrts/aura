@@ -11,7 +11,7 @@ use crate::ui_contract::{
 };
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
-use crate::workflows::context::current_home_context_or_authority_default;
+use crate::workflows::context::current_home_context;
 use crate::workflows::harness_determinism;
 use crate::workflows::observed_projection::{
     reduce_chat_fact_observed, update_chat_projection_observed,
@@ -274,7 +274,7 @@ struct ChannelReadinessCoordinator {
 }
 
 impl ChannelReadinessCoordinator {
-    async fn load(app_core: &Arc<RwLock<AppCore>>) -> Self {
+    async fn load(app_core: &Arc<RwLock<AppCore>>) -> Result<Self, AuraError> {
         // OWNERSHIP: observed
         let chat = observed_chat_snapshot(app_core).await;
         let (runtime, self_authority) = {
@@ -293,8 +293,7 @@ impl ChannelReadinessCoordinator {
                             AuthoritativeChannelRef::new(channel.id, context_id),
                             authority_id,
                         )
-                        .await
-                        .unwrap_or_default()
+                        .await?
                     } else {
                         Vec::new()
                     }
@@ -304,7 +303,7 @@ impl ChannelReadinessCoordinator {
             states.push(ChannelReadinessState::new(channel, recipients));
         }
 
-        Self { states }
+        Ok(Self { states })
     }
 
     fn states(&self) -> &[ChannelReadinessState] {
@@ -525,7 +524,7 @@ async fn resolve_chat_channel_id_from_state_or_input(
 async fn matching_chat_channel_ids(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
-) -> Vec<ChannelId> {
+) -> Result<Vec<ChannelId>, AuraError> {
     routing::matching_chat_channel_ids(app_core, channel_input).await
 }
 
@@ -824,7 +823,7 @@ fn bootstrap_required_for_recipients(recipient_count: usize) -> bool {
 pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let coordinator = ChannelReadinessCoordinator::load(app_core).await;
+    let coordinator = ChannelReadinessCoordinator::load(app_core).await?;
     let runtime = {
         let core = app_core.read().await;
         core.runtime().cloned()
@@ -860,7 +859,7 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
 pub(in crate::workflows) async fn refresh_authoritative_recipient_resolution_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let coordinator = ChannelReadinessCoordinator::load(app_core).await;
+    let coordinator = ChannelReadinessCoordinator::load(app_core).await?;
     let replacements = coordinator
         .states()
         .iter()
@@ -902,7 +901,7 @@ async fn refresh_authoritative_delivery_readiness_for_channel(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
 ) -> Result<(), AuraError> {
-    let coordinator = ChannelReadinessCoordinator::load(app_core).await;
+    let coordinator = ChannelReadinessCoordinator::load(app_core).await?;
     let channel_id = channel.channel_id();
     let Some(channel_state) = coordinator.state_for_channel(channel_id).cloned() else {
         return update_authoritative_semantic_facts(app_core, |facts| {
@@ -1619,8 +1618,7 @@ pub async fn create_channel_with_authoritative_binding(
     let mut channel_context: Option<ContextId> = None;
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
-        let (context_id, _is_home_context) =
-            current_home_context_or_authority_default(app_core, runtime.authority_id()).await?;
+        let context_id = current_home_context(app_core).await?;
         channel_context = Some(context_id);
         let channel_hint = (!name.trim().is_empty())
             .then(|| channel_id_from_input(name))
@@ -2144,7 +2142,7 @@ pub async fn leave_channel_by_name(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
 ) -> Result<(), AuraError> {
-    let mut candidate_ids = matching_chat_channel_ids(app_core, channel_name).await;
+    let mut candidate_ids = matching_chat_channel_ids(app_core, channel_name).await?;
     if candidate_ids.is_empty() {
         candidate_ids
             .push(resolve_chat_channel_id_from_state_or_input(app_core, channel_name).await?);
@@ -3644,7 +3642,9 @@ mod tests {
         .await
         .unwrap();
 
-        let coordinator = ChannelReadinessCoordinator::load(&app_core).await;
+        let coordinator = ChannelReadinessCoordinator::load(&app_core)
+            .await
+            .expect("channel readiness should load");
         let state = coordinator
             .state_for_channel(channel_id)
             .unwrap_or_else(|| panic!("expected channel readiness state for {channel_id}"));

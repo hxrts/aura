@@ -66,10 +66,10 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
 pub(super) async fn matching_chat_channel_ids(
     app_core: &Arc<RwLock<AppCore>>,
     channel_input: &str,
-) -> Vec<ChannelId> {
+) -> Result<Vec<ChannelId>, AuraError> {
     let raw = channel_input.trim();
     if raw.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let normalized_name = raw.trim_start_matches('#').trim();
@@ -82,24 +82,28 @@ pub(super) async fn matching_chat_channel_ids(
     if is_note_to_self_channel_name(normalized_name) {
         if let Some(authority_id) = local_authority {
             let channel_id = note_to_self_channel_id(authority_id);
-            return vec![channel_id];
+            return Ok(vec![channel_id]);
         }
     }
 
     if let Ok(runtime) = require_runtime(app_core).await {
-        return runtime
+        let matches = runtime
             .resolve_authoritative_channel_ids_by_name(normalized_name)
             .await
-            .unwrap_or_default();
+            .map_err(|error| {
+                error::runtime_call("resolve authoritative channel ids by name", error)
+            })?;
+        return Ok(matches);
     }
 
     // OWNERSHIP: observed
     // Local-only fallback when no authoritative runtime exists.
     let chat = observed_chat_snapshot(app_core).await;
-    chat.all_channels()
+    Ok(chat
+        .all_channels()
         .filter(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
         .map(|channel| channel.id)
-        .collect()
+        .collect())
 }
 
 pub(super) async fn resolve_target_authority_for_invite(

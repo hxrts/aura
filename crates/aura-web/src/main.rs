@@ -48,14 +48,14 @@ cfg_if! {
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
-        fn selected_runtime_identity_key(storage_prefix: &str) -> String {
+        pub(crate) fn selected_runtime_identity_key(storage_prefix: &str) -> String {
             format!(
                 "{storage_prefix}{}",
                 WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX
             )
         }
 
-        fn pending_device_enrollment_code_key(storage_prefix: &str) -> String {
+        pub(crate) fn pending_device_enrollment_code_key(storage_prefix: &str) -> String {
             format!("{storage_prefix}pending_device_enrollment_code")
         }
 
@@ -96,7 +96,7 @@ cfg_if! {
             harness_instance_id().is_some()
         }
 
-        fn active_storage_prefix() -> String {
+        pub(crate) fn active_storage_prefix() -> String {
             if let Some(instance_id) = harness_instance_id() {
                 let sanitized = sanitize_storage_segment(&instance_id);
                 if !sanitized.is_empty() {
@@ -141,7 +141,7 @@ cfg_if! {
             }
         }
 
-        fn load_selected_runtime_identity(
+        pub(crate) fn load_selected_runtime_identity(
             storage_key: &str,
         ) -> Result<Option<BootstrapRuntimeIdentity>, WebUiError> {
             let Some(window) = web_sys::window() else {
@@ -177,7 +177,7 @@ cfg_if! {
             Ok(None)
         }
 
-        fn persist_selected_runtime_identity(
+        pub(crate) fn persist_selected_runtime_identity(
             storage_key: &str,
             identity: &BootstrapRuntimeIdentity,
         ) -> Result<(), WebUiError> {
@@ -415,7 +415,7 @@ cfg_if! {
             })
         }
 
-        fn persist_pending_device_enrollment_code(
+        pub(crate) fn persist_pending_device_enrollment_code(
             storage_key: &str,
             code: &str,
         ) -> Result<(), WebUiError> {
@@ -451,7 +451,9 @@ cfg_if! {
             })
         }
 
-        fn clear_pending_device_enrollment_code(storage_key: &str) -> Result<(), WebUiError> {
+        pub(crate) fn clear_pending_device_enrollment_code(
+            storage_key: &str,
+        ) -> Result<(), WebUiError> {
             let window = web_sys::window().ok_or_else(|| {
                 WebUiError::config(
                     WebUiOperation::ClearPendingDeviceEnrollmentCode,
@@ -484,7 +486,7 @@ cfg_if! {
             })
         }
 
-        async fn submit_runtime_bootstrap_handoff(
+        pub(crate) async fn submit_runtime_bootstrap_handoff(
             handoff: harness_bridge::BootstrapHandoff,
         ) -> Result<(), WebUiError> {
             harness_bridge::submit_bootstrap_handoff(handoff)
@@ -752,6 +754,15 @@ cfg_if! {
                     BootstrapSurface::Web,
                     BootstrapEventKind::RuntimeBootstrapFinalized,
                 );
+                let final_snapshot = controller.semantic_model_snapshot();
+                web_sys::console::log_1(
+                    &format!(
+                        "[web-bootstrap] final_snapshot screen={:?};readiness={:?};revision={:?}",
+                        final_snapshot.screen, final_snapshot.readiness, final_snapshot.revision
+                    )
+                    .into(),
+                );
+                harness_bridge::publish_ui_snapshot(&final_snapshot);
                 controller.push_log(&finalized_event.to_string());
                 if let Some(instance_id) = harness_instance {
                     controller.push_log(&format!(
@@ -986,15 +997,6 @@ cfg_if! {
             let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
                 && controller_snapshot.screen != ScreenId::Onboarding;
             let account_ready = bootstrap_account_ready() || controller_account_ready;
-
-            use_effect({
-                let controller = controller.clone();
-                move || {
-                    if harness_mode_enabled() {
-                        harness_bridge::publish_ui_snapshot(&controller.semantic_model_snapshot());
-                    }
-                }
-            });
 
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
@@ -1291,6 +1293,9 @@ cfg_if! {
                                     controller.info_toast("Device enrollment complete");
                                     bootstrap_account_ready.set(true);
                                     controller.set_account_setup_state(true, "", None);
+                                    controller.set_screen(ScreenId::Neighborhood);
+                                    controller
+                                        .set_ui_snapshot(controller.semantic_model_snapshot());
                                 } else {
                                     controller.info_toast("Switching runtime to finish import");
                                 }

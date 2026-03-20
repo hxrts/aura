@@ -39,8 +39,6 @@ pub enum ActiveHomeSource {
     ExplicitHint,
     /// Home resolved from the currently selected home.
     Selected,
-    /// Home resolved from deterministic fallback ordering.
-    Fallback,
 }
 
 /// Active-home resolution result shared by context-dependent workflows.
@@ -75,27 +73,12 @@ async fn authoritative_active_home_selection(app_core: &Arc<RwLock<AppCore>>) ->
     core.active_home_selection()
 }
 
-// OWNERSHIP: first-run-default
-fn fallback_home(homes: &HomesState) -> Option<(ChannelId, HomeState)> {
-    homes
-        .iter()
-        .min_by(|(lhs, _), (rhs, _)| lhs.as_bytes().cmp(rhs.as_bytes()))
-        .map(|(home_id, home)| (*home_id, home.clone()))
-}
-
 #[aura_macros::authoritative_source(kind = "signal")]
 // OWNERSHIP: authoritative-source
-// OWNERSHIP: first-run-default
-async fn homes_state_signal_snapshot(app_core: &Arc<RwLock<AppCore>>) -> HomesState {
-    let signal_homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
-        .await
-        .unwrap_or_default();
-    if signal_homes.iter().next().is_some() {
-        return signal_homes;
-    }
-
-    let core = app_core.read().await;
-    core.views().get_homes()
+async fn homes_state_signal_snapshot(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<HomesState, AuraError> {
+    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
 }
 
 /// Set active context for navigation and command targeting
@@ -146,17 +129,12 @@ pub async fn move_position(
         _ => 1, // Default to partial
     };
 
-    let signal_homes = homes_state_signal_snapshot(app_core).await;
+    let mut homes = homes_state_signal_snapshot(app_core).await?;
 
     let mut core = app_core.write().await;
 
     // Get current neighborhood state
     let mut neighborhood = core.views().get_neighborhood();
-    let mut homes = core.views().get_homes();
-    if homes.iter().next().is_none() && signal_homes.iter().next().is_some() {
-        homes = signal_homes;
-    }
-
     // Determine target home ID
     let target_selector = HomeSelector::parse(home_id)?;
     let target_home_id = resolve_target_home_id(&neighborhood, target_selector)?;
@@ -623,9 +601,6 @@ pub async fn ensure_local_home_projection(
             });
         }
 
-        // OWNERSHIP: test-only-helper
-        core.views_mut().set_homes(homes.clone());
-        core.views_mut().set_neighborhood(neighborhood.clone());
         (homes, neighborhood)
     };
 
@@ -655,14 +630,12 @@ pub const fn missing_active_home_message() -> &'static str {
     MISSING_ACTIVE_HOME_MESSAGE
 }
 
-/// Resolve an active home/context with deterministic fallback behavior.
-///
-/// OWNERSHIP: first-run-default
+/// Resolve an active home/context without implicit fallback behavior.
 pub async fn resolve_active_home(
     app_core: &Arc<RwLock<AppCore>>,
     home_hint: Option<ChannelId>,
 ) -> Result<ActiveHomeResolution, AuraError> {
-    let homes = homes_state_signal_snapshot(app_core).await;
+    let homes = homes_state_signal_snapshot(app_core).await?;
 
     if let Some(home_id) = home_hint {
         if let Some(home_state) = homes.home_state(&home_id) {
@@ -680,24 +653,16 @@ pub async fn resolve_active_home(
         return resolution_from_home(home_state.id, home_state, ActiveHomeSource::Selected);
     }
 
-    if let Some((home_id, home_state)) = fallback_home(&homes) {
-        return resolution_from_home(home_id, &home_state, ActiveHomeSource::Fallback);
-    }
-
     Err(AuraError::not_found(MISSING_ACTIVE_HOME_MESSAGE))
 }
 
-/// Resolve the active home id with deterministic fallback behavior.
-pub async fn current_home_id_or_fallback(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<ChannelId, AuraError> {
+/// Resolve the active home id.
+pub async fn current_home_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ChannelId, AuraError> {
     Ok(resolve_active_home(app_core, None).await?.home_id)
 }
 
-/// Get current home context id with a deterministic fallback.
-pub async fn current_home_context_or_fallback(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<ContextId, AuraError> {
+/// Get current home context id.
+pub async fn current_home_context(app_core: &Arc<RwLock<AppCore>>) -> Result<ContextId, AuraError> {
     Ok(resolve_active_home(app_core, None).await?.context_id)
 }
 
@@ -705,21 +670,6 @@ pub async fn current_home_context_or_fallback(
 #[must_use]
 pub fn authority_default_relational_context(authority_id: AuthorityId) -> ContextId {
     ContextId::new_from_entropy(hash(&authority_id.to_bytes()))
-}
-
-/// Resolve a chat-capable context, preferring the active home and falling back to
-/// the authority default context when no home has been selected yet.
-pub async fn current_home_context_or_authority_default(
-    app_core: &Arc<RwLock<AppCore>>,
-    authority_id: AuthorityId,
-) -> Result<(ContextId, bool), AuraError> {
-    match resolve_active_home(app_core, None).await {
-        Ok(resolution) => Ok((resolution.context_id, true)),
-        Err(AuraError::NotFound { message }) if message == MISSING_ACTIVE_HOME_MESSAGE => {
-            Ok((authority_default_relational_context(authority_id), false))
-        }
-        Err(error) => Err(error),
-    }
 }
 
 /// Stable fallback context for relational facts that should not depend on UI selection.
@@ -773,10 +723,9 @@ pub async fn initialize_test_home(
 
     // Add to HOMES_SIGNAL
     let homes = {
-        let mut core = app_core.write().await;
+        let core = app_core.read().await;
         let mut homes = core.views().get_homes();
         homes.add_home(home_state);
-        core.views_mut().set_homes(homes.clone());
         homes
     };
 
@@ -883,7 +832,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_resolve_active_home_uses_deterministic_fallback() {
+    async fn test_resolve_active_home_requires_explicit_or_selected_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
@@ -892,17 +841,6 @@ mod tests {
         let home_b = ChannelId::from_bytes(hash(b"home-a"));
         let ctx_a = ContextId::new_from_entropy(hash(b"ctx-z"));
         let ctx_b = ContextId::new_from_entropy(hash(b"ctx-a"));
-        let expected_home = if home_a.as_bytes() <= home_b.as_bytes() {
-            home_a
-        } else {
-            home_b
-        };
-        let expected_ctx = if expected_home == home_a {
-            ctx_a
-        } else {
-            ctx_b
-        };
-
         {
             let mut core = app_core.write().await;
             let mut homes = core.views().get_homes();
@@ -925,10 +863,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let resolved = resolve_active_home(&app_core, None).await.unwrap();
-        assert_eq!(resolved.home_id, expected_home);
-        assert_eq!(resolved.context_id, expected_ctx);
-        assert_eq!(resolved.source, ActiveHomeSource::Fallback);
+        let error = resolve_active_home(&app_core, None).await.unwrap_err();
+        assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
     }
 
     #[tokio::test]
@@ -941,7 +877,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_current_home_context_or_authority_default_uses_active_home_when_available() {
+    async fn test_current_home_context_uses_active_home_when_available() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
@@ -961,29 +897,19 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let (resolved_ctx, used_home_context) =
-            current_home_context_or_authority_default(&app_core, authority)
-                .await
-                .expect("context should resolve");
+        let resolved_ctx = current_home_context(&app_core)
+            .await
+            .expect("context should resolve");
         assert_eq!(resolved_ctx, home_ctx);
-        assert!(used_home_context);
     }
 
     #[tokio::test]
-    async fn test_current_home_context_or_authority_default_falls_back_without_home() {
+    async fn test_current_home_context_requires_active_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([32u8; 32]);
 
-        let (resolved_ctx, used_home_context) =
-            current_home_context_or_authority_default(&app_core, authority)
-                .await
-                .expect("fallback context should resolve");
-        assert_eq!(
-            resolved_ctx,
-            authority_default_relational_context(authority)
-        );
-        assert!(!used_home_context);
+        let error = current_home_context(&app_core).await.unwrap_err();
+        assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
     }
 
     #[tokio::test]

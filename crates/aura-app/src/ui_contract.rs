@@ -1802,6 +1802,13 @@ pub const BROWSER_HARNESS_BRIDGE_METHODS: &[BrowserHarnessBridgeMethod] = &[
         returns_render_signal: false,
     },
     BrowserHarnessBridgeMethod {
+        name: "open_settings_section",
+        kind: BrowserHarnessBridgeMethodKind::Action,
+        deterministic: false,
+        returns_semantic_state: false,
+        returns_render_signal: false,
+    },
+    BrowserHarnessBridgeMethod {
         name: "snapshot",
         kind: BrowserHarnessBridgeMethodKind::ReadState,
         deterministic: true,

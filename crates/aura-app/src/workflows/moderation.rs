@@ -439,7 +439,7 @@ pub async fn kick_user_resolved(
         channel_id,
         target_id,
         runtime.authority_id(),
-        reason.unwrap_or_default().to_string(),
+        reason.map_or_else(String::new, str::to_string),
         kicked_at_ms,
     )
     .to_generic();
@@ -494,7 +494,7 @@ pub async fn ban_user_resolved(
         None,
         target_id,
         runtime.authority_id(),
-        reason.unwrap_or_default().to_string(),
+        reason.map_or_else(String::new, str::to_string),
         banned_at_ms,
         None,
     )
@@ -508,7 +508,7 @@ pub async fn ban_user_resolved(
         |home| {
             home.add_ban(crate::views::home::BanRecord {
                 authority_id: target_id,
-                reason: reason.unwrap_or_default().to_string(),
+                reason: reason.map_or_else(String::new, str::to_string),
                 actor: runtime.authority_id(),
                 banned_at: banned_at_ms,
             });

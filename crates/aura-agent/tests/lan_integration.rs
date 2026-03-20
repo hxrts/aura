@@ -406,10 +406,7 @@ async fn accept_pending_channel_invitation(
 }
 
 async fn ensure_current_home(app: &Arc<RwLock<AppCore>>) -> TestResult {
-    if context_workflow::current_home_context_or_fallback(app)
-        .await
-        .is_ok()
-    {
+    if context_workflow::current_home_context(app).await.is_ok() {
         return Ok(());
     }
 

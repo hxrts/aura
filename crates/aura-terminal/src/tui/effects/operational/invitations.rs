@@ -169,11 +169,7 @@ pub async fn handle_invitations(
                     let home_id = if let Some(id) = extra {
                         id
                     } else {
-                        match aura_app::ui::workflows::context::current_home_id_or_fallback(
-                            app_core,
-                        )
-                        .await
-                        {
+                        match aura_app::ui::workflows::context::current_home_id(app_core).await {
                             Ok(id) => id.to_string(),
                             Err(error) => {
                                 return Some(Err(OpError::InvalidArgument(error.to_string())));
@@ -237,12 +233,10 @@ pub async fn handle_invitations(
                 Err(error) => return Some(Err(error)),
             };
 
-            let home_id =
-                match aura_app::ui::workflows::context::current_home_id_or_fallback(app_core).await
-                {
-                    Ok(id) => id.to_string(),
-                    Err(error) => return Some(Err(OpError::InvalidArgument(error.to_string()))),
-                };
+            let home_id = match aura_app::ui::workflows::context::current_home_id(app_core).await {
+                Ok(id) => id.to_string(),
+                Err(error) => return Some(Err(OpError::InvalidArgument(error.to_string()))),
+            };
 
             match create_channel_invitation(
                 app_core, receiver, home_id, None, None, None, None, None, None, None, None,
