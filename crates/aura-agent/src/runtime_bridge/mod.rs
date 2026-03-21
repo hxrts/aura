@@ -540,7 +540,6 @@ impl AgentRuntimeBridge {
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to merge synced facts: {e}"))
             })?;
-        effects.await_next_view_update().await;
 
         tracing::info!(
             peer = %peer,

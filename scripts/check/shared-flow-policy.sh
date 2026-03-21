@@ -30,7 +30,12 @@ bash scripts/check/harness-mode-allowlist.sh
 bash scripts/check/harness-render-convergence.sh
 bash scripts/check/harness-focus-selection-contract.sh
 bash scripts/check/harness-revision-contract.sh
-bash scripts/check/harness-recovery-ownership.sh
+cargo run -q -p aura-macros --bin ownership_lints -- \
+  harness-recovery-ownership \
+  crates/aura-harness/src/tool_api.rs \
+  crates/aura-terminal/src/tui/harness_state/snapshot.rs \
+  crates/aura-ui/src/model.rs \
+  crates/aura-web/src/harness_bridge.rs
 bash scripts/check/harness-recovery-contract.sh
 bash scripts/check/harness-wait-contract.sh
 bash scripts/check/harness-semantic-primitive-contract.sh

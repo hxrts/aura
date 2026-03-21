@@ -65,10 +65,20 @@ rg -q 'move semantics solve session and endpoint ownership transfer' "$agent_arc
   || fail "aura-agent must document move semantics for ownership transfer"
 
 # Composition: delegates to sub-checks after the doc validation above.
-#   1. harness-readiness-ownership.sh — readiness-specific refresh API enforcement
-#   2. harness-move-ownership-boundary.sh — frontend handle/receipt fabrication boundaries
+#   1. ownership_lints harness-readiness-ownership — readiness-specific refresh API enforcement
+#   2. ownership_lints harness-move-ownership-boundary — frontend handle/receipt fabrication boundaries
 # Note: semantic lifecycle authorship is now covered by aura-app compile-fail ownership boundaries.
-bash scripts/check/harness-readiness-ownership.sh
-bash scripts/check/harness-move-ownership-boundary.sh
+cargo run -q -p aura-macros --bin ownership_lints -- \
+  harness-readiness-ownership \
+  crates/aura-agent/src/reactive/app_signal_views.rs \
+  crates/aura-terminal/src \
+  crates/aura-web/src \
+  crates/aura-harness/src
+cargo run -q -p aura-macros --bin ownership_lints -- \
+  harness-move-ownership-boundary \
+  crates/aura-app \
+  crates/aura-terminal \
+  crates/aura-web \
+  crates/aura-harness
 
 echo "harness actor-vs-move ownership: clean"

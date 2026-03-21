@@ -291,31 +291,41 @@ pub fn best_effort_boundary(_attr: TokenStream, item: TokenStream) -> TokenStrea
 
 /// Marker attribute for helpers that mint or read authoritative semantic truth.
 ///
-/// This is currently a no-op at expansion time and exists so repo-local
-/// ownership lints can distinguish authoritative-source helpers from observed
-/// snapshot helpers.
+/// The marker is validated so Rust-native ownership lints can rely on it as a
+/// real declaration surface rather than an unchecked comment replacement.
 #[proc_macro_attribute]
-pub fn authoritative_source(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
+pub fn authoritative_source(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<AuthoritativeSourceAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    transform_authoritative_source(item, config)
 }
 
 /// Marker attribute for canonical strong-reference types.
 ///
-/// This is currently a no-op at expansion time and exists so repo-local
-/// ownership lints can distinguish canonical owned references/handles from weak
-/// identifier inputs.
+/// The marker is validated so Rust-native ownership lints can distinguish
+/// canonical owned references/handles from weak identifier inputs reliably.
 #[proc_macro_attribute]
-pub fn strong_reference(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
+pub fn strong_reference(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<StrongReferenceAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    transform_strong_reference(item, config)
 }
 
 /// Marker attribute for weak identifier carrier types.
 ///
-/// This is currently a no-op at expansion time and exists so repo-local
-/// ownership lints can model weak-to-strong upgrade boundaries explicitly.
+/// The marker is validated so repo-local ownership lints can model
+/// weak-to-strong upgrade boundaries explicitly.
 #[proc_macro_attribute]
-pub fn weak_identifier(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    item
+pub fn weak_identifier(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<WeakIdentifierAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    transform_weak_identifier(item, config)
 }
 
 /// Marker attribute for helpers that are projection/display-only.
@@ -435,6 +445,18 @@ struct CapabilityBoundaryAttr {
     capability: LitStr,
 }
 
+struct AuthoritativeSourceAttr {
+    kind: LitStr,
+}
+
+struct StrongReferenceAttr {
+    domain: LitStr,
+}
+
+struct WeakIdentifierAttr {
+    domain: LitStr,
+}
+
 struct OwnershipLifecycleAttr {
     initial: LitStr,
     ordered: Vec<LitStr>,
@@ -453,17 +475,17 @@ impl Parse for ActorOwnedAttr {
 
         for meta in metas {
             if meta.path.is_ident("owner") {
-                owner = Some(expect_string_literal(&meta, "owner")?);
+                owner = Some(expect_string_literal(&meta, "owner", "actor_owned")?);
             } else if meta.path.is_ident("domain") {
-                domain = Some(expect_string_literal(&meta, "domain")?);
+                domain = Some(expect_string_literal(&meta, "domain", "actor_owned")?);
             } else if meta.path.is_ident("gate") {
-                gate = Some(expect_string_literal(&meta, "gate")?);
+                gate = Some(expect_string_literal(&meta, "gate", "actor_owned")?);
             } else if meta.path.is_ident("command") {
-                command = Some(expect_type_value(&meta, "command")?);
+                command = Some(expect_type_value(&meta, "command", "actor_owned")?);
             } else if meta.path.is_ident("capacity") {
-                capacity = Some(expect_u32_literal(&meta, "capacity")?);
+                capacity = Some(expect_u32_literal(&meta, "capacity", "actor_owned")?);
             } else if meta.path.is_ident("category") {
-                category = Some(expect_string_literal(&meta, "category")?);
+                category = Some(expect_string_literal(&meta, "category", "actor_owned")?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
@@ -527,30 +549,37 @@ impl Parse for SemanticOwnerAttr {
 
         for meta in metas {
             if meta.path.is_ident("owner") {
-                owner = Some(expect_string_literal(&meta, "owner")?);
+                owner = Some(expect_string_literal(&meta, "owner", "semantic_owner")?);
             } else if meta.path.is_ident("terminal") {
-                terminal = Some(expect_string_literal(&meta, "terminal")?);
+                terminal = Some(expect_string_literal(&meta, "terminal", "semantic_owner")?);
             } else if meta.path.is_ident("postcondition") {
-                postcondition = Some(expect_string_literal(&meta, "postcondition")?);
+                postcondition = Some(expect_string_literal(
+                    &meta,
+                    "postcondition",
+                    "semantic_owner",
+                )?);
             } else if meta.path.is_ident("proof") {
-                proof = Some(expect_type_value(&meta, "proof")?);
+                proof = Some(expect_type_value(&meta, "proof", "semantic_owner")?);
             } else if meta.path.is_ident("authoritative_inputs") {
                 authoritative_inputs = Some(parse_optional_list_literal(&expect_string_literal(
                     &meta,
                     "authoritative_inputs",
+                    "semantic_owner",
                 )?)?);
             } else if meta.path.is_ident("depends_on") {
                 depends_on = Some(parse_optional_list_literal(&expect_string_literal(
                     &meta,
                     "depends_on",
+                    "semantic_owner",
                 )?)?);
             } else if meta.path.is_ident("child_ops") {
                 child_ops = Some(parse_optional_list_literal(&expect_string_literal(
                     &meta,
                     "child_ops",
+                    "semantic_owner",
                 )?)?);
             } else if meta.path.is_ident("category") {
-                category = Some(expect_string_literal(&meta, "category")?);
+                category = Some(expect_string_literal(&meta, "category", "semantic_owner")?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
@@ -617,9 +646,17 @@ impl Parse for CapabilityBoundaryAttr {
 
         for meta in metas {
             if meta.path.is_ident("category") {
-                category = Some(expect_string_literal(&meta, "category")?);
+                category = Some(expect_string_literal(
+                    &meta,
+                    "category",
+                    "capability_boundary",
+                )?);
             } else if meta.path.is_ident("capability") {
-                capability = Some(expect_string_literal(&meta, "capability")?);
+                capability = Some(expect_string_literal(
+                    &meta,
+                    "capability",
+                    "capability_boundary",
+                )?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
@@ -645,6 +682,91 @@ impl Parse for CapabilityBoundaryAttr {
     }
 }
 
+impl Parse for AuthoritativeSourceAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut kind = None;
+
+        for meta in metas {
+            if meta.path.is_ident("kind") {
+                kind = Some(expect_string_literal(
+                    &meta,
+                    "kind",
+                    "authoritative_source",
+                )?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported authoritative_source attribute key; expected `kind`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            kind: kind.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "authoritative_source requires `kind = \"...\"`",
+                )
+            })?,
+        })
+    }
+}
+
+impl Parse for StrongReferenceAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut domain = None;
+
+        for meta in metas {
+            if meta.path.is_ident("domain") {
+                domain = Some(expect_string_literal(&meta, "domain", "strong_reference")?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported strong_reference attribute key; expected `domain`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            domain: domain.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "strong_reference requires `domain = \"...\"`",
+                )
+            })?,
+        })
+    }
+}
+
+impl Parse for WeakIdentifierAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut domain = None;
+
+        for meta in metas {
+            if meta.path.is_ident("domain") {
+                domain = Some(expect_string_literal(&meta, "domain", "weak_identifier")?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported weak_identifier attribute key; expected `domain`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            domain: domain.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "weak_identifier requires `domain = \"...\"`",
+                )
+            })?,
+        })
+    }
+}
+
 impl Parse for OwnershipLifecycleAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
         let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
@@ -654,15 +776,22 @@ impl Parse for OwnershipLifecycleAttr {
 
         for meta in metas {
             if meta.path.is_ident("initial") {
-                initial = Some(expect_string_literal(&meta, "initial")?);
+                initial = Some(expect_string_literal(
+                    &meta,
+                    "initial",
+                    "ownership_lifecycle",
+                )?);
             } else if meta.path.is_ident("ordered") {
                 ordered = Some(parse_list_literal(&expect_string_literal(
-                    &meta, "ordered",
+                    &meta,
+                    "ordered",
+                    "ownership_lifecycle",
                 )?)?);
             } else if meta.path.is_ident("terminals") {
                 terminals = Some(parse_list_literal(&expect_string_literal(
                     &meta,
                     "terminals",
+                    "ownership_lifecycle",
                 )?)?);
             } else {
                 return Err(Error::new_spanned(
@@ -695,7 +824,7 @@ impl Parse for OwnershipLifecycleAttr {
     }
 }
 
-fn expect_string_literal(meta: &MetaNameValue, name: &str) -> SynResult<LitStr> {
+fn expect_string_literal(meta: &MetaNameValue, name: &str, attr: &str) -> SynResult<LitStr> {
     match &meta.value {
         Expr::Lit(ExprLit {
             lit: Lit::Str(value),
@@ -703,12 +832,12 @@ fn expect_string_literal(meta: &MetaNameValue, name: &str) -> SynResult<LitStr> 
         }) => Ok(value.clone()),
         other => Err(Error::new_spanned(
             other,
-            format!("semantic_owner `{name}` value must be a string literal"),
+            format!("{attr} `{name}` value must be a string literal"),
         )),
     }
 }
 
-fn expect_type_value(meta: &MetaNameValue, name: &str) -> SynResult<Type> {
+fn expect_type_value(meta: &MetaNameValue, name: &str, attr: &str) -> SynResult<Type> {
     match &meta.value {
         Expr::Path(expr_path) => Ok(Type::Path(TypePath {
             qself: None,
@@ -716,22 +845,22 @@ fn expect_type_value(meta: &MetaNameValue, name: &str) -> SynResult<Type> {
         })),
         other => Err(Error::new_spanned(
             other,
-            format!("actor_owned `{name}` value must be a type"),
+            format!("{attr} `{name}` value must be a type"),
         )),
     }
 }
 
-fn expect_u32_literal(meta: &MetaNameValue, name: &str) -> SynResult<u32> {
+fn expect_u32_literal(meta: &MetaNameValue, name: &str, attr: &str) -> SynResult<u32> {
     match &meta.value {
         Expr::Lit(ExprLit {
             lit: Lit::Int(value),
             ..
-        }) => value.base10_parse::<u32>().map_err(|_| {
-            Error::new_spanned(value, format!("actor_owned `{name}` must fit in u32"))
-        }),
+        }) => value
+            .base10_parse::<u32>()
+            .map_err(|_| Error::new_spanned(value, format!("{attr} `{name}` must fit in u32"))),
         other => Err(Error::new_spanned(
             other,
-            format!("actor_owned `{name}` value must be an integer literal"),
+            format!("{attr} `{name}` value must be an integer literal"),
         )),
     }
 }
@@ -758,6 +887,94 @@ fn parse_optional_list_literal(list: &LitStr) -> SynResult<Vec<LitStr>> {
         return Ok(Vec::new());
     }
     parse_list_literal(list)
+}
+
+fn transform_authoritative_source(
+    item: TokenStream,
+    config: AuthoritativeSourceAttr,
+) -> TokenStream {
+    if let Ok(function) = syn::parse::<ItemFn>(item.clone()) {
+        if let Err(error) = validate_authoritative_source_kind(&config.kind) {
+            return error.to_compile_error().into();
+        }
+        return quote! { #function }.into();
+    }
+    if let Ok(function) = syn::parse::<ImplItemFn>(item.clone()) {
+        if let Err(error) = validate_authoritative_source_kind(&config.kind) {
+            return error.to_compile_error().into();
+        }
+        return quote! { #function }.into();
+    }
+    Error::new(
+        proc_macro2::Span::call_site(),
+        "#[authoritative_source] may only be applied to free or impl functions",
+    )
+    .to_compile_error()
+    .into()
+}
+
+fn transform_strong_reference(item: TokenStream, config: StrongReferenceAttr) -> TokenStream {
+    if let Err(error) = validate_reference_domain(&config.domain, "strong_reference") {
+        return error.to_compile_error().into();
+    }
+    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
+        return quote! { #strukt }.into();
+    }
+    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
+        return quote! { #item_enum }.into();
+    }
+    Error::new(
+        proc_macro2::Span::call_site(),
+        "#[strong_reference] may only be applied to structs or enums",
+    )
+    .to_compile_error()
+    .into()
+}
+
+fn transform_weak_identifier(item: TokenStream, config: WeakIdentifierAttr) -> TokenStream {
+    if let Err(error) = validate_reference_domain(&config.domain, "weak_identifier") {
+        return error.to_compile_error().into();
+    }
+    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
+        return quote! { #strukt }.into();
+    }
+    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
+        return quote! { #item_enum }.into();
+    }
+    Error::new(
+        proc_macro2::Span::call_site(),
+        "#[weak_identifier] may only be applied to structs or enums",
+    )
+    .to_compile_error()
+    .into()
+}
+
+fn validate_authoritative_source_kind(kind: &LitStr) -> SynResult<()> {
+    if matches!(
+        kind.value().as_str(),
+        "runtime" | "signal" | "app_core" | "proof_issuer"
+    ) {
+        return Ok(());
+    }
+    Err(Error::new_spanned(
+        kind,
+        "authoritative_source kind must be one of `runtime`, `signal`, `app_core`, or `proof_issuer`",
+    ))
+}
+
+fn validate_reference_domain(domain: &LitStr, attr: &str) -> SynResult<()> {
+    if matches!(
+        domain.value().as_str(),
+        "channel" | "invitation" | "ceremony" | "home" | "home_scope"
+    ) {
+        return Ok(());
+    }
+    Err(Error::new_spanned(
+        domain,
+        format!(
+            "{attr} domain must be one of `channel`, `invitation`, `ceremony`, `home`, or `home_scope`"
+        ),
+    ))
 }
 
 fn transform_semantic_owner(item: TokenStream, config: SemanticOwnerAttr) -> TokenStream {

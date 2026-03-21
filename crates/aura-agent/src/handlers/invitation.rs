@@ -2779,17 +2779,8 @@ mod tests {
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) {
-        let now_ms = InvitationHandler::best_effort_current_timestamp_ms(&effects).await;
         handler
-            .validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
-            .await
-            .unwrap();
-
-        let snapshot = handler.build_snapshot(effects.as_ref()).await;
-        let outcome = handler
-            .service
-            .prepare_accept_invitation(&snapshot, invitation_id);
-        execute_guard_outcome_for_accept(outcome, &handler.context.authority, effects.as_ref())
+            .accept_invitation(effects, invitation_id)
             .await
             .unwrap();
     }

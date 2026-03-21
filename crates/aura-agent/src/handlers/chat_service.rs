@@ -373,6 +373,278 @@ impl ChatServiceApi {
         Ok(out)
     }
 
+    async fn load_message_facts(
+        &self,
+        message_id: &ChatMessageId,
+    ) -> AgentResult<Option<(ChatGroupId, Vec<aura_chat::ChatFact>)>> {
+        let typed = self
+            .effects
+            .load_committed_facts(self.effects.authority_id())
+            .await
+            .map_err(AgentError::from)?;
+
+        let target_message_id = message_id.to_string();
+        let mut group_id = None;
+        let mut out = Vec::new();
+
+        for fact in typed {
+            let aura_journal::fact::FactContent::Relational(
+                aura_journal::fact::RelationalFact::Generic { envelope, .. },
+            ) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
+                continue;
+            };
+
+            let matched_context = match &chat_fact {
+                aura_chat::ChatFact::MessageSentSealed {
+                    context_id,
+                    message_id,
+                    ..
+                }
+                | aura_chat::ChatFact::MessageRead {
+                    context_id,
+                    message_id,
+                    ..
+                }
+                | aura_chat::ChatFact::MessageEdited {
+                    context_id,
+                    message_id,
+                    ..
+                }
+                | aura_chat::ChatFact::MessageDeliveryUpdated {
+                    context_id,
+                    message_id,
+                    ..
+                }
+                | aura_chat::ChatFact::MessageDeleted {
+                    context_id,
+                    message_id,
+                    ..
+                } if *message_id == target_message_id => Some(*context_id),
+                _ => None,
+            };
+
+            let Some(context_id) = matched_context else {
+                continue;
+            };
+
+            group_id.get_or_insert_with(|| {
+                ChatGroupId::from_uuid(Uuid::from_bytes(context_id.to_bytes()))
+            });
+            out.push(chat_fact);
+        }
+
+        Ok(group_id.map(|group_id| (group_id, out)))
+    }
+
+    fn physical_timestamp(physical_time: PhysicalTime) -> TimeStamp {
+        TimeStamp::PhysicalClock(physical_time)
+    }
+
+    fn parse_message_id(message_id: &str) -> ChatMessageId {
+        let message_uuid = Uuid::parse_str(message_id).unwrap_or_else(|_| {
+            let digest = hash(message_id.as_bytes());
+            let mut uuid_bytes = [0u8; 16];
+            uuid_bytes.copy_from_slice(&digest[..16]);
+            Uuid::from_bytes(uuid_bytes)
+        });
+        ChatMessageId(message_uuid)
+    }
+
+    fn decode_payload(payload: Vec<u8>) -> String {
+        let payload_len = payload.len();
+        String::from_utf8(payload).unwrap_or_else(|_| format!("[sealed: {payload_len} bytes]"))
+    }
+
+    fn ordered_chat_facts(facts: Vec<aura_chat::ChatFact>) -> Vec<(usize, aura_chat::ChatFact)> {
+        let mut ordered: Vec<_> = facts.into_iter().enumerate().collect();
+        ordered.sort_by(|(left_idx, left_fact), (right_idx, right_fact)| {
+            left_fact
+                .timestamp_ms()
+                .cmp(&right_fact.timestamp_ms())
+                .then(left_idx.cmp(right_idx))
+        });
+        ordered
+    }
+
+    fn reduce_group_messages(
+        group_id: &ChatGroupId,
+        facts: Vec<aura_chat::ChatFact>,
+    ) -> Vec<ChatMessage> {
+        let mut messages = std::collections::BTreeMap::<String, ChatMessage>::new();
+
+        for (_, fact) in Self::ordered_chat_facts(facts) {
+            match fact {
+                aura_chat::ChatFact::MessageSentSealed {
+                    message_id,
+                    sender_id,
+                    payload,
+                    sent_at,
+                    reply_to,
+                    ..
+                } => {
+                    let mut message = ChatMessage::new_text(
+                        Self::parse_message_id(&message_id),
+                        group_id.clone(),
+                        sender_id,
+                        Self::decode_payload(payload),
+                        Self::physical_timestamp(sent_at),
+                    );
+                    if let Some(reply_to) = reply_to {
+                        if let Ok(reply_uuid) = Uuid::parse_str(&reply_to) {
+                            message = message.set_reply_to(ChatMessageId(reply_uuid));
+                        }
+                    }
+                    messages.insert(message_id, message);
+                }
+                aura_chat::ChatFact::MessageEdited {
+                    message_id,
+                    editor_id,
+                    new_payload,
+                    edited_at,
+                    ..
+                } => {
+                    let edited_content = Self::decode_payload(new_payload);
+                    let timestamp = Self::physical_timestamp(edited_at);
+                    if let Some(existing) = messages.get_mut(&message_id) {
+                        existing.content = edited_content;
+                        existing.timestamp = timestamp;
+                        existing.message_type = aura_chat::types::MessageType::Edit;
+                    } else {
+                        messages.insert(
+                            message_id.clone(),
+                            ChatMessage {
+                                id: Self::parse_message_id(&message_id),
+                                group_id: group_id.clone(),
+                                sender_id: editor_id,
+                                content: edited_content,
+                                message_type: aura_chat::types::MessageType::Edit,
+                                timestamp,
+                                reply_to: None,
+                                metadata: std::collections::HashMap::default(),
+                            },
+                        );
+                    }
+                }
+                aura_chat::ChatFact::MessageDeleted { message_id, .. } => {
+                    messages.remove(&message_id);
+                }
+                _ => {}
+            }
+        }
+
+        let mut messages: Vec<_> = messages.into_values().collect();
+        messages.sort_by(|left, right| {
+            left.timestamp
+                .sort_compare(&right.timestamp, OrderingPolicy::DeterministicTieBreak)
+        });
+        messages
+    }
+
+    fn reduce_group_view(
+        group_id: &ChatGroupId,
+        facts: Vec<aura_chat::ChatFact>,
+    ) -> Option<ChatGroup> {
+        let mut group = None;
+        let mut closed = false;
+
+        for (_, fact) in Self::ordered_chat_facts(facts) {
+            match fact {
+                aura_chat::ChatFact::ChannelCreated {
+                    name,
+                    topic,
+                    created_at,
+                    creator_id,
+                    ..
+                } => {
+                    let created_at = Self::physical_timestamp(created_at);
+                    group = Some(ChatGroup {
+                        id: group_id.clone(),
+                        name,
+                        description: topic.unwrap_or_default(),
+                        created_at: created_at.clone(),
+                        created_by: creator_id,
+                        members: vec![ChatMember {
+                            authority_id: creator_id,
+                            nickname_suggestion: creator_id.to_string(),
+                            joined_at: created_at,
+                            role: ChatRole::Admin,
+                        }],
+                        metadata: std::collections::HashMap::default(),
+                    });
+                }
+                aura_chat::ChatFact::ChannelUpdated {
+                    name,
+                    topic,
+                    member_ids,
+                    updated_at,
+                    ..
+                } => {
+                    let Some(group) = group.as_mut() else {
+                        continue;
+                    };
+                    if let Some(name) = name {
+                        group.name = name;
+                    }
+                    if let Some(topic) = topic {
+                        group.description = topic;
+                    }
+                    if let Some(member_ids) = member_ids {
+                        let joined_at = Self::physical_timestamp(updated_at);
+                        let mut members = vec![ChatMember {
+                            authority_id: group.created_by,
+                            nickname_suggestion: group.created_by.to_string(),
+                            joined_at: group.created_at.clone(),
+                            role: ChatRole::Admin,
+                        }];
+                        for member_id in member_ids {
+                            if member_id == group.created_by {
+                                continue;
+                            }
+                            members.push(ChatMember {
+                                authority_id: member_id,
+                                nickname_suggestion: member_id.to_string(),
+                                joined_at: joined_at.clone(),
+                                role: ChatRole::Member,
+                            });
+                        }
+                        group.members = members;
+                    }
+                }
+                aura_chat::ChatFact::ChannelClosed { .. } => {
+                    closed = true;
+                }
+                _ => {}
+            }
+        }
+
+        if closed {
+            None
+        } else {
+            group
+        }
+    }
+
+    fn reduce_message(
+        group_id: &ChatGroupId,
+        facts: Vec<aura_chat::ChatFact>,
+    ) -> Option<ChatMessage> {
+        let mut reduced = Self::reduce_group_messages(group_id, facts);
+        if reduced.len() == 1 {
+            reduced.pop()
+        } else {
+            None
+        }
+    }
+
     // =========================================================================
     // Public API (terminal/tests)
     // =========================================================================
@@ -537,64 +809,16 @@ impl ChatServiceApi {
         before: Option<TimeStamp>,
     ) -> AgentResult<Vec<ChatMessage>> {
         let facts = self.load_group_facts(group_id).await?;
+        let mut messages = Self::reduce_group_messages(group_id, facts);
 
-        let mut messages = Vec::new();
-        for fact in facts {
-            let aura_chat::ChatFact::MessageSentSealed {
-                message_id,
-                sender_id,
-                payload,
-                sent_at,
-                reply_to,
-                ..
-            } = fact
-            else {
-                continue;
-            };
-
-            let timestamp = TimeStamp::PhysicalClock(sent_at);
-            if let Some(before_ts) = &before {
-                if !matches!(
-                    timestamp.compare(before_ts, OrderingPolicy::Native),
+        if let Some(before_ts) = &before {
+            messages.retain(|message| {
+                matches!(
+                    message.timestamp.compare(before_ts, OrderingPolicy::Native),
                     TimeOrdering::Before
-                ) {
-                    continue;
-                }
-            }
-
-            let msg_uuid = Uuid::parse_str(&message_id).unwrap_or_else(|_| {
-                let h = hash(message_id.as_bytes());
-                let mut uuid_bytes = [0u8; 16];
-                uuid_bytes.copy_from_slice(&h[..16]);
-                Uuid::from_bytes(uuid_bytes)
+                )
             });
-
-            let payload_len = payload.len();
-            let content = String::from_utf8(payload)
-                .unwrap_or_else(|_| format!("[sealed: {} bytes]", payload_len));
-
-            let mut msg = ChatMessage::new_text(
-                ChatMessageId(msg_uuid),
-                group_id.clone(),
-                sender_id,
-                content,
-                timestamp,
-            );
-
-            if let Some(reply_str) = reply_to {
-                if let Ok(reply_uuid) = Uuid::parse_str(&reply_str) {
-                    msg = msg.set_reply_to(ChatMessageId(reply_uuid));
-                }
-            }
-
-            messages.push(msg);
         }
-
-        // Sort by timestamp for stable history
-        messages.sort_by(|a, b| {
-            a.timestamp
-                .sort_compare(&b.timestamp, OrderingPolicy::DeterministicTieBreak)
-        });
 
         if let Some(limit) = limit {
             if messages.len() > limit {
@@ -608,42 +832,10 @@ impl ChatServiceApi {
 
     /// Get a chat group by ID.
     ///
-    /// Reconstructs a minimal view from the `ChannelCreated` fact.
+    /// Reconstructs a fact-backed view from the committed channel facts.
     pub async fn get_group(&self, group_id: &ChatGroupId) -> AgentResult<Option<ChatGroup>> {
         let facts = self.load_group_facts(group_id).await?;
-
-        let mut created: Option<(String, AuthorityId, PhysicalTime)> = None;
-        for fact in facts {
-            if let aura_chat::ChatFact::ChannelCreated {
-                name,
-                creator_id,
-                created_at,
-                ..
-            } = fact
-            {
-                created = Some((name, creator_id, created_at));
-            }
-        }
-
-        let Some((name, creator_id, created_at)) = created else {
-            return Ok(None);
-        };
-
-        let created_at_ts = TimeStamp::PhysicalClock(created_at);
-        Ok(Some(ChatGroup {
-            id: group_id.clone(),
-            name,
-            description: String::new(),
-            created_at: created_at_ts.clone(),
-            created_by: creator_id,
-            members: vec![ChatMember {
-                authority_id: creator_id,
-                nickname_suggestion: creator_id.to_string(),
-                joined_at: created_at_ts,
-                role: ChatRole::Admin,
-            }],
-            metadata: std::collections::HashMap::default(),
-        }))
+        Ok(Self::reduce_group_view(group_id, facts))
     }
 
     /// List groups that this authority has created/observed locally.
@@ -828,14 +1020,15 @@ impl ChatServiceApi {
 
     pub async fn get_message(
         &self,
-        _message_id: &ChatMessageId,
+        message_id: &ChatMessageId,
     ) -> AgentResult<Option<ChatMessage>> {
-        Err(AgentError::effects(
-            "Message lookup by ID is not yet fact-backed",
-        ))
+        let Some((group_id, facts)) = self.load_message_facts(message_id).await? else {
+            return Ok(None);
+        };
+        Ok(Self::reduce_message(&group_id, facts))
     }
 
-    /// Edit a message (Category A operation - optimistic)
+    /// Edit a message (Category A operation - fact-backed)
     ///
     /// Per docs/109_operation_categories.md, message edits are Category A:
     /// just emit a MessageEdited fact. The original message remains in the journal;
@@ -872,19 +1065,8 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit edit fact: {e}")))?;
 
-        // Wait for the reactive scheduler to process the fact before returning
-        self.effects.await_next_view_update().await;
-
-        // Return the updated message representation
-        Ok(ChatMessage {
-            id: message_id.clone(),
-            group_id: group_id.clone(),
-            sender_id: editor,
-            content: new_content.to_string(),
-            message_type: aura_chat::types::MessageType::Edit,
-            timestamp: TimeStamp::PhysicalClock(now),
-            reply_to: None,
-            metadata: std::collections::HashMap::default(),
+        self.get_message(message_id).await?.ok_or_else(|| {
+            AgentError::effects("Edited message was committed but could not be reduced")
         })
     }
 
@@ -936,7 +1118,7 @@ impl ChatServiceApi {
         Err(AgentError::effects("Message search is not yet fact-backed"))
     }
 
-    /// Update group details (Category A operation - optimistic)
+    /// Update group details (Category A operation - fact-backed)
     ///
     /// Per docs/109_operation_categories.md, topic/name updates are Category A:
     /// CRDT semantics with last-write-wins resolution.
@@ -976,16 +1158,8 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit update fact: {e}")))?;
 
-        // Return the updated group representation
-        // Note: This returns the requested changes; actual state comes from reducing all facts
-        Ok(ChatGroup {
-            id: group_id.clone(),
-            name: name.unwrap_or_default(),
-            description: description.unwrap_or_default(),
-            created_at: TimeStamp::PhysicalClock(now), // Would need to fetch actual created_at
-            created_by: requester,                     // Would need to fetch actual creator
-            members: vec![],                           // Would need to fetch actual members
-            metadata: std::collections::HashMap::default(),
+        self.get_group(group_id).await?.ok_or_else(|| {
+            AgentError::effects("Updated group was committed but could not be reduced")
         })
     }
 
@@ -1078,4 +1252,250 @@ fn amp_session_uuid(context_id: &ContextId, sender: &AuthorityId, receiver: &Aut
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     Uuid::from_bytes(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use aura_journal::DomainFact;
+    use std::sync::Arc;
+
+    fn authority(byte: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([byte; 32])
+    }
+
+    fn group_id(byte: u8) -> ChatGroupId {
+        ChatGroupId::from_uuid(Uuid::from_bytes([byte; 16]))
+    }
+
+    async fn commit_chat_fact(
+        effects: &Arc<AuraEffectSystem>,
+        context_id: ContextId,
+        fact: aura_chat::ChatFact,
+    ) {
+        effects
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), fact.to_bytes())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_history_reduces_edits_and_deletes_from_committed_facts() {
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let group_id = group_id(7);
+        let context_id = ChatServiceApi::context_id_for_group(&group_id);
+        let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
+        let creator = authority(1);
+        let message_one = ChatMessageId::from_uuid(Uuid::from_bytes([8; 16]));
+        let message_two = ChatMessageId::from_uuid(Uuid::from_bytes([9; 16]));
+
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::channel_created_ms(
+                context_id,
+                channel_id,
+                "general".to_string(),
+                Some("Initial topic".to_string()),
+                false,
+                100,
+                creator,
+            ),
+        )
+        .await;
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::message_sent_sealed_ms(
+                context_id,
+                channel_id,
+                message_one.to_string(),
+                creator,
+                creator.to_string(),
+                b"hello".to_vec(),
+                200,
+                None,
+                None,
+            ),
+        )
+        .await;
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::message_sent_sealed_ms(
+                context_id,
+                channel_id,
+                message_two.to_string(),
+                creator,
+                creator.to_string(),
+                b"goodbye".to_vec(),
+                250,
+                None,
+                None,
+            ),
+        )
+        .await;
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::message_edited_ms(
+                context_id,
+                channel_id,
+                message_one.to_string(),
+                creator,
+                b"hello, edited".to_vec(),
+                300,
+            ),
+        )
+        .await;
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::message_deleted_ms(
+                context_id,
+                channel_id,
+                message_two.to_string(),
+                creator,
+                350,
+            ),
+        )
+        .await;
+
+        let history = service.get_history(&group_id, None, None).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id, message_one);
+        assert_eq!(history[0].content, "hello, edited");
+        assert_eq!(history[0].message_type, aura_chat::types::MessageType::Edit);
+        assert_eq!(service.get_message(&message_two).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn edit_message_returns_refetched_fact_backed_message() {
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let group_id = group_id(11);
+        let context_id = ChatServiceApi::context_id_for_group(&group_id);
+        let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
+        let creator = authority(2);
+        let message_id = ChatMessageId::from_uuid(Uuid::from_bytes([12; 16]));
+
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::channel_created_ms(
+                context_id,
+                channel_id,
+                "general".to_string(),
+                None,
+                false,
+                100,
+                creator,
+            ),
+        )
+        .await;
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::message_sent_sealed_ms(
+                context_id,
+                channel_id,
+                message_id.to_string(),
+                creator,
+                creator.to_string(),
+                b"before".to_vec(),
+                200,
+                None,
+                None,
+            ),
+        )
+        .await;
+
+        let edited = service
+            .edit_message(&group_id, creator, &message_id, "after")
+            .await
+            .unwrap();
+
+        assert_eq!(edited.id, message_id);
+        assert_eq!(edited.content, "after");
+        assert_eq!(edited.message_type, aura_chat::types::MessageType::Edit);
+        assert_eq!(
+            service
+                .get_message(&message_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .content,
+            "after"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_group_details_returns_refetched_fact_backed_group() {
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let group_id = group_id(15);
+        let context_id = ChatServiceApi::context_id_for_group(&group_id);
+        let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
+        let creator = authority(3);
+        let participant = authority(4);
+
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::channel_created_ms(
+                context_id,
+                channel_id,
+                "general".to_string(),
+                Some("Initial topic".to_string()),
+                false,
+                100,
+                creator,
+            ),
+        )
+        .await;
+        commit_chat_fact(
+            &effects,
+            context_id,
+            aura_chat::ChatFact::channel_updated_ms(
+                context_id,
+                channel_id,
+                None,
+                None,
+                Some(2),
+                Some(vec![participant]),
+                150,
+                creator,
+            ),
+        )
+        .await;
+
+        let updated = service
+            .update_group_details(
+                &group_id,
+                creator,
+                Some("renamed".to_string()),
+                Some("Updated topic".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(updated.name, "renamed");
+        assert_eq!(updated.description, "Updated topic");
+        assert_eq!(updated.created_by, creator);
+        assert_eq!(updated.members.len(), 2);
+        assert!(updated
+            .members
+            .iter()
+            .any(|member| member.authority_id == participant));
+        assert_eq!(
+            service.get_group(&group_id).await.unwrap().unwrap(),
+            updated
+        );
+    }
 }

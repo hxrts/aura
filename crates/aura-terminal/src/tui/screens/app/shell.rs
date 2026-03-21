@@ -232,6 +232,20 @@ impl SelectedChannelBinding {
             context_id: channel.context_id.clone(),
         }
     }
+
+    fn semantic_value(&self) -> aura_app::scenario_contract::SemanticCommandValue {
+        match &self.context_id {
+            Some(context_id) => {
+                aura_app::scenario_contract::SemanticCommandValue::AuthoritativeChannelBinding {
+                    channel_id: self.channel_id.clone(),
+                    context_id: context_id.clone(),
+                }
+            }
+            None => aura_app::scenario_contract::SemanticCommandValue::ChannelSelection {
+                channel_id: self.channel_id.clone(),
+            },
+        }
+    }
 }
 
 fn complete_ready_channel_binding_receipts(
@@ -258,12 +272,7 @@ fn complete_ready_channel_binding_receipts(
                     operation_id.clone(),
                     aura_app::ui_contract::OperationInstanceId(instance_id),
                 ),
-                value: Some(
-                    aura_app::scenario_contract::SemanticCommandValue::ChannelBinding {
-                        channel_id: binding.channel_id.clone(),
-                        context_id: binding.context_id.clone(),
-                    },
-                ),
+                value: Some(binding.semantic_value()),
             },
         );
     }
@@ -2043,10 +2052,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 instance_id,
                                             ),
                                             value: Some(
-                                                aura_app::scenario_contract::SemanticCommandValue::ChannelBinding {
+                                                SelectedChannelBinding {
                                                     channel_id,
                                                     context_id,
-                                                },
+                                                }
+                                                .semantic_value(),
                                             ),
                                         },
                                     );

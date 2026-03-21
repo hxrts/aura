@@ -1,0 +1,7 @@
+error: weak_identifier requires `domain = "..."`
+ --> tests/boundaries/weak_identifier_missing_domain.rs:1:1
+  |
+1 | #[aura_macros::weak_identifier]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::weak_identifier` (in Nightly builds, run with -Z macro-backtrace for more info)

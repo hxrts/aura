@@ -28,11 +28,19 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 - Browser-only APIs stay in this crate.
 - Shared UI behavior remains in `aura-ui`.
+- Browser task ownership reuses the shared frontend task-owner implementation
+  from `aura-ui` rather than keeping a forked cancellation/spawner stack.
 - Harness bridge methods are deterministic and backwards-compatible.
 - Bridge responses that claim to return a channel binding must originate from authoritative selected-channel context materialization; selected ids without context are not a binding.
+- When bridge flows can only observe a selected channel id without authoritative
+  context, they must publish an explicit weak selection payload instead of a
+  binding-shaped response.
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
+- Browser bootstrap/rebootstrap bridge promises resolve on completion of the
+  owned bootstrap transition, not merely on enqueue, so harness/browser callers
+  do not mistake acceptance for success.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
 - Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
 - Harness mode may change instrumentation and render stability, but not business-flow semantics.
@@ -40,6 +48,13 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Playwright-to-page semantic submission uses the page-owned semantic queue
   (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
   browser semantic lifecycle or runtime/bootstrap state.
+- Long-lived browser maintenance tasks must surface terminal pause/failure
+  through observed UI state or equivalent structured browser signals rather than
+  relying on console logging alone.
+- Browser-owned maintenance loops such as ceremony acceptance and background
+  sync are explicitly non-semantic upkeep. They may keep local runtime/browser
+  state moving, but they must not become browser-owned semantic lifecycle
+  authorities.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
@@ -89,6 +104,7 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 | Browser semantic lifecycle rendering | `Observed` | authoritative semantic facts from `aura-app` | browser presentation state only | harness, user-visible rendering |
 | Render-convergence and projection publication | `Observed` | browser projection/export path | bridge/publication code only | Playwright/harness |
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
+| Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper reused from `aura-ui::task_owner` | shared frontend task-owner implementation | browser shell wiring only | harness, render layer |
 
 ### Capability-Gated Points
 
@@ -111,6 +127,9 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 - Explicit bridge entrypoints currently include semantic command submission,
   observed snapshot/render publication, and runtime identity staging for
   owned browser rebootstrap during create-account style flows.
+- Runtime identity staging and bootstrap handoff completion semantics are part
+  of that compatibility surface; changes must preserve the distinction between
+  accepted/enqueued work and completed bootstrap state.
 - Additive fields and additive non-breaking methods are allowed when old callers continue to observe the same behavior.
 - Breaking request/response or observation-shape changes must update explicit compatibility metadata and tests.
 

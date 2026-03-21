@@ -244,6 +244,15 @@ Macro declaration rule:
 - `#[aura_macros::ownership_lifecycle(initial = "...", ordered = "...", terminals = "...")]`
   is the sanctioned declaration surface for small parity-critical lifecycle
   enums
+- `#[aura_macros::authoritative_source(kind = "...")]` is the sanctioned
+  declaration surface for helpers that mint or read authoritative semantic
+  truth; valid kinds are `runtime`, `signal`, `app_core`, and `proof_issuer`
+- `#[aura_macros::strong_reference(domain = "...")]` is the sanctioned
+  declaration surface for canonical strong-reference carriers; valid domains are
+  `channel`, `invitation`, `ceremony`, `home`, and `home_scope`
+- `#[aura_macros::weak_identifier(domain = "...")]` is the sanctioned
+  declaration surface for weak identifier carriers that must not be upgraded
+  into strong bindings without an explicit owner path
 
 ## Reactive Contract
 
@@ -255,6 +264,14 @@ Parity-critical reactive consumers must rely on one explicit subscription contra
 - parity-critical owners may not infer replay or lossless history from the reactive layer unless an explicit replay contract exists
 
 This means reactive delivery is a transport for authoritative snapshots, not an alternate owner of semantic truth. Owner code must tolerate "newer snapshot after lag" semantics without silently treating a missed update as "no change."
+
+Enforcement rule:
+
+- ownership declarations, strong-reference markers, and authoritative-source
+  markers should be enforced first by proc-macro validation, Rust-native lints,
+  and compile-fail tests
+- shell scripts should remain only for integration checks or governance rules
+  that are not realistically provable in types or Rust-native syntax analysis
 
 Reactive/view consumers also may not fabricate canonical entities from partial
 facts. For example, a membership fact may update membership for a known channel,

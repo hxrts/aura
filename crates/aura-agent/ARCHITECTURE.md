@@ -327,6 +327,18 @@ Rules:
   private owner trees internally.
 - Service health must degrade structurally when maintenance obligations fail;
   loop-local logging is not a substitute for degraded lifecycle state.
+- Inbound moderation and membership gating must fail closed when home state is
+  unavailable, ambiguous, or missing authoritative roster membership; observed
+  chat projection and current-home fallback may not authorize message
+  admission.
+- Runtime service APIs must not wait on generic "next reactive update" signals
+  or return optimistic domain sketches when they claim to return a postcondition;
+  converted chat/message/group queries and mutations, invitation-acceptance
+  processing, and remote relational-fact pulls reduce committed facts and
+  explicit cache/materialization work directly before returning.
+- Converted runtime choreography start paths must surface typed start-failure
+  reasons such as duplicate active session or stale task binding; caller retry
+  policy must bind to that typed reason rather than parsing error strings.
 
 ### Verification Hooks
 

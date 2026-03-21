@@ -12,6 +12,7 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 | Deterministic keyboard routing for harness-driven scenarios | Desktop/mobile shell integration code |
 | Canonical snapshot text rendering for harness introspection | Runtime/effect handler implementation ownership |
 | Platform-neutral harness bridge primitives and clipboard adapter boundary | Parity-critical semantic lifecycle authorship |
+| Shared frontend task-owner implementation reused by Layer 7 shells | Browser shell bridge ownership and publication policy |
 | Shared semantic UI contract materialization from `aura-app` | Callback-owned readiness synthesis |
 
 ## Dependencies
@@ -22,6 +23,7 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 | Outgoing | — | Typed screen, modal, operation, toast, list, and runtime-event state |
 | Outgoing | — | `UiSnapshot` for canonical semantic projection export |
 | Outgoing | — | Platform-neutral harness bridge primitives |
+| Outgoing | `aura-web` | Shared frontend task-owner implementation reused by the browser shell |
 
 ## Invariants
 
@@ -30,8 +32,10 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Keyboard routing is centralized and side-effect order is deterministic.
 - Shared state is keyed by semantic ids and typed operation/runtime-event snapshots rather than frontend-local row indexes or renderer-only state.
 - Shared channel/contact selection keys use canonical ids from runtime projections; display labels stay display-only and must not be upgraded back into semantic identity.
+- Shared channel list item ids and click paths must stay on canonical channel ids when the runtime projection already provides them; render code may not bounce back through display-name selection on those paths.
 - Shared screen and modal structure remains stable enough for semantic harness execution and render-convergence checks.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from `aura-app::ui_contract`; they are not locally reinvented here.
+- Parity-relevant ceremony progress in shared modals must consume upstream-owned lifecycle helpers from `aura-app::ui::workflows`; `aura-ui` must not keep bespoke poll/sleep loops for those paths.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every other screen.
 
@@ -86,6 +90,7 @@ Contract alignment:
 | Keyboard/focus/modal state | `Observed` | Shared UI model owns state; `keyboard.rs`, `model.rs` update it. |
 | Parity-critical operation rendering | `Observed` | Authoritative semantic facts from `aura-app` own truth; `model.rs` projects. |
 | Shared-flow completion helpers | `Observed` | Upstream workflow/runtime coordinators own truth; helpers dismiss UI state only. |
+| Shared frontend task-owner primitive | `ActorOwned` helper for Layer 7 shells | `task_owner.rs` provides the bounded cancellation/spawner pattern reused by UI/web shells without authoring semantic truth. |
 
 ### Capability-Gated Points
 
@@ -113,6 +118,7 @@ just ci-observed-layer-boundaries
 |---------------------|-----------|--------------|--------|
 | Snapshot missing runtime events | UiSnapshotReflectsSemanticState | `semantic_snapshot_includes_runtime_events` | Covered |
 | Restarted operation reuses stale id | UiSnapshotReflectsSemanticState | `restarting_operation_generates_new_operation_instance_id` | Covered |
+| Shared frontend task owner stops reporting live after shutdown/drop | Ownership inventory | `task_owner::tests` | Covered |
 | Shared flow shapes diverge per frontend | SharedFlowShapesAreUniform | `just ci-shared-flow-policy` | Covered |
 
 ## References

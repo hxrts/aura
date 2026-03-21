@@ -1,0 +1,7 @@
+error: #[strong_reference] may only be applied to structs or enums
+ --> tests/boundaries/strong_reference_on_function.rs:1:1
+  |
+1 | #[aura_macros::strong_reference(domain = "channel")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::strong_reference` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -910,7 +910,7 @@ fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
                 .path()
                 .segments
                 .last()
-            .is_some_and(|segment| segment.ident == "test")
+                .is_some_and(|segment| segment.ident == "test")
     })
 }
 

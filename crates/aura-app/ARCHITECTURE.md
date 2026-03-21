@@ -137,6 +137,10 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - each converted semantic domain should have one publication helper and one
   ownership label; context/home/neighborhood workflows must not drift into
   mirrored `views_mut().set_*` plus ad hoc signal emission paths
+- parity-critical strong-command and semantic-query paths may not treat
+  unverifiable scope/home state as success, and they may not upgrade legacy
+  `dm:` descriptors or empty observed membership into canonical participant
+  truth
 
 ## Testing
 

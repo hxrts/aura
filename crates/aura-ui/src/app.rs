@@ -524,13 +524,13 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         }
         (merged, authority_id)
     };
-    let selected_name = controller
+    let selected_channel_id = controller
         .ui_model()
         .and_then(|model| model.selected_channel_id().map(str::to_string));
-    let runtime = build_chat_runtime_view(chat.clone(), selected_name.as_deref());
+    let runtime = build_chat_runtime_view(chat.clone(), selected_channel_id.as_deref());
     controller.push_log(&format!(
         "load_chat_runtime_view: selected={:?} active={} channels={}",
-        selected_name,
+        selected_channel_id,
         runtime.active_channel,
         runtime.channels.len()
     ));
@@ -984,13 +984,6 @@ fn selected_contact_for_modal(
         .cloned()
 }
 
-fn effective_contacts_view(
-    runtime: &ContactsRuntimeView,
-    _model: &UiModel,
-) -> Vec<ContactsRuntimeContact> {
-    runtime.contacts.clone()
-}
-
 fn harness_log(line: &str) {
     tracing::info!("{line}");
 }
@@ -1008,6 +1001,60 @@ fn next_device_enrollment_invitee_authority_id(
         seq
     );
     AuthorityId::new_from_entropy(hash(seed.as_bytes()))
+}
+
+fn monitor_runtime_device_enrollment_ceremony(
+    controller: Arc<UiController>,
+    app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+    status_handle: ceremony_workflows::CeremonyStatusHandle,
+    rerender: Arc<dyn Fn() + Send + Sync>,
+) {
+    spawn_ui(async move {
+        let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
+            &app_core,
+            &status_handle,
+            ceremony_workflows::CeremonyPollPolicy {
+                interval: Duration::from_secs(1),
+                refresh_settings_on_complete: false,
+                ..Default::default()
+            },
+            |status| {
+                controller.update_runtime_device_enrollment_status(
+                    status.accepted_count,
+                    status.total_count,
+                    status.threshold,
+                    status.is_complete,
+                    status.has_failed,
+                    status.error_message.clone(),
+                );
+                rerender();
+            },
+            |duration| {
+                let app_core = app_core.clone();
+                async move {
+                    let sleep_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+                    let _ = time_workflows::sleep_ms(&app_core, sleep_ms).await;
+                }
+            },
+        )
+        .await;
+
+        match lifecycle {
+            Ok(lifecycle)
+                if lifecycle.state == ceremony_workflows::CeremonyLifecycleState::TimedOut =>
+            {
+                controller.runtime_error_toast(
+                    "Device enrollment status monitoring timed out; use Enter to refresh",
+                );
+                rerender();
+            }
+            Ok(_) => {}
+            Err(error) => {
+                controller.runtime_error_toast(error.to_string());
+                rerender();
+            }
+        }
+    });
 }
 
 fn removable_device_for_modal(
@@ -1118,40 +1165,12 @@ fn submit_runtime_modal_action(
                                     &name,
                                     &start.enrollment_code,
                                 );
-
-                                let controller_for_status = controller.clone();
-                                let app_core_for_status = app_core.clone();
-                                let rerender_for_status = rerender_for_start.clone();
-                                spawn_ui(async move {
-                                    loop {
-                                        let _ =
-                                            time_workflows::sleep_ms(&app_core_for_status, 1_000)
-                                                .await;
-                                        match ceremony_workflows::get_key_rotation_ceremony_status(
-                                            &app_core_for_status,
-                                            &status_handle,
-                                        )
-                                        .await
-                                        {
-                                            Ok(status) => {
-                                                controller_for_status
-                                                    .update_runtime_device_enrollment_status(
-                                                        status.accepted_count,
-                                                        status.total_count,
-                                                        status.threshold,
-                                                        status.is_complete,
-                                                        status.has_failed,
-                                                        status.error_message.clone(),
-                                                    );
-                                                rerender_for_status();
-                                                if status.is_complete || status.has_failed {
-                                                    break;
-                                                }
-                                            }
-                                            Err(_) => break,
-                                        }
-                                    }
-                                });
+                                monitor_runtime_device_enrollment_ceremony(
+                                    controller.clone(),
+                                    app_core.clone(),
+                                    status_handle,
+                                    rerender_for_start.clone(),
+                                );
                             }
                             Err(error) => {
                                 controller.runtime_error_toast(error.to_string());
@@ -2949,7 +2968,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         &settings_runtime_snapshot,
         &notifications_runtime_snapshot,
     );
-    controller.set_ui_snapshot(semantic_snapshot);
+    controller.publish_ui_snapshot(semantic_snapshot);
     let keydown_controller = controller.clone();
     rsx! {
         main {
@@ -4356,7 +4375,7 @@ fn ContactsScreen(
     controller: Arc<UiController>,
     mut render_tick: Signal<u64>,
 ) -> Element {
-    let contacts = effective_contacts_view(runtime, model);
+    let contacts = runtime.contacts.clone();
     let selected_contact_id = model.selected_contact_authority_id();
     let selected_contact = selected_contact_id
         .and_then(|authority_id| {
@@ -5668,7 +5687,9 @@ fn runtime_semantic_snapshot(
     }
 
     let contacts = if contacts_runtime.loaded {
-        effective_contacts_view(contacts_runtime, model)
+        contacts_runtime
+            .contacts
+            .clone()
             .iter()
             .map(|contact| ListItemSnapshot {
                 id: contact.authority_id.to_string(),
@@ -6484,5 +6505,27 @@ mod tests {
 
         assert!(!contacts_branch.contains("RuntimeFact::ContactLinkReady"));
         assert!(!notifications_branch.contains("RuntimeFact::PendingHomeInvitationReady"));
+    }
+
+    #[test]
+    fn add_device_ceremony_monitor_uses_upstream_bounded_monitor() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-ui/src/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        let helper_start = source
+            .find("fn monitor_runtime_device_enrollment_ceremony")
+            .unwrap_or_else(|| panic!("missing monitor_runtime_device_enrollment_ceremony"));
+        let helper_end = source[helper_start..]
+            .find("fn removable_device_for_modal")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing removable_device_for_modal"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper.contains("monitor_key_rotation_ceremony_with_policy"));
+        assert!(helper.contains("CeremonyLifecycleState::TimedOut"));
+        assert!(!helper.contains("sleep_ms(&app_core_for_status, 1_000)"));
+        assert!(!helper.contains("loop {"));
     }
 }
