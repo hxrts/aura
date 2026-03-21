@@ -2780,23 +2780,6 @@ fn fetch_ui_snapshot(tool_api: &mut ToolApi, instance_id: &str) -> Result<UiSnap
     fetch_ui_snapshot_in_lane(tool_api, ExecutionLane::FrontendConformance, instance_id)
 }
 
-fn remember_snapshot_bindings(
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    snapshot: &UiSnapshot,
-) {
-    let _ = (context, instance_id, snapshot);
-}
-
-fn capture_semantic_wait_success_bindings(
-    step: &CompatibilityStep,
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    snapshot: &UiSnapshot,
-) {
-    let _ = (step, context, instance_id, snapshot);
-}
-
 fn removable_device_id_from_snapshot(snapshot: &UiSnapshot) -> Option<String> {
     snapshot
         .lists
@@ -3108,7 +3091,6 @@ fn submit_shared_intent(
     intent: IntentAction,
 ) -> Result<SemanticCommandResponse> {
     if let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) {
-        remember_snapshot_bindings(context, instance_id, &snapshot);
         context
             .pending_projection_baseline
             .insert(instance_id.to_string(), snapshot.revision);
@@ -3308,12 +3290,10 @@ fn wait_for_semantic_state_snapshot(
         .get(instance_id)
         .copied();
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    remember_snapshot_bindings(context, instance_id, &last_snapshot);
     let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
     match classify_projection_freshness(required_newer_than, &last_snapshot) {
         ProjectionFreshness::Satisfied => {
             if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
-                capture_semantic_wait_success_bindings(step, context, instance_id, &last_snapshot);
                 context.pending_projection_baseline.remove(instance_id);
                 return Ok(last_snapshot);
             }
@@ -3384,11 +3364,9 @@ fn wait_for_semantic_state_snapshot(
             blocking_sleep(Duration::from_millis(40));
             fetch_ui_snapshot(tool_api, instance_id)?
         };
-        remember_snapshot_bindings(context, instance_id, &snapshot);
         match classify_projection_freshness(required_newer_than, &snapshot) {
             ProjectionFreshness::Satisfied => {
                 if semantic_wait_matches_for_instance(step, &snapshot, context, instance_id) {
-                    capture_semantic_wait_success_bindings(step, context, instance_id, &snapshot);
                     context.pending_projection_baseline.remove(instance_id);
                     return Ok(snapshot);
                 }
