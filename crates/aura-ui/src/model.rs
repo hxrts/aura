@@ -1072,7 +1072,7 @@ impl UiModel {
         self.active_modal = None;
     }
 
-    pub fn select_channel_by_name(&mut self, name: &str) {
+    pub(crate) fn select_channel_by_name(&mut self, name: &str) {
         let selected_id = self
             .channels
             .iter()
@@ -1738,7 +1738,7 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub fn select_channel_by_name(&self, name: &str) {
+    pub(crate) fn select_channel_by_name(&self, name: &str) {
         write_model(&self.model).select_channel_by_name(name);
         self.request_rerender();
     }
@@ -2250,10 +2250,6 @@ impl UiController {
                 sink(snapshot);
             }
         }
-    }
-
-    pub fn set_ui_snapshot(&self, snapshot: UiSnapshot) {
-        self.publish_ui_snapshot(snapshot);
     }
 
     pub fn read_clipboard(&self) -> String {

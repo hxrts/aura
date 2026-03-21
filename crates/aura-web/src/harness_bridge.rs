@@ -272,7 +272,7 @@ fn selected_authority_id(controller: &UiController) -> Option<String> {
 }
 
 fn publish_current_ui_snapshot(controller: &UiController) {
-    controller.set_ui_snapshot(controller.semantic_model_snapshot());
+    controller.publish_ui_snapshot(controller.semantic_model_snapshot());
 }
 
 async fn schedule_browser_ui_mutation(
