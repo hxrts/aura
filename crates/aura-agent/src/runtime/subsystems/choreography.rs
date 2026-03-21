@@ -136,6 +136,35 @@ pub enum SessionOwnershipError {
     },
 }
 
+/// Typed reasons why a runtime choreography session start was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStartError {
+    /// The current task or thread is still bound to an active session.
+    TaskAlreadyBound {
+        session_id: RuntimeChoreographySessionId,
+    },
+    /// Another active session already exists for the requested session id.
+    SessionAlreadyExists {
+        session_id: RuntimeChoreographySessionId,
+    },
+}
+
+impl fmt::Display for SessionStartError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TaskAlreadyBound { session_id } => {
+                write!(
+                    f,
+                    "task already bound to active choreography session {session_id}"
+                )
+            }
+            Self::SessionAlreadyExists { session_id } => {
+                write!(f, "choreography session already exists: {session_id}")
+            }
+        }
+    }
+}
+
 /// In-memory choreography session state for one runtime session.
 #[derive(Debug, Clone)]
 pub struct ChoreographySessionState {
@@ -257,18 +286,18 @@ impl ChoreographyState {
         current_role: ChoreographicRole,
         timeout_ms: Option<u64>,
         now_ms: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), SessionStartError> {
         let task_id = Self::current_binding_key();
         if let Some(existing_session_id) = self.task_bindings.get(&task_id).copied() {
             if self.sessions.contains_key(&existing_session_id) {
-                return Err(format!(
-                    "task already bound to active choreography session {existing_session_id}"
-                ));
+                return Err(SessionStartError::TaskAlreadyBound {
+                    session_id: existing_session_id,
+                });
             }
             self.task_bindings.remove(&task_id);
         }
         if self.sessions.contains_key(&session_id) {
-            return Err(format!("choreography session already exists: {session_id}"));
+            return Err(SessionStartError::SessionAlreadyExists { session_id });
         }
 
         self.sessions.insert(
@@ -758,5 +787,30 @@ mod tests {
                 | Err(SessionOwnershipError::CapabilityMismatch { .. })
         ));
         assert!(state.ensure_session_owner(session_id, &transferred).is_ok());
+    }
+
+    #[test]
+    fn duplicate_session_start_is_typed() {
+        let authority_id = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+        let role = ChoreographicRole::new(
+            authority_id,
+            AuthorityId::new_from_entropy([5u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(50));
+        let context_id = ContextId::new_from_entropy([13; 32]);
+        let mut state = ChoreographyState::new();
+
+        state
+            .start_session(session_id, context_id, vec![role], role, Some(1000), 0)
+            .expect("session starts");
+        state.task_bindings.clear();
+
+        assert_eq!(
+            state
+                .start_session(session_id, context_id, vec![role], role, Some(1000), 1)
+                .expect_err("duplicate session should be rejected"),
+            SessionStartError::SessionAlreadyExists { session_id }
+        );
     }
 }

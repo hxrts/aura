@@ -13,6 +13,7 @@ use aura_protocol::effects::{
 use std::collections::HashMap;
 
 use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
+use crate::runtime::subsystems::choreography::SessionStartError;
 
 fn current_session_snapshot(
     effects: &AuraEffectSystem,
@@ -413,12 +414,13 @@ impl ChoreographicEffects for AuraEffectSystem {
                 None,
                 started_at_ms,
             )
-            .map_err(|message| {
-                if message.contains("already exists") {
+            .map_err(|error| match error {
+                SessionStartError::SessionAlreadyExists { .. } => {
                     ChoreographyError::SessionAlreadyExists { session_id }
-                } else {
-                    ChoreographyError::InternalError { message }
                 }
+                SessionStartError::TaskAlreadyBound { .. } => ChoreographyError::InternalError {
+                    message: error.to_string(),
+                },
             })
     }
 

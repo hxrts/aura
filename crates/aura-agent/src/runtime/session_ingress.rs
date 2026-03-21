@@ -35,6 +35,15 @@ pub struct RuntimeSessionOwner {
     pub capability: SessionOwnerCapability,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionStartFailureReason {
+    AlreadyExists,
+    TaskAlreadyBound,
+    OwnerClaimRejected,
+    VmSessionOpenFailed,
+    Other,
+}
+
 #[derive(Debug, Error)]
 pub enum SessionIngressError {
     #[error("runtime session {session_id} has no owner record")]
@@ -52,10 +61,13 @@ pub enum SessionIngressError {
         owner_label: String,
         details: RuntimeBoundaryError,
     },
-    #[error("failed to start owned runtime session {session_id} for {owner_label}: {message}")]
+    #[error(
+        "failed to start owned runtime session {session_id} for {owner_label} ({reason:?}): {message}"
+    )]
     SessionStart {
         session_id: RuntimeChoreographySessionId,
         owner_label: String,
+        reason: SessionStartFailureReason,
         message: String,
     },
     #[error("failed to advance owned runtime session {session_id} for {owner_label}: {message}")]
@@ -92,6 +104,22 @@ impl SessionIngressError {
             Self::SessionClose { .. } => "session_close",
             Self::OwnerTransfer { .. } => "owner_transfer",
         }
+    }
+}
+
+fn classify_session_start_error(
+    error: &aura_protocol::effects::ChoreographyError,
+) -> SessionStartFailureReason {
+    match error {
+        aura_protocol::effects::ChoreographyError::SessionAlreadyExists { .. } => {
+            SessionStartFailureReason::AlreadyExists
+        }
+        aura_protocol::effects::ChoreographyError::InternalError { message }
+            if message.starts_with("task already bound to active choreography session") =>
+        {
+            SessionStartFailureReason::TaskAlreadyBound
+        }
+        _ => SessionStartFailureReason::Other,
     }
 }
 
@@ -527,6 +555,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
             Err(SessionIngressError::SessionStart {
                 session_id: owner.session_id,
                 owner_label: owner.owner_label,
+                reason: SessionStartFailureReason::VmSessionOpenFailed,
                 message: error.to_string(),
             })
         }
@@ -620,6 +649,7 @@ impl AuraEffectSystem {
             .map_err(|error| SessionIngressError::SessionStart {
                 session_id: RuntimeChoreographySessionId::from_uuid(session_uuid),
                 owner_label: owner_label.clone(),
+                reason: classify_session_start_error(&error),
                 message: error.to_string(),
             })
             .inspect_err(|error| {
@@ -648,6 +678,7 @@ impl AuraEffectSystem {
                     return Err(SessionIngressError::SessionStart {
                         session_id,
                         owner_label,
+                        reason: SessionStartFailureReason::OwnerClaimRejected,
                         message: error,
                     });
                 }
@@ -795,6 +826,7 @@ mod tests {
     use aura_mpst::{CompositionLinkSpec, CompositionManifest};
     use aura_protocol::effects::{ChoreographicRole, RoleIndex};
     use std::collections::BTreeSet;
+    use std::sync::Arc;
 
     fn test_authority(byte: u8) -> AuthorityId {
         AuthorityId::from_uuid(Uuid::from_bytes([byte; 16]))
@@ -1000,5 +1032,46 @@ mod tests {
             ),
             "stale capability generation must be rejected even if the owner label is unchanged"
         );
+    }
+
+    #[tokio::test]
+    async fn duplicate_session_start_reports_typed_already_exists_reason() {
+        let authority = test_authority(0x99);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority)
+                .expect("test effect system"),
+        );
+        let roles = vec![ChoreographicRole::for_authority(
+            authority,
+            RoleIndex::new(0).expect("role index"),
+        )];
+        let session_uuid = Uuid::from_bytes([0xaa; 16]);
+        let original = effects
+            .start_owned_choreography_session("owner-a", session_uuid, roles.clone())
+            .await
+            .expect("start first session");
+
+        let duplicate_effects = Arc::clone(&effects);
+        let duplicate = tokio::spawn(async move {
+            duplicate_effects
+                .start_owned_choreography_session("owner-b", session_uuid, roles)
+                .await
+        })
+        .await
+        .expect("duplicate task joined")
+        .expect_err("duplicate session start must fail");
+
+        assert!(matches!(
+            duplicate,
+            SessionIngressError::SessionStart {
+                reason: SessionStartFailureReason::AlreadyExists,
+                ..
+            }
+        ));
+
+        effects
+            .end_owned_choreography_session(&original)
+            .await
+            .expect("close original session");
     }
 }
