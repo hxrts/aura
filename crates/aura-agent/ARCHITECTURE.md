@@ -257,9 +257,10 @@ Runtime bridge lookup follows the same strong-ref rule:
 - runtime bridge query APIs must fail explicitly when the required runtime
   service is absent; they may not silently degrade absence into empty success
   values that look like authoritative state
-- storage-backed runtime bridge queries such as device or authority listing
-  must also fail explicitly on storage/tree read errors; they may not synthesize
-  current-only fallback rows that look like authoritative inventory
+- storage-backed runtime bridge queries such as settings, device, or authority
+  listing must also fail explicitly on storage/tree read errors; they may not
+  synthesize default snapshots or current-only fallback rows that look like
+  authoritative inventory
 
 ## Canonical Host/VM Boundary
 
