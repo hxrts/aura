@@ -8,6 +8,7 @@ use crate::workflows::error::WorkflowError;
 use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
+    runtime_bridge::AuthoritativeChannelBinding,
     signal_defs::{
         AuthorityInfo, DeviceInfo, SettingsState, HOMES_SIGNAL, HOMES_SIGNAL_NAME, RECOVERY_SIGNAL,
         RECOVERY_SIGNAL_NAME, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
@@ -145,7 +146,7 @@ pub async fn update_mfa_policy(
         || runtime.set_mfa_policy(policy),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("update MFA policy", e))?;
+    .map_err(|e| super::error::runtime_call("update MFA policy", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
@@ -170,7 +171,7 @@ pub async fn update_nickname(
         || runtime.set_nickname_suggestion(&name),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("update nickname", e))?;
+    .map_err(|e| super::error::runtime_call("update nickname", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
@@ -191,35 +192,32 @@ pub async fn set_channel_mode(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
     let normalized_channel = crate::workflows::chat_commands::normalize_channel_name(&channel_id);
-    let resolved_channel = {
-        match ChannelSelector::parse(&normalized_channel)? {
-            ChannelSelector::Id(channel_id) => channel_id,
-            ChannelSelector::Name(channel_name) => {
-                let resolved = timeout_runtime_call(
-                    &runtime,
-                    "set_channel_mode",
-                    "resolve_authoritative_channel_ids_by_name",
-                    SETTINGS_RUNTIME_TIMEOUT,
-                    || runtime.resolve_authoritative_channel_ids_by_name(&channel_name),
-                )
-                .await?
-                    .map_err(|e| {
-                        super::error::runtime_call("resolve channel for mode update", e)
-                    })?;
-                match resolved.as_slice() {
-                    [] => return Err(AuraError::not_found(channel_name.clone())),
-                    [channel_id] => *channel_id,
-                    _ => {
-                        return Err(AuraError::invalid(format!(
-                            "Ambiguous channel name for mode update: {channel_name}"
-                        )));
-                    }
-                }
-            }
+    match ChannelSelector::parse(&normalized_channel)? {
+        ChannelSelector::Id(channel_id) => {
+            set_channel_mode_resolved(app_core, channel_id, flags).await
         }
-    };
-
-    set_channel_mode_resolved(app_core, resolved_channel, flags).await
+        ChannelSelector::Name(channel_name) => {
+            let resolved = timeout_runtime_call(
+                &runtime,
+                "set_channel_mode",
+                "identify_materialized_channel_bindings_by_name",
+                SETTINGS_RUNTIME_TIMEOUT,
+                || runtime.identify_materialized_channel_bindings_by_name(&channel_name),
+            )
+            .await?
+            .map_err(|e| super::error::runtime_call("resolve channel for mode update", e))?;
+            let binding = match resolved.as_slice() {
+                [] => return Err(AuraError::not_found(channel_name.clone())),
+                [binding] => *binding,
+                _ => {
+                    return Err(AuraError::invalid(format!(
+                        "Ambiguous channel name for mode update: {channel_name}"
+                    )));
+                }
+            };
+            set_channel_mode_bound(app_core, binding, flags).await
+        }
+    }
 }
 
 /// Set channel mode flags using a canonical channel ID.
@@ -237,12 +235,12 @@ pub async fn set_channel_mode_resolved(
         || runtime.resolve_amp_channel_context(resolved_channel),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("resolve channel context for mode update", e))?
-        .ok_or_else(|| {
-            AuraError::from(WorkflowError::MissingAuthoritativeContext {
-                channel: resolved_channel.to_string(),
-            })
-        })?;
+    .map_err(|e| super::error::runtime_call("resolve channel context for mode update", e))?
+    .ok_or_else(|| {
+        AuraError::from(WorkflowError::MissingAuthoritativeContext {
+            channel: resolved_channel.to_string(),
+        })
+    })?;
     let mut homes = homes_state_signal_snapshot(app_core).await?;
 
     let target_home_id = if homes.has_home(&resolved_channel) {
@@ -270,6 +268,40 @@ pub async fn set_channel_mode_resolved(
     let home = homes.home_mut(&home_id).ok_or_else(|| {
         AuraError::permission_denied("Set channel mode requires a valid home context")
     })?;
+    home.mode_flags = Some(flags);
+
+    emit_homes_state_observed(app_core, homes).await
+}
+
+async fn set_channel_mode_bound(
+    app_core: &Arc<RwLock<AppCore>>,
+    binding: AuthoritativeChannelBinding,
+    flags: String,
+) -> Result<(), AuraError> {
+    let mut homes = homes_state_signal_snapshot(app_core).await?;
+
+    let target_home_id = if homes.has_home(&binding.channel_id) {
+        Some(binding.channel_id)
+    } else {
+        homes
+            .iter()
+            .filter(|(_, home)| home.context_id == Some(binding.context_id))
+            .max_by_key(|(_, home)| home.member_count)
+            .map(|(home_id, _)| *home_id)
+    };
+
+    let Some(home_id) = target_home_id else {
+        return Err(AuraError::from(
+            WorkflowError::MissingAuthoritativeHomeProjection {
+                context: binding.context_id.to_string(),
+            },
+        ));
+    };
+
+    let home = homes.home_mut(&home_id).ok_or_else(|| {
+        AuraError::permission_denied("Set channel mode requires a valid home context")
+    })?;
+    home.context_id = Some(binding.context_id);
     home.mode_flags = Some(flags);
 
     emit_homes_state_observed(app_core, homes).await
@@ -390,7 +422,7 @@ mod tests {
         emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
             .await
             .unwrap();
-        runtime.set_authoritative_channel_name_matches("general", vec![channel_id]);
+        runtime.set_materialized_channel_name_matches("general", vec![channel_id]);
         runtime.set_amp_channel_context(channel_id, context);
 
         set_channel_mode(&app_core, "#general".to_string(), "+m".to_string())
@@ -436,7 +468,7 @@ mod tests {
             .await
             .unwrap();
         runtime
-            .set_authoritative_channel_name_matches(&target_channel_name, vec![target_channel_id]);
+            .set_materialized_channel_name_matches(&target_channel_name, vec![target_channel_id]);
 
         let error = set_channel_mode(&app_core, target_channel_name, "+m".to_string())
             .await

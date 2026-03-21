@@ -55,7 +55,7 @@ use std::sync::Arc;
 
 type PendingInvitationsState = Arc<Mutex<Option<Vec<InvitationInfo>>>>;
 type AmpChannelContexts = Arc<Mutex<HashMap<ChannelId, ContextId>>>;
-type AuthoritativeChannelNameMatches = Arc<Mutex<HashMap<String, Vec<ChannelId>>>>;
+type MaterializedChannelNameMatches = Arc<Mutex<HashMap<String, Vec<ChannelId>>>>;
 type AmpChannelStates = Arc<Mutex<HashMap<(ContextId, ChannelId), bool>>>;
 type AmpChannelParticipants = Arc<Mutex<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>;
 type ModerationStatuses =
@@ -548,22 +548,28 @@ pub trait RuntimeBridge: Send + Sync {
         channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError>;
 
-    /// Resolve authoritative channel identifiers by normalized display name.
+    /// Identify already-materialized channel identifiers by normalized display
+    /// name.
     ///
-    /// This is the runtime-owned replacement for projection-backed channel name
-    /// lookup in workflow code.
-    async fn resolve_authoritative_channel_ids_by_name(
+    /// Name lookup is an identification step only. Callers must not treat the
+    /// resulting ids as a strong witness unless they also hold a runtime-owned
+    /// bound context.
+    async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
     ) -> Result<Vec<ChannelId>, IntentError>;
 
-    /// Resolve authoritative channel bindings by normalized display name.
-    async fn resolve_authoritative_channel_bindings_by_name(
+    /// Identify already-materialized channel bindings by normalized display
+    /// name.
+    async fn identify_materialized_channel_bindings_by_name(
         &self,
         channel_name: &str,
     ) -> Result<Vec<AuthoritativeChannelBinding>, IntentError> {
         let mut bindings = Vec::new();
-        for channel_id in self.resolve_authoritative_channel_ids_by_name(channel_name).await? {
+        for channel_id in self
+            .identify_materialized_channel_ids_by_name(channel_name)
+            .await?
+        {
             if let Some(context_id) = self.resolve_amp_channel_context(channel_id).await? {
                 bindings.push(AuthoritativeChannelBinding {
                     channel_id,
@@ -1145,7 +1151,7 @@ pub struct OfflineRuntimeBridge {
     reactive: ReactiveHandler,
     pending_invitations: PendingInvitationsState,
     amp_channel_contexts: AmpChannelContexts,
-    authoritative_channel_name_matches: AuthoritativeChannelNameMatches,
+    materialized_channel_name_matches: MaterializedChannelNameMatches,
     amp_channel_states: AmpChannelStates,
     amp_channel_participants: AmpChannelParticipants,
     moderation_statuses: ModerationStatuses,
@@ -1159,7 +1165,7 @@ impl OfflineRuntimeBridge {
             reactive: ReactiveHandler::new(),
             pending_invitations: Arc::new(Mutex::new(None)),
             amp_channel_contexts: Arc::new(Mutex::new(HashMap::new())),
-            authoritative_channel_name_matches: Arc::new(Mutex::new(HashMap::new())),
+            materialized_channel_name_matches: Arc::new(Mutex::new(HashMap::new())),
             amp_channel_states: Arc::new(Mutex::new(HashMap::new())),
             amp_channel_participants: Arc::new(Mutex::new(HashMap::new())),
             moderation_statuses: Arc::new(Mutex::new(HashMap::new())),
@@ -1201,15 +1207,15 @@ impl OfflineRuntimeBridge {
     }
 
     #[cfg(test)]
-    /// Configure authoritative channel-name lookup results.
-    pub fn set_authoritative_channel_name_matches(
+    /// Configure materialized channel-name lookup results.
+    pub fn set_materialized_channel_name_matches(
         &self,
         channel_name: impl Into<String>,
         channel_ids: Vec<ChannelId>,
     ) {
-        self.authoritative_channel_name_matches
+        self.materialized_channel_name_matches
             .try_lock()
-            .unwrap_or_else(|| panic!("authoritative channel name matches mutex already locked"))
+            .unwrap_or_else(|| panic!("materialized channel name matches mutex already locked"))
             .insert(channel_name.into().trim().to_ascii_lowercase(), channel_ids);
     }
 
@@ -1371,18 +1377,18 @@ impl RuntimeBridge for OfflineRuntimeBridge {
             })
     }
 
-    async fn resolve_authoritative_channel_ids_by_name(
+    async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
     ) -> Result<Vec<ChannelId>, IntentError> {
-        self.authoritative_channel_name_matches
+        self.materialized_channel_name_matches
             .lock()
             .await
             .get(&channel_name.trim().to_ascii_lowercase())
             .cloned()
             .ok_or_else(|| {
                 IntentError::no_agent(format!(
-                    "authoritative channel-name lookup unavailable in offline mode for channel {channel_name}"
+                    "materialized channel-name lookup unavailable in offline mode for channel {channel_name}"
                 ))
             })
     }

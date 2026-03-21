@@ -54,9 +54,9 @@ async fn send_moderator_fact_with_retry(
                 || runtime.send_chat_fact(peer, context_id, fact),
             )
             .await?
-                .map_err(|error| {
-                    AuraError::from(super::error::runtime_call("Send moderator fact", error))
-                })
+            .map_err(|error| {
+                AuraError::from(super::error::runtime_call("Send moderator fact", error))
+            })
         }
     })
     .await
@@ -103,26 +103,41 @@ async fn emit_homes_state_observed(
     emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
 }
 
-async fn resolve_authoritative_channel_id(
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy)]
+struct MaterializedChannelHint {
+    channel_id: ChannelId,
+    context_id: Option<ContextId>,
+}
+
+async fn identify_materialized_channel_hint(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     channel: &str,
-) -> Result<ChannelId, AuraError> {
+) -> Result<MaterializedChannelHint, AuraError> {
     match crate::workflows::channel_ref::ChannelSelector::parse(channel)? {
-        crate::workflows::channel_ref::ChannelSelector::Id(channel_id) => Ok(channel_id),
+        crate::workflows::channel_ref::ChannelSelector::Id(channel_id) => {
+            Ok(MaterializedChannelHint {
+                channel_id,
+                context_id: None,
+            })
+        }
         crate::workflows::channel_ref::ChannelSelector::Name(channel_name) => {
             let resolved = timeout_runtime_call(
                 runtime,
-                "resolve_authoritative_channel_id",
-                "resolve_authoritative_channel_ids_by_name",
+                "identify_materialized_channel_hint",
+                "identify_materialized_channel_bindings_by_name",
                 MODERATOR_RUNTIME_TIMEOUT,
-                || runtime.resolve_authoritative_channel_ids_by_name(&channel_name),
+                || runtime.identify_materialized_channel_bindings_by_name(&channel_name),
             )
             .await
             .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?
-                .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?;
+            .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?;
             match resolved.as_slice() {
                 [] => Err(AuraError::not_found(channel_name)),
-                [channel_id] => Ok(*channel_id),
+                [binding] => Ok(MaterializedChannelHint {
+                    channel_id: binding.channel_id,
+                    context_id: Some(binding.context_id),
+                }),
                 _ => Err(AuraError::invalid(format!(
                     "Ambiguous moderator channel hint: {channel_name}"
                 ))),
@@ -157,25 +172,29 @@ async fn resolve_scope(
     let runtime = require_runtime(app_core).await?;
     let homes = homes_state_signal_snapshot(app_core).await?;
     let hinted_channel = match channel_hint {
-        Some(hint) => Some(resolve_authoritative_channel_id(&runtime, hint).await?),
+        Some(hint) => Some(identify_materialized_channel_hint(&runtime, hint).await?),
         None => None,
     };
 
-    let (home_id, home_state) = if let Some(channel_id) = hinted_channel {
+    let (home_id, home_state) = if let Some(hinted_channel) = hinted_channel {
+        let channel_id = hinted_channel.channel_id;
         if let Some(home) = homes.home_state(&channel_id) {
             (channel_id, home.clone())
         } else {
-            let context_id = timeout_runtime_call(
-                &runtime,
-                "resolve_scope",
-                "resolve_amp_channel_context",
-                MODERATOR_RUNTIME_TIMEOUT,
-                || runtime.resolve_amp_channel_context(channel_id),
-            )
-            .await
-            .map_err(|e| super::error::runtime_call("resolve moderator scope context", e))?
+            let context_id = match hinted_channel.context_id {
+                Some(context_id) => context_id,
+                None => timeout_runtime_call(
+                    &runtime,
+                    "resolve_scope",
+                    "resolve_amp_channel_context",
+                    MODERATOR_RUNTIME_TIMEOUT,
+                    || runtime.resolve_amp_channel_context(channel_id),
+                )
+                .await
                 .map_err(|e| super::error::runtime_call("resolve moderator scope context", e))?
-                .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
+                .map_err(|e| super::error::runtime_call("resolve moderator scope context", e))?
+                .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?,
+            };
             best_home_for_context(&homes, context_id)
                 .ok_or_else(|| AuraError::permission_denied(context_id.to_string()))?
         }
@@ -200,7 +219,7 @@ async fn resolve_scope(
     )
     .await
     .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?
-        .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
+    .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
 
     Ok(ModeratorScope {
         home_id,
@@ -230,7 +249,7 @@ async fn current_moderator_scope(
             )
             .await
             .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?
-                .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
+            .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
             return Ok(ModeratorScope {
                 home_id: active_home_id,
                 context_id,
@@ -256,7 +275,11 @@ pub async fn grant_moderator(
     let target_id = resolve_target_authority(app_core, target).await?;
     let runtime = require_runtime(app_core).await?;
     let channel_id = match channel_hint {
-        Some(hint) => Some(resolve_authoritative_channel_id(&runtime, hint).await?),
+        Some(hint) => Some(
+            identify_materialized_channel_hint(&runtime, hint)
+                .await?
+                .channel_id,
+        ),
         None => None,
     };
     grant_moderator_resolved(app_core, channel_id, target_id).await
@@ -312,7 +335,7 @@ pub async fn grant_moderator_resolved(
     )
     .await
     .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?
-        .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?;
+    .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?;
     let actor = runtime.authority_id();
     let fact =
         HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
@@ -326,7 +349,7 @@ pub async fn grant_moderator_resolved(
     )
     .await
     .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?
-        .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?;
+    .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?;
 
     for peer in scope.peers {
         if peer == actor {
@@ -378,7 +401,11 @@ pub async fn revoke_moderator(
     let target_id = resolve_target_authority(app_core, target).await?;
     let runtime = require_runtime(app_core).await?;
     let channel_id = match channel_hint {
-        Some(hint) => Some(resolve_authoritative_channel_id(&runtime, hint).await?),
+        Some(hint) => Some(
+            identify_materialized_channel_hint(&runtime, hint)
+                .await?
+                .channel_id,
+        ),
         None => None,
     };
     revoke_moderator_resolved(app_core, channel_id, target_id).await
@@ -426,7 +453,7 @@ pub async fn revoke_moderator_resolved(
     )
     .await
     .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?
-        .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
+    .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
     let actor = runtime.authority_id();
     let fact =
         HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
@@ -440,7 +467,7 @@ pub async fn revoke_moderator_resolved(
     )
     .await
     .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?
-        .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?;
+    .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?;
 
     for peer in scope.peers {
         if peer == actor {
@@ -569,7 +596,7 @@ mod tests {
         emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
             .await
             .unwrap();
-        runtime.set_authoritative_channel_name_matches("slash-lab", vec![channel_id]);
+        runtime.set_materialized_channel_name_matches("slash-lab", vec![channel_id]);
         runtime.set_amp_channel_context(channel_id, context_id);
         runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
         {
@@ -662,7 +689,7 @@ mod tests {
         emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
             .await
             .unwrap();
-        runtime.set_authoritative_channel_name_matches("slash-lab", vec![channel_home_id]);
+        runtime.set_materialized_channel_name_matches("slash-lab", vec![channel_home_id]);
         runtime.set_amp_channel_context(channel_home_id, channel_context);
         runtime.set_amp_channel_participants(channel_context, channel_home_id, vec![owner, peer]);
         {

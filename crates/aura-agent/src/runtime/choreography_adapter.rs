@@ -504,7 +504,20 @@ where
 
         if let Some(context_id) = self.guard_config.context_id {
             if let Some(guard_req) = self.guard_config.get_guard(type_name) {
-                let peer = self.role_map.get(&to).copied().unwrap_or(self.authority_id);
+                let peer = if to == self.self_role {
+                    self.authority_id
+                } else {
+                    *self
+                        .role_map
+                        .get(&to)
+                        .ok_or_else(|| AuraChoreographyError::RoleNotFound {
+                            role: ChoreographicRole::new(
+                                aura_core::DeviceId::new_from_entropy([0u8; 32]),
+                                self.authority_id,
+                                RoleIndex::new(0).expect("role index"),
+                            ),
+                        })?
+                };
 
                 debug!(
                     message_type = type_name,

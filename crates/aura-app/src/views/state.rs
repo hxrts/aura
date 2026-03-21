@@ -132,6 +132,11 @@ cfg_if! {
                 self.homes.get_cloned()
             }
 
+            /// Get a clone of the current chat state.
+            pub fn get_chat(&self) -> ChatState {
+                self.chat.get_cloned()
+            }
+
             /// Get a clone of the current recovery state
             pub fn get_recovery(&self) -> RecoveryState {
                 self.recovery.get_cloned()
@@ -208,6 +213,11 @@ cfg_if! {
             /// Get current chat state
             pub fn chat(&self) -> &ChatState {
                 &self.chat
+            }
+
+            /// Get a clone of the current chat state.
+            pub fn get_chat(&self) -> ChatState {
+                self.chat.clone()
             }
 
             /// Get current recovery state

@@ -1,5 +1,4 @@
 use super::AuraEffectSystem;
-use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
@@ -201,32 +200,8 @@ async fn resolve_peer_addr(
     peer: AuthorityId,
 ) -> Option<String> {
     let manager = effects.rendezvous_manager()?;
-    if let Some(addr) = manager
-        .get_descriptor(context, peer)
-        .await
-        .and_then(descriptor_transport_addr)
-    {
-        return Some(addr);
-    }
-
-    let fallback_context = default_context_id_for_authority(peer);
-    if fallback_context == context {
-        return manager
-            .get_any_descriptor_for_authority(peer)
-            .await
-            .and_then(descriptor_transport_addr);
-    }
-
-    if let Some(addr) = manager
-        .get_descriptor(fallback_context, peer)
-        .await
-        .and_then(descriptor_transport_addr)
-    {
-        return Some(addr);
-    }
-
     manager
-        .get_any_descriptor_for_authority(peer)
+        .get_descriptor(context, peer)
         .await
         .and_then(descriptor_transport_addr)
 }
@@ -428,6 +403,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::default_context_id_for_authority;
     use crate::core::AgentConfig;
     use crate::runtime::services::{
         RendezvousManager, RendezvousManagerConfig, RuntimeService, RuntimeServiceContext,
@@ -456,7 +432,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_peer_addr_falls_back_when_primary_descriptor_has_no_tcp_hint() {
+    async fn resolve_peer_addr_does_not_fall_back_across_contexts() {
         let authority = AuthorityId::new_from_entropy([210u8; 32]);
         let peer = AuthorityId::new_from_entropy([211u8; 32]);
         let primary_context = ContextId::new_from_entropy([212u8; 32]);
@@ -498,7 +474,7 @@ mod tests {
             .unwrap();
 
         let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
-        assert_eq!(resolved.as_deref(), Some("127.0.0.1:55002"));
+        assert!(resolved.is_none());
         RuntimeService::stop(&manager).await.unwrap();
     }
 }

@@ -226,9 +226,29 @@ impl<'a> InvitationContactHandler<'a> {
                     &updated,
                 )
                 .await?;
-                self.handler
-                    .materialize_home_signal_for_channel_acceptance(effects.as_ref(), &updated)
-                    .await?;
+                if let InvitationType::Channel {
+                    home_id,
+                    nickname_suggestion,
+                    ..
+                } = &updated.invitation_type
+                {
+                    let reactive = effects.reactive_handler();
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    let home_name =
+                        require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                    crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                        &reactive,
+                        *home_id,
+                        &home_name,
+                        updated.sender_id,
+                        updated.receiver_id,
+                        updated.context_id,
+                        now_ms,
+                    )
+                    .await
+                    .map_err(AgentError::runtime)?;
+                }
                 self.handler
                     .invitation_cache
                     .cache_invitation(updated)
@@ -330,9 +350,29 @@ impl<'a> InvitationContactHandler<'a> {
                     &updated,
                 )
                 .await?;
-                self.handler
-                    .materialize_home_signal_for_channel_acceptance(effects.as_ref(), &updated)
-                    .await?;
+                if let InvitationType::Channel {
+                    home_id,
+                    nickname_suggestion,
+                    ..
+                } = &updated.invitation_type
+                {
+                    let reactive = effects.reactive_handler();
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    let home_name =
+                        require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                    crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                        &reactive,
+                        *home_id,
+                        &home_name,
+                        updated.sender_id,
+                        updated.receiver_id,
+                        updated.context_id,
+                        now_ms,
+                    )
+                    .await
+                    .map_err(AgentError::runtime)?;
+                }
                 self.handler
                     .invitation_cache
                     .cache_invitation(updated)

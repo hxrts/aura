@@ -17,7 +17,10 @@ use aura_app::views::{
         note_to_self_channel_id, Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     },
     contacts::{Contact, ContactError, ContactsState},
-    home::{BanRecord, HomeRole, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
+    home::{
+        BanRecord, HomeMember, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
+        PinnedMessageMeta,
+    },
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
     },
@@ -62,6 +65,164 @@ async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
             Some(AppError::internal("reactive_scheduler", message)),
         )
         .await;
+}
+
+async fn read_registered_homes_state(reactive: &ReactiveHandler) -> Result<HomesState, String> {
+    reactive.read(&*HOMES_SIGNAL).await.map_err(|error| {
+        format!("home signal materialization requires registered homes signal: {error}")
+    })
+}
+
+pub(crate) async fn materialize_home_signal_for_channel_invitation(
+    reactive: &ReactiveHandler,
+    own_authority: AuthorityId,
+    channel_id: ChannelId,
+    home_name: &str,
+    sender_id: AuthorityId,
+    context_id: ContextId,
+    now_ms: u64,
+) -> Result<(), String> {
+    let mut homes = read_registered_homes_state(reactive).await?;
+    let mut changed = false;
+
+    if !homes.has_home(&channel_id) {
+        let mut home = HomeState::new(
+            channel_id,
+            Some(home_name.to_string()),
+            sender_id,
+            now_ms,
+            context_id,
+        );
+
+        if sender_id != own_authority {
+            if let Some(owner) = home.member_mut(&sender_id) {
+                owner.name = sender_id.to_string();
+                owner.is_online = false;
+                owner.last_seen = Some(now_ms);
+            }
+            home.my_role = HomeRole::Participant;
+        }
+
+        if home.member(&own_authority).is_none() {
+            home.add_member(HomeMember {
+                id: own_authority,
+                name: "You".to_string(),
+                role: HomeRole::Participant,
+                is_online: true,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::MEMBER_ALLOCATION,
+            });
+        }
+
+        homes.add_home(home);
+        if homes.current_home_id().is_none() {
+            homes.select_home(Some(channel_id));
+        }
+        changed = true;
+    } else if let Some(home) = homes.home_mut(&channel_id) {
+        if home.context_id != Some(context_id) {
+            home.context_id = Some(context_id);
+            changed = true;
+        }
+
+        if sender_id != own_authority && home.member(&own_authority).is_none() {
+            home.add_member(HomeMember {
+                id: own_authority,
+                name: "You".to_string(),
+                role: HomeRole::Participant,
+                is_online: true,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::MEMBER_ALLOCATION,
+            });
+            changed = true;
+        }
+
+        if sender_id != own_authority && matches!(home.my_role, HomeRole::Member) {
+            home.my_role = HomeRole::Participant;
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    if homes.current_home_id().is_none() && homes.has_home(&channel_id) {
+        homes.select_home(Some(channel_id));
+    }
+
+    reactive
+        .emit(&*HOMES_SIGNAL, homes)
+        .await
+        .map_err(|error| format!("emit homes signal: {error}"))?;
+
+    Ok(())
+}
+
+pub(crate) async fn materialize_home_signal_for_channel_acceptance(
+    reactive: &ReactiveHandler,
+    home_id: ChannelId,
+    home_name: &str,
+    sender_id: AuthorityId,
+    receiver_id: AuthorityId,
+    context_id: ContextId,
+    now_ms: u64,
+) -> Result<(), String> {
+    let mut homes = read_registered_homes_state(reactive).await?;
+    let mut changed = false;
+
+    if !homes.has_home(&home_id) {
+        let mut home = HomeState::new(
+            home_id,
+            Some(home_name.to_string()),
+            sender_id,
+            now_ms,
+            context_id,
+        );
+        if home.member(&receiver_id).is_none() {
+            home.add_member(HomeMember {
+                id: receiver_id,
+                name: receiver_id.to_string(),
+                role: HomeRole::Participant,
+                is_online: false,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::MEMBER_ALLOCATION,
+            });
+        }
+        homes.add_home(home);
+        changed = true;
+    } else if let Some(home) = homes.home_mut(&home_id) {
+        if home.context_id != Some(context_id) {
+            home.context_id = Some(context_id);
+            changed = true;
+        }
+        if home.member(&receiver_id).is_none() {
+            home.add_member(HomeMember {
+                id: receiver_id,
+                name: receiver_id.to_string(),
+                role: HomeRole::Participant,
+                is_online: false,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::MEMBER_ALLOCATION,
+            });
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    reactive
+        .emit(&*HOMES_SIGNAL, homes)
+        .await
+        .map_err(|error| format!("emit homes signal: {error}"))?;
+
+    Ok(())
 }
 
 // =============================================================================

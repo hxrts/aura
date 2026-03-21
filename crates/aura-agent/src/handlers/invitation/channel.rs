@@ -139,7 +139,9 @@ impl<'a> InvitationChannelHandler<'a> {
                 }
 
                 let _ = rendezvous_manager.trigger_discovery().await;
-                let _ = effects.sleep_ms(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS).await;
+                let _ = effects
+                    .sleep_ms(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS)
+                    .await;
 
                 if attempt + 1 == CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
                     let detail = result.error.unwrap_or_else(|| {
@@ -711,9 +713,19 @@ impl<'a> InvitationChannelHandler<'a> {
                 .map_err(|e| AgentError::effects(e.to_string()))?;
         }
 
-        self.handler
-            .materialize_home_signal_for_channel_invitation(effects, invite)
-            .await?;
+        let reactive = effects.reactive_handler();
+        let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+        crate::reactive::app_signal_views::materialize_home_signal_for_channel_invitation(
+            &reactive,
+            own_id,
+            invite.channel_id,
+            &invite.home_name,
+            invite.sender_id,
+            invite.context_id,
+            now_ms,
+        )
+        .await
+        .map_err(AgentError::runtime)?;
 
         Ok(())
     }
