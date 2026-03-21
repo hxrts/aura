@@ -13,12 +13,12 @@
 //! ```
 
 use super::{Intent, IntentError, StateSnapshot};
-use crate::workflows::runtime::timeout_runtime_call as timeout_runtime_call_bounded;
 use crate::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
     SyncStatus as RuntimeSyncStatus,
 };
 use crate::views::ViewState;
+use crate::workflows::runtime::timeout_runtime_call as timeout_runtime_call_bounded;
 
 use crate::ReactiveHandler;
 use async_lock::RwLock;
@@ -174,8 +174,8 @@ impl AppCore {
         timeout_runtime_call_bounded(&runtime, operation, stage, duration, move || {
             call(runtime_for_call)
         })
-            .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))
+        .await
+        .map_err(|error| IntentError::internal_error(error.to_string()))
     }
 
     /// Create a new AppCore instance with the given configuration
@@ -858,11 +858,11 @@ impl AppCore {
                 APP_RUNTIME_QUERY_TIMEOUT,
                 || runtime.try_get_sync_status(),
             )
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .map(|status| status.is_running)
-                .unwrap_or(false);
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .map(|status| status.is_running)
+            .unwrap_or(false);
         }
         false
     }
@@ -1013,7 +1013,8 @@ impl AppCore {
     /// # Errors
     ///
     /// Returns `IntentError::NoAgent` if no runtime is configured or sync
-    /// service is not available.
+    /// service is not available. Also fails explicitly when no sync peers are
+    /// available, rather than reporting a no-op as success.
     pub async fn trigger_sync(&self) -> Result<(), IntentError> {
         self.with_runtime_timeout(
             "trigger_sync requires a runtime",
