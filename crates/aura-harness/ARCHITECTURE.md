@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Multi-instance orchestration harness for Aura runtime testing and operator workflows. Coordinates local PTY and SSH-backed instances, exposes a structured tool API, executes semantic scenarios against real frontends through a typed semantic command plane, and produces replay and artifact bundles.
+Multi-instance orchestration harness for Aura runtime testing and operator workflows. Coordinates local PTY and SSH-backed instances, exposes a typed tool API, executes semantic scenarios against real frontends through a typed semantic command plane, and produces replay and artifact bundles.
 
 ## Scope
 
@@ -28,10 +28,10 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - `config.rs` — Schema parsing for run config, semantic scenarios, and compatibility-only executor fixtures.
 - `compatibility_step.rs` — Internal compatibility IR for frontend-conformance execution; limited to renderer-mechanic primitives.
 - `coordinator.rs` — Multi-instance orchestration and per-instance command routing.
-- `tool_api.rs` — Versioned request and response surface used by tests and automation.
+- `tool_api.rs` — Versioned request and typed response surface used by tests and automation.
 - `executor.rs` — Semantic and compatibility scenario execution with deterministic budgets.
-- `replay.rs` — Replay bundle validation and shape-based response conformance.
-- `preflight.rs` — Capability, binary, storage, port, and SSH baseline checks.
+- `replay.rs` — Replay bundle validation and typed response conformance.
+- `preflight.rs` — Capability, binary, storage, port, and SSH baseline checks plus semantic-lane admission.
 - `backend/` — Local PTY and SSH backend adapters.
 
 ## Invariants
@@ -46,10 +46,11 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Primary-lane policy: default lane targets real Aura runtime and real TUI/web surfaces.
 - Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
+- Explicit lane capability contract: shared-semantic, raw-UI, and diagnostic-observation access are declared separately at preflight time; SSH is diagnostic-only until it implements the shared semantic contract.
 - The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.
 - Shared semantic execution must not keep a duplicate lifecycle graph, phase cache, or heuristic identifier repair path for accounts, contacts, channels, or messaging state.
 - Parity-critical create/join/accept shared-channel flows must receive canonical operation handles and channel bindings from the authoritative submission/receipt path; post-hoc polling repair is forbidden.
-- Raw renderer capture is diagnostic-only and is exposed through explicitly named `diagnostic_*` observation surfaces; typed `UiSnapshot` / `UiSnapshotEvent` remain the only authoritative shared-semantic observation plane.
+- Raw renderer capture is diagnostic-only and is exposed through explicitly named `diagnostic_*` observation surfaces; typed `UiSnapshot` / `UiSnapshotEvent` remain the only authoritative shared-semantic observation plane, and diagnostic query APIs keep the `diagnostic_*` naming through the tool boundary.
 - Time-bounded loops in shared semantic code are allowed only for infrastructure readiness, transport, or bounded observation waits whose owner is explicit; ownership transfer itself must not depend on settle windows or heuristic polling.
 - Do not add backwards-compatibility, migration, fallback, or legacy code paths for removed shared-semantic harness behavior. Delete obsolete paths instead.
 
@@ -168,7 +169,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 
 ### Strategy
 
-Deterministic replay, semantic flow execution, and tool API correctness are the primary concerns. Tests are organized into `tests/phases/` for the phased harness evolution (phase 1 through 5), `tests/holepunch/` for NAT traversal tiers, and top-level contract tests.
+Deterministic replay, semantic flow execution, and tool API correctness are the primary concerns. Replay now compares typed tool-response meaning rather than only `Ok`/`Error` shape. Tests are organized into `tests/phases/` for the phased harness evolution (phase 1 through 5), `tests/holepunch/` for NAT traversal tiers, and top-level contract tests.
 
 ### Commands
 

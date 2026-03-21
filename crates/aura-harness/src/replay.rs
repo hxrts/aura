@@ -70,7 +70,7 @@ impl ReplayRunner {
         let mut mismatches = 0_u64;
         for action in &bundle.actions {
             let actual = tool_api.handle_request(action.request.clone());
-            if !response_shape_matches(&actual, &action.response) {
+            if !response_semantics_match(&actual, &action.response) {
                 mismatches = mismatches.saturating_add(1_u64);
             }
         }
@@ -85,12 +85,8 @@ impl ReplayRunner {
     }
 }
 
-fn response_shape_matches(left: &ToolResponse, right: &ToolResponse) -> bool {
-    matches!(
-        (left, right),
-        (ToolResponse::Ok { .. }, ToolResponse::Ok { .. })
-            | (ToolResponse::Error { .. }, ToolResponse::Error { .. })
-    )
+fn response_semantics_match(left: &ToolResponse, right: &ToolResponse) -> bool {
+    left == right
 }
 
 pub fn parse_bundle(payload: &str) -> Result<ReplayBundle> {
@@ -98,4 +94,31 @@ pub fn parse_bundle(payload: &str) -> Result<ReplayBundle> {
         .map_err(|error| anyhow!("failed to parse replay bundle JSON: {error}"))?;
     bundle.validate()?;
     Ok(bundle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::response_semantics_match;
+    use crate::tool_api::{
+        ClipboardPayload, ToolPayload, ToolResponse,
+    };
+
+    #[test]
+    fn replay_response_semantics_reject_payload_drift() {
+        let expected = ToolResponse::Ok {
+            payload: ToolPayload::Clipboard(ClipboardPayload {
+                text: "alpha".to_string(),
+            }),
+        };
+        let actual = ToolResponse::Ok {
+            payload: ToolPayload::Clipboard(ClipboardPayload {
+                text: "beta".to_string(),
+            }),
+        };
+
+        assert!(
+            !response_semantics_match(&actual, &expected),
+            "typed replay matching must reject payload drift"
+        );
+    }
 }

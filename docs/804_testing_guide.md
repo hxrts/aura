@@ -51,6 +51,8 @@ Use this lane matrix when selecting harness mode.
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot/readiness waits.
 
+Shared-semantic preflight is intentionally stricter than generic backend startup. A run config that includes SSH instances does not automatically qualify for the shared semantic lane; until a backend implements the shared semantic contract, SSH remains diagnostic-only / transport-only for harness purposes and shared-semantic scenarios must fail closed before execution.
+
 `aura-app::ui_contract` is the canonical module for shared flow support. It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and `RuntimeEventSnapshot`. Use semantic readiness and state assertions before using fallback text matching.
 
 Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or `Uuid::new_v4()` is forbidden. These operations must flow through effect traits instead.
@@ -95,6 +97,7 @@ For parity-critical observation:
 - observation surfaces must be side-effect free
 - recovery and retries must be explicit and separate from observation
 - DOM/text fallback paths are diagnostics only and must not become success-path observation behavior
+- diagnostic tool/query surfaces should say `diagnostic_*` at the API boundary when they are derived from screen/DOM capture rather than authoritative semantic state
 - onboarding must publish through the same semantic snapshot path as the rest of the UI
 - placeholder IDs, override-backed exports, and heuristic success/event synthesis are not acceptable correctness paths
 
@@ -136,6 +139,7 @@ For failure analysis:
 
 - prefer canonical action/event/state traces and structured timeout diagnostics
 - treat final text or screenshot inspection as supporting evidence, not the primary oracle
+- replay bundles should compare typed tool-response payload meaning, not just top-level `Ok` vs `Error` shape
 
 For ownership cleanup discipline:
 

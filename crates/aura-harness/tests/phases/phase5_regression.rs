@@ -26,7 +26,6 @@ fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
     };
 
     let config_path = temp.path().join("run.toml");
-    let scenario_path = temp.path().join("scenario.toml");
     let artifacts_dir = temp.path().join("artifacts");
 
     let run_config = RunConfig {
@@ -103,24 +102,11 @@ fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
         panic!("failed writing run config: {error}");
     }
 
-    let scenario_body = r#"id = "phase5-regression"
-goal = "validate phase 5 hardening artifacts"
-
-[[steps]]
-id = "seed"
-action = "launch_actors"
-"#;
-    if let Err(error) = fs::write(&scenario_path, scenario_body) {
-        panic!("failed writing scenario config: {error}");
-    }
-
     let binary = env!("CARGO_BIN_EXE_aura-harness");
     let status = match Command::new(binary)
         .arg("run")
         .arg("--config")
         .arg(config_path.as_os_str())
-        .arg("--scenario")
-        .arg(scenario_path.as_os_str())
         .arg("--artifacts-dir")
         .arg(artifacts_dir.as_os_str())
         .status()
@@ -245,7 +231,7 @@ args = ["-lc", "yes churn"]
             assert!(message.contains("wait_for timed out"));
         }
         ToolResponse::Ok { payload } => {
-            panic!("expected wait_for timeout, got success payload: {payload}");
+            panic!("expected wait_for timeout, got success payload: {payload:?}");
         }
     }
 

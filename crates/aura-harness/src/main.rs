@@ -26,7 +26,7 @@ use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
-use aura_harness::tool_api::{DiagnosticScreenCapture, ToolApi, ToolRequest};
+use aura_harness::tool_api::{DiagnosticScreenCapture, ToolApi, ToolPayload, ToolRequest};
 use aura_harness::{artifacts::ArtifactBundle, default_artifacts_dir};
 use clap::{Parser, Subcommand};
 
@@ -235,13 +235,11 @@ fn run_with_artifacts(
             instance_id: instance.id.clone(),
             screen_source: ScreenSource::Default,
         });
-        if let aura_harness::tool_api::ToolResponse::Ok { payload } = response {
-            let screen = payload
-                .get("screen")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            initial_screens.insert(instance.id.clone(), screen);
+        if let aura_harness::tool_api::ToolResponse::Ok {
+            payload: ToolPayload::DiagnosticScreenCapture(capture),
+        } = response
+        {
+            initial_screens.insert(instance.id.clone(), capture.diagnostic_authoritative_screen);
         }
         if verbose_steps {
             eprintln!(
@@ -333,18 +331,21 @@ fn collect_failure_diagnostics(
             screen_source: ScreenSource::Default,
         });
         let diagnostic_capture = match screen_response {
-            aura_harness::tool_api::ToolResponse::Ok { payload } => serde_json::from_value::<
-                DiagnosticScreenCapture,
-            >(payload)
-            .unwrap_or_else(|error| DiagnosticScreenCapture {
-                diagnostic_authoritative_screen: format!("diagnostic_screen_decode_error: {error}"),
+            aura_harness::tool_api::ToolResponse::Ok {
+                payload: ToolPayload::DiagnosticScreenCapture(capture),
+            } => capture,
+            aura_harness::tool_api::ToolResponse::Ok { payload } => DiagnosticScreenCapture {
+                diagnostic_authoritative_screen: format!(
+                    "diagnostic_screen_unexpected_payload: {:?}",
+                    payload
+                ),
                 diagnostic_raw_screen: String::new(),
                 diagnostic_normalized_screen: String::new(),
                 screen_source: "default".to_string(),
                 capture_consistency: None,
                 matched: None,
                 matched_view: None,
-            }),
+            },
             aura_harness::tool_api::ToolResponse::Error { message } => {
                 let error = format!("screen_capture_error: {message}");
                 DiagnosticScreenCapture {
@@ -364,7 +365,14 @@ fn collect_failure_diagnostics(
             screen_source: ScreenSource::Dom,
         });
         let dom_capture = match dom_screen_response {
-            aura_harness::tool_api::ToolResponse::Ok { payload } => payload,
+            aura_harness::tool_api::ToolResponse::Ok {
+                payload: ToolPayload::DiagnosticScreenCapture(capture),
+            } => serde_json::to_value(capture).unwrap_or_else(|error| {
+                serde_json::json!({ "error": format!("dom_capture_encode_error: {error}") })
+            }),
+            aura_harness::tool_api::ToolResponse::Ok { payload } => serde_json::json!({
+                "error": format!("dom_capture_unexpected_payload: {payload:?}")
+            }),
             aura_harness::tool_api::ToolResponse::Error { message } => serde_json::json!({
                 "error": format!("dom_screen_capture_error: {message}")
             }),
@@ -373,20 +381,37 @@ fn collect_failure_diagnostics(
         let ui_state_response = tool_api.handle_request(ToolRequest::UiState {
             instance_id: instance.id.clone(),
         });
-        let (ui_state, ui_state_error) = match ui_state_response {
-            aura_harness::tool_api::ToolResponse::Ok { payload } => (Some(payload), None),
-            aura_harness::tool_api::ToolResponse::Error { message } => (None, Some(message)),
+        let (ui_state_snapshot, ui_state, ui_state_error) = match ui_state_response {
+            aura_harness::tool_api::ToolResponse::Ok {
+                payload: ToolPayload::UiSnapshot(snapshot),
+            } => (
+                Some(snapshot.clone()),
+                Some(serde_json::to_value(snapshot).unwrap_or_else(|error| {
+                    serde_json::json!({ "encode_error": error.to_string() })
+                })),
+                None,
+            ),
+            aura_harness::tool_api::ToolResponse::Ok { payload } => (
+                None,
+                Some(serde_json::json!({
+                    "unexpected_payload": format!("{payload:?}")
+                })),
+                Some("ui_state_unexpected_payload".to_string()),
+            ),
+            aura_harness::tool_api::ToolResponse::Error { message } => (None, None, Some(message)),
         };
 
-        let render_convergence = match &ui_state {
-            Some(ui_state) => {
-                let semantic_screen = ui_state
-                    .get("screen")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                let semantic_modal = ui_state
-                    .get("open_modal")
-                    .and_then(serde_json::Value::as_str);
+        let render_convergence = match &ui_state_snapshot {
+            Some(snapshot) => {
+                let semantic_screen = serde_json::to_value(&snapshot.screen)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_string))
+                    .unwrap_or_else(|| format!("{:?}", snapshot.screen));
+                let semantic_modal = snapshot
+                    .open_modal
+                    .as_ref()
+                    .and_then(|modal| serde_json::to_value(modal).ok())
+                    .and_then(|value| value.as_str().map(str::to_string));
                 let dom_authoritative = dom_capture
                     .get("diagnostic_authoritative_screen")
                     .and_then(serde_json::Value::as_str);
@@ -394,7 +419,7 @@ fn collect_failure_diagnostics(
                     "semantic_screen": semantic_screen,
                     "semantic_modal": semantic_modal,
                     "diagnostic_dom_authoritative_screen": dom_authoritative,
-                    "screen_matches_dom": dom_authoritative == Some(semantic_screen),
+                    "screen_matches_dom": dom_authoritative == Some(semantic_screen.as_str()),
                 })
             }
             None => serde_json::json!({
@@ -402,9 +427,13 @@ fn collect_failure_diagnostics(
             }),
         };
 
-        let runtime_events = ui_state
+        let runtime_events = ui_state_snapshot
             .as_ref()
-            .and_then(|ui_state| ui_state.get("runtime_events").cloned())
+            .map(|snapshot| {
+                serde_json::to_value(&snapshot.runtime_events).unwrap_or_else(|error| {
+                    serde_json::json!([format!("runtime_events_encode_error: {error}")])
+                })
+            })
             .unwrap_or_else(|| serde_json::json!([]));
 
         let log_response = tool_api.handle_request(ToolRequest::TailLog {
@@ -412,10 +441,14 @@ fn collect_failure_diagnostics(
             lines: 200,
         });
         let log_tail = match log_response {
-            aura_harness::tool_api::ToolResponse::Ok { payload } => payload
-                .get("lines")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!([])),
+            aura_harness::tool_api::ToolResponse::Ok {
+                payload: ToolPayload::TailLog(lines),
+            } => serde_json::to_value(lines.lines).unwrap_or_else(|error| {
+                serde_json::json!([format!("tail_log_encode_error: {error}")])
+            }),
+            aura_harness::tool_api::ToolResponse::Ok { payload } => {
+                serde_json::json!([format!("tail_log_unexpected_payload: {payload:?}")])
+            }
             aura_harness::tool_api::ToolResponse::Error { message } => {
                 serde_json::json!([format!("tail_log_error: {message}")])
             }
