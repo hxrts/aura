@@ -1893,7 +1893,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError> {
-        Ok(rendezvous::get_rendezvous_status(self).await)
+        rendezvous::get_rendezvous_status(self).await
     }
 
     async fn trigger_discovery(&self) -> Result<(), IntentError> {
@@ -4702,6 +4702,33 @@ mod tests {
 
         let error = bridge
             .try_get_lan_peers()
+            .await
+            .expect_err("missing rendezvous service should be explicit");
+        assert!(
+            error.to_string().contains("rendezvous_service"),
+            "expected rendezvous service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_rendezvous_status_requires_rendezvous_service() {
+        let authority = AuthorityId::new_from_entropy([24u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([25u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_rendezvous_status()
             .await
             .expect_err("missing rendezvous service should be explicit");
         assert!(
