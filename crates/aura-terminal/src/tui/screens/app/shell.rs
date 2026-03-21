@@ -43,9 +43,7 @@ use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
-use aura_app::ui_contract::{
-    HarnessUiCommand, RuntimeEventKind, RuntimeFact, SemanticOperationKind,
-};
+use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact, SemanticOperationKind};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::FrostThreshold;
@@ -1009,18 +1007,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let ready_join_channel_receipts_ref =
         hooks.use_ref(|| Arc::new(Mutex::new(HashSet::<String>::new())));
     let ready_join_channel_receipts = ready_join_channel_receipts_ref.read().clone();
-    let pending_accept_pending_channel_receipts_ref = hooks.use_ref(|| {
-        Arc::new(Mutex::new(
-            HashMap::<String, HarnessCommandReceiptHandle>::new(),
-        ))
-    });
-    let pending_accept_pending_channel_receipts =
-        pending_accept_pending_channel_receipts_ref.read().clone();
-    let ready_accept_pending_channel_receipts_ref =
-        hooks.use_ref(|| Arc::new(Mutex::new(HashSet::<String>::new())));
-    let ready_accept_pending_channel_receipts =
-        ready_accept_pending_channel_receipts_ref.read().clone();
-
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
@@ -1377,12 +1363,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
             let selected_channel_binding_for_commands =
                 selected_channel_binding_for_chat_screen.clone();
-            let pending_create_channel_receipts_for_commands =
-                pending_create_channel_receipts.clone();
-            let pending_join_channel_receipts_for_commands =
-                pending_join_channel_receipts.clone();
-            let pending_accept_pending_channel_receipts_for_commands =
-                pending_accept_pending_channel_receipts.clone();
             async move {
                 #[allow(clippy::expect_used)]
                 let mut rx = {
@@ -1473,57 +1453,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let harness_devices = shared_devices_for_commands.read().clone();
                     let harness_channels = shared_channels_for_commands.read().clone();
                     let harness_messages = shared_messages_for_commands.read().clone();
-                    let defer_create_channel_receipt = matches!(
-                        submission.command,
-                        HarnessUiCommand::CreateChannel { .. }
-                    ) && operation_handle.is_some();
-                    let defer_join_channel_receipt = matches!(
-                        submission.command,
-                        HarnessUiCommand::JoinChannel { .. }
-                    ) && operation_handle.is_some();
-                    let defer_accept_pending_channel_receipt = matches!(
-                        submission.command,
-                        HarnessUiCommand::AcceptPendingChannelInvitation
-                    ) && operation_handle.is_some();
-                    if defer_create_channel_receipt
-                        || defer_join_channel_receipt
-                        || defer_accept_pending_channel_receipt
-                    {
-                        let Some(handle) = operation_handle.clone() else {
-                            submission.receipt.complete(
-                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                    reason: "semantic command did not expose a canonical ui operation handle with exact instance tracking".to_string(),
-                                },
-                            );
-                            continue;
-                        };
-                        let pending_receipts = if defer_create_channel_receipt {
-                            &pending_create_channel_receipts_for_commands
-                        } else if defer_join_channel_receipt {
-                            &pending_join_channel_receipts_for_commands
-                        } else {
-                            &pending_accept_pending_channel_receipts_for_commands
-                        };
-                        pending_receipts
-                            .lock()
-                            .unwrap()
-                            .insert(handle.instance_id().0.clone(), submission.receipt.clone());
-                    } else {
-                        let receipt = match operation_handle {
-                            Some(operation) => {
-                                aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
-                                    operation,
-                                    value: None,
-                                }
+                    let receipt = match operation_handle {
+                        Some(operation) => {
+                            aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
+                                operation,
+                                value: None,
                             }
-                            None => {
-                                aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
-                                    value: None,
-                                }
+                        }
+                        None => {
+                            aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
+                                value: None,
                             }
-                        };
-                        submission.receipt.complete(receipt);
-                    }
+                        }
+                    };
+                    submission.receipt.complete(receipt);
 
                     let export_result = maybe_export_ui_snapshot(
                         &updated_state,
@@ -1562,10 +1505,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let pending_create_channel_receipts_for_updates = pending_create_channel_receipts;
             let pending_join_channel_receipts_for_updates = pending_join_channel_receipts;
             let ready_join_channel_receipts_for_updates = ready_join_channel_receipts;
-            let pending_accept_pending_channel_receipts_for_updates =
-                pending_accept_pending_channel_receipts;
-            let ready_accept_pending_channel_receipts_for_updates =
-                ready_accept_pending_channel_receipts;
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -2025,12 +1964,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     aura_app::ui_contract::OperationId::join_channel(),
                                     &binding,
                                 );
-                                complete_ready_channel_binding_receipts(
-                                    &pending_accept_pending_channel_receipts_for_updates,
-                                    &ready_accept_pending_channel_receipts_for_updates,
-                                    aura_app::ui_contract::OperationId::invitation_accept(),
-                                    &binding,
-                                );
                             }
                         }
                         UiUpdate::ChannelCreated {
@@ -2169,12 +2102,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     &pending_join_channel_receipts_for_updates,
                                     &ready_join_channel_receipts_for_updates,
                                     aura_app::ui_contract::OperationId::join_channel(),
-                                    &binding,
-                                );
-                                complete_ready_channel_binding_receipts(
-                                    &pending_accept_pending_channel_receipts_for_updates,
-                                    &ready_accept_pending_channel_receipts_for_updates,
-                                    aura_app::ui_contract::OperationId::invitation_accept(),
                                     &binding,
                                 );
                             }
@@ -2326,10 +2253,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     == SemanticOperationKind::JoinChannel
                                     && operation_id
                                         == aura_app::ui_contract::OperationId::join_channel();
-                                let is_accept_pending_channel = status.kind
-                                    == SemanticOperationKind::AcceptPendingChannelInvitation
-                                    && operation_id
-                                        == aura_app::ui_contract::OperationId::invitation_accept();
                                 let is_failed_or_cancelled = matches!(
                                     status.phase,
                                     aura_app::ui_contract::SemanticOperationPhase::Failed
@@ -2373,45 +2296,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 &pending_join_channel_receipts_for_updates,
                                                 &ready_join_channel_receipts_for_updates,
                                                 aura_app::ui_contract::OperationId::join_channel(),
-                                                &binding,
-                                            );
-                                        }
-                                    }
-                                }
-                                if is_accept_pending_channel {
-                                    if is_failed_or_cancelled {
-                                        ready_accept_pending_channel_receipts_for_updates
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&instance_id.0);
-                                        if let Some(receipt) = pending_accept_pending_channel_receipts_for_updates
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&instance_id.0)
-                                        {
-                                            let reason = status
-                                                .error
-                                                .as_ref()
-                                                .and_then(|error| error.detail.clone())
-                                                .unwrap_or_else(|| "accept pending channel invitation failed".to_string());
-                                            receipt.complete(
-                                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                                    reason,
-                                                },
-                                            );
-                                        }
-                                    } else if is_succeeded {
-                                        ready_accept_pending_channel_receipts_for_updates
-                                            .lock()
-                                            .unwrap()
-                                            .insert(instance_id.0.clone());
-                                        if let Some(binding) =
-                                            selected_channel_binding_for_updates.read().clone()
-                                        {
-                                            complete_ready_channel_binding_receipts(
-                                                &pending_accept_pending_channel_receipts_for_updates,
-                                                &ready_accept_pending_channel_receipts_for_updates,
-                                                aura_app::ui_contract::OperationId::invitation_accept(),
                                                 &binding,
                                             );
                                         }

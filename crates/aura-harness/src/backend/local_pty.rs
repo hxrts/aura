@@ -147,6 +147,17 @@ fn require_channel_binding_submission(
     }
 }
 
+fn observe_exact_operation_state(
+    snapshot: &UiSnapshot,
+    handle: &UiOperationHandle,
+) -> Option<OperationState> {
+    snapshot
+        .operations
+        .iter()
+        .find(|operation| operation.id == *handle.id() && operation.instance_id == *handle.instance_id())
+        .map(|operation| operation.state)
+}
+
 struct RunningSession {
     child: Mutex<Box<dyn Child + Send>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -182,6 +193,42 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
+    fn await_channel_binding_for_operation(
+        &self,
+        handle: &UiOperationHandle,
+        operation_name: &str,
+        timeout: Duration,
+    ) -> Result<SubmittedAction<ChannelBinding>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let snapshot = self.ui_snapshot()?;
+            match observe_exact_operation_state(&snapshot, handle) {
+                Some(OperationState::Succeeded) => {
+                    let binding = selected_channel_binding(&snapshot).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "{operation_name} succeeded without an authoritative selected channel binding"
+                        )
+                    })?;
+                    return Ok(SubmittedAction::with_ui_operation(binding, handle.clone()));
+                }
+                Some(OperationState::Failed) => {
+                    anyhow::bail!("{operation_name} failed before publishing a channel binding");
+                }
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "{operation_name} did not publish a successful authoritative channel binding within {:?}",
+                    timeout
+                );
+            }
+            if let Some(session) = self.session.as_ref() {
+                self.ensure_session_alive(session, operation_name)?;
+            }
+            blocking_sleep(Duration::from_millis(100));
+        }
+    }
+
     fn reader_thread_alive(session: &RunningSession) -> bool {
         session
             .reader_thread
@@ -1509,10 +1556,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
-                    value: SemanticCommandValue::ChannelBinding {
-                        channel_id: submitted.value.channel_id,
-                        context_id: submitted.value.context_id,
-                    },
+                    value: SemanticCommandValue::None,
                 })
             }
             IntentAction::CreateChannel { channel_name } => {
@@ -1644,15 +1688,23 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         channel_name: &str,
     ) -> Result<SubmittedAction<ChannelBinding>> {
-        require_channel_binding_submission(
-            self.send_harness_command_receipt(&HarnessUiCommand::CreateChannel {
+        let operation_name = format!("submit_create_channel: create_channel_command:{channel_name}");
+        let receipt = self
+            .send_harness_command_receipt(&HarnessUiCommand::CreateChannel {
                 channel_name: channel_name.to_string(),
             })
-            .with_context(|| {
-                format!("submit_create_channel: create_channel_command:{channel_name}")
-            })?,
-            "submit_create_channel",
-        )
+            .with_context(|| operation_name.clone())?;
+        match require_channel_binding_submission(receipt.clone(), "submit_create_channel") {
+            Ok(submitted) => Ok(submitted),
+            Err(_) => {
+                let handle = require_ui_operation_handle(receipt, "submit_create_channel")?;
+                self.await_channel_binding_for_operation(
+                    &handle,
+                    "submit_create_channel",
+                    Duration::from_secs(15),
+                )
+            }
+        }
     }
 
     fn submit_create_contact_invitation(
@@ -1732,23 +1784,32 @@ impl SharedSemanticBackend for LocalPtyBackend {
 
     fn submit_accept_pending_channel_invitation(
         &mut self,
-    ) -> Result<SubmittedAction<ChannelBinding>> {
-        require_channel_binding_submission(
+    ) -> Result<SubmittedAction<()>> {
+        let handle = require_ui_operation_handle(
             self.send_harness_command_receipt(&HarnessUiCommand::AcceptPendingChannelInvitation)?,
             "accept_pending_channel_invitation",
-        )
+        )?;
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_join_channel(
         &mut self,
         channel_name: &str,
     ) -> Result<SubmittedAction<ChannelBinding>> {
-        require_channel_binding_submission(
-            self.send_harness_command_receipt(&HarnessUiCommand::JoinChannel {
-                channel_name: channel_name.to_string(),
-            })?,
-            "join_channel",
-        )
+        let receipt = self.send_harness_command_receipt(&HarnessUiCommand::JoinChannel {
+            channel_name: channel_name.to_string(),
+        })?;
+        match require_channel_binding_submission(receipt.clone(), "join_channel") {
+            Ok(submitted) => Ok(submitted),
+            Err(_) => {
+                let handle = require_ui_operation_handle(receipt, "join_channel")?;
+                self.await_channel_binding_for_operation(
+                    &handle,
+                    "join_channel",
+                    Duration::from_secs(15),
+                )
+            }
+        }
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {

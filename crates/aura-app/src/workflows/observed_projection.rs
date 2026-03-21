@@ -26,7 +26,7 @@ use crate::views::{
 use crate::workflows::parse::{
     parse_authority_id as parse_workflow_authority_id, parse_context_id,
 };
-use crate::workflows::signals::{emit_signal, read_signal};
+use crate::workflows::signals::emit_signal;
 use crate::AppCore;
 use aura_core::AuraError;
 
@@ -72,9 +72,11 @@ pub async fn reduce_chat_fact_observed(
 
     let reducer = ChatViewReducer;
     let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None);
-    let current_state = read_signal(app_core, &*CHAT_SIGNAL, CHAT_SIGNAL_NAME).await?;
-
     let state = {
+        let current_state = {
+            let core = app_core.read().await;
+            core.snapshot().chat
+        };
         let mut core = app_core.write().await;
         let mut state = current_state;
         for delta in deltas {

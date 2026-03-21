@@ -2425,6 +2425,10 @@ async fn join_channel_by_name_owned(
     };
     let channel_id = binding.channel_id;
     let authoritative_channel = authoritative_channel_ref(binding.channel_id, binding.context_id);
+    if let Ok(proof) = prove_channel_membership_ready(app_core, channel_id).await {
+        owner.publish_success_with(proof).await?;
+        return Ok(());
+    }
     if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)

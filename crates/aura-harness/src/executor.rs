@@ -1479,12 +1479,11 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            let (channel_binding, operation_handle) =
-                require_channel_binding_submission_with_exact_handle(
-                    &metadata_step,
-                    "accept_pending_channel_invitation",
-                    response,
-                )?;
+            let operation_handle = require_semantic_unit_submission_with_exact_handle(
+                &metadata_step,
+                "accept_pending_channel_invitation",
+                response,
+            )?;
             record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
             convergence_stage(
                 &metadata_step,
@@ -1498,7 +1497,6 @@ fn execute_semantic_intent(
                     OperationState::Succeeded,
                 ),
             )?;
-            record_current_channel_binding(context, &instance_id, channel_binding);
             declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }

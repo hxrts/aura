@@ -315,8 +315,8 @@ pub trait SharedSemanticBackend {
 
     fn submit_accept_pending_channel_invitation(
         &mut self,
-    ) -> Result<SubmittedAction<ChannelBinding>> {
-        expect_semantic_command_channel_binding_with_required_handle(
+    ) -> Result<SubmittedAction<()>> {
+        expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::AcceptPendingChannelInvitation,
             ))?,
