@@ -3902,10 +3902,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 config.mfa_policy.unwrap_or_else(|| "disabled".to_string()),
             ),
             Ok(None) => (String::new(), "disabled".to_string()),
-            Err(e) => {
-                tracing::warn!("Failed to load account config for settings: {}", e);
-                (String::new(), "disabled".to_string())
-            }
+            Err(e) => return Err(e),
         };
 
         Ok(SettingsBridgeState {
@@ -4865,5 +4862,45 @@ mod tests {
         );
 
         let _ = fs::remove_file(storage_root);
+    }
+
+    #[tokio::test]
+    async fn try_get_settings_requires_readable_account_config() {
+        let authority = AuthorityId::new_from_entropy([34u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([35u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let storage_root = unique_test_path("settings-account-config-read-error");
+        fs::create_dir_all(&storage_root).expect("create storage root");
+
+        let mut config = AgentConfig::default();
+        config.storage.base_path = storage_root.clone();
+
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        fs::create_dir_all(storage_root.join("account.json.dat"))
+            .expect("create unreadable account config directory");
+
+        let error = bridge
+            .try_get_settings()
+            .await
+            .expect_err("account config read failure should be explicit");
+        let message = error.to_string();
+        assert!(
+            message.contains("Failed to read account.json"),
+            "settings failure should surface the account config read error: {message}"
+        );
+
+        let _ = fs::remove_dir_all(storage_root);
     }
 }
