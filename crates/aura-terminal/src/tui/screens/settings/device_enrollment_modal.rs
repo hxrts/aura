@@ -37,23 +37,7 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
         CodeDisplayStatus::Pending
     };
 
-    let status_text = if props.has_failed {
-        "Enrollment failed".to_string()
-    } else if props.is_complete {
-        "Enrollment complete".to_string()
-    } else {
-        match props.agreement_mode {
-            AgreementMode::Provisional => "Waiting for acceptance…".to_string(),
-            AgreementMode::CoordinatorSoftSafe => {
-                if props.reversion_risk {
-                    "Soft-safe (reversion risk)".to_string()
-                } else {
-                    "Soft-safe".to_string()
-                }
-            }
-            AgreementMode::ConsensusFinalized => "Finalized".to_string(),
-        }
-    };
+    let status_text = status_text(props);
 
     let step_title = if props.is_complete {
         format!("Add Device — Step 3 of 3: {}", props.nickname_suggestion)
@@ -79,5 +63,67 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
             copied: props.copied,
             show_mobile_hint: props.is_demo_mode,
         )
+    }
+}
+
+fn status_text(props: &DeviceEnrollmentModalProps) -> String {
+    if props.has_failed {
+        "Enrollment failed".to_string()
+    } else if props.is_complete {
+        "Enrollment complete".to_string()
+    } else {
+        match props.agreement_mode {
+            AgreementMode::Provisional => "Waiting for acceptance…".to_string(),
+            AgreementMode::CoordinatorSoftSafe => {
+                if props.reversion_risk {
+                    "Soft-safe (reversion risk)".to_string()
+                } else {
+                    "Soft-safe".to_string()
+                }
+            }
+            AgreementMode::ConsensusFinalized => "Finalized".to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{status_text, DeviceEnrollmentModalProps};
+    use aura_core::threshold::AgreementMode;
+
+    #[test]
+    fn device_enrollment_status_text_follows_typed_lifecycle_state() {
+        let base = DeviceEnrollmentModalProps {
+            agreement_mode: AgreementMode::Provisional,
+            ..DeviceEnrollmentModalProps::default()
+        };
+
+        assert_eq!(status_text(&base), "Waiting for acceptance…");
+
+        let soft_safe = DeviceEnrollmentModalProps {
+            agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            reversion_risk: true,
+            ..base
+        };
+        assert_eq!(status_text(&soft_safe), "Soft-safe (reversion risk)");
+
+        let finalized = DeviceEnrollmentModalProps {
+            agreement_mode: AgreementMode::ConsensusFinalized,
+            reversion_risk: false,
+            ..DeviceEnrollmentModalProps::default()
+        };
+        assert_eq!(status_text(&finalized), "Finalized");
+
+        let completed = DeviceEnrollmentModalProps {
+            is_complete: true,
+            ..DeviceEnrollmentModalProps::default()
+        };
+        assert_eq!(status_text(&completed), "Enrollment complete");
+
+        let failed = DeviceEnrollmentModalProps {
+            has_failed: true,
+            ..DeviceEnrollmentModalProps::default()
+        };
+        assert_eq!(status_text(&failed), "Enrollment failed");
     }
 }
