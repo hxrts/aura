@@ -226,13 +226,10 @@ struct SelectedChannelBinding {
 }
 
 impl SelectedChannelBinding {
-    fn merged_from_channel(channel: &Channel, previous: Option<&Self>) -> Self {
-        let preserved_context = previous
-            .filter(|binding| binding.channel_id == channel.id)
-            .and_then(|binding| binding.context_id.clone());
+    fn from_authoritative_channel(channel: &Channel) -> Self {
         Self {
             channel_id: channel.id.clone(),
-            context_id: channel.context_id.clone().or(preserved_context),
+            context_id: channel.context_id.clone(),
         }
     }
 }
@@ -422,10 +419,9 @@ fn execute_harness_followup_command(
                 *selected_channel.write() = Some(channel_id.to_string());
                 {
                     let mut guard = selected_channel_binding.write();
-                    let previous = guard.clone();
-                    *guard = channels.get(idx).map(|channel| {
-                        SelectedChannelBinding::merged_from_channel(channel, previous.as_ref())
-                    });
+                    *guard = channels
+                        .get(idx)
+                        .map(SelectedChannelBinding::from_authoritative_channel);
                 }
             } else {
                 return Err("Selected channel is no longer visible".to_string());
@@ -1971,13 +1967,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             *tui_selected_for_updates.write() = Some(channel_id.clone());
                             {
                                 let mut guard = selected_channel_binding_for_updates.write();
-                                let previous = guard.clone();
-                                *guard = selected_channel.as_ref().map(|(_, channel)| {
-                                    SelectedChannelBinding::merged_from_channel(
-                                        channel,
-                                        previous.as_ref(),
-                                    )
-                                });
+                                *guard = selected_channel
+                                    .as_ref()
+                                    .map(|(_, channel)| {
+                                        SelectedChannelBinding::from_authoritative_channel(channel)
+                                    });
                             }
                             if let Some((idx, channel)) = selected_channel {
                                 tui.with_mut(|state| {
@@ -2101,16 +2095,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     .map(|channel| channel.id.clone());
                                 {
                                     let mut guard = selected_channel_binding_for_updates.write();
-                                    let previous = guard.clone();
                                     *guard = shared_channels_for_updates
                                         .read()
                                         .get(state.chat.selected_channel)
-                                        .map(|channel| {
-                                            SelectedChannelBinding::merged_from_channel(
-                                                channel,
-                                                previous.as_ref(),
-                                            )
-                                        });
+                                        .map(SelectedChannelBinding::from_authoritative_channel);
                                 }
 
                                 // Auto-scroll to bottom when new messages arrive, but only if
@@ -2981,13 +2969,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             *tui_selected_for_events.write() = Some(channel_id.to_string());
                                             {
                                                 let mut guard = selected_channel_binding_for_events.write();
-                                                let previous = guard.clone();
-                                                *guard = channels.get(idx).map(|channel| {
-                                                    SelectedChannelBinding::merged_from_channel(
-                                                        channel,
-                                                        previous.as_ref(),
-                                                    )
-                                                });
+                                                *guard = channels
+                                                    .get(idx)
+                                                    .map(SelectedChannelBinding::from_authoritative_channel);
                                             }
                                         }
                                     }

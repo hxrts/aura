@@ -796,6 +796,7 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                             model.channels.retain(|row| row.name != current);
                             if model.channels.is_empty() {
                                 model.channels.push(crate::model::ChannelRow {
+                                    id: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
                                     name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
                                     selected: true,
                                     topic: NOTE_TO_SELF_CHANNEL_TOPIC.to_string(),
@@ -1014,6 +1015,7 @@ fn ensure_dm_channel(model: &mut UiModel) {
         return;
     }
     model.channels.push(ChannelRow {
+        id: "dm".to_string(),
         name: "dm".to_string(),
         selected: false,
         topic: String::new(),

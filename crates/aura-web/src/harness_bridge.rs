@@ -7,6 +7,7 @@ use aura_app::ui::contract::{ListId, ModalId, RenderHeartbeat, ScreenId, UiSnaps
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
 };
+use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
 use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
@@ -213,10 +214,21 @@ fn selected_channel_id(controller: &UiController) -> Result<ChannelId, JsValue> 
         .map_err(|error| JsValue::from_str(&format!("invalid selected channel id: {error}")))
 }
 
-fn selected_channel_binding(
-    controller: &UiController,
-) -> Result<(String, Option<String>), JsValue> {
-    Ok((selected_channel_id(controller)?.to_string(), None))
+async fn selected_channel_binding(controller: &UiController) -> Result<(String, String), JsValue> {
+    let channel_id = selected_channel_id(controller)?;
+    let context_id = {
+        let core = controller.app_core().read().await;
+        let chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
+        chat.channel(&channel_id)
+            .and_then(|channel| channel.context_id)
+    }
+    .ok_or_else(|| {
+        JsValue::from_str(&format!(
+            "selected channel lacks authoritative context: {channel_id}"
+        ))
+    })?;
+
+    Ok((channel_id.to_string(), context_id.to_string()))
 }
 
 fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
@@ -574,18 +586,20 @@ async fn submit_semantic_command(
             invitation_workflows::accept_pending_home_invitation(controller.app_core())
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let (channel_id, context_id) = selected_channel_binding(&controller)?;
+            let (channel_id, context_id) = selected_channel_binding(&controller).await?;
             Ok(SemanticCommandResponse::accepted_channel_binding(
-                channel_id, context_id,
+                channel_id,
+                Some(context_id),
             ))
         }
         IntentAction::JoinChannel { channel_name } => {
             messaging_workflows::join_channel_by_name(controller.app_core(), &channel_name)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let (channel_id, context_id) = selected_channel_binding(&controller)?;
+            let (channel_id, context_id) = selected_channel_binding(&controller).await?;
             Ok(SemanticCommandResponse::accepted_channel_binding(
-                channel_id, context_id,
+                channel_id,
+                Some(context_id),
             ))
         }
         IntentAction::InviteActorToChannel {

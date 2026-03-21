@@ -452,10 +452,7 @@ fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
     contact.id.to_string().chars().take(8).collect()
 }
 
-fn build_chat_runtime_view(
-    chat: ChatState,
-    selected_channel_name: Option<&str>,
-) -> ChatRuntimeView {
+fn build_chat_runtime_view(chat: ChatState, selected_channel_id: Option<&str>) -> ChatRuntimeView {
     let mut channels: Vec<_> = chat
         .all_channels()
         .map(|channel| ChatRuntimeChannel {
@@ -479,13 +476,11 @@ fn build_chat_runtime_view(
         }
     });
 
-    let active_channel = selected_channel_name
-        .and_then(|name| {
+    let active_channel = selected_channel_id
+        .and_then(|channel_id| {
             channels
                 .iter()
-                .find(|channel| {
-                    channel.name.eq_ignore_ascii_case(name) || channel.id.eq_ignore_ascii_case(name)
-                })
+                .find(|channel| channel.id.eq_ignore_ascii_case(channel_id))
                 .map(|channel| channel.name.clone())
         })
         .or_else(|| channels.first().map(|channel| channel.name.clone()))
@@ -522,10 +517,7 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
 
     let (chat, authority_id) = {
         let core = controller.app_core().read().await;
-        let signal_chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
-        let snapshot = core.snapshot();
-        let local_chat = snapshot.chat;
-        let mut merged = merge_chat_state(signal_chat, local_chat);
+        let mut merged = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
         let authority_id = core.authority().cloned();
         if let Some(authority_id) = authority_id {
             merged.ensure_note_to_self_channel(authority_id);
@@ -534,7 +526,7 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
     };
     let selected_name = controller
         .ui_model()
-        .and_then(|model| model.selected_channel_name().map(str::to_string));
+        .and_then(|model| model.selected_channel_id().map(str::to_string));
     let runtime = build_chat_runtime_view(chat.clone(), selected_name.as_deref());
     controller.push_log(&format!(
         "load_chat_runtime_view: selected={:?} active={} channels={}",
@@ -580,50 +572,17 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         runtime
             .channels
             .iter()
-            .map(|channel| (channel.name.clone(), channel.topic.clone()))
+            .map(|channel| {
+                (
+                    channel.id.clone(),
+                    channel.name.clone(),
+                    channel.topic.clone(),
+                )
+            })
             .collect(),
         runtime_facts,
     );
     runtime
-}
-
-fn merge_chat_state(
-    mut signal_chat: aura_app::views::chat::ChatState,
-    local_chat: aura_app::views::chat::ChatState,
-) -> aura_app::views::chat::ChatState {
-    for local_channel in local_chat.all_channels() {
-        match signal_chat.channel_mut(&local_channel.id) {
-            Some(signal_channel) => {
-                if signal_channel.context_id.is_none() {
-                    signal_channel.context_id = local_channel.context_id;
-                }
-                if signal_channel.topic.is_none() && local_channel.topic.is_some() {
-                    signal_channel.topic = local_channel.topic.clone();
-                }
-                if signal_channel.name == signal_channel.id.to_string()
-                    && local_channel.name != local_channel.id.to_string()
-                    && !local_channel.name.trim().is_empty()
-                {
-                    signal_channel.name = local_channel.name.clone();
-                }
-                if local_channel.member_count > signal_channel.member_count {
-                    signal_channel.member_count = local_channel.member_count;
-                }
-                for member in &local_channel.member_ids {
-                    if !signal_channel.member_ids.contains(member) {
-                        signal_channel.member_ids.push(*member);
-                    }
-                }
-            }
-            None => signal_chat.upsert_channel(local_channel.clone()),
-        }
-
-        for message in local_chat.messages_for_channel(&local_channel.id) {
-            signal_chat.apply_message(local_channel.id, message.clone());
-        }
-    }
-
-    signal_chat
 }
 
 fn build_contacts_runtime_view(
@@ -1027,31 +986,9 @@ fn selected_contact_for_modal(
 
 fn effective_contacts_view(
     runtime: &ContactsRuntimeView,
-    model: &UiModel,
+    _model: &UiModel,
 ) -> Vec<ContactsRuntimeContact> {
-    let mut merged = runtime.contacts.clone();
-
-    for contact in &model.contacts {
-        if merged
-            .iter()
-            .any(|row| row.authority_id == contact.authority_id)
-        {
-            continue;
-        }
-
-        merged.push(ContactsRuntimeContact {
-            authority_id: contact.authority_id,
-            name: contact.name.clone(),
-            nickname_hint: None,
-            is_guardian: contact.is_guardian,
-            is_member: false,
-            is_online: false,
-            confirmation: contact.confirmation,
-        });
-    }
-
-    merged.sort_by(|left, right| left.name.cmp(&right.name));
-    merged
+    runtime.contacts.clone()
 }
 
 fn harness_log(line: &str) {
@@ -2620,7 +2557,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         let Some(current_model) = controller_for_chat_selection.ui_model() else {
             return;
         };
-        let selected_channel_key = current_model.selected_channel_name().map(str::to_string);
+        let selected_channel_key = current_model.selected_channel_id().map(str::to_string);
         if last_chat_selection_key() == selected_channel_key {
             return;
         }
@@ -4221,9 +4158,9 @@ fn ChatScreen(
                                     extra_class: Some("pt-px pb-0".to_string()),
                                     onclick: {
                                         let controller = controller.clone();
-                                        let channel_name = channel.name.clone();
+                                        let channel_id = channel.id.clone();
                                         move |_| {
-                                            controller.select_channel_by_name(&channel_name);
+                                            controller.select_channel_by_id(&channel_id);
                                             render_tick.set(render_tick() + 1);
                                         }
                                     }
@@ -4709,7 +4646,7 @@ fn ContactsScreen(
                                                 ).await {
                                                     Ok(channel_id) => {
                                                         controller.set_screen(ScreenId::Chat);
-                                                        controller.select_channel_by_name(&channel_id);
+                                                        controller.select_channel_by_id(&channel_id);
                                                     }
                                                     Err(error) => controller.runtime_error_toast(error.to_string()),
                                                 }
@@ -4734,22 +4671,22 @@ fn ContactsScreen(
                                         move |_| {
                                             let controller = invite_to_channel_controller.clone();
                                             let app_core = controller.app_core().clone();
-                                            let selected_channel_name = controller
+                                            let selected_channel_id = controller
                                                 .ui_model()
                                                 .and_then(|model| {
                                                     model
-                                                        .selected_channel_name()
+                                                        .selected_channel_id()
                                                         .map(str::to_string)
                                                 });
                                             spawn_ui(async move {
-                                                let Some(channel_name) = selected_channel_name else {
+                                                let Some(channel_id) = selected_channel_id else {
                                                     controller.runtime_error_toast("Select a channel first");
                                                     return;
                                                 };
                                                 match messaging_workflows::invite_user_to_channel(
                                                     &app_core,
                                                     &authority_id.to_string(),
-                                                    &channel_name,
+                                                    &channel_id,
                                                     None,
                                                     None,
                                                 )

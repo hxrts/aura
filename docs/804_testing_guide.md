@@ -97,6 +97,7 @@ For parity-critical observation:
 - observation surfaces must be side-effect free
 - recovery and retries must be explicit and separate from observation
 - DOM/text fallback paths are diagnostics only and must not become success-path observation behavior
+- channel-binding responses must either carry authoritative context materialization or fail explicitly; selected ids or labels alone are not semantic bindings
 - diagnostic tool/query surfaces should say `diagnostic_*` at the API boundary when they are derived from screen/DOM capture rather than authoritative semantic state
 - onboarding must publish through the same semantic snapshot path as the rest of the UI
 - placeholder IDs, override-backed exports, and heuristic success/event synthesis are not acceptable correctness paths
