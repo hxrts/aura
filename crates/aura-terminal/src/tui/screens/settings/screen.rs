@@ -24,9 +24,6 @@ use aura_app::ui::signals::{
     TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::format_relative_time_from;
-use aura_app::ui::workflows::time as time_workflows;
-use aura_core::effects::time::PhysicalTimeEffects;
-use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback,
@@ -36,6 +33,7 @@ use crate::tui::components::SimpleSelectableItem;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
+use crate::tui::screens::app::subscriptions::use_display_clock_state;
 use crate::tui::theme::Theme;
 use crate::tui::types::{AuthorityInfo, Device, MfaPolicy, RecoveryStatus, SettingsSection};
 
@@ -111,7 +109,7 @@ pub fn SettingsScreen(
     let reactive_sync_status = hooks.use_state(SyncStatus::default);
     let reactive_transport_peers = hooks.use_state(|| 0usize);
     let reactive_discovery_counts = hooks.use_state(|| (0usize, 0usize, 0usize, 0u64));
-    let reactive_now_ms = hooks.use_state(|| None::<u64>);
+    let reactive_now_ms = use_display_clock_state(&mut hooks, &app_ctx);
 
     // Subscribe to settings signal for domain data
     hooks.use_future({
@@ -230,25 +228,6 @@ pub fn SettingsScreen(
                 ));
             })
             .await;
-        }
-    });
-
-    // Keep a best-effort physical clock for relative-time UI formatting.
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut reactive_now_ms = reactive_now_ms.clone();
-        async move {
-            loop {
-                let runtime = app_core.raw().read().await.runtime().cloned();
-                if let Some(runtime) = runtime {
-                    if let Ok(ts) = time_workflows::current_time_ms(app_core.raw()).await {
-                        reactive_now_ms.set(Some(ts));
-                    }
-                    runtime.sleep_ms(1000).await;
-                } else {
-                    let _ = PhysicalTimeHandler::new().sleep_ms(1000).await;
-                }
-            }
         }
     });
 
@@ -594,4 +573,31 @@ pub async fn run_settings_screen() -> std::io::Result<()> {
     }
     .fullscreen()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn settings_screen_uses_shared_display_clock_helper() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let screen_path = repo_root.join("crates/aura-terminal/src/tui/screens/settings/screen.rs");
+        let source = std::fs::read_to_string(&screen_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", screen_path.display()));
+
+        let helper_start = source
+            .find("let reactive_now_ms = use_display_clock_state(&mut hooks, &app_ctx);")
+            .unwrap_or_else(|| panic!("missing shared display clock helper usage"));
+        let render_start = source[helper_start..]
+            .find("// Use reactive state for rendering")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing render boundary after helper usage"));
+        let helper_region = &source[helper_start..render_start];
+
+        assert!(helper_region.contains("use_display_clock_state(&mut hooks, &app_ctx)"));
+        assert!(!helper_region.contains("runtime.sleep_ms(1000).await"));
+        assert!(!helper_region.contains("PhysicalTimeHandler::new().sleep_ms(1000).await"));
+        assert!(!helper_region.contains("loop {"));
+    }
 }
