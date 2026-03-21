@@ -210,6 +210,9 @@ Rules:
 - Network, timer, and external events are queued before touching session state.
 - Session ownership and task ownership move together.
 - Session-bound effects execute only under the current owner capability.
+- Runtime bridge query APIs fail explicitly when a required runtime service is
+  absent; they do not return empty authoritative-looking peer/discovery results
+  as a fallback.
 
 The current owner may be hosted by an actor, but ownership itself remains a single-owner move boundary, not a shared mutable actor coordination pattern.
 
@@ -236,6 +239,9 @@ canonical channel or invitation metadata from weaker facts such as membership
 events or raw identifiers. If runtime acceptance or reconciliation needs to
 materialize canonical metadata, one explicit owned handler path must do that
 end to end before reactive views are allowed to enrich the projection.
+Fact commit is the completion boundary for converted runtime-owned invitation
+acceptance and inbound transport materialization paths; those paths must not
+wait for an uncorrelated "next reactive view update" before returning success.
 
 Runtime bridge lookup follows the same strong-ref rule:
 
@@ -248,6 +254,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - invitation-triggered home signal materialization must flow through the
   declared reactive home-signal owner path in `reactive/app_signal_views.rs`,
   not through handler-local signal read/patch/emit logic
+- runtime bridge query APIs must fail explicitly when the required runtime
+  service is absent; they may not silently degrade absence into empty success
+  values that look like authoritative state
 
 ## Canonical Host/VM Boundary
 
@@ -327,10 +336,18 @@ Rules:
   private owner trees internally.
 - Service health must degrade structurally when maintenance obligations fail;
   loop-local logging is not a substitute for degraded lifecycle state.
+- Inbound moderation and membership gating must fail closed when home state is
+  unavailable, ambiguous, or missing authoritative roster membership; observed
+  chat projection and current-home fallback may not authorize message
+  admission.
 - Runtime service APIs must not wait on generic "next reactive update" signals
   or return optimistic domain sketches when they claim to return a postcondition;
-  converted chat/message/group queries and mutations reduce committed facts
-  directly before returning.
+  converted chat/message/group queries and mutations, invitation-acceptance
+  processing, and remote relational-fact pulls reduce committed facts and
+  explicit cache/materialization work directly before returning.
+- Converted runtime choreography start paths must surface typed start-failure
+  reasons such as duplicate active session or stale task binding; caller retry
+  policy must bind to that typed reason rather than parsing error strings.
 
 ### Verification Hooks
 

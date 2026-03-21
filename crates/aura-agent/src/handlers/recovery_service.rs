@@ -964,8 +964,10 @@ impl RecoveryServiceApi {
                 Err(error)
                     if matches!(
                         &error,
-                        crate::runtime::SessionIngressError::SessionStart { message, .. }
-                            if message.contains("already exists")
+                        crate::runtime::SessionIngressError::SessionStart {
+                            reason: crate::runtime::SessionStartFailureReason::AlreadyExists,
+                            ..
+                        }
                     ) =>
                 {
                     if attempt >= CHOREO_START_RETRY_LIMIT {
@@ -1185,8 +1187,10 @@ impl RecoveryServiceApi {
                 Err(error)
                     if matches!(
                         &error,
-                        crate::runtime::SessionIngressError::SessionStart { message, .. }
-                            if message.contains("already exists")
+                        crate::runtime::SessionIngressError::SessionStart {
+                            reason: crate::runtime::SessionStartFailureReason::AlreadyExists,
+                            ..
+                        }
                     ) =>
                 {
                     if attempt >= CHOREO_START_RETRY_LIMIT {

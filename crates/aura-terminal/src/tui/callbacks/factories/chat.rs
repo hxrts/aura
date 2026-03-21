@@ -530,7 +530,7 @@ impl ChatCallbacks {
                   threshold_k: u8,
                   operation: LocalTerminalOperationOwner| {
                 let channel_name = name.clone();
-                let operation_instance_id = Some(operation.harness_handle().instance_id().clone());
+                let operation_instance_id = operation.ui_update_instance_id();
                 spawn_local_terminal_result_callback(
                     ctx.clone(),
                     tx.clone(),

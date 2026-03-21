@@ -161,7 +161,7 @@ use crate::workflows::semantic_facts::{
 use crate::workflows::settings;
 use crate::workflows::signals::read_signal_or_default;
 use crate::{views::invitations::InvitationsState, AppCore};
-use async_lock::RwLock;
+use async_lock::{Mutex, RwLock};
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::{
@@ -171,7 +171,6 @@ use aura_core::{
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::Mutex;
 
 type ChannelInvitationStageTracker = Arc<Mutex<&'static str>>;
 
@@ -225,7 +224,7 @@ fn update_channel_invitation_stage(
     stage: &'static str,
 ) {
     if let Some(tracker) = tracker {
-        if let Ok(mut guard) = tracker.try_lock() {
+        if let Some(mut guard) = tracker.try_lock() {
             *guard = stage;
         }
     }
@@ -237,7 +236,7 @@ fn new_channel_invitation_stage_tracker(stage: &'static str) -> ChannelInvitatio
 
 #[cfg(feature = "signals")]
 fn update_accept_reconcile_stage(tracker: &ChannelInvitationStageTracker, stage: &'static str) {
-    if let Ok(mut guard) = tracker.try_lock() {
+    if let Some(mut guard) = tracker.try_lock() {
         *guard = stage;
     }
 }
@@ -1589,7 +1588,7 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
         Err(TimeoutRunError::Timeout(_)) => {
             let detail = stage_tracker
                 .as_ref()
-                .and_then(|tracker| tracker.try_lock().ok().map(|guard| *guard))
+                .and_then(|tracker| tracker.try_lock().map(|guard| *guard))
                 .unwrap_or("operation");
             let channel_id =
                 fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32])));

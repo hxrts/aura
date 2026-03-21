@@ -1303,9 +1303,8 @@ fn execute_semantic_intent(
                     runtime_event_detail: None,
                 },
             )?;
-            let code = code.unwrap_or_else(|| {
-                extract_invitation_code(&snapshot).unwrap_or_default()
-            });
+            let code =
+                code.unwrap_or_else(|| extract_invitation_code(&snapshot).unwrap_or_default());
             if let Some(code_name) = code_name.as_deref() {
                 context.vars.insert(code_name.to_string(), code);
             }
@@ -3127,7 +3126,12 @@ fn require_semantic_unit_submission(
             step.id,
             operation
         ),
-        SemanticCommandValue::ChannelBinding { .. } => bail!(
+        SemanticCommandValue::ChannelSelection { .. } => bail!(
+            "step {} issue stage failed for {}: unexpected channel selection payload",
+            step.id,
+            operation
+        ),
+        SemanticCommandValue::AuthoritativeChannelBinding { .. } => bail!(
             "step {} issue stage failed for {}: unexpected channel binding payload",
             step.id,
             operation
@@ -3156,7 +3160,7 @@ fn require_channel_binding_submission(
     response: SemanticCommandResponse,
 ) -> Result<(ChannelBinding, Option<UiOperationHandle>)> {
     match response.value {
-        SemanticCommandValue::ChannelBinding {
+        SemanticCommandValue::AuthoritativeChannelBinding {
             channel_id,
             context_id,
         } => Ok((
@@ -3170,6 +3174,12 @@ fn require_channel_binding_submission(
             "step {} issue stage failed for {}: missing channel binding payload",
             step.id,
             operation
+        ),
+        SemanticCommandValue::ChannelSelection { channel_id } => bail!(
+            "step {} issue stage failed for {}: weak selected-channel payload without authoritative context: {}",
+            step.id,
+            operation,
+            channel_id
         ),
         SemanticCommandValue::ContactInvitationCode { .. } => bail!(
             "step {} issue stage failed for {}: unexpected contact invitation code payload",
@@ -3204,7 +3214,11 @@ fn require_contact_invitation_submission(
             Ok((Some(code), response.handle.ui_operation))
         }
         SemanticCommandValue::None => Ok((None, response.handle.ui_operation)),
-        SemanticCommandValue::ChannelBinding { .. } => bail!(
+        SemanticCommandValue::ChannelSelection { .. } => bail!(
+            "step {} issue stage failed for create_contact_invitation: unexpected channel selection payload",
+            step.id
+        ),
+        SemanticCommandValue::AuthoritativeChannelBinding { .. } => bail!(
             "step {} issue stage failed for create_contact_invitation: unexpected channel binding payload",
             step.id
         ),
@@ -3213,7 +3227,10 @@ fn require_contact_invitation_submission(
 
 fn extract_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
     snapshot.runtime_events.iter().rev().find_map(|event| {
-        if let RuntimeFact::InvitationCodeReady { code: Some(code), .. } = &event.fact {
+        if let RuntimeFact::InvitationCodeReady {
+            code: Some(code), ..
+        } = &event.fact
+        {
             return Some(code.clone());
         }
         None
@@ -5318,7 +5335,8 @@ mod tests {
                 channel_id:
                     "channel:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
                         .to_string(),
-                context_id: None,
+                context_id: "ctx:d2063fb67d0f80f6061878a00623a3608c72ec5b3e08088324064174068cec76"
+                    .to_string(),
             },
         );
 

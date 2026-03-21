@@ -4,7 +4,7 @@
 //! It follows the reactive signal pattern and manages neighborhood navigation state.
 
 use crate::{
-    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME},
+    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     ui_contract::{
         OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
         SemanticOperationKind, SemanticOperationPhase,
@@ -14,6 +14,9 @@ use crate::{
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
+    workflows::observed_projection::{
+        update_homes_projection_observed, update_neighborhood_projection_observed,
+    },
     workflows::semantic_facts::{prove_home_created, SemanticWorkflowOwner},
     workflows::signals::read_signal,
     AppCore,
@@ -25,8 +28,6 @@ use aura_core::{
     AuraError,
 };
 use std::sync::Arc;
-
-use crate::workflows::signals::emit_signal;
 pub use crate::workflows::time::current_time_ms;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
@@ -101,7 +102,7 @@ pub async fn set_context(
 ///
 /// **What it does**: Updates neighborhood traversal position
 /// **Returns**: Unit result
-/// **Signal pattern**: Updates neighborhood view state directly
+/// **Signal pattern**: Publishes observed projections
 ///
 /// This operation:
 /// 1. Determines target home (home, current, or specific ID)
@@ -129,47 +130,52 @@ pub async fn move_position(
     };
 
     let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut publish_homes = false;
+    let neighborhood = {
+        let mut core = app_core.write().await;
 
-    let mut core = app_core.write().await;
+        // Get current neighborhood state
+        let mut neighborhood = core.views().get_neighborhood();
+        // Determine target home ID
+        let target_selector = HomeSelector::parse(home_id)?;
+        let target_home_id = resolve_target_home_id(&neighborhood, target_selector)?;
 
-    // Get current neighborhood state
-    let mut neighborhood = core.views().get_neighborhood();
-    // Determine target home ID
-    let target_selector = HomeSelector::parse(home_id)?;
-    let target_home_id = resolve_target_home_id(&neighborhood, target_selector)?;
+        // Get home name from neighbors or use the ID
+        let home_name = neighborhood
+            .neighbor(&target_home_id)
+            .map(|n| n.name.clone())
+            .unwrap_or_else(|| {
+                if target_home_id == neighborhood.home_home_id {
+                    neighborhood.home_name.clone()
+                } else {
+                    target_home_id.to_string()
+                }
+            });
 
-    // Get home name from neighbors or use the ID
-    let home_name = neighborhood
-        .neighbor(&target_home_id)
-        .map(|n| n.name.clone())
-        .unwrap_or_else(|| {
-            // Check if it's home
-            if target_home_id == neighborhood.home_home_id {
-                neighborhood.home_name.clone()
-            } else {
-                target_home_id.to_string()
-            }
-        });
+        let position = TraversalPosition {
+            current_home_id: target_home_id,
+            current_home_name: home_name,
+            depth: depth_value,
+            path: vec![target_home_id],
+        };
+        neighborhood.position = Some(position);
 
-    // Create or update position
-    let position = TraversalPosition {
-        current_home_id: target_home_id,
-        current_home_name: home_name,
-        depth: depth_value,
-        path: vec![target_home_id],
+        // Keep homes selection aligned with neighborhood traversal when the target
+        // home is known locally (for member/channel metadata lookups).
+        if homes.has_home(&target_home_id) {
+            homes.select_home(Some(target_home_id));
+            core.set_active_home_selection(Some(target_home_id));
+            publish_homes = true;
+        }
+
+        neighborhood
     };
-    neighborhood.position = Some(position);
 
-    // Keep homes selection aligned with neighborhood traversal when the target
-    // home is known locally (for member/channel metadata lookups).
-    if homes.has_home(&target_home_id) {
-        homes.select_home(Some(target_home_id));
-        core.set_active_home_selection(Some(target_home_id));
-        core.views_mut().set_homes(homes);
+    if publish_homes {
+        publish_homes_projection(app_core, homes).await?;
     }
 
-    // Set the updated state
-    core.views_mut().set_neighborhood(neighborhood);
+    publish_neighborhood_projection(app_core, neighborhood).await?;
 
     Ok(())
 }
@@ -210,25 +216,23 @@ fn resolve_home_name(
         .unwrap_or_else(|| home_id.to_string())
 }
 
-fn write_homes_and_neighborhood_views(
-    core: &mut AppCore,
-    homes: &HomesState,
-    neighborhood: &NeighborhoodState,
-) {
-    core.views_mut().set_homes(homes.clone());
-    core.views_mut().set_neighborhood(neighborhood.clone());
+async fn publish_homes_projection(
+    app_core: &Arc<RwLock<AppCore>>,
+    homes_state: HomesState,
+) -> Result<(), AuraError> {
+    update_homes_projection_observed(app_core, move |state| {
+        *state = homes_state;
+    })
+    .await
 }
 
 async fn publish_neighborhood_projection(
     app_core: &Arc<RwLock<AppCore>>,
     neighborhood_state: NeighborhoodState,
 ) -> Result<(), AuraError> {
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        neighborhood_state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
+    update_neighborhood_projection_observed(app_core, move |state| {
+        *state = neighborhood_state;
+    })
     .await
 }
 
@@ -237,7 +241,7 @@ async fn publish_homes_and_neighborhood_projection(
     homes_state: HomesState,
     neighborhood_state: NeighborhoodState,
 ) -> Result<(), AuraError> {
-    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
+    publish_homes_projection(app_core, homes_state).await?;
     publish_neighborhood_projection(app_core, neighborhood_state).await
 }
 
@@ -273,11 +277,10 @@ pub async fn create_neighborhood(
     .to_string();
 
     let neighborhood_state = {
-        let mut core = app_core.write().await;
+        let core = app_core.write().await;
         let mut neighborhood = core.views().get_neighborhood();
         neighborhood.neighborhood_id = Some(neighborhood_id.clone());
         neighborhood.neighborhood_name = Some(neighborhood_name);
-        core.views_mut().set_neighborhood(neighborhood.clone());
         neighborhood
     };
 
@@ -295,7 +298,7 @@ pub async fn add_home_to_neighborhood(
     home_id: &str,
 ) -> Result<(), AuraError> {
     let (homes_state, neighborhood_state) = {
-        let mut core = app_core.write().await;
+        let core = app_core.write().await;
         let mut homes = core.views().get_homes();
         let mut neighborhood = core.views().get_neighborhood();
 
@@ -327,7 +330,6 @@ pub async fn add_home_to_neighborhood(
             }
         }
 
-        write_homes_and_neighborhood_views(&mut core, &homes, &neighborhood);
         (homes, neighborhood)
     };
 
@@ -343,7 +345,7 @@ pub async fn link_home_one_hop_link(
     home_id: &str,
 ) -> Result<(), AuraError> {
     let neighborhood_state = {
-        let mut core = app_core.write().await;
+        let core = app_core.write().await;
         let homes = core.views().get_homes();
         let mut neighborhood = core.views().get_neighborhood();
 
@@ -369,7 +371,6 @@ pub async fn link_home_one_hop_link(
         };
 
         neighborhood.add_neighbor(updated_neighbor);
-        core.views_mut().set_neighborhood(neighborhood.clone());
         neighborhood
     };
 
@@ -457,7 +458,6 @@ async fn create_home_with_creator(
             });
         }
 
-        write_homes_and_neighborhood_views(&mut core, &homes, &neighborhood);
         (homes, neighborhood)
     };
 
@@ -601,7 +601,6 @@ pub async fn ensure_local_home_projection(
             });
         }
 
-        write_homes_and_neighborhood_views(&mut core, &homes, &neighborhood);
         (homes, neighborhood)
     };
 
@@ -727,6 +726,7 @@ mod tests {
     use super::*;
     use crate::views::home::HomeState;
     use crate::AppConfig;
+    use crate::workflows::signals::emit_signal;
     use aura_core::crypto::hash::hash;
 
     #[tokio::test]

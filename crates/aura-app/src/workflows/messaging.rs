@@ -45,7 +45,7 @@ use crate::{
     },
     AppCore,
 };
-use async_lock::RwLock;
+use async_lock::{Mutex, RwLock};
 use aura_chat::{ChatFact, ChatMessageDeliveryStatus};
 use aura_core::{
     crypto::hash::hash,
@@ -64,7 +64,6 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::Mutex;
 
 type InviteStageTracker = Arc<Mutex<&'static str>>;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
@@ -142,7 +141,7 @@ fn new_invite_stage_tracker(stage: &'static str) -> InviteStageTracker {
 
 fn update_invite_stage(tracker: &Option<InviteStageTracker>, stage: &'static str) {
     if let Some(tracker) = tracker {
-        if let Ok(mut guard) = tracker.try_lock() {
+        if let Some(mut guard) = tracker.try_lock() {
             *guard = stage;
         }
     }
@@ -3572,7 +3571,7 @@ async fn invite_user_to_channel_with_context_owned(
         TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
             let stage = stage_tracker
                 .as_ref()
-                .and_then(|tracker| tracker.try_lock().ok().map(|guard| *guard))
+                .and_then(|tracker| tracker.try_lock().map(|guard| *guard))
                 .unwrap_or("operation");
             AuraError::from(super::error::WorkflowError::TimedOut {
                 operation: "invite_user_to_channel",

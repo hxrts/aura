@@ -174,6 +174,8 @@ pub use services::{
     RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SyncManagerConfig,
     SyncManagerState, SyncServiceManager,
 };
+#[allow(unused_imports)]
+pub use session_ingress::SessionStartFailureReason;
 
 // Simulation factory re-export
 #[cfg(feature = "simulation")]

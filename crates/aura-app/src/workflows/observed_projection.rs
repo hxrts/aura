@@ -14,12 +14,14 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_journal::{DomainFact, RelationalFact};
 
 use crate::signal_defs::{
-    CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL,
-    NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
+    CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, HOMES_SIGNAL,
+    HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL,
+    RECOVERY_SIGNAL_NAME,
 };
 use crate::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
     contacts::ContactsState,
+    home::HomesState,
     neighborhood::NeighborhoodState,
     recovery::RecoveryState,
 };
@@ -475,6 +477,32 @@ pub async fn update_contacts_projection_observed<T>(
     };
 
     emit_signal(app_core, &*CONTACTS_SIGNAL, state, CONTACTS_SIGNAL_NAME).await?;
+
+    Ok(output)
+}
+
+/// Observed-only projection update helper for homes state.
+///
+/// This helper updates both:
+/// 1. ViewState (for futures-signals subscribers)
+/// 2. HOMES_SIGNAL (for ReactiveEffects subscribers)
+///
+/// OWNERSHIP: observed-display-update
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn update_homes_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut HomesState) -> T,
+) -> Result<T, AuraError> {
+    let (output, state) = {
+        let mut core = app_core.write().await;
+        let mut state = core.snapshot().homes;
+        let output = update(&mut state);
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_homes(state.clone());
+        (output, state)
+    };
+
+    emit_signal(app_core, &*HOMES_SIGNAL, state, HOMES_SIGNAL_NAME).await?;
 
     Ok(output)
 }

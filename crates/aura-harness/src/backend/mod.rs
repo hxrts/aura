@@ -31,7 +31,7 @@ pub struct ContactInvitationCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelBinding {
     pub channel_id: String,
-    pub context_id: Option<String>,
+    pub context_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,7 +280,10 @@ pub trait SharedSemanticBackend {
             SemanticCommandValue::None => Err(anyhow!(
                 "submit_create_contact_invitation did not produce a contact invitation code"
             )),
-            SemanticCommandValue::ChannelBinding { .. } => Err(anyhow!(
+            SemanticCommandValue::ChannelSelection { .. } => Err(anyhow!(
+                "submit_create_contact_invitation produced an unexpected channel selection payload"
+            )),
+            SemanticCommandValue::AuthoritativeChannelBinding { .. } => Err(anyhow!(
                 "submit_create_contact_invitation produced an unexpected channel binding payload"
             )),
         }
@@ -313,9 +316,7 @@ pub trait SharedSemanticBackend {
         )
     }
 
-    fn submit_accept_pending_channel_invitation(
-        &mut self,
-    ) -> Result<SubmittedAction<()>> {
+    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
         expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::AcceptPendingChannelInvitation,
@@ -361,7 +362,10 @@ fn expect_semantic_command_unit(
         SemanticCommandValue::ContactInvitationCode { .. } => Err(anyhow!(
             "{operation} produced an unexpected contact invitation code payload"
         )),
-        SemanticCommandValue::ChannelBinding { .. } => Err(anyhow!(
+        SemanticCommandValue::ChannelSelection { .. } => Err(anyhow!(
+            "{operation} produced an unexpected channel selection payload"
+        )),
+        SemanticCommandValue::AuthoritativeChannelBinding { .. } => Err(anyhow!(
             "{operation} produced an unexpected channel binding payload"
         )),
     }
@@ -385,7 +389,7 @@ fn expect_semantic_command_channel_binding(
     operation: &str,
 ) -> Result<SubmittedAction<ChannelBinding>> {
     match response.value {
-        SemanticCommandValue::ChannelBinding {
+        SemanticCommandValue::AuthoritativeChannelBinding {
             channel_id,
             context_id,
         } => Ok(SubmittedAction {
@@ -398,6 +402,9 @@ fn expect_semantic_command_channel_binding(
         }),
         SemanticCommandValue::None => Err(anyhow!(
             "{operation} did not produce a channel binding payload"
+        )),
+        SemanticCommandValue::ChannelSelection { channel_id } => Err(anyhow!(
+            "{operation} produced only a weak selected-channel payload without authoritative context: {channel_id}"
         )),
         SemanticCommandValue::ContactInvitationCode { .. } => Err(anyhow!(
             "{operation} produced an unexpected contact invitation code payload"
@@ -859,7 +866,10 @@ mod tests {
     #[test]
     fn parity_critical_shared_submit_helpers_require_ui_operation_handles() {
         let mut backend = RecordingSemanticBackend::new().with_response(Ok(
-            SemanticCommandResponse::accepted_channel_binding("channel:test".to_string(), None),
+            SemanticCommandResponse::accepted_authoritative_channel_binding(
+                "channel:test".to_string(),
+                "ctx:test".to_string(),
+            ),
         ));
 
         let error = backend
@@ -871,6 +881,25 @@ mod tests {
             error
                 .to_string()
                 .contains("canonical ui operation handle with exact instance tracking"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn shared_submit_rejects_weak_channel_selection_when_binding_is_required() {
+        let mut backend = RecordingSemanticBackend::new().with_response(Ok(
+            SemanticCommandResponse::accepted_channel_selection("channel:test".to_string()),
+        ));
+
+        let error = backend
+            .submit_join_channel("shared-parity-lab")
+            .err()
+            .unwrap_or_else(|| panic!("weak selection payload must fail"));
+
+        assert!(
+            error
+                .to_string()
+                .contains("weak selected-channel payload without authoritative context"),
             "unexpected error: {error:#}"
         );
     }

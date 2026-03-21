@@ -196,9 +196,12 @@ pub enum SemanticCommandValue {
     ContactInvitationCode {
         code: String,
     },
-    ChannelBinding {
+    ChannelSelection {
         channel_id: String,
-        context_id: Option<String>,
+    },
+    AuthoritativeChannelBinding {
+        channel_id: String,
+        context_id: String,
     },
 }
 
@@ -230,8 +233,13 @@ impl SemanticCommandResponse {
     }
 
     #[must_use]
-    pub fn accepted_channel_binding(channel_id: String, context_id: Option<String>) -> Self {
-        Self::accepted(SemanticCommandValue::ChannelBinding {
+    pub fn accepted_channel_selection(channel_id: String) -> Self {
+        Self::accepted(SemanticCommandValue::ChannelSelection { channel_id })
+    }
+
+    #[must_use]
+    pub fn accepted_authoritative_channel_binding(channel_id: String, context_id: String) -> Self {
+        Self::accepted(SemanticCommandValue::AuthoritativeChannelBinding {
             channel_id,
             context_id,
         })

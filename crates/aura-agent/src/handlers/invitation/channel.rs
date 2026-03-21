@@ -1,7 +1,6 @@
 use super::*;
 
 const INVITATION_CHANNEL_JOIN_TIMEOUT_MS: u64 = 2_000;
-const INVITATION_VIEW_UPDATE_TIMEOUT_MS: u64 = 500;
 const CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
 const CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS: u64 = 75;
 
@@ -164,61 +163,6 @@ impl<'a> InvitationChannelHandler<'a> {
             ]
             .concat(),
         ))
-    }
-
-    async fn best_effort_await_view_update(
-        &self,
-        effects: &AuraEffectSystem,
-        context_id: ContextId,
-        channel_id: ChannelId,
-        log_message: &'static str,
-    ) {
-        let started_at = match effects.physical_time().await {
-            Ok(started_at) => started_at,
-            Err(error) => {
-                tracing::debug!(
-                    context_id = %context_id,
-                    channel_id = %channel_id,
-                    error = %error,
-                    "{log_message}"
-                );
-                return;
-            }
-        };
-        let budget = match TimeoutBudget::from_start_and_timeout(
-            &started_at,
-            Duration::from_millis(INVITATION_VIEW_UPDATE_TIMEOUT_MS),
-        ) {
-            Ok(budget) => budget,
-            Err(error) => {
-                tracing::debug!(
-                    context_id = %context_id,
-                    channel_id = %channel_id,
-                    error = %error,
-                    "{log_message}"
-                );
-                return;
-            }
-        };
-
-        match execute_with_timeout_budget(effects, &budget, || async {
-            effects.await_next_view_update().await;
-            Ok::<(), AgentError>(())
-        })
-        .await
-        {
-            Ok(()) => {}
-            Err(TimeoutRunError::Timeout(error)) => {
-                tracing::debug!(
-                    context_id = %context_id,
-                    channel_id = %channel_id,
-                    error = %error,
-                    timeout_ms = INVITATION_VIEW_UPDATE_TIMEOUT_MS,
-                    "{log_message}"
-                );
-            }
-            Err(TimeoutRunError::Operation(_)) => {}
-        }
     }
 
     async fn attempt_channel_checkpoint_provision(
@@ -778,13 +722,6 @@ impl<'a> InvitationChannelHandler<'a> {
             ))
             .await
             .map_err(|e| AgentError::effects(e.to_string()))?;
-        self.best_effort_await_view_update(
-            effects,
-            invite.context_id,
-            invite.channel_id,
-            "Timed out waiting for channel invitation bootstrap view update",
-        )
-        .await;
 
         Ok(())
     }

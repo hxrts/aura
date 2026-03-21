@@ -80,7 +80,7 @@ fn require_channel_binding_submission(
         HarnessUiCommandReceipt::AcceptedWithOperation {
             operation,
             value:
-                Some(SemanticCommandValue::ChannelBinding {
+                Some(SemanticCommandValue::AuthoritativeChannelBinding {
                     channel_id,
                     context_id,
                 }),
@@ -104,6 +104,12 @@ fn require_channel_binding_submission(
         }
         HarnessUiCommandReceipt::AcceptedWithOperation {
             operation: _,
+            value: Some(SemanticCommandValue::ChannelSelection { channel_id }),
+        } => anyhow::bail!(
+            "{operation_name} returned only a weak selected-channel payload without authoritative context: {channel_id}"
+        ),
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation: _,
             value: Some(SemanticCommandValue::None),
         } => anyhow::bail!(
             "{operation_name} returned an explicit empty semantic payload"
@@ -115,13 +121,14 @@ fn require_channel_binding_submission(
             "{operation_name} returned an unexpected contact invitation payload"
         ),
         HarnessUiCommandReceipt::Accepted {
-            value:
-                Some(SemanticCommandValue::ChannelBinding {
-                    channel_id: _,
-                    context_id: _,
-                }),
+            value: Some(SemanticCommandValue::AuthoritativeChannelBinding { .. }),
         } => anyhow::bail!(
             "{operation_name} accepted without exact operation handle"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::ChannelSelection { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned a weak selected-channel payload without a canonical operation handle"
         ),
         HarnessUiCommandReceipt::Accepted { value: None } => anyhow::bail!(
             "{operation_name} accepted without exact operation handle or authoritative channel binding payload"
@@ -164,7 +171,13 @@ fn require_contact_invitation_submission(
         } => Ok((into_ui_operation_handle(operation), None)),
         HarnessUiCommandReceipt::AcceptedWithOperation {
             operation: _,
-            value: Some(SemanticCommandValue::ChannelBinding { .. }),
+            value: Some(SemanticCommandValue::ChannelSelection { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned an unexpected channel selection payload"
+        ),
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation: _,
+            value: Some(SemanticCommandValue::AuthoritativeChannelBinding { .. }),
         } => anyhow::bail!(
             "{operation_name} returned an unexpected channel binding payload"
         ),
@@ -178,7 +191,12 @@ fn require_contact_invitation_submission(
             "{operation_name} accepted without exact operation handle"
         ),
         HarnessUiCommandReceipt::Accepted {
-            value: Some(SemanticCommandValue::ChannelBinding { .. }),
+            value: Some(SemanticCommandValue::ChannelSelection { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned an unexpected channel selection payload without a canonical operation handle"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::AuthoritativeChannelBinding { .. }),
         } => anyhow::bail!(
             "{operation_name} returned an unexpected channel binding payload without a canonical operation handle"
         ),
@@ -1531,9 +1549,11 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 ..
             } => {
                 let (handle, code) = require_contact_invitation_submission(
-                    self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {
-                        receiver_authority_id: receiver_authority_id.to_string(),
-                    })?,
+                    self.send_harness_command_receipt(
+                        &HarnessUiCommand::CreateContactInvitation {
+                            receiver_authority_id: receiver_authority_id.to_string(),
+                        },
+                    )?,
                     "create_contact_invitation",
                 )?;
                 Ok(SemanticCommandResponse {
@@ -1542,9 +1562,9 @@ impl SharedSemanticBackend for LocalPtyBackend {
                         ui_operation: Some(handle),
                     },
                     value: match code {
-                        Some(code) => SemanticCommandValue::ContactInvitationCode {
-                            code: code.code,
-                        },
+                        Some(code) => {
+                            SemanticCommandValue::ContactInvitationCode { code: code.code }
+                        }
                         None => SemanticCommandValue::None,
                     },
                 })
@@ -1582,7 +1602,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
-                    value: SemanticCommandValue::ChannelBinding {
+                    value: SemanticCommandValue::AuthoritativeChannelBinding {
                         channel_id: submitted.value.channel_id,
                         context_id: submitted.value.context_id,
                     },
@@ -1593,7 +1613,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
-                    value: SemanticCommandValue::ChannelBinding {
+                    value: SemanticCommandValue::AuthoritativeChannelBinding {
                         channel_id: submitted.value.channel_id,
                         context_id: submitted.value.context_id,
                     },
@@ -1646,7 +1666,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         channel_name: &str,
     ) -> Result<SubmittedAction<ChannelBinding>> {
-        let operation_name = format!("submit_create_channel: create_channel_command:{channel_name}");
+        let operation_name =
+            format!("submit_create_channel: create_channel_command:{channel_name}");
         let receipt = self
             .send_harness_command_receipt(&HarnessUiCommand::CreateChannel {
                 channel_name: channel_name.to_string(),
@@ -1717,9 +1738,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
-    fn submit_accept_pending_channel_invitation(
-        &mut self,
-    ) -> Result<SubmittedAction<()>> {
+    fn submit_accept_pending_channel_invitation(&mut self) -> Result<SubmittedAction<()>> {
         let handle = require_ui_operation_handle(
             self.send_harness_command_receipt(&HarnessUiCommand::AcceptPendingChannelInvitation)?,
             "accept_pending_channel_invitation",
@@ -1872,13 +1891,13 @@ mod tests {
             .unwrap_or_else(|| panic!("missing submit_accept_contact_invitation"));
         let invitation_branch = &source[invitation_start..invitation_end];
         assert!(source.contains("fn submit_create_account"));
-        assert!(source.contains(
-            "self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {"
-        ));
+        assert!(
+            source.contains("self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {")
+        );
         assert!(source.contains("fn submit_create_home"));
-        assert!(source.contains(
-            "self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {"
-        ));
+        assert!(
+            source.contains("self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {")
+        );
         assert!(source.contains("fn submit_create_contact_invitation"));
         assert!(source.contains(
             "self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {"

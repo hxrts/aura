@@ -32,9 +32,15 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   from `aura-ui` rather than keeping a forked cancellation/spawner stack.
 - Harness bridge methods are deterministic and backwards-compatible.
 - Bridge responses that claim to return a channel binding must originate from authoritative selected-channel context materialization; selected ids without context are not a binding.
+- When bridge flows can only observe a selected channel id without authoritative
+  context, they must publish an explicit weak selection payload instead of a
+  binding-shaped response.
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
+- Browser bootstrap/rebootstrap bridge promises resolve on completion of the
+  owned bootstrap transition, not merely on enqueue, so harness/browser callers
+  do not mistake acceptance for success.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
 - Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
 - Browser semantic observation must fail closed when published semantic state is
@@ -48,6 +54,13 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Playwright-to-page semantic submission uses the page-owned semantic queue
   (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
   browser semantic lifecycle or runtime/bootstrap state.
+- Long-lived browser maintenance tasks must surface terminal pause/failure
+  through observed UI state or equivalent structured browser signals rather than
+  relying on console logging alone.
+- Browser-owned maintenance loops such as ceremony acceptance and background
+  sync are explicitly non-semantic upkeep. They may keep local runtime/browser
+  state moving, but they must not become browser-owned semantic lifecycle
+  authorities.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState
@@ -124,6 +137,9 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 - The browser also exports explicit diagnostic publication-state globals for
   semantic snapshot and render-heartbeat availability so harness failures can
   distinguish unavailable publication from stale render convergence.
+- Runtime identity staging and bootstrap handoff completion semantics are part
+  of that compatibility surface; changes must preserve the distinction between
+  accepted/enqueued work and completed bootstrap state.
 - Additive fields and additive non-breaking methods are allowed when old callers continue to observe the same behavior.
 - Breaking request/response or observation-shape changes must update explicit compatibility metadata and tests.
 

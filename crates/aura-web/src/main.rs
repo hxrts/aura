@@ -565,36 +565,6 @@ cfg_if! {
                         })?,
                 ));
 
-                let ceremony_agent = agent.clone();
-                let ceremony_app_core = app_core.clone();
-                shared_web_task_owner().spawn_local_cancellable(async move {
-                    loop {
-                        if let Err(error) =
-                            time_workflows::sleep_ms(&ceremony_app_core, 500).await
-                        {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::ProcessCeremonyAcceptances,
-                                    "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                            break;
-                        }
-                        if let Err(error) = ceremony_agent.process_ceremony_acceptances().await {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::ProcessCeremonyAcceptances,
-                                    "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                        }
-                    }
-                });
-
                 AppCore::init_signals_with_hooks(&app_core)
                     .await
                     .map_err(|error| {
@@ -684,6 +654,11 @@ cfg_if! {
                     })),
                 ));
                 install_harness_instrumentation(controller.clone());
+                spawn_ceremony_acceptance_loop(
+                    controller.clone(),
+                    app_core.clone(),
+                    agent.clone(),
+                );
                 controller.set_account_setup_state(account_ready, "", None);
 
                 if account_ready {
@@ -852,54 +827,15 @@ cfg_if! {
                         let mut committed_bootstrap = committed_bootstrap;
                         let mut bootstrap_error = bootstrap_error;
                         future_to_promise(async move {
-                            shared_web_task_owner().spawn_local(async move {
-                                let _guard = rebootstrap_lock.lock().await;
-                                let epoch = bootstrap_epoch() + 1;
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "[web-bootstrap] handoff start epoch={epoch} detail={}",
-                                        handoff.detail()
-                                    )
-                                    .into(),
-                                );
-                                bootstrap_epoch.set(epoch);
-
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "[web-bootstrap] runner start epoch={epoch} detail={}",
-                                        handoff.detail()
-                                    )
-                                    .into(),
-                                );
-                                match bootstrap_controller().await {
-                                    Ok(state) => {
-                                        web_sys::console::log_1(
-                                            &format!(
-                                                "[web-bootstrap] runner ok epoch={epoch} detail={}",
-                                                handoff.detail()
-                                            )
-                                            .into(),
-                                        );
-                                        bootstrap_error.set(None);
-                                        committed_bootstrap.set(Some(state));
-                                    }
-                                    Err(error) => {
-                                        web_sys::console::error_1(
-                                            &format!(
-                                                "[web-bootstrap] runner error epoch={epoch} detail={} error={}",
-                                                handoff.detail(),
-                                                error.user_message()
-                                            )
-                                            .into(),
-                                        );
-                                        if committed_bootstrap().is_none() {
-                                            bootstrap_error.set(Some(error.clone()));
-                                        } else {
-                                            log_web_error("error", &error);
-                                        }
-                                    }
-                                }
-                            });
+                            complete_bootstrap_handoff(
+                                rebootstrap_lock,
+                                bootstrap_epoch,
+                                committed_bootstrap,
+                                bootstrap_error,
+                                handoff,
+                            )
+                            .await
+                            .map_err(|error| JsValue::from_str(&error.user_message()))?;
                             Ok(JsValue::UNDEFINED)
                         })
                     }
@@ -1000,73 +936,7 @@ cfg_if! {
 
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
-                let app_core = controller.app_core().clone();
-                shared_web_task_owner().spawn_local_cancellable(async move {
-                    loop {
-                        let runtime = { app_core.read().await.runtime().cloned() };
-                        if let Some(runtime) = runtime {
-                            if let Err(error) = runtime_workflows::timeout_runtime_call(
-                                &runtime,
-                                "web_background_sync",
-                                "trigger_discovery",
-                                std::time::Duration::from_secs(3),
-                                || runtime.trigger_discovery(),
-                            )
-                            .await
-                            {
-                                log_web_error(
-                                    "warn",
-                                    &WebUiError::operation(
-                                        WebUiOperation::BackgroundSync,
-                                        "WEB_DISCOVERY_TRIGGER_FAILED",
-                                        error.to_string(),
-                                    ),
-                                );
-                            }
-                            if let Err(error) = runtime_workflows::timeout_runtime_call(
-                                &runtime,
-                                "web_background_sync",
-                                "trigger_sync",
-                                std::time::Duration::from_secs(3),
-                                || runtime.trigger_sync(),
-                            )
-                            .await
-                            {
-                                log_web_error(
-                                    "warn",
-                                    &WebUiError::operation(
-                                        WebUiOperation::BackgroundSync,
-                                        "WEB_SYNC_TRIGGER_FAILED",
-                                        error.to_string(),
-                                    ),
-                                );
-                            }
-                        }
-                        if let Err(error) =
-                            network_workflows::refresh_discovered_peers(&app_core).await
-                        {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::BackgroundSync,
-                                    "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                        }
-                        if let Err(error) = time_workflows::sleep_ms(&app_core, 1_500).await {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::BackgroundSync,
-                                    "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                            break;
-                        }
-                    }
-                });
+                spawn_background_sync_loop(controller.clone(), controller.app_core().clone());
             }
 
             if account_ready {
@@ -1212,28 +1082,6 @@ cfg_if! {
                                 )
                                 .into(),
                             );
-
-                            for _ in 0..8 {
-                                runtime_workflows::converge_runtime(&runtime).await;
-                                if runtime_workflows::ensure_runtime_peer_connectivity(
-                                    &runtime,
-                                    "device_enrollment_accept",
-                                )
-                                .await
-                                .is_ok()
-                                {
-                                    break;
-                                }
-                                time_workflows::sleep_ms(&app_core, 250)
-                                    .await
-                                    .map_err(|error| {
-                                        WebUiError::operation(
-                                            WebUiOperation::ImportDeviceEnrollmentCode,
-                                            "WEB_DEVICE_ENROLLMENT_SLEEP_FAILED",
-                                            error.to_string(),
-                                        )
-                                    })?;
-                            }
 
                             invitation_workflows::accept_device_enrollment_invitation(
                                 &app_core,
@@ -1546,6 +1394,171 @@ cfg_if! {
                 }
             }
         }
+
+        fn spawn_background_sync_loop(
+            controller: Arc<UiController>,
+            app_core: Arc<RwLock<AppCore>>,
+        ) {
+            shared_web_task_owner().spawn_local_cancellable(async move {
+                loop {
+                    let runtime = { app_core.read().await.runtime().cloned() };
+                    if let Some(runtime) = runtime {
+                        if let Err(error) = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "web_background_sync",
+                            "trigger_discovery",
+                            std::time::Duration::from_secs(3),
+                            || runtime.trigger_discovery(),
+                        )
+                        .await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_DISCOVERY_TRIGGER_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                        }
+                        if let Err(error) = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "web_background_sync",
+                            "trigger_sync",
+                            std::time::Duration::from_secs(3),
+                            || runtime.trigger_sync(),
+                        )
+                        .await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_SYNC_TRIGGER_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                        }
+                    }
+                    if let Err(error) = network_workflows::refresh_discovered_peers(&app_core).await
+                    {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::BackgroundSync,
+                                "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                    }
+                    if let Err(error) = time_workflows::sleep_ms(&app_core, 1_500).await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::BackgroundSync,
+                                "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                        controller
+                            .runtime_error_toast("Background sync paused; refresh to resume");
+                        break;
+                    }
+                }
+            });
+        }
+
+        fn spawn_ceremony_acceptance_loop(
+            controller: Arc<UiController>,
+            app_core: Arc<RwLock<AppCore>>,
+            agent: Arc<aura_agent::Agent>,
+        ) {
+            shared_web_task_owner().spawn_local_cancellable(async move {
+                loop {
+                    if let Err(error) = time_workflows::sleep_ms(&app_core, 500).await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::ProcessCeremonyAcceptances,
+                                "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                        controller
+                            .runtime_error_toast("Ceremony acceptance paused; refresh to resume");
+                        break;
+                    }
+                    if let Err(error) = agent.process_ceremony_acceptances().await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::ProcessCeremonyAcceptances,
+                                "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                    }
+                }
+            });
+        }
+
+        async fn complete_bootstrap_handoff(
+            rebootstrap_lock: Arc<Mutex<()>>,
+            mut bootstrap_epoch: Signal<u64>,
+            mut committed_bootstrap: Signal<Option<BootstrapState>>,
+            mut bootstrap_error: Signal<Option<WebUiError>>,
+            handoff: harness_bridge::BootstrapHandoff,
+        ) -> Result<(), WebUiError> {
+            let _guard = rebootstrap_lock.lock().await;
+            let epoch = bootstrap_epoch() + 1;
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] handoff start epoch={epoch} detail={}",
+                    handoff.detail()
+                )
+                .into(),
+            );
+            bootstrap_epoch.set(epoch);
+
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] runner start epoch={epoch} detail={}",
+                    handoff.detail()
+                )
+                .into(),
+            );
+
+            match bootstrap_controller().await {
+                Ok(state) => {
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-bootstrap] runner ok epoch={epoch} detail={}",
+                            handoff.detail()
+                        )
+                        .into(),
+                    );
+                    bootstrap_error.set(None);
+                    committed_bootstrap.set(Some(state));
+                    Ok(())
+                }
+                Err(error) => {
+                    web_sys::console::error_1(
+                        &format!(
+                            "[web-bootstrap] runner error epoch={epoch} detail={} error={}",
+                            handoff.detail(),
+                            error.user_message()
+                        )
+                        .into(),
+                    );
+                    if committed_bootstrap().is_none() {
+                        bootstrap_error.set(Some(error.clone()));
+                    } else {
+                        log_web_error("error", &error);
+                    }
+                    Err(error)
+                }
+            }
+        }
     } else {
         fn main() {
             eprintln!("aura-web is a wasm32 frontend. Build with target wasm32-unknown-unknown.");
@@ -1580,5 +1593,69 @@ mod tests {
         assert!(source.contains("\"degraded\""));
         assert!(source.contains("\"unavailable\""));
         assert!(source.contains("driver_push_failed"));
+    }
+
+    #[test]
+    fn web_background_sync_exit_is_structurally_visible() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let helper_start = source
+            .find("fn spawn_background_sync_loop")
+            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
+        let helper_end = source[helper_start..]
+            .find("} else {")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(
+            helper.contains("runtime_error_toast(\"Background sync paused; refresh to resume\")")
+        );
+        assert!(helper.contains("\"WEB_BACKGROUND_SYNC_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_ceremony_acceptance_exit_is_structurally_visible() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let helper_start = source
+            .find("fn spawn_ceremony_acceptance_loop")
+            .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
+        let helper_end = source[helper_start..]
+            .find("} else {")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper
+            .contains("runtime_error_toast(\"Ceremony acceptance paused; refresh to resume\")"));
+        assert!(helper.contains("\"WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_bootstrap_handoff_waits_for_completion() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let helper_start = source
+            .find("async fn complete_bootstrap_handoff")
+            .unwrap_or_else(|| panic!("missing complete_bootstrap_handoff"));
+        let helper_end = source[helper_start..]
+            .find("} else {")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper.contains("bootstrap_controller().await"));
+        assert!(helper.contains("Err(error)"));
+        assert!(!helper.contains("spawn_local(async move"));
     }
 }

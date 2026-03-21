@@ -9,10 +9,20 @@ help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublicat
    |
  3 | struct FakePublication;
    | ^^^^^^^^^^^^^^^^^^^^^^
-   = help: the following other types implement trait `ownership::sealed::Sealed`:
-             AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
-             AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
-             OperationContext<OperationId, InstanceId, Trace>
+help: the following other types implement trait `ownership::sealed::Sealed`
+  --> src/ownership.rs
+   |
+   | / impl<OperationId, InstanceId, Trace> sealed::Sealed
+   | |     for OperationContext<OperationId, InstanceId, Trace>
+   | |________________________________________________________^ `OperationContext<OperationId, InstanceId, Trace>`
+...
+   | / impl<OperationId, InstanceId, Trace, Phase> sealed::Sealed
+   | |     for AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+   | |____________________________________________________________________________^ `AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>`
+...
+   | / impl<OperationId, InstanceId, Trace, Output, Error> sealed::Sealed
+   | |     for AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+   | |____________________________________________________________________________________^ `AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>`
 note: required by a bound in `OwnerPublication`
   --> src/ownership.rs
    |
@@ -35,10 +45,20 @@ help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublicat
    |
  3 | struct FakePublication;
    | ^^^^^^^^^^^^^^^^^^^^^^
-   = help: the following other types implement trait `ownership::sealed::Sealed`:
-             AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
-             AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
-             OperationContext<OperationId, InstanceId, Trace>
+help: the following other types implement trait `ownership::sealed::Sealed`
+  --> src/ownership.rs
+   |
+   | / impl<OperationId, InstanceId, Trace> sealed::Sealed
+   | |     for OperationContext<OperationId, InstanceId, Trace>
+   | |________________________________________________________^ `OperationContext<OperationId, InstanceId, Trace>`
+...
+   | / impl<OperationId, InstanceId, Trace, Phase> sealed::Sealed
+   | |     for AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+   | |____________________________________________________________________________^ `AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>`
+...
+   | / impl<OperationId, InstanceId, Trace, Output, Error> sealed::Sealed
+   | |     for AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+   | |____________________________________________________________________________________^ `AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>`
 note: required by a bound in `OwnerPublication`
   --> src/ownership.rs
    |
@@ -61,10 +81,20 @@ help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublicat
    |
  3 | struct FakePublication;
    | ^^^^^^^^^^^^^^^^^^^^^^
-   = help: the following other types implement trait `ownership::sealed::Sealed`:
-             AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
-             AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
-             OperationContext<OperationId, InstanceId, Trace>
+help: the following other types implement trait `ownership::sealed::Sealed`
+  --> src/ownership.rs
+   |
+   | / impl<OperationId, InstanceId, Trace> sealed::Sealed
+   | |     for OperationContext<OperationId, InstanceId, Trace>
+   | |________________________________________________________^ `OperationContext<OperationId, InstanceId, Trace>`
+...
+   | / impl<OperationId, InstanceId, Trace, Phase> sealed::Sealed
+   | |     for AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+   | |____________________________________________________________________________^ `AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>`
+...
+   | / impl<OperationId, InstanceId, Trace, Output, Error> sealed::Sealed
+   | |     for AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+   | |____________________________________________________________________________________^ `AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>`
 note: required by a bound in `OwnerPublication`
   --> src/ownership.rs
    |
@@ -87,10 +117,20 @@ help: the trait `ownership::sealed::Sealed` is not implemented for `FakePublicat
   |
 3 | struct FakePublication;
   | ^^^^^^^^^^^^^^^^^^^^^^
-  = help: the following other types implement trait `ownership::sealed::Sealed`:
-            AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
-            AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
-            OperationContext<OperationId, InstanceId, Trace>
+help: the following other types implement trait `ownership::sealed::Sealed`
+ --> src/ownership.rs
+  |
+  | / impl<OperationId, InstanceId, Trace> sealed::Sealed
+  | |     for OperationContext<OperationId, InstanceId, Trace>
+  | |________________________________________________________^ `OperationContext<OperationId, InstanceId, Trace>`
+...
+  | / impl<OperationId, InstanceId, Trace, Phase> sealed::Sealed
+  | |     for AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>
+  | |____________________________________________________________________________^ `AuthorizedProgressPublication<OperationId, InstanceId, Trace, Phase>`
+...
+  | / impl<OperationId, InstanceId, Trace, Output, Error> sealed::Sealed
+  | |     for AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>
+  | |____________________________________________________________________________________^ `AuthorizedTerminalPublication<OperationId, InstanceId, Trace, Output, Error>`
 note: required by a bound in `OwnerPublication`
  --> src/ownership.rs
   |
