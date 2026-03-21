@@ -30,6 +30,7 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Keyboard routing is centralized and side-effect order is deterministic.
 - Shared state is keyed by semantic ids and typed operation/runtime-event snapshots rather than frontend-local row indexes or renderer-only state.
 - Shared channel/contact selection keys use canonical ids from runtime projections; display labels stay display-only and must not be upgraded back into semantic identity.
+- Shared channel list item ids and click paths must stay on canonical channel ids when the runtime projection already provides them; render code may not bounce back through display-name selection on those paths.
 - Shared screen and modal structure remains stable enough for semantic harness execution and render-convergence checks.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from `aura-app::ui_contract`; they are not locally reinvented here.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.

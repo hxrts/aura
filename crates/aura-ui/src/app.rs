@@ -524,13 +524,13 @@ async fn load_chat_runtime_view(controller: Arc<UiController>) -> ChatRuntimeVie
         }
         (merged, authority_id)
     };
-    let selected_name = controller
+    let selected_channel_id = controller
         .ui_model()
         .and_then(|model| model.selected_channel_id().map(str::to_string));
-    let runtime = build_chat_runtime_view(chat.clone(), selected_name.as_deref());
+    let runtime = build_chat_runtime_view(chat.clone(), selected_channel_id.as_deref());
     controller.push_log(&format!(
         "load_chat_runtime_view: selected={:?} active={} channels={}",
-        selected_name,
+        selected_channel_id,
         runtime.active_channel,
         runtime.channels.len()
     ));
@@ -982,13 +982,6 @@ fn selected_contact_for_modal(
         .iter()
         .find(|contact| contact.authority_id == selected)
         .cloned()
-}
-
-fn effective_contacts_view(
-    runtime: &ContactsRuntimeView,
-    _model: &UiModel,
-) -> Vec<ContactsRuntimeContact> {
-    runtime.contacts.clone()
 }
 
 fn harness_log(line: &str) {
@@ -2949,7 +2942,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         &settings_runtime_snapshot,
         &notifications_runtime_snapshot,
     );
-    controller.set_ui_snapshot(semantic_snapshot);
+    controller.publish_ui_snapshot(semantic_snapshot);
     let keydown_controller = controller.clone();
     rsx! {
         main {
@@ -4356,7 +4349,7 @@ fn ContactsScreen(
     controller: Arc<UiController>,
     mut render_tick: Signal<u64>,
 ) -> Element {
-    let contacts = effective_contacts_view(runtime, model);
+    let contacts = runtime.contacts.clone();
     let selected_contact_id = model.selected_contact_authority_id();
     let selected_contact = selected_contact_id
         .and_then(|authority_id| {
@@ -5668,7 +5661,9 @@ fn runtime_semantic_snapshot(
     }
 
     let contacts = if contacts_runtime.loaded {
-        effective_contacts_view(contacts_runtime, model)
+        contacts_runtime
+            .contacts
+            .clone()
             .iter()
             .map(|contact| ListItemSnapshot {
                 id: contact.authority_id.to_string(),

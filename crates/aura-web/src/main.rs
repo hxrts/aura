@@ -1311,7 +1311,7 @@ cfg_if! {
                                     controller.set_account_setup_state(true, "", None);
                                     controller.set_screen(ScreenId::Neighborhood);
                                     controller
-                                        .set_ui_snapshot(controller.semantic_model_snapshot());
+                                        .publish_ui_snapshot(controller.semantic_model_snapshot());
                                 } else {
                                     controller.info_toast("Switching runtime to finish import");
                                 }
