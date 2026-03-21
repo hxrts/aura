@@ -33,6 +33,12 @@ In practice, Aura's production `ActorOwned` runtime path is `aura-agent`:
 - shared actor handles/mailboxes are crate-private runtime internals, not a
   public API for higher layers
 - raw spawn lives only inside the sanctioned supervision implementation
+- public runtime facades must consume shared runtime-owned supervisors and
+  ceremony runners; they may not allocate private ownership roots as a
+  convenience constructor
+- service health must reflect degraded obligation progress explicitly; "task
+  exists" is not a sufficient health contract when required maintenance work is
+  failing
 
 ### `Observed`
 
@@ -54,6 +60,10 @@ The ownership model builds on Aura's existing capability system. Parity-critical
 Semantic lifecycle publication requires an appropriate capability. Readiness publication requires a coordinator-owned capability. Ownership transfer requires a transfer capability or sanctioned handoff token. Actor ingress that mutates owned state requires the actor's command boundary.
 
 The goal is to make incorrect authority structurally hard to express. Code should not be able to publish semantic truth merely because it can call a helper.
+
+The same fail-closed rule applies to authoritative signal reads in semantic
+owner code. Missing or unavailable authoritative state must surface as explicit
+failure or degraded state, not `Default::default()` business truth.
 
 ## Usage Examples
 

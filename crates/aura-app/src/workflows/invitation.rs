@@ -146,8 +146,7 @@ use crate::ui_contract::{
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
     execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
-    warn_workflow_timeout, workflow_retry_policy,
-    workflow_timeout_budget,
+    warn_workflow_timeout, workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -172,9 +171,9 @@ use aura_core::{
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
-#[allow(clippy::disallowed_types)]
-type ChannelInvitationStageTracker = Arc<std::sync::Mutex<&'static str>>;
+type ChannelInvitationStageTracker = Arc<Mutex<&'static str>>;
 
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
 const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
@@ -226,20 +225,19 @@ fn update_channel_invitation_stage(
     stage: &'static str,
 ) {
     if let Some(tracker) = tracker {
-        if let Ok(mut guard) = tracker.lock() {
+        if let Ok(mut guard) = tracker.try_lock() {
             *guard = stage;
         }
     }
 }
 
-#[allow(clippy::disallowed_types)]
 fn new_channel_invitation_stage_tracker(stage: &'static str) -> ChannelInvitationStageTracker {
-    Arc::new(std::sync::Mutex::new(stage))
+    Arc::new(Mutex::new(stage))
 }
 
 #[cfg(feature = "signals")]
 fn update_accept_reconcile_stage(tracker: &ChannelInvitationStageTracker, stage: &'static str) {
-    if let Ok(mut guard) = tracker.lock() {
+    if let Ok(mut guard) = tracker.try_lock() {
         *guard = stage;
     }
 }
@@ -277,11 +275,13 @@ async fn timeout_channel_invitation_stage_with_deadline<T>(
         Ok(value) => Ok(value),
         Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout("create_channel_invitation", stage, budget.timeout_ms());
-            Err(AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
-                operation: "create_channel_invitation",
-                stage,
-                timeout_ms: budget.timeout_ms(),
-            }))
+            Err(AuraError::from(
+                crate::workflows::error::WorkflowError::TimedOut {
+                    operation: "create_channel_invitation",
+                    stage,
+                    timeout_ms: budget.timeout_ms(),
+                },
+            ))
         }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
@@ -733,7 +733,7 @@ async fn reconcile_channel_invitation_acceptance(
             let detail = match error {
                 TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
                     let stage = stage_tracker
-                        .lock()
+                        .try_lock()
                         .map(|guard| *guard)
                         .unwrap_or("reconcile_channel_invitation:unknown");
                     format!(
@@ -1260,9 +1260,9 @@ async fn reconcile_accepted_channel_invitation_authoritative(
             INVITATION_RUNTIME_OPERATION_TIMEOUT,
             || {
                 runtime.amp_join_channel(aura_core::effects::amp::ChannelJoinParams {
-                context: authoritative_context,
-                channel: local_channel_id,
-                participant: runtime.authority_id(),
+                    context: authoritative_context,
+                    channel: local_channel_id,
+                    participant: runtime.authority_id(),
                 })
             },
         )
@@ -1346,7 +1346,7 @@ pub async fn create_contact_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
+    .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
     owner
         .publish_success_with(issue_invitation_created_proof(
             invitation.invitation_id.clone(),
@@ -1386,9 +1386,7 @@ pub async fn create_guardian_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?
-        .map_err(|e| {
-            AuraError::from(super::error::runtime_call("create guardian invitation", e))
-        })?;
+    .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?;
     owner
         .publish_success_with(issue_invitation_created_proof(
             invitation.invitation_id.clone(),
@@ -1591,7 +1589,7 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
         Err(TimeoutRunError::Timeout(_)) => {
             let detail = stage_tracker
                 .as_ref()
-                .and_then(|tracker| tracker.lock().ok().map(|guard| *guard))
+                .and_then(|tracker| tracker.try_lock().ok().map(|guard| *guard))
                 .unwrap_or("operation");
             let channel_id =
                 fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32])));
@@ -1649,7 +1647,7 @@ pub async fn list_pending_invitations(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))
 }
 
 /// Import and get invitation details from a shareable code
@@ -1672,8 +1670,8 @@ pub async fn import_invitation_details(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))?
-        .map(InvitationHandle::new)
-        .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
+    .map(InvitationHandle::new)
+    .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }
 
 async fn pending_invitation_info_by_id(
@@ -1691,7 +1689,7 @@ async fn pending_invitation_info_by_id(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
+    .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
     invitations
         .into_iter()
         .find(|invitation| invitation.invitation_id == invitation_id)
@@ -1725,7 +1723,7 @@ pub async fn export_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?;
+    .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?;
     SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
@@ -2206,8 +2204,11 @@ pub async fn accept_device_enrollment_invitation(
     )
     .await;
     if let Err(error) = accept_result {
-        return fail_device_enrollment_accept(app_core, format!("accept invitation failed: {error}"))
-            .await;
+        return fail_device_enrollment_accept(
+            app_core,
+            format!("accept invitation failed: {error}"),
+        )
+        .await;
     }
     if let Ok(Err(error)) = accept_result {
         return fail_device_enrollment_accept(
@@ -2235,8 +2236,9 @@ pub async fn accept_device_enrollment_invitation(
                 || runtime.process_ceremony_messages(),
             )
             .await
-            .unwrap_or_else(|error| Err(crate::core::IntentError::internal_error(error.to_string())))
-            {
+            .unwrap_or_else(|error| {
+                Err(crate::core::IntentError::internal_error(error.to_string()))
+            }) {
                 #[cfg(feature = "instrumented")]
                 tracing::info!(
                     invitation_id = %invitation_id,
@@ -2257,8 +2259,8 @@ pub async fn accept_device_enrollment_invitation(
             )
             .await
             .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
-                .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
-                .len();
+            .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
+            .len();
             let settings_device_count = settings::get_settings(app_core).await?.devices.len();
             #[cfg(feature = "instrumented")]
             tracing::info!(
@@ -2347,7 +2349,7 @@ pub async fn decline_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
 }
 
 /// Decline an invitation by string ID for callers that only carry string keys.
@@ -2379,7 +2381,7 @@ pub async fn cancel_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
 }
 
 /// Cancel an invitation by string ID for callers that only carry string keys.
@@ -2413,8 +2415,8 @@ pub async fn import_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))?
-        .map(|_| ()) // Discard InvitationInfo, just return success
-        .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
+    .map(|_| ()) // Discard InvitationInfo, just return success
+    .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }
 
 async fn wait_for_contact_link(

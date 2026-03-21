@@ -129,6 +129,15 @@ effect. Public parity-critical workflow APIs should either:
 
 They must not accept raw ids and silently derive stronger truth internally.
 
+Converted semantic-owner paths also follow two stricter publication rules:
+
+- authoritative semantic-fact reads must fail explicitly when the authoritative
+  signal is unavailable; owner code may not collapse that state to
+  `Default::default()`
+- each converted semantic domain should have one publication helper and one
+  ownership label; context/home/neighborhood workflows must not drift into
+  mirrored `views_mut().set_*` plus ad hoc signal emission paths
+
 ## Testing
 
 ### Strategy

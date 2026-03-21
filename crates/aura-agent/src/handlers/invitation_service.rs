@@ -14,7 +14,6 @@ use crate::runtime::services::ceremony_runner::{
 };
 use crate::runtime::{AuraEffectSystem, TaskSupervisor};
 use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
@@ -41,24 +40,7 @@ impl std::fmt::Debug for InvitationServiceApi {
 }
 
 impl InvitationServiceApi {
-    /// Create a new invitation service
-    pub fn new(
-        effects: Arc<AuraEffectSystem>,
-        authority_context: AuthorityContext,
-    ) -> AgentResult<Self> {
-        let handler = InvitationHandler::new(authority_context)?;
-        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
-        let ceremony_runner =
-            CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new(time_effects));
-        Ok(Self {
-            handler,
-            effects,
-            ceremony_runner,
-            tasks: Arc::new(TaskSupervisor::new()),
-        })
-    }
-
-    /// Create a new invitation service with a shared ceremony runner.
+    /// Create a new invitation service with shared runtime-owned supervisors.
     pub fn new_with_runner(
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
@@ -787,6 +769,10 @@ impl InvitationServiceApi {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use crate::runtime::services::ceremony_runner::CeremonyRunner;
+    use crate::runtime::services::CeremonyTracker;
+    use crate::runtime::TaskSupervisor;
+    use aura_core::effects::time::PhysicalTimeEffects;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -821,20 +807,39 @@ mod tests {
         )
     }
 
+    fn service_for(
+        authority_context: AuthorityContext,
+        effects: Arc<AuraEffectSystem>,
+    ) -> InvitationServiceApi {
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new(time_effects));
+        InvitationServiceApi::new_with_runner(
+            effects,
+            authority_context,
+            ceremony_runner,
+            Arc::new(TaskSupervisor::new()),
+        )
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn test_invitation_service_creation() {
         let authority_context = create_test_authority(110);
         let effects = effects_for(&authority_context);
+        let expected_authority = authority_context.authority_id();
 
-        let service = InvitationServiceApi::new(effects, authority_context);
-        assert!(service.is_ok());
+        let service = service_for(authority_context, effects);
+        assert_eq!(
+            service.handler.authority_context().authority_id(),
+            expected_authority
+        );
     }
 
     #[tokio::test]
     async fn test_invite_as_contact() {
         let authority_context = create_test_authority(111);
         let effects = effects_for(&authority_context);
-        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
+        let service = service_for(authority_context, effects);
 
         let receiver_id = AuthorityId::new_from_entropy([112u8; 32]);
         let invitation = service
@@ -856,7 +861,7 @@ mod tests {
     async fn test_invite_as_contact_self_out_of_band_does_not_require_peer() {
         let authority_context = create_test_authority(141);
         let effects = effects_for_simulation(&authority_context, 141);
-        let service = InvitationServiceApi::new(effects, authority_context.clone()).unwrap();
+        let service = service_for(authority_context.clone(), effects);
 
         let receiver_id = authority_context.authority_id();
         let result = service
@@ -878,7 +883,7 @@ mod tests {
     async fn test_invite_as_guardian() {
         let authority_context = create_test_authority(113);
         let effects = effects_for(&authority_context);
-        let service = InvitationServiceApi::new(effects, authority_context.clone()).unwrap();
+        let service = service_for(authority_context.clone(), effects);
 
         let receiver_id = AuthorityId::new_from_entropy([114u8; 32]);
         let invitation = service
@@ -899,7 +904,7 @@ mod tests {
     async fn test_invite_to_channel() {
         let authority_context = create_test_authority(115);
         let effects = effects_for(&authority_context);
-        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
+        let service = service_for(authority_context, effects);
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
         let home_id = ChannelId::from_bytes([116u8; 32]).to_string();
@@ -930,7 +935,7 @@ mod tests {
     async fn test_accept_decline_flow() {
         let authority_context = create_test_authority(117);
         let effects = effects_for(&authority_context);
-        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
+        let service = service_for(authority_context, effects);
 
         let receiver_id = AuthorityId::new_from_entropy([118u8; 32]);
 
@@ -963,7 +968,7 @@ mod tests {
     async fn test_is_pending() {
         let authority_context = create_test_authority(120);
         let effects = effects_for(&authority_context);
-        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
+        let service = service_for(authority_context, effects);
 
         let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);
         let invitation = service

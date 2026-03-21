@@ -2657,6 +2657,9 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::reactive::app_signal_views;
     use crate::runtime::effects::AuraEffectSystem;
+    use crate::runtime::services::ceremony_runner::CeremonyRunner;
+    use crate::runtime::services::CeremonyTracker;
+    use crate::runtime::TaskSupervisor;
     use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL};
     use aura_app::views::home::{HomeRole, HomesState};
     use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
@@ -2789,6 +2792,22 @@ mod tests {
         execute_guard_outcome_for_accept(outcome, &handler.context.authority, effects.as_ref())
             .await
             .unwrap();
+    }
+
+    fn invitation_service_for(
+        authority_context: AuthorityContext,
+        effects: Arc<AuraEffectSystem>,
+    ) -> InvitationServiceApi {
+        let time_effects: Arc<dyn aura_core::effects::time::PhysicalTimeEffects> =
+            Arc::new(effects.time_effects().clone());
+        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new(time_effects));
+        InvitationServiceApi::new_with_runner(
+            effects,
+            authority_context,
+            ceremony_runner,
+            Arc::new(TaskSupervisor::new()),
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -3643,8 +3662,7 @@ mod tests {
         let sender_context = AuthorityContext::new(sender_id);
         let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-        let sender_service =
-            InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
+        let sender_service = invitation_service_for(sender_context, sender_effects.clone());
 
         let context_id = ContextId::new_from_entropy([209u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-sender-propagation"));
@@ -3759,8 +3777,7 @@ mod tests {
         let sender_context = AuthorityContext::new(sender_id);
         let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-        let sender_service =
-            InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
+        let sender_service = invitation_service_for(sender_context, sender_effects.clone());
 
         let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
             sender_id,
