@@ -45,6 +45,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Long-lived browser maintenance tasks must surface terminal pause/failure
   through observed UI state or equivalent structured browser signals rather than
   relying on console logging alone.
+- Browser-owned maintenance loops such as ceremony acceptance and background
+  sync are explicitly non-semantic upkeep. They may keep local runtime/browser
+  state moving, but they must not become browser-owned semantic lifecycle
+  authorities.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState

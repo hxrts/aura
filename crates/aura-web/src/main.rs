@@ -565,36 +565,6 @@ cfg_if! {
                         })?,
                 ));
 
-                let ceremony_agent = agent.clone();
-                let ceremony_app_core = app_core.clone();
-                shared_web_task_owner().spawn_local_cancellable(async move {
-                    loop {
-                        if let Err(error) =
-                            time_workflows::sleep_ms(&ceremony_app_core, 500).await
-                        {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::ProcessCeremonyAcceptances,
-                                    "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                            break;
-                        }
-                        if let Err(error) = ceremony_agent.process_ceremony_acceptances().await {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::ProcessCeremonyAcceptances,
-                                    "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                        }
-                    }
-                });
-
                 AppCore::init_signals_with_hooks(&app_core)
                     .await
                     .map_err(|error| {
@@ -684,6 +654,11 @@ cfg_if! {
                     })),
                 ));
                 install_harness_instrumentation(controller.clone());
+                spawn_ceremony_acceptance_loop(
+                    controller.clone(),
+                    app_core.clone(),
+                    agent.clone(),
+                );
                 controller.set_account_setup_state(account_ready, "", None);
 
                 if account_ready {
@@ -1531,6 +1506,40 @@ cfg_if! {
                 }
             });
         }
+
+        fn spawn_ceremony_acceptance_loop(
+            controller: Arc<UiController>,
+            app_core: Arc<RwLock<AppCore>>,
+            agent: Arc<aura_agent::Agent>,
+        ) {
+            shared_web_task_owner().spawn_local_cancellable(async move {
+                loop {
+                    if let Err(error) = time_workflows::sleep_ms(&app_core, 500).await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::ProcessCeremonyAcceptances,
+                                "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                        controller
+                            .runtime_error_toast("Ceremony acceptance paused; refresh to resume");
+                        break;
+                    }
+                    if let Err(error) = agent.process_ceremony_acceptances().await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::ProcessCeremonyAcceptances,
+                                "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                    }
+                }
+            });
+        }
     } else {
         fn main() {
             eprintln!("aura-web is a wasm32 frontend. Build with target wasm32-unknown-unknown.");
@@ -1562,5 +1571,26 @@ mod tests {
             helper.contains("runtime_error_toast(\"Background sync paused; refresh to resume\")")
         );
         assert!(helper.contains("\"WEB_BACKGROUND_SYNC_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_ceremony_acceptance_exit_is_structurally_visible() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let helper_start = source
+            .find("fn spawn_ceremony_acceptance_loop")
+            .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
+        let helper_end = source[helper_start..]
+            .find("} else {")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper
+            .contains("runtime_error_toast(\"Ceremony acceptance paused; refresh to resume\")"));
+        assert!(helper.contains("\"WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED\""));
     }
 }
