@@ -214,4 +214,39 @@ mod tests {
         assert!(!status_branch.contains("tokio::time::sleep"));
         assert!(!status_branch.contains("Small delay to allow commitment tree update to propagate"));
     }
+
+    #[test]
+    fn ceremony_monitors_use_typed_lifecycle_outcomes() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+
+        let guardian_start = shell_source
+            .find("DispatchCommand::StartGuardianCeremony")
+            .unwrap_or_else(|| panic!("missing StartGuardianCeremony dispatch arm"));
+        let mfa_start = shell_source[guardian_start..]
+            .find("DispatchCommand::StartMfaCeremony")
+            .map(|offset| guardian_start + offset)
+            .unwrap_or_else(|| panic!("missing StartMfaCeremony dispatch arm"));
+        let cancel_start = shell_source[mfa_start..]
+            .find("DispatchCommand::CancelGuardianCeremony")
+            .map(|offset| mfa_start + offset)
+            .unwrap_or_else(|| panic!("missing CancelGuardianCeremony dispatch arm"));
+        let guardian_branch = &shell_source[guardian_start..mfa_start];
+        let mfa_branch = &shell_source[mfa_start..cancel_start];
+
+        assert!(guardian_branch.contains("monitor_key_rotation_ceremony_with_policy("));
+        assert!(mfa_branch.contains("monitor_key_rotation_ceremony_with_policy("));
+        assert!(!guardian_branch.contains("monitor_key_rotation_ceremony("));
+        assert!(!mfa_branch.contains("monitor_key_rotation_ceremony("));
+        assert!(guardian_branch.contains("CeremonyLifecycleState::TimedOut"));
+        assert!(mfa_branch.contains("CeremonyLifecycleState::TimedOut"));
+        assert!(guardian_branch.contains("key_rotation_lifecycle_toast("));
+        assert!(mfa_branch.contains("key_rotation_lifecycle_toast("));
+        assert!(shell_source.contains("CeremonyLifecycleState::FailedRollbackIncomplete"));
+        assert!(
+            shell_source.contains("rollback was incomplete; manual intervention may be required")
+        );
+    }
 }
