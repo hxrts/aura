@@ -46,7 +46,9 @@
 
 use crate::error::TerminalError;
 use crate::tui::components::ToastMessage;
+use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{AuthorityInfo, Device, MfaPolicy};
+use async_lock::Mutex as AsyncMutex;
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{
     OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus,
@@ -67,15 +69,76 @@ pub type HarnessCommandSender = tokio::sync::mpsc::Sender<HarnessCommandSubmissi
 /// Channel receiver type for typed harness UI commands.
 pub type HarnessCommandReceiver = tokio::sync::mpsc::Receiver<HarnessCommandSubmission>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiUpdatePublication {
+    OrderedRequired,
+    RequiredUnordered,
+    LossyObserved,
+}
+
+pub async fn publish_ui_update(
+    tx: &UiUpdateSender,
+    update: UiUpdate,
+    publication: UiUpdatePublication,
+) -> bool {
+    match publication {
+        UiUpdatePublication::OrderedRequired | UiUpdatePublication::RequiredUnordered => {
+            if tx.try_send(update.clone()).is_err() && tx.send(update).await.is_err() {
+                tracing::debug!("UI update channel closed during shutdown");
+                return false;
+            }
+            true
+        }
+        UiUpdatePublication::LossyObserved => tx.try_send(update).is_ok(),
+    }
+}
+
+pub fn spawn_ui_update(
+    tasks: &Arc<UiTaskOwner>,
+    tx: &UiUpdateSender,
+    update: UiUpdate,
+    publication: UiUpdatePublication,
+) {
+    let tx = tx.clone();
+    match publication {
+        UiUpdatePublication::LossyObserved => {
+            let _ = tx.try_send(update);
+        }
+        UiUpdatePublication::OrderedRequired | UiUpdatePublication::RequiredUnordered => {
+            tasks.spawn(async move {
+                let _ = publish_ui_update(&tx, update, publication).await;
+            });
+        }
+    }
+}
+
+pub fn spawn_ordered_ui_updates(
+    tasks: &Arc<UiTaskOwner>,
+    tx: &UiUpdateSender,
+    ordered_gate: &Arc<AsyncMutex<()>>,
+    updates: Vec<UiUpdate>,
+) {
+    if updates.is_empty() {
+        return;
+    }
+
+    let tx = tx.clone();
+    let ordered_gate = Arc::clone(ordered_gate);
+    tasks.spawn(async move {
+        let _guard = ordered_gate.lock().await;
+        for update in updates {
+            let _ = publish_ui_update(&tx, update, UiUpdatePublication::OrderedRequired).await;
+        }
+    });
+}
+
 /// Send a UI update, trying non-blocking first and falling back to async.
 ///
 /// Prefers `try_send` to avoid blocking the caller. Falls back to `send().await`
 /// if the channel buffer is full. If both fail (channel closed), the update is
 /// silently dropped — the UI is shutting down.
 pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
-    if tx.try_send(update.clone()).is_err() && tx.send(update).await.is_err() {
-        tracing::debug!("UI update channel closed during shutdown");
-    }
+    let _ = publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await;
 }
 
 /// Send a UI update without blocking. Returns `true` if sent.
@@ -450,6 +513,9 @@ pub enum UiUpdate {
     // =========================================================================
     /// Notifications count changed (for keyboard navigation)
     NotificationsCountChanged(usize),
+
+    /// A long-lived subscription exhausted its retry budget and degraded permanently.
+    SubscriptionDegraded { signal_id: String, reason: String },
 
     /// Replace the authoritative runtime facts for specific fact kinds.
     RuntimeFactsUpdated {

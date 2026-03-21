@@ -15,12 +15,6 @@ use aura_core::SemanticOwnerProtocol;
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FrontendSemanticOwnershipMode {
-    LocalTerminalOnly,
-    HandoffRequired,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationOwner {
     FrontendCallback,
     AppWorkflow,
@@ -52,18 +46,9 @@ pub(crate) struct SemanticOperationTransfer {
     result: SemanticOperationTransferResult,
 }
 
-use super::updates::send_ui_update_required;
-
-fn send_ui_update_now_or_spawn(tasks: &Arc<UiTaskOwner>, tx: &UiUpdateSender, update: UiUpdate) {
-    if tx.try_send(update.clone()).is_ok() {
-        return;
-    }
-
-    let tx = tx.clone();
-    tasks.spawn(async move {
-        let _ = tx.send(update).await;
-    });
-}
+use super::updates::{
+    publish_ui_update, send_ui_update_required, spawn_ui_update, UiUpdatePublication,
+};
 
 #[must_use]
 pub(crate) fn authoritative_operation_status_update(
@@ -159,7 +144,7 @@ fn next_owned_operation_instance_id(operation_id: &OperationId) -> OperationInst
     OperationInstanceId(format!("tui-op-{}-{}", operation_id.0, nonce))
 }
 
-pub(crate) struct SubmittedOperationOwner {
+struct SubmittedOperationOwner {
     _app_core: Arc<RwLock<AppCore>>,
     tasks: Arc<UiTaskOwner>,
     tx: UiUpdateSender,
@@ -167,12 +152,13 @@ pub(crate) struct SubmittedOperationOwner {
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
     owner: SemanticOperationOwner,
-    mode: FrontendSemanticOwnershipMode,
     settled: bool,
 }
 
+#[must_use]
 pub(crate) struct LocalTerminalOperationOwner(SubmittedOperationOwner);
 
+#[must_use]
 pub(crate) struct WorkflowHandoffOperationOwner(SubmittedOperationOwner);
 
 impl SubmittedOperationOwner {
@@ -182,20 +168,22 @@ impl SubmittedOperationOwner {
         tx: UiUpdateSender,
         operation_id: OperationId,
         kind: SemanticOperationKind,
-        mode: FrontendSemanticOwnershipMode,
     ) -> Self {
         let instance_id = next_owned_operation_instance_id(&operation_id);
-        let status = SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched);
-        send_ui_update_now_or_spawn(
-            &tasks,
-            &tx,
-            authoritative_operation_status_update(
-                operation_id.clone(),
-                Some(instance_id.clone()),
-                None,
-                status,
-            ),
+        let submission = authoritative_operation_status_update(
+            operation_id.clone(),
+            Some(instance_id.clone()),
+            None,
+            SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
         );
+        if tx.try_send(submission.clone()).is_err() {
+            spawn_ui_update(
+                &tasks,
+                &tx,
+                submission,
+                UiUpdatePublication::OrderedRequired,
+            );
+        }
 
         Self {
             _app_core: app_core,
@@ -205,54 +193,34 @@ impl SubmittedOperationOwner {
             instance_id,
             kind,
             owner: SemanticOperationOwner::FrontendCallback,
-            mode,
             settled: false,
         }
     }
 
-    pub(crate) fn submit_local_terminal(
+    fn submit_local_terminal(
         app_core: Arc<RwLock<AppCore>>,
         tasks: Arc<UiTaskOwner>,
         tx: UiUpdateSender,
         operation_id: OperationId,
         kind: SemanticOperationKind,
     ) -> Self {
-        Self::submit(
-            app_core,
-            tasks,
-            tx,
-            operation_id,
-            kind,
-            FrontendSemanticOwnershipMode::LocalTerminalOnly,
-        )
+        Self::submit(app_core, tasks, tx, operation_id, kind)
     }
 
-    pub(crate) fn submit_for_app_handoff(
+    fn submit_for_app_handoff(
         app_core: Arc<RwLock<AppCore>>,
         tasks: Arc<UiTaskOwner>,
         tx: UiUpdateSender,
         operation_id: OperationId,
         kind: SemanticOperationKind,
     ) -> Self {
-        Self::submit(
-            app_core,
-            tasks,
-            tx,
-            operation_id,
-            kind,
-            FrontendSemanticOwnershipMode::HandoffRequired,
-        )
+        Self::submit(app_core, tasks, tx, operation_id, kind)
     }
 
-    pub(crate) async fn succeed(mut self) {
-        debug_assert_eq!(
-            self.mode,
-            FrontendSemanticOwnershipMode::LocalTerminalOnly,
-            "frontend-local terminal success is only legal for sanctioned local-terminal owners"
-        );
+    async fn succeed(mut self) {
         self.settled = true;
         let status = SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded);
-        send_ui_update_required(
+        publish_ui_update(
             &self.tx,
             authoritative_operation_status_update(
                 self.operation_id.clone(),
@@ -260,11 +228,12 @@ impl SubmittedOperationOwner {
                 None,
                 status,
             ),
+            UiUpdatePublication::RequiredUnordered,
         )
         .await;
     }
 
-    pub(crate) async fn fail(self, detail: impl Into<String>) {
+    async fn fail(self, detail: impl Into<String>) {
         let error = SemanticOperationError::new(
             SemanticFailureDomain::Command,
             SemanticFailureCode::InternalError,
@@ -273,12 +242,7 @@ impl SubmittedOperationOwner {
         self.fail_with(error).await;
     }
 
-    pub(crate) async fn fail_with(mut self, error: SemanticOperationError) {
-        debug_assert_eq!(
-            self.mode,
-            FrontendSemanticOwnershipMode::LocalTerminalOnly,
-            "frontend-local terminal failure is only legal for sanctioned local-terminal owners"
-        );
+    async fn fail_with(mut self, error: SemanticOperationError) {
         self.settled = true;
         let status = SemanticOperationStatus::failed(self.kind, error.clone());
         send_ui_update_required(
@@ -293,15 +257,10 @@ impl SubmittedOperationOwner {
         .await;
     }
 
-    pub(crate) fn handoff_to_app_workflow(
+    fn handoff_to_app_workflow(
         mut self,
         scope: SemanticOperationTransferScope,
     ) -> SemanticOperationTransfer {
-        debug_assert_eq!(
-            self.mode,
-            FrontendSemanticOwnershipMode::HandoffRequired,
-            "handoff is only legal for frontend owners created for app-workflow transfer"
-        );
         self.settled = true;
         SemanticOperationTransfer {
             prior_owner: self.owner,
@@ -315,7 +274,7 @@ impl SubmittedOperationOwner {
         }
     }
 
-    pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
+    fn harness_handle(&self) -> HarnessUiOperationHandle {
         HarnessUiOperationHandle::new(self.operation_id.clone(), self.instance_id.clone())
     }
 }
@@ -409,7 +368,7 @@ impl Drop for SubmittedOperationOwner {
         .with_detail(detail);
         let status = SemanticOperationStatus::failed(self.kind, error);
 
-        send_ui_update_now_or_spawn(
+        spawn_ui_update(
             &self.tasks,
             &self.tx,
             authoritative_operation_status_update(
@@ -418,6 +377,7 @@ impl Drop for SubmittedOperationOwner {
                 None,
                 status,
             ),
+            UiUpdatePublication::RequiredUnordered,
         );
     }
 }

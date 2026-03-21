@@ -39,8 +39,8 @@ use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
 use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
-    ceremonies as ceremony_workflows, context as context_workflows, settings as settings_workflows,
-    runtime as runtime_workflows, system as system_workflows,
+    ceremonies as ceremony_workflows, context as context_workflows, runtime as runtime_workflows,
+    settings as settings_workflows, system as system_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
@@ -1242,7 +1242,11 @@ impl IoContext {
 
     #[must_use]
     pub fn get_current_role(&self) -> Option<aura_app::ui::types::home::HomeRole> {
-        let snapshot = self.snapshots.try_state_snapshot()?;
+        let crate::tui::context::snapshots::StateSnapshotAvailability::Available(snapshot) =
+            self.snapshots.state_snapshot_availability()
+        else {
+            return None;
+        };
         let home_state = snapshot.homes.current_home()?;
         Some(home_state.my_role)
     }

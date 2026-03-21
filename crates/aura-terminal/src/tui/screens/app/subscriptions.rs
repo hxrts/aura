@@ -30,43 +30,53 @@ use aura_effects::time::PhysicalTimeHandler;
 use crate::tui::chat_scope::{
     active_home_scope_id, effective_home_scope_id, is_dm_like_channel, scoped_channels,
 };
-use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
+use crate::tui::context::InitializedAppCore;
+use crate::tui::hooks::{
+    subscribe_signal_with_retry, subscribe_signal_with_retry_report, AppCoreContext,
+};
 use crate::tui::semantic_lifecycle::authoritative_operation_status_update;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{
     AuthorityInfo, Channel, Contact, Device, Invitation, Message, PendingRequest,
 };
-use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use crate::tui::updates::{
+    spawn_ordered_ui_updates, spawn_ui_update, UiUpdate, UiUpdatePublication, UiUpdateSender,
+};
 
-fn publish_ui_update(tasks: &Arc<UiTaskOwner>, tx: &UiUpdateSender, update: UiUpdate) {
-    if tx.try_send(update.clone()).is_err() {
-        let tx = tx.clone();
-        tasks.spawn(async move {
-            let _ = tx.send(update).await;
-        });
+fn report_subscription_degradation(
+    tasks: &Arc<UiTaskOwner>,
+    tx: &Option<UiUpdateSender>,
+    signal_id: &str,
+    reason: String,
+) {
+    if let Some(tx) = tx {
+        spawn_ui_update(
+            tasks,
+            tx,
+            UiUpdate::SubscriptionDegraded {
+                signal_id: signal_id.to_string(),
+                reason,
+            },
+            UiUpdatePublication::RequiredUnordered,
+        );
     }
 }
 
-fn publish_ui_updates_ordered(
-    tasks: &Arc<UiTaskOwner>,
-    tx: &UiUpdateSender,
-    ordered_gate: &Arc<Mutex<()>>,
-    updates: Vec<UiUpdate>,
-) {
-    if updates.is_empty() {
-        return;
-    }
-
-    let tx = tx.clone();
-    let ordered_gate = Arc::clone(ordered_gate);
-    tasks.spawn(async move {
-        let _guard = ordered_gate.lock().await;
-        for update in updates {
-            if tx.try_send(update.clone()).is_err() {
-                let _ = tx.send(update).await;
-            }
-        }
-    });
+async fn subscribe_signal_with_retry_report_to_ui<T, F>(
+    app_core: InitializedAppCore,
+    signal: &'static aura_core::effects::reactive::Signal<T>,
+    on_value: F,
+    tasks: Arc<UiTaskOwner>,
+    update_tx: Option<UiUpdateSender>,
+) where
+    T: Clone + Send + Sync + 'static,
+    F: FnMut(T) + Send + 'static,
+{
+    let signal_id = signal.id().to_string();
+    subscribe_signal_with_retry_report(app_core, signal, on_value, move |reason| {
+        report_subscription_degradation(&tasks, &update_tx, &signal_id, reason);
+    })
+    .await;
 }
 
 fn bump_projection_version(version: &mut State<usize>) {
@@ -119,40 +129,49 @@ pub fn use_authority_id_subscription(
 ) -> SharedAuthorityId {
     let shared_ref = hooks.use_ref(SharedAuthorityId::new);
     let shared: SharedAuthorityId = shared_ref.read().clone();
+    let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let authority_id = shared.clone();
+        let tasks = tasks.clone();
+        let update_tx_for_report = update_tx.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
-                if let Some(ref tx) = update_tx {
-                    let current_index = settings_state
-                        .authorities
-                        .iter()
-                        .position(|authority| authority.is_current)
-                        .unwrap_or(0);
-                    let authorities = settings_state
-                        .authorities
-                        .iter()
-                        .map(|authority| {
-                            let info = AuthorityInfo::new(
-                                authority.id.to_string(),
-                                authority.nickname_suggestion.clone(),
-                            );
-                            if authority.is_current {
-                                info.current()
-                            } else {
-                                info
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    let _ = tx.try_send(UiUpdate::AuthoritiesUpdated {
-                        authorities,
-                        current_index,
-                    });
-                }
-            })
+            subscribe_signal_with_retry_report_to_ui(
+                app_core,
+                &*SETTINGS_SIGNAL,
+                move |settings_state| {
+                    *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
+                    if let Some(ref tx) = update_tx {
+                        let current_index = settings_state
+                            .authorities
+                            .iter()
+                            .position(|authority| authority.is_current)
+                            .unwrap_or(0);
+                        let authorities = settings_state
+                            .authorities
+                            .iter()
+                            .map(|authority| {
+                                let info = AuthorityInfo::new(
+                                    authority.id.to_string(),
+                                    authority.nickname_suggestion.clone(),
+                                );
+                                if authority.is_current {
+                                    info.current()
+                                } else {
+                                    info
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let _ = tx.try_send(UiUpdate::AuthoritiesUpdated {
+                            authorities,
+                            current_index,
+                        });
+                    }
+                },
+                tasks,
+                update_tx_for_report,
+            )
             .await;
         }
     });
@@ -180,17 +199,25 @@ pub fn use_nav_status_signals(
     let known_online = hooks.use_state(|| initial_known_online);
     let transport_peers = hooks.use_state(|| initial_transport_peers);
     let now_ms = hooks.use_state(|| None::<u64>);
+    let tasks = app_ctx.tasks();
 
     // Subscribe to unified network status signal
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut network_status = network_status.clone();
+        let tasks = tasks.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*NETWORK_STATUS_SIGNAL, move |status| {
-                if network_status.get() != status {
-                    network_status.set(status);
-                }
-            })
+            subscribe_signal_with_retry_report_to_ui(
+                app_core,
+                &*NETWORK_STATUS_SIGNAL,
+                move |status| {
+                    if network_status.get() != status {
+                        network_status.set(status);
+                    }
+                },
+                tasks,
+                None,
+            )
             .await;
         }
     });
@@ -199,16 +226,23 @@ pub fn use_nav_status_signals(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut known_online = known_online.clone();
+        let tasks = tasks.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*CONNECTION_STATUS_SIGNAL, move |status| {
-                let count = match status {
-                    ConnectionStatus::Online { peer_count } => peer_count,
-                    _ => 0,
-                };
-                if known_online.get() != count {
-                    known_online.set(count);
-                }
-            })
+            subscribe_signal_with_retry_report_to_ui(
+                app_core,
+                &*CONNECTION_STATUS_SIGNAL,
+                move |status| {
+                    let count = match status {
+                        ConnectionStatus::Online { peer_count } => peer_count,
+                        _ => 0,
+                    };
+                    if known_online.get() != count {
+                        known_online.set(count);
+                    }
+                },
+                tasks,
+                None,
+            )
             .await;
         }
     });
@@ -217,12 +251,19 @@ pub fn use_nav_status_signals(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut transport_peers = transport_peers.clone();
+        let tasks = tasks.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
-                if transport_peers.get() != count {
-                    transport_peers.set(count);
-                }
-            })
+            subscribe_signal_with_retry_report_to_ui(
+                app_core,
+                &*TRANSPORT_PEERS_SIGNAL,
+                move |count| {
+                    if transport_peers.get() != count {
+                        transport_peers.set(count);
+                    }
+                },
+                tasks,
+                None,
+            )
             .await;
         }
     });
@@ -350,7 +391,12 @@ pub fn use_discovered_peers_subscription(
                 if let Some(ref tx) = update_tx {
                     let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
                     if previous != new_count {
-                        publish_ui_update(&tasks, tx, UiUpdate::LanPeersCountChanged(new_count));
+                        spawn_ui_update(
+                            &tasks,
+                            tx,
+                            UiUpdate::LanPeersCountChanged(new_count),
+                            UiUpdatePublication::RequiredUnordered,
+                        );
                     }
                 }
             })
@@ -401,7 +447,12 @@ pub fn use_contacts_subscription(
                 if let Some(ref tx) = update_tx {
                     let previous = last_contact_count.swap(new_count, Ordering::Relaxed);
                     if previous != new_count {
-                        publish_ui_update(&tasks, tx, UiUpdate::ContactCountChanged(new_count));
+                        spawn_ui_update(
+                            &tasks,
+                            tx,
+                            UiUpdate::ContactCountChanged(new_count),
+                            UiUpdatePublication::RequiredUnordered,
+                        );
                     }
                 }
             })
@@ -464,7 +515,12 @@ pub fn use_devices_subscription(
                 bump_projection_version(&mut projection_version);
                 if list.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
-                        publish_ui_update(&tasks, tx, UiUpdate::RuntimeBootstrapFinalized);
+                        spawn_ui_update(
+                            &tasks,
+                            tx,
+                            UiUpdate::RuntimeBootstrapFinalized,
+                            UiUpdatePublication::RequiredUnordered,
+                        );
                     }
                 }
             })
@@ -649,7 +705,7 @@ fn publish_scoped_channels(
         if !(channel_changed || message_changed || channel_signature_changed) {
             return;
         }
-        publish_ui_update(
+        spawn_ui_update(
             tasks,
             tx,
             UiUpdate::ChatStateUpdated {
@@ -657,6 +713,7 @@ fn publish_scoped_channels(
                 message_count,
                 selected_index: None,
             },
+            UiUpdatePublication::RequiredUnordered,
         );
     }
 }
@@ -1149,7 +1206,7 @@ pub fn use_authoritative_semantic_facts_subscription(
                         replace_kinds: authoritative_runtime_replace_kinds(),
                         facts,
                     });
-                    publish_ui_updates_ordered(&tasks, tx, &ordered_gate, updates);
+                    spawn_ordered_ui_updates(&tasks, tx, &ordered_gate, updates);
                 },
             )
             .await;
@@ -1290,7 +1347,12 @@ pub fn use_notifications_subscription(
             let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
             let previous = last_total.swap(total, Ordering::Relaxed);
             if previous != total {
-                publish_ui_update(tasks, tx, UiUpdate::NotificationsCountChanged(total));
+                spawn_ui_update(
+                    tasks,
+                    tx,
+                    UiUpdate::NotificationsCountChanged(total),
+                    UiUpdatePublication::RequiredUnordered,
+                );
             }
         }
     };
@@ -1368,14 +1430,18 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 
 #[cfg(test)]
 mod tests {
+    use super::report_subscription_degradation;
     use super::scoped_channel_snapshot;
+    use crate::tui::tasks::UiTaskOwner;
     use crate::tui::types::Device;
+    use crate::tui::updates::UiUpdate;
     use aura_app::ui::types::{
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     };
     use aura_core::crypto::hash::hash;
     use aura_core::types::identifiers::{AuthorityId, ChannelId};
     use std::path::Path;
+    use std::sync::Arc;
 
     fn test_channel_id(seed: &str) -> ChannelId {
         ChannelId::from_bytes(hash(seed.as_bytes()))
@@ -1478,6 +1544,29 @@ mod tests {
         assert!(source.contains("selected_channel_id: Arc<RwLock<Option<String>>>"));
         assert!(source.contains("let selected_channel = selected_channel_id.read().clone();"));
         assert!(source.contains("selected_channel.as_deref()"));
+    }
+
+    #[tokio::test]
+    async fn subscription_degradation_reports_structural_ui_update() {
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        report_subscription_degradation(
+            &tasks,
+            &Some(tx),
+            "app:chat",
+            "attempts exhausted after 1 retries".to_string(),
+        );
+
+        match rx.recv().await {
+            Some(UiUpdate::SubscriptionDegraded { signal_id, reason }) => {
+                assert_eq!(signal_id, "app:chat");
+                assert_eq!(reason, "attempts exhausted after 1 retries");
+            }
+            other => panic!("expected SubscriptionDegraded update, got {other:?}"),
+        }
+
+        tasks.shutdown();
     }
 
     #[test]

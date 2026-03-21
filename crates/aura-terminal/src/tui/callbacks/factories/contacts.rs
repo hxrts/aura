@@ -1,7 +1,6 @@
 //! Contacts domain callbacks.
 
 use super::*;
-use crate::tui::semantic_lifecycle::apply_handed_off_terminal_status;
 use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the contacts screen
@@ -9,7 +8,7 @@ use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 pub struct ContactsCallbacks {
     pub on_update_nickname: UpdateNicknameCallback,
     pub on_start_chat: StartChatCallback,
-    pub(crate) on_invite_to_channel: TwoStringContextOwnedCallback,
+    pub(crate) on_invite_to_channel: TwoStringContextHandoffCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
     pub on_remove_contact: IdCallback,
 }
@@ -28,189 +27,113 @@ impl ContactsCallbacks {
 
     fn make_update_nickname(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdateNicknameCallback {
         Arc::new(move |contact_id: String, new_nickname: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let contact_id_clone = contact_id.clone();
             let nickname_clone = new_nickname.clone();
-            let cmd = EffectCommand::UpdateContactNickname {
-                contact_id,
-                nickname: new_nickname,
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::NicknameUpdated {
-                                contact_id: contact_id_clone,
-                                nickname: nickname_clone,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::UpdateContactNickname {
+                    contact_id,
+                    nickname: new_nickname,
+                },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::NicknameUpdated {
+                            contact_id: contact_id_clone,
+                            nickname: nickname_clone,
+                        },
+                    )
+                    .await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
     fn make_start_chat(ctx: Arc<IoContext>, tx: UiUpdateSender) -> StartChatCallback {
         Arc::new(move |contact_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let contact_id_clone = contact_id.clone();
-            let cmd = EffectCommand::StartDirectChat { contact_id };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ChatStarted {
-                                contact_id: contact_id_clone,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, contact_id = %contact_id_clone, "StartDirectChat dispatch failed");
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
+            let success_contact_id = contact_id.clone();
+            let error_contact_id = contact_id.clone();
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::StartDirectChat { contact_id },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ChatStarted {
+                            contact_id: success_contact_id,
+                        },
+                    )
+                    .await;
+                },
+                move |error| async move {
+                    tracing::error!(error = %error, contact_id = %error_contact_id, "StartDirectChat dispatch failed");
+                    // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                },
+            );
         })
     }
 
     fn make_invite_to_channel(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-    ) -> TwoStringContextOwnedCallback {
+    ) -> TwoStringContextHandoffCallback {
         Arc::new(
             move |contact_id: String,
                   channel: String,
                   context_id: Option<String>,
-                  operation: Option<WorkflowHandoffOperationOwner>| {
+                  operation: WorkflowHandoffOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                let operation_instance_id = operation
-                    .as_ref()
-                    .map(|operation| operation.harness_handle().instance_id().clone());
-                let workflow_instance_id = operation_instance_id.clone();
-                let app_core = ctx.app_core_raw().clone();
-                spawn_ctx(ctx, async move {
-                    if let Some(operation) = operation {
-                        let _ = operation.handoff_to_app_workflow(
-                            SemanticOperationTransferScope::InviteActorToChannel,
-                        );
-                    }
-
-                    let dispatch = std::panic::AssertUnwindSafe(
-                        aura_app::ui::workflows::messaging::invite_user_to_channel_with_context_terminal_status(
-                            &app_core,
-                            &contact_id,
-                            &channel,
-                            context_id
-                                .as_deref()
-                                .and_then(|context_id| context_id.parse().ok()),
-                            workflow_instance_id,
-                            None,
-                            None,
-                        ),
-                    )
-                    .catch_unwind();
-                    match dispatch.await {
-                        Ok(aura_app::ui_contract::WorkflowTerminalOutcome {
-                            result: Ok(_),
-                            terminal,
-                        }) => {
-                            if let Some(operation_instance_id) = operation_instance_id {
-                                if let Err(error) = apply_handed_off_terminal_status(
-                                    &app_core,
-                                    &tx,
-                                    OperationId::invitation_create(),
-                                    operation_instance_id,
-                                    SemanticOperationKind::InviteActorToChannel,
-                                    terminal,
-                                )
-                                .await
-                                {
-                                    send_ui_update_reliable(
-                                        &tx,
-                                        UiUpdate::ToastAdded(ToastMessage::error(
-                                            "invitation",
-                                            error,
-                                        )),
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-                        Ok(aura_app::ui_contract::WorkflowTerminalOutcome {
-                            result: Err(error),
-                            terminal,
-                        }) => {
-                            if let Some(operation_instance_id) = operation_instance_id {
-                                let _ = apply_handed_off_terminal_status(
-                                    &app_core,
-                                    &tx,
-                                    OperationId::invitation_create(),
-                                    operation_instance_id,
-                                    SemanticOperationKind::InviteActorToChannel,
-                                    terminal,
-                                )
-                                .await;
-                            }
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "invitation",
-                                    format!("Invite to channel failed: {error}"),
-                                )),
+                spawn_handoff_workflow_callback(
+                    ctx,
+                    tx,
+                    operation,
+                    OperationId::invitation_create(),
+                    SemanticOperationKind::InviteActorToChannel,
+                    SemanticOperationTransferScope::InviteActorToChannel,
+                    "invitation",
+                    "Invite to channel failed",
+                    "invite_to_channel callback",
+                    move |app_core, operation_instance_id| {
+                        let contact_id = contact_id.clone();
+                        let channel = channel.clone();
+                        let parsed_context_id = context_id
+                            .as_deref()
+                            .and_then(|context_id| context_id.parse().ok());
+                        async move {
+                            aura_app::ui::workflows::messaging::invite_user_to_channel_with_context_terminal_status(
+                                &app_core,
+                                &contact_id,
+                                &channel,
+                                parsed_context_id,
+                                operation_instance_id,
+                                None,
+                                None,
                             )
-                            .await;
+                            .await
                         }
-                        Err(panic) => {
-                            let detail = if let Some(message) = panic.downcast_ref::<&str>() {
-                                format!("invite_to_channel callback panicked: {message}")
-                            } else if let Some(message) = panic.downcast_ref::<String>() {
-                                format!("invite_to_channel callback panicked: {message}")
-                            } else {
-                                "invite_to_channel callback panicked".to_string()
-                            };
-                            if let Some(operation_instance_id) = operation_instance_id {
-                                let _ = apply_handed_off_terminal_status(
-                                    &app_core,
-                                    &tx,
-                                    OperationId::invitation_create(),
-                                    operation_instance_id,
-                                    SemanticOperationKind::InviteActorToChannel,
-                                    None,
-                                )
-                                .await;
-                            }
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "invitation",
-                                    detail.clone(),
-                                )),
-                            )
-                            .await;
-                        }
-                    }
-                });
+                    },
+                );
             },
         )
     }
 
-    fn make_remove_contact(ctx: Arc<IoContext>, _tx: UiUpdateSender) -> IdCallback {
+    fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
         Arc::new(move |contact_id: String| {
-            let ctx = ctx.clone();
-            let cmd = EffectCommand::RemoveContact { contact_id };
-            spawn_ctx(ctx.clone(), async move {
-                let _ = ctx.dispatch(cmd).await;
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::RemoveContact { contact_id },
+                |_| async {},
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
@@ -229,13 +152,16 @@ impl ContactsCallbacks {
                     return;
                 }
             };
-            let cmd = EffectCommand::InviteLanPeer {
-                authority_id: parsed_authority_id,
-                address,
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::InviteLanPeer {
+                    authority_id: parsed_authority_id,
+                    address,
+                },
+                move |tx| {
+                    let ctx = ctx.clone();
+                    async move {
                         ctx.mark_peer_invited(&authority_id_clone).await;
                         send_ui_update_required(
                             &tx,
@@ -245,11 +171,11 @@ impl ContactsCallbacks {
                         )
                         .await;
                     }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 }

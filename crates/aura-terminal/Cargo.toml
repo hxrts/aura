@@ -124,3 +124,4 @@ tempfile = { workspace = true }
 insta = "1.34"  # Snapshot testing for TUI render tests
 proptest = { workspace = true }  # Property-based testing for TUI state machine
 assert_matches = { workspace = true }
+trybuild = { workspace = true }

@@ -1,0 +1,8 @@
+error[E0593]: closure is expected to take 5 arguments, but it takes 4 arguments
+ --> tests/ui/create_channel_without_owner.rs:7:9
+  |
+7 |         |_name: String, _topic: Option<String>, _members: Vec<String>, _threshold_k: u8| {},
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         |
+  |         expected closure that takes 5 arguments
+  |         takes 4 arguments

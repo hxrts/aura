@@ -44,21 +44,19 @@ impl SettingsCallbacks {
         tx: UiUpdateSender,
     ) -> Arc<dyn Fn(MfaPolicy) + Send + Sync> {
         Arc::new(move |policy: MfaPolicy| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::UpdateMfaPolicy {
-                require_mfa: policy.requires_mfa(),
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(&tx, UiUpdate::MfaPolicyChanged(policy)).await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::UpdateMfaPolicy {
+                    require_mfa: policy.requires_mfa(),
+                },
+                move |tx| async move {
+                    send_ui_update_required(&tx, UiUpdate::MfaPolicyChanged(policy)).await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
@@ -67,24 +65,19 @@ impl SettingsCallbacks {
         tx: UiUpdateSender,
     ) -> UpdateNicknameSuggestionCallback {
         Arc::new(move |name: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let name_clone = name.clone();
-            let cmd = EffectCommand::UpdateNickname { name };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::NicknameSuggestionChanged(name_clone),
-                        )
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::UpdateNickname { name },
+                move |tx| async move {
+                    send_ui_update_required(&tx, UiUpdate::NicknameSuggestionChanged(name_clone))
                         .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
@@ -106,25 +99,24 @@ impl SettingsCallbacks {
                     return;
                 }
             };
-            let cmd = EffectCommand::UpdateThreshold { config };
-            let task_ctx = ctx.clone();
-            spawn_ctx(ctx, async move {
-                match task_ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ThresholdChanged {
-                                k: threshold_k,
-                                n: threshold_n,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx,
+                tx,
+                EffectCommand::UpdateThreshold { config },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ThresholdChanged {
+                            k: threshold_k,
+                            n: threshold_n,
+                        },
+                    )
+                    .await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
@@ -353,38 +345,37 @@ impl SettingsCallbacks {
     ) -> ImportDeviceEnrollmentCallback {
         Arc::new(
             move |code: String, operation: LocalTerminalOperationOwner| {
-                let ctx = ctx.clone();
-                let tx = tx.clone();
                 let should_complete_onboarding = !ctx.has_account();
-                spawn_ctx(ctx.clone(), async move {
-                    match ctx.import_device_enrollment_code(&code).await {
-                        Ok(()) => {
-                            operation.succeed().await;
-                            if should_complete_onboarding {
-                                send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
-                            }
-                            send_ui_update_required(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::success(
-                                    "devices",
-                                    "Device enrollment invitation accepted",
-                                )),
-                            )
-                            .await;
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "ImportDeviceEnrollmentOnMobile callback",
+                    move |ctx| async move { ctx.import_device_enrollment_code(&code).await },
+                    move |tx, ()| async move {
+                        if should_complete_onboarding {
+                            send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
                         }
-                        Err(e) => {
-                            operation.fail(e.to_string()).await;
-                            send_ui_update_required(
-                                &tx,
-                                UiUpdate::operation_failed(
-                                    UiOperation::ImportDeviceEnrollmentCode,
-                                    e,
-                                ),
-                            )
-                            .await;
-                        }
-                    }
-                });
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "devices",
+                                "Device enrollment invitation accepted",
+                            )),
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::operation_failed(
+                                UiOperation::ImportDeviceEnrollmentCode,
+                                error,
+                            ),
+                        )
+                        .await;
+                    },
+                );
             },
         )
     }
@@ -430,8 +421,6 @@ impl NeighborhoodCallbacks {
         tx: UiUpdateSender,
     ) -> Arc<dyn Fn(String, AccessLevel) + Send + Sync> {
         Arc::new(move |home_id: String, depth: AccessLevel| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let home_id_clone = home_id.clone();
             let depth_str = match depth {
                 AccessLevel::Limited => "Limited",
@@ -439,71 +428,67 @@ impl NeighborhoodCallbacks {
                 AccessLevel::Full => "Full",
             }
             .to_string();
-            let cmd = EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id,
-                depth: depth_str,
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::HomeEntered {
-                                home_id: home_id_clone,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::MovePosition {
+                    neighborhood_id: "current".to_string(),
+                    home_id,
+                    depth: depth_str,
+                },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::HomeEntered {
+                            home_id: home_id_clone,
+                        },
+                    )
+                    .await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
     fn make_go_home(ctx: Arc<IoContext>, tx: UiUpdateSender) -> GoHomeCallback {
         Arc::new(move || {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id: "home".to_string(),
-                depth: "Full".to_string(),
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(&tx, UiUpdate::NavigatedHome).await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::MovePosition {
+                    neighborhood_id: "current".to_string(),
+                    home_id: "home".to_string(),
+                    depth: "Full".to_string(),
+                },
+                |tx| async move {
+                    send_ui_update_required(&tx, UiUpdate::NavigatedHome).await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
     fn make_back_to_limited(ctx: Arc<IoContext>, tx: UiUpdateSender) -> GoHomeCallback {
         Arc::new(move || {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id: "current".to_string(),
-                depth: "Limited".to_string(),
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(&tx, UiUpdate::NavigatedToLimited).await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::MovePosition {
+                    neighborhood_id: "current".to_string(),
+                    home_id: "current".to_string(),
+                    depth: "Limited".to_string(),
+                },
+                |tx| async move {
+                    send_ui_update_required(&tx, UiUpdate::NavigatedToLimited).await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
@@ -523,58 +508,67 @@ impl NeighborhoodCallbacks {
                         target: target_id.clone(),
                     }
                 };
-                spawn_ctx(ctx.clone(), async move {
-                    match ctx.dispatch(cmd).await {
-                        Ok(_) => {
-                            let action = if assign { "granted" } else { "revoked" };
-                            send_ui_update_required(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::success(
-                                    "moderation",
-                                    format!("Moderator designation {action} for {target_id}"),
-                                )),
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            send_ui_update_required(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "moderation",
-                                    format!("Failed to update moderator designation: {e}"),
-                                )),
-                            )
-                            .await;
-                        }
-                    }
-                });
+                spawn_observed_dispatch_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    cmd,
+                    move |tx| async move {
+                        let action = if assign { "granted" } else { "revoked" };
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "moderation",
+                                format!("Moderator designation {action} for {target_id}"),
+                            )),
+                        )
+                        .await;
+                    },
+                    |error| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error(
+                                "moderation",
+                                format!("Failed to update moderator designation: {error}"),
+                            )),
+                        )
+                        .await;
+                    },
+                );
             },
         )
     }
 
     fn make_create_home(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateHomeCallback {
         Arc::new(move |name: String, _description: Option<String>| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let display_name = name.trim().to_string();
-            let cmd = EffectCommand::CreateHome {
-                name: Some(display_name.clone()),
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "home",
-                                format!("Home '{display_name}' created"),
-                            )),
-                        )
-                        .await;
-                    }
-                    Err(_error) => {}
-                }
-            });
+            let failure_tx = tx.clone();
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::CreateHome {
+                    name: Some(display_name.clone()),
+                },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::success(
+                            "home",
+                            format!("Home '{display_name}' created"),
+                        )),
+                    )
+                    .await;
+                },
+                move |error| async move {
+                    send_ui_update_required(
+                        &failure_tx,
+                        UiUpdate::ToastAdded(ToastMessage::error(
+                            "home",
+                            format!("Failed to create home: {error}"),
+                        )),
+                    )
+                    .await;
+                },
+            );
         })
     }
 
@@ -583,33 +577,39 @@ impl NeighborhoodCallbacks {
         tx: UiUpdateSender,
     ) -> CreateNeighborhoodCallback {
         Arc::new(move |name: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let display_name = if name.trim().is_empty() {
                 "Neighborhood".to_string()
             } else {
                 name.trim().to_string()
             };
-            let cmd = EffectCommand::CreateNeighborhood {
-                name: display_name.clone(),
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "neighborhood",
-                                format!("Neighborhood '{display_name}' ready"),
-                            )),
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            let failure_tx = tx.clone();
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::CreateNeighborhood {
+                    name: display_name.clone(),
+                },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::success(
+                            "neighborhood",
+                            format!("Neighborhood '{display_name}' ready"),
+                        )),
+                    )
+                    .await;
+                },
+                move |error| async move {
+                    send_ui_update_required(
+                        &failure_tx,
+                        UiUpdate::ToastAdded(ToastMessage::error(
+                            "neighborhood",
+                            format!("Failed to create neighborhood: {error}"),
+                        )),
+                    )
+                    .await;
+                },
+            );
         })
     }
 
@@ -618,33 +618,32 @@ impl NeighborhoodCallbacks {
         tx: UiUpdateSender,
     ) -> NeighborhoodHomeCallback {
         Arc::new(move |home_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::AddHomeToNeighborhood { home_id };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "neighborhood",
-                                "Home added to neighborhood",
-                            )),
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "neighborhood",
-                                format!("Failed to add home to neighborhood: {e}"),
-                            )),
-                        )
-                        .await;
-                    }
-                }
-            });
+            let failure_tx = tx.clone();
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::AddHomeToNeighborhood { home_id },
+                |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::success(
+                            "neighborhood",
+                            "Home added to neighborhood",
+                        )),
+                    )
+                    .await;
+                },
+                move |error| async move {
+                    send_ui_update_required(
+                        &failure_tx,
+                        UiUpdate::ToastAdded(ToastMessage::error(
+                            "neighborhood",
+                            format!("Failed to add home to neighborhood: {error}"),
+                        )),
+                    )
+                    .await;
+                },
+            );
         })
     }
 
@@ -653,33 +652,32 @@ impl NeighborhoodCallbacks {
         tx: UiUpdateSender,
     ) -> NeighborhoodHomeCallback {
         Arc::new(move |home_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::LinkHomeOneHopLink { home_id };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "neighborhood",
-                                "OneHopLink linked",
-                            )),
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "neighborhood",
-                                format!("Failed to link one_hop_link: {e}"),
-                            )),
-                        )
-                        .await;
-                    }
-                }
-            });
+            let failure_tx = tx.clone();
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::LinkHomeOneHopLink { home_id },
+                |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::success(
+                            "neighborhood",
+                            "OneHopLink linked",
+                        )),
+                    )
+                    .await;
+                },
+                move |error| async move {
+                    send_ui_update_required(
+                        &failure_tx,
+                        UiUpdate::ToastAdded(ToastMessage::error(
+                            "neighborhood",
+                            format!("Failed to link one_hop_link: {error}"),
+                        )),
+                    )
+                    .await;
+                },
+            );
         })
     }
 }

@@ -63,7 +63,7 @@ use crate::tui::harness_state::{
     apply_harness_command, clear_harness_command_sender, ensure_harness_command_listener,
     maybe_export_ui_snapshot, register_harness_command_sender, TuiSemanticInputs,
 };
-use crate::tui::hooks::{AppCoreContext, CallbackContext};
+use crate::tui::hooks::{AppCoreContext, AppSnapshotAvailability, CallbackContext};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;
@@ -197,9 +197,9 @@ use crate::tui::props::{
 use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
-    harness_command_channel, ui_update_channel, HarnessCommandReceiptHandle,
-    HarnessCommandReceiver, UiOperation, UiOperationFailure, UiUpdate, UiUpdateReceiver,
-    UiUpdateSender,
+    harness_command_channel, publish_ui_update, ui_update_channel, HarnessCommandReceiptHandle,
+    HarnessCommandReceiver, UiOperation, UiOperationFailure, UiUpdate, UiUpdatePublication,
+    UiUpdateReceiver, UiUpdateSender,
 };
 use std::sync::Mutex;
 
@@ -294,9 +294,7 @@ fn format_ui_operation_failure(failure: &UiOperationFailure) -> String {
 
 async fn send_optional_ui_update_required(tx: &Option<UiUpdateSender>, update: UiUpdate) {
     if let Some(tx) = tx {
-        if tx.try_send(update.clone()).is_err() {
-            let _ = tx.send(update).await;
-        }
+        let _ = publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await;
     }
 }
 
@@ -412,7 +410,7 @@ fn execute_harness_followup_command(
                 topic,
                 members.into_iter().map(|id| id.to_string()).collect(),
                 threshold_k.get(),
-                Some(operation),
+                operation,
             );
             Ok(Some(handle))
         }
@@ -483,7 +481,7 @@ fn execute_harness_followup_command(
                 invitation_type.as_str().to_string(),
                 message,
                 ttl_secs,
-                Some(operation),
+                operation,
             );
             Ok(Some(handle))
         }
@@ -522,7 +520,7 @@ fn execute_harness_followup_command(
             );
             let handle = operation.harness_handle();
             state.router.go_to(Screen::Chat);
-            (cb.chat.on_join_channel)(channel_name, Some(operation));
+            (cb.chat.on_join_channel)(channel_name, operation);
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::AcceptPendingHomeInvitation) => {
@@ -582,7 +580,11 @@ fn execute_harness_followup_command(
                 let handle = operation
                     .as_ref()
                     .map(WorkflowHandoffOperationOwner::harness_handle);
-                (cb.chat.on_send)(channel_id, content, operation);
+                if let Some(operation) = operation {
+                    (cb.chat.on_send_owned)(channel_id, content, operation);
+                } else {
+                    (cb.chat.on_send)(channel_id, content);
+                }
                 Ok(handle)
             } else {
                 Err(format!(
@@ -620,14 +622,25 @@ fn execute_harness_followup_command(
                     channel.id
                 ));
             };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = WorkflowHandoffOperationOwner::submit(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::invitation_create(),
+                SemanticOperationKind::InviteActorToChannel,
+            );
+            let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 contact.id.clone(),
                 channel.id.clone(),
                 Some(context_id),
-                None,
+                operation,
             );
-            Ok(None)
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::InviteActorToChannel {
             authority_id,
@@ -675,7 +688,7 @@ fn execute_harness_followup_command(
                 authority_id.to_string(),
                 channel.id.clone(),
                 Some(context_id),
-                Some(operation),
+                operation,
             );
             Ok(Some(handle))
         }
@@ -1375,7 +1388,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 };
 
                 while let Some(submission) = rx.recv().await {
-                    let app_snapshot_for_command = app_ctx_for_commands.snapshot();
+                    let app_snapshot_for_command = match app_ctx_for_commands.snapshot() {
+                        AppSnapshotAvailability::Available(snapshot) => snapshot,
+                        AppSnapshotAvailability::Contended => {
+                            submission.receipt.complete(
+                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
+                                    reason: "authoritative snapshot unavailable: state lock contended".to_string(),
+                                },
+                            );
+                            continue;
+                        }
+                    };
                     let harness_contacts_for_command = shared_contacts_for_commands.read().clone();
                     let harness_channels_for_command = shared_channels_for_commands.read().clone();
                     let harness_devices_for_command =
@@ -1448,7 +1471,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                     }
 
-                    let app_snapshot = app_ctx_for_commands.snapshot();
+                    let app_snapshot = match app_ctx_for_commands.snapshot() {
+                        AppSnapshotAvailability::Available(snapshot) => snapshot,
+                        AppSnapshotAvailability::Contended => {
+                            tracing::warn!(
+                                "failed to export authoritative TUI projection after applying harness command: state lock contended"
+                            );
+                            continue;
+                        }
+                    };
                     let harness_contacts = shared_contacts_for_commands.read().clone();
                     let harness_devices = shared_devices_for_commands.read().clone();
                     let harness_channels = shared_channels_for_commands.read().clone();
@@ -2355,7 +2386,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 );
                             }
                             let export_state = tui.read_clone();
-                            let app_snapshot = app_ctx_for_updates.snapshot();
+                            let app_snapshot = match app_ctx_for_updates.snapshot() {
+                                AppSnapshotAvailability::Available(snapshot) => snapshot,
+                                AppSnapshotAvailability::Contended => {
+                                    tracing::warn!(
+                                        "failed to publish TUI harness snapshot after authoritative operation status update: state lock contended"
+                                    );
+                                    continue;
+                                }
+                            };
                             let harness_contacts = shared_contacts_for_updates.read().clone();
                             let harness_channels = shared_channels_for_updates.read().clone();
                             let harness_devices = shared_devices_for_updates.read().clone();
@@ -2536,6 +2575,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 });
                             }
                         }
+                        UiUpdate::SubscriptionDegraded { signal_id, reason } => {
+                            let changed = tui.with_mut(|state| {
+                                state.mark_subscription_degraded(signal_id.clone(), reason.clone())
+                            });
+                            if changed {
+                                enqueue_toast!(
+                                    format!("Signal degraded: {signal_id}"),
+                                    crate::tui::state::ToastLevel::Warning
+                                );
+                            }
+                        }
                         UiUpdate::RuntimeFactsUpdated {
                             replace_kinds,
                             facts,
@@ -2694,7 +2744,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
     let _projection_export_version = projection_export_version.get();
-    let app_snapshot = app_ctx.snapshot();
+    let app_snapshot = match app_ctx.snapshot() {
+        AppSnapshotAvailability::Available(snapshot) => snapshot,
+        AppSnapshotAvailability::Contended => {
+            tracing::warn!(
+                "failed to publish TUI harness snapshot during render: state lock contended"
+            );
+            return element! { View {} };
+        }
+    };
     let harness_devices = shared_devices.read().clone();
     let harness_contacts = shared_contacts.read().clone();
     let harness_channels = shared_channels.read().clone();
@@ -2934,8 +2992,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::JoinChannel { channel_name } => {
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation =
+                                            WorkflowHandoffOperationOwner::submit(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::join_channel(),
+                                                SemanticOperationKind::JoinChannel,
+                                            );
                                         new_state.router.go_to(Screen::Chat);
-                                        (cb.chat.on_join_channel)(channel_name, None);
+                                        (cb.chat.on_join_channel)(channel_name, operation);
                                     }
                                     DispatchCommand::AcceptPendingHomeInvitation => {
                                         let Some(update_tx) = update_tx_for_events.clone() else {
@@ -3001,7 +3073,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 &channels,
                                             )
                                         }).or(visible_message_channel_id) {
-                                            (cb.chat.on_send)(channel_id, content, operation);
+                                            if let Some(operation) = operation {
+                                                (cb.chat.on_send_owned)(channel_id, content, operation);
+                                            } else {
+                                                (cb.chat.on_send)(channel_id, content);
+                                            }
                                         } else {
                                             new_state.toast_error(format!(
                                                 "No committed channel selected (channels={} selected_index={} visible_messages={})",
@@ -3254,7 +3330,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             topic,
                                             members.into_iter().map(|id| id.to_string()).collect(),
                                             threshold_k.get(),
-                                            Some(operation),
+                                            operation,
                                         );
                                     }
                                     DispatchCommand::SetChannelTopic { channel_id, topic } => {
@@ -3375,6 +3451,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ));
                                             continue;
                                         };
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation =
+                                            WorkflowHandoffOperationOwner::submit(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::invitation_create(),
+                                                SemanticOperationKind::InviteActorToChannel,
+                                            );
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::PendingHomeInvitationReady,
                                         );
@@ -3382,7 +3472,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             contact.id.clone(),
                                             channel.id.clone(),
                                             Some(context_id),
-                                            None,
+                                            operation,
                                         );
                                     }
                                     DispatchCommand::InviteActorToChannel {
@@ -3414,6 +3504,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             ));
                                             continue;
                                         };
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let operation =
+                                            WorkflowHandoffOperationOwner::submit(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::invitation_create(),
+                                                SemanticOperationKind::InviteActorToChannel,
+                                            );
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::PendingHomeInvitationReady,
                                         );
@@ -3421,7 +3525,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             authority_id.to_string(),
                                             channel.id.clone(),
                                             Some(context_id),
-                                            None,
+                                            operation,
                                         );
                                     }
                                     DispatchCommand::RemoveContact { contact_id } => {
@@ -3510,6 +3614,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         message,
                                         ttl_secs,
                                     } => {
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error(
+                                                "UI update sender is unavailable",
+                                            );
+                                            continue;
+                                        };
+                                        let kind = match invitation_type {
+                                            InvitationKind::Contact => {
+                                                SemanticOperationKind::CreateContactInvitation
+                                            }
+                                            InvitationKind::Guardian => {
+                                                SemanticOperationKind::CreateContactInvitation
+                                            }
+                                            InvitationKind::Channel => {
+                                                SemanticOperationKind::InviteActorToChannel
+                                            }
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::invitation_create(),
+                                            kind,
+                                        );
                                         new_state.clear_runtime_fact_kind(
                                             RuntimeEventKind::InvitationCodeReady,
                                         );
@@ -3518,7 +3646,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             invitation_type.as_str().to_owned(),
                                             message,
                                             ttl_secs,
-                                            None,
+                                            operation,
                                         );
                                     }
                                     DispatchCommand::ImportInvitation { code } => {

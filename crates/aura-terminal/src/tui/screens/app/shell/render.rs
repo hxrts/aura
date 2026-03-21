@@ -104,5 +104,8 @@ pub(super) fn state_indicator_label(tui_snapshot: &TuiState) -> String {
     } else {
         "Off"
     };
-    format!("D:{depth_label} M:{moderator_label} P:{pending_actions}")
+    format!(
+        "D:{depth_label} M:{moderator_label} P:{pending_actions} S:{}",
+        tui_snapshot.degraded_subscription_count()
+    )
 }

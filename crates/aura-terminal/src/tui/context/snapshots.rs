@@ -16,6 +16,12 @@ use crate::tui::hooks::{
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 
+#[derive(Debug, Clone)]
+pub enum StateSnapshotAvailability {
+    Available(aura_app::ui::types::StateSnapshot),
+    Contended,
+}
+
 /// Helper for reading a best-effort snapshot of AppCore state.
 ///
 /// This is intentionally **best-effort** (uses `try_read`) so UI dispatch paths
@@ -34,10 +40,13 @@ impl SnapshotHelper {
         }
     }
 
-    /// Get a best-effort `StateSnapshot` (returns `None` if lock is contended).
+    /// Get an explicit snapshot-access result.
     #[must_use]
-    pub fn try_state_snapshot(&self) -> Option<aura_app::ui::types::StateSnapshot> {
-        self.app_core.try_read().map(|core| core.snapshot())
+    pub fn state_snapshot_availability(&self) -> StateSnapshotAvailability {
+        match self.app_core.try_read() {
+            Some(core) => StateSnapshotAvailability::Available(core.snapshot()),
+            None => StateSnapshotAvailability::Contended,
+        }
     }
 }
 
@@ -51,7 +60,7 @@ impl SnapshotHelper {
 impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_chat(&self) -> ChatSnapshot {
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             ChatSnapshot {
                 channels: snapshot.chat.all_channels().cloned().collect(),
                 // Selection and messages are managed at a different level now
@@ -65,7 +74,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             let guardian_count = snapshot.recovery.guardian_count();
             GuardiansSnapshot {
                 guardians: snapshot.recovery.all_guardians().cloned().collect(),
@@ -82,7 +91,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_recovery(&self) -> RecoverySnapshot {
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             let (progress_percent, is_in_progress) = snapshot
                 .recovery
                 .active_recovery()
@@ -110,7 +119,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             let pending_count = snapshot.invitations.pending_count();
             let invitations = snapshot
                 .invitations
@@ -133,7 +142,7 @@ impl SnapshotHelper {
     pub fn snapshot_home(&self) -> HomeSnapshot {
         use aura_app::ui::types::home::HomeRole;
 
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             let home_state = snapshot.homes.current_home().cloned();
             let my_role = home_state.as_ref().map(|b| b.my_role);
             HomeSnapshot {
@@ -148,7 +157,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             ContactsSnapshot {
                 contacts: snapshot.contacts.all_contacts().cloned().collect(),
             }
@@ -159,7 +168,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
-        if let Some(snapshot) = self.try_state_snapshot() {
+        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
             let home_id = snapshot.neighborhood.home_home_id.clone();
             let home_name = snapshot.neighborhood.home_name.clone();
             // Collect neighbors first before moving position
