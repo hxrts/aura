@@ -1,0 +1,7 @@
+error: authoritative_source requires `kind = "..."`
+ --> tests/boundaries/authoritative_source_missing_kind.rs:1:1
+  |
+1 | #[aura_macros::authoritative_source]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::authoritative_source` (in Nightly builds, run with -Z macro-backtrace for more info)

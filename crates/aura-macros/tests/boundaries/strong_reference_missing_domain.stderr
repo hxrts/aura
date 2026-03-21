@@ -1,0 +1,7 @@
+error: strong_reference requires `domain = "..."`
+ --> tests/boundaries/strong_reference_missing_domain.rs:1:1
+  |
+1 | #[aura_macros::strong_reference]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::strong_reference` (in Nightly builds, run with -Z macro-backtrace for more info)
