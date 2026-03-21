@@ -3928,21 +3928,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let state = match effects.get_current_state().await {
             Ok(state) => state,
             Err(e) => {
-                tracing::warn!("Failed to read commitment tree state for devices: {e}");
-                // Return at least the current device on error
-                let id = current_device;
-                let device = BridgeDeviceInfo {
-                    id,
-                    name: String::new(), // Will be computed from effective_name()
-                    nickname: None,
-                    nickname_suggestion: None,
-                    is_current: true,
-                    last_seen: None,
-                };
-                return Ok(vec![BridgeDeviceInfo {
-                    name: device.effective_name(),
-                    ..device
-                }]);
+                return Err(IntentError::internal_error(format!(
+                    "Failed to read current device list: {e}"
+                )));
             }
         };
 
@@ -4027,8 +4015,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let keys = match effects.list_keys(Some(authority_key_prefix())).await {
             Ok(keys) => keys,
             Err(error) => {
-                tracing::warn!("Failed to list stored authorities: {}", error);
-                return Ok(authorities);
+                return Err(IntentError::internal_error(format!(
+                    "Failed to list stored authorities: {error}"
+                )));
             }
         };
 
@@ -4165,17 +4154,31 @@ impl AuraAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::AgentConfig;
     use crate::AgentBuilder;
     use aura_chat::ChatFact;
     use aura_core::context::EffectContext;
     use aura_core::effects::ExecutionMode;
     use aura_core::effects::TransportEffects;
     use aura_core::hash::hash;
+    use aura_journal::commitment_tree::storage::TREE_OPS_INDEX_KEY;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, OnceLock};
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn unique_test_path(label: &str) -> PathBuf {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        std::env::temp_dir().join(format!(
+            "aura-agent-runtime-bridge-{label}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
     }
 
     // Note: Full tests would require mock infrastructure which is in aura-testkit
@@ -4783,5 +4786,84 @@ mod tests {
             error.to_string().contains("rendezvous_service"),
             "expected rendezvous service error, got: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn try_list_devices_requires_readable_tree_state() {
+        let authority = AuthorityId::new_from_entropy([30u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([31u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let storage_root = unique_test_path("device-list-read-error");
+        fs::create_dir_all(&storage_root).expect("create storage root");
+        fs::create_dir_all(storage_root.join(format!("{TREE_OPS_INDEX_KEY}.dat")))
+            .expect("create unreadable tree index directory");
+
+        let mut config = AgentConfig::default();
+        config.storage.base_path = storage_root.clone();
+
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_list_devices()
+            .await
+            .expect_err("missing tree readability should be explicit");
+        let message = error.to_string();
+        assert!(
+            message.contains("Failed to read current device list"),
+            "device-list failure should stay explicit: {message}"
+        );
+
+        let _ = fs::remove_dir_all(storage_root);
+    }
+
+    #[tokio::test]
+    async fn try_list_authorities_requires_readable_storage_listing() {
+        let authority = AuthorityId::new_from_entropy([32u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([33u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let storage_root = unique_test_path("authority-list-read-error");
+        fs::create_dir_all(&storage_root).expect("create storage root");
+
+        let mut config = AgentConfig::default();
+        config.storage.base_path = storage_root.clone();
+
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        fs::remove_dir_all(&storage_root).expect("remove storage root directory");
+        fs::write(&storage_root, b"not-a-directory").expect("create invalid storage root file");
+
+        let error = bridge
+            .try_list_authorities()
+            .await
+            .expect_err("missing authority storage listing should be explicit");
+        let message = error.to_string();
+        assert!(
+            message.contains("Failed to list stored authorities"),
+            "authority-list failure should stay explicit: {message}"
+        );
+
+        let _ = fs::remove_file(storage_root);
     }
 }
