@@ -3,11 +3,13 @@ use aura_app::runtime_bridge::{LanPeerInfo, RendezvousStatus};
 use aura_app::IntentError;
 use aura_core::types::identifiers::AuthorityId;
 
-pub(super) async fn get_discovered_peers(bridge: &AgentRuntimeBridge) -> Vec<AuthorityId> {
+pub(super) async fn get_discovered_peers(
+    bridge: &AgentRuntimeBridge,
+) -> Result<Vec<AuthorityId>, IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        rendezvous.list_cached_peers().await
+        Ok(rendezvous.list_cached_peers().await)
     } else {
-        Vec::new()
+        Err(service_unavailable("rendezvous_service"))
     }
 }
 
@@ -33,9 +35,11 @@ pub(super) async fn trigger_discovery(bridge: &AgentRuntimeBridge) -> Result<(),
     }
 }
 
-pub(super) async fn get_lan_peers(bridge: &AgentRuntimeBridge) -> Vec<LanPeerInfo> {
+pub(super) async fn get_lan_peers(
+    bridge: &AgentRuntimeBridge,
+) -> Result<Vec<LanPeerInfo>, IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        rendezvous
+        Ok(rendezvous
             .list_lan_discovered_peers()
             .await
             .into_iter()
@@ -45,9 +49,9 @@ pub(super) async fn get_lan_peers(bridge: &AgentRuntimeBridge) -> Vec<LanPeerInf
                 discovered_at_ms: peer.discovered_at_ms,
                 nickname_suggestion: peer.descriptor.nickname_suggestion.clone(),
             })
-            .collect()
+            .collect())
     } else {
-        Vec::new()
+        Err(service_unavailable("rendezvous_service"))
     }
 }
 

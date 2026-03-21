@@ -1889,7 +1889,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn try_get_discovered_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
-        Ok(rendezvous::get_discovered_peers(self).await)
+        rendezvous::get_discovered_peers(self).await
     }
 
     async fn try_get_rendezvous_status(&self) -> Result<RendezvousStatus, IntentError> {
@@ -1905,7 +1905,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
-        Ok(rendezvous::get_lan_peers(self).await)
+        rendezvous::get_lan_peers(self).await
     }
 
     async fn send_lan_invitation(
@@ -4653,6 +4653,60 @@ mod tests {
         assert!(
             error.to_string().contains("sync_service"),
             "expected sync service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_discovered_peers_requires_rendezvous_service() {
+        let authority = AuthorityId::new_from_entropy([20u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([21u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_discovered_peers()
+            .await
+            .expect_err("missing rendezvous service should be explicit");
+        assert!(
+            error.to_string().contains("rendezvous_service"),
+            "expected rendezvous service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_lan_peers_requires_rendezvous_service() {
+        let authority = AuthorityId::new_from_entropy([22u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([23u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_lan_peers()
+            .await
+            .expect_err("missing rendezvous service should be explicit");
+        assert!(
+            error.to_string().contains("rendezvous_service"),
+            "expected rendezvous service error, got: {error}"
         );
     }
 }

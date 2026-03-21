@@ -210,6 +210,9 @@ Rules:
 - Network, timer, and external events are queued before touching session state.
 - Session ownership and task ownership move together.
 - Session-bound effects execute only under the current owner capability.
+- Runtime bridge query APIs fail explicitly when a required runtime service is
+  absent; they do not return empty authoritative-looking peer/discovery results
+  as a fallback.
 
 The current owner may be hosted by an actor, but ownership itself remains a single-owner move boundary, not a shared mutable actor coordination pattern.
 
