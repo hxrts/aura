@@ -42,6 +42,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Playwright-to-page semantic submission uses the page-owned semantic queue
   (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
   browser semantic lifecycle or runtime/bootstrap state.
+- Long-lived browser maintenance tasks must surface terminal pause/failure
+  through observed UI state or equivalent structured browser signals rather than
+  relying on console logging alone.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState

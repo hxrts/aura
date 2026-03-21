@@ -1000,73 +1000,7 @@ cfg_if! {
 
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
-                let app_core = controller.app_core().clone();
-                shared_web_task_owner().spawn_local_cancellable(async move {
-                    loop {
-                        let runtime = { app_core.read().await.runtime().cloned() };
-                        if let Some(runtime) = runtime {
-                            if let Err(error) = runtime_workflows::timeout_runtime_call(
-                                &runtime,
-                                "web_background_sync",
-                                "trigger_discovery",
-                                std::time::Duration::from_secs(3),
-                                || runtime.trigger_discovery(),
-                            )
-                            .await
-                            {
-                                log_web_error(
-                                    "warn",
-                                    &WebUiError::operation(
-                                        WebUiOperation::BackgroundSync,
-                                        "WEB_DISCOVERY_TRIGGER_FAILED",
-                                        error.to_string(),
-                                    ),
-                                );
-                            }
-                            if let Err(error) = runtime_workflows::timeout_runtime_call(
-                                &runtime,
-                                "web_background_sync",
-                                "trigger_sync",
-                                std::time::Duration::from_secs(3),
-                                || runtime.trigger_sync(),
-                            )
-                            .await
-                            {
-                                log_web_error(
-                                    "warn",
-                                    &WebUiError::operation(
-                                        WebUiOperation::BackgroundSync,
-                                        "WEB_SYNC_TRIGGER_FAILED",
-                                        error.to_string(),
-                                    ),
-                                );
-                            }
-                        }
-                        if let Err(error) =
-                            network_workflows::refresh_discovered_peers(&app_core).await
-                        {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::BackgroundSync,
-                                    "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                        }
-                        if let Err(error) = time_workflows::sleep_ms(&app_core, 1_500).await {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::BackgroundSync,
-                                    "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                            break;
-                        }
-                    }
-                });
+                spawn_background_sync_loop(controller.clone(), controller.app_core().clone());
             }
 
             if account_ready {
@@ -1524,9 +1458,109 @@ cfg_if! {
                 }
             }
         }
+
+        fn spawn_background_sync_loop(
+            controller: Arc<UiController>,
+            app_core: Arc<RwLock<AppCore>>,
+        ) {
+            shared_web_task_owner().spawn_local_cancellable(async move {
+                loop {
+                    let runtime = { app_core.read().await.runtime().cloned() };
+                    if let Some(runtime) = runtime {
+                        if let Err(error) = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "web_background_sync",
+                            "trigger_discovery",
+                            std::time::Duration::from_secs(3),
+                            || runtime.trigger_discovery(),
+                        )
+                        .await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_DISCOVERY_TRIGGER_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                        }
+                        if let Err(error) = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "web_background_sync",
+                            "trigger_sync",
+                            std::time::Duration::from_secs(3),
+                            || runtime.trigger_sync(),
+                        )
+                        .await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_SYNC_TRIGGER_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                        }
+                    }
+                    if let Err(error) = network_workflows::refresh_discovered_peers(&app_core).await
+                    {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::BackgroundSync,
+                                "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                    }
+                    if let Err(error) = time_workflows::sleep_ms(&app_core, 1_500).await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                WebUiOperation::BackgroundSync,
+                                "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
+                                error.to_string(),
+                            ),
+                        );
+                        controller
+                            .runtime_error_toast("Background sync paused; refresh to resume");
+                        break;
+                    }
+                }
+            });
+        }
     } else {
         fn main() {
             eprintln!("aura-web is a wasm32 frontend. Build with target wasm32-unknown-unknown.");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn web_background_sync_exit_is_structurally_visible() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let helper_start = source
+            .find("fn spawn_background_sync_loop")
+            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
+        let helper_end = source[helper_start..]
+            .find("} else {")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(
+            helper.contains("runtime_error_toast(\"Background sync paused; refresh to resume\")")
+        );
+        assert!(helper.contains("\"WEB_BACKGROUND_SYNC_SLEEP_FAILED\""));
     }
 }
