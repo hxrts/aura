@@ -1523,6 +1523,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError> {
+        let Some(sync) = self.agent.runtime().sync() else {
+            return Err(service_unavailable("sync_service"));
+        };
+
         // "Connected peers" is a UI-facing availability signal. It should reflect
         // currently reachable peers (e.g., contacts/devices online), not merely the
         // configured peer list.
@@ -1533,29 +1537,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let transport_stats = effects.get_transport_stats().await;
 
-        let (is_running, active_sessions, last_sync_ms) =
-            if let Some(sync) = self.agent.runtime().sync() {
-                let health = sync.sync_service_health().await;
-                (
-                    sync.is_running().await,
-                    health.as_ref().map(|h| h.active_sessions).unwrap_or(0),
-                    health.and_then(|h| h.last_sync),
-                )
-            } else {
-                let now_ms = self
-                    .agent
-                    .runtime()
-                    .effects()
-                    .physical_time()
-                    .await
-                    .map(|time| time.ts_ms)
-                    .ok();
-                (
-                    false,
-                    0,
-                    now_ms.filter(|_| transport_stats.active_channels > 0),
-                )
-            };
+        let health = sync.sync_service_health().await;
+        let is_running = sync.is_running().await;
+        let active_sessions = health.as_ref().map(|h| h.active_sessions).unwrap_or(0);
+        let last_sync_ms = health.and_then(|h| h.last_sync);
 
         Ok(SyncStatus {
             is_running,
@@ -4689,6 +4674,33 @@ mod tests {
                 .to_string()
                 .contains("No sync peers are available for synchronization"),
             "expected no-peers sync error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_sync_status_requires_sync_service() {
+        let authority = AuthorityId::new_from_entropy([28u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([29u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_sync_status()
+            .await
+            .expect_err("missing sync service should be explicit");
+        assert!(
+            error.to_string().contains("sync_service"),
+            "expected sync service error, got: {error}"
         );
     }
 
