@@ -43,6 +43,9 @@ use crate::tui::updates::{
     spawn_ordered_ui_updates, spawn_ui_update, UiUpdate, UiUpdatePublication, UiUpdateSender,
 };
 
+const DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES: u32 = 200;
+const DISPLAY_CLOCK_POLL_INTERVAL: Duration = Duration::from_millis(1000);
+
 fn report_subscription_degradation(
     tasks: &Arc<UiTaskOwner>,
     tx: &Option<UiUpdateSender>,
@@ -77,6 +80,44 @@ async fn subscribe_signal_with_retry_report_to_ui<T, F>(
         report_subscription_degradation(&tasks, &update_tx, &signal_id, reason);
     })
     .await;
+}
+
+/// Best-effort physical display clock for relative-time formatting only.
+///
+/// This state is explicitly observed-only UI maintenance. It must not gate or
+/// synthesize parity-critical lifecycle semantics. On repeated failures it
+/// stops updating rather than retrying forever during shutdown.
+pub fn use_display_clock_state(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> State<Option<u64>> {
+    let now_ms = hooks.use_state(|| None::<u64>);
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut now_ms = now_ms.clone();
+        async move {
+            let time = PhysicalTimeHandler::new();
+            let mut consecutive_failures = 0u32;
+            loop {
+                match time_workflows::current_time_ms(app_core.raw()).await {
+                    Ok(ts) => {
+                        let next = Some(ts);
+                        if now_ms.get() != next {
+                            now_ms.set(next);
+                        }
+                        consecutive_failures = 0;
+                    }
+                    Err(_) => {
+                        consecutive_failures += 1;
+                    }
+                }
+                if consecutive_failures > DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES {
+                    break;
+                }
+                let _ = time
+                    .sleep_ms(DISPLAY_CLOCK_POLL_INTERVAL.as_millis() as u64)
+                    .await;
+            }
+        }
+    });
+    now_ms
 }
 
 fn bump_projection_version(version: &mut State<usize>) {
@@ -198,7 +239,7 @@ pub fn use_nav_status_signals(
     let network_status = hooks.use_state(|| initial_network_status);
     let known_online = hooks.use_state(|| initial_known_online);
     let transport_peers = hooks.use_state(|| initial_transport_peers);
-    let now_ms = hooks.use_state(|| None::<u64>);
+    let now_ms = use_display_clock_state(hooks, app_ctx);
     let tasks = app_ctx.tasks();
 
     // Subscribe to unified network status signal
@@ -265,41 +306,6 @@ pub fn use_nav_status_signals(
                 None,
             )
             .await;
-        }
-    });
-
-    // Keep a best-effort physical clock for relative-time UI formatting.
-    // This must come from the runtime/effects system (not OS clock).
-    // Exits after 200 consecutive failures (~3+ minutes) to avoid running
-    // forever during shutdown.
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut now_ms = now_ms.clone();
-        async move {
-            let mut consecutive_failures = 0u32;
-            let time = PhysicalTimeHandler::new();
-            loop {
-                let has_runtime = app_core.raw().read().await.runtime().is_some();
-                if has_runtime {
-                    if let Ok(ts) = time_workflows::current_time_ms(app_core.raw()).await {
-                        let next = Some(ts);
-                        if now_ms.get() != next {
-                            now_ms.set(next);
-                        }
-                        consecutive_failures = 0;
-                    } else {
-                        consecutive_failures += 1;
-                    }
-                } else {
-                    consecutive_failures += 1;
-                }
-                if consecutive_failures > 200 {
-                    break;
-                }
-                let _ = time
-                    .sleep_ms(Duration::from_millis(1000).as_millis() as u64)
-                    .await;
-            }
         }
     });
 
@@ -1432,6 +1438,8 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 mod tests {
     use super::report_subscription_degradation;
     use super::scoped_channel_snapshot;
+    use super::DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES;
+    use super::DISPLAY_CLOCK_POLL_INTERVAL;
     use crate::tui::tasks::UiTaskOwner;
     use crate::tui::types::Device;
     use crate::tui::updates::UiUpdate;
@@ -1442,6 +1450,7 @@ mod tests {
     use aura_core::types::identifiers::{AuthorityId, ChannelId};
     use std::path::Path;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn test_channel_id(seed: &str) -> ChannelId {
         ChannelId::from_bytes(hash(seed.as_bytes()))
@@ -1705,5 +1714,38 @@ mod tests {
 
         assert!(merged.has_channel(&dm_like));
         assert_eq!(merged.messages_for_channel(&dm_like).len(), 1);
+    }
+
+    #[test]
+    fn display_clock_helper_is_bounded_and_ui_only() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let subscriptions_path =
+            repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
+        let source = std::fs::read_to_string(&subscriptions_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", subscriptions_path.display())
+        });
+
+        let helper_start = source
+            .find("pub fn use_display_clock_state(")
+            .unwrap_or_else(|| panic!("missing use_display_clock_state helper"));
+        let helper_end = source[helper_start..]
+            .find("fn bump_projection_version(")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing helper terminator"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(source.contains("relative-time formatting only"));
+        assert!(source.contains("observed-only UI maintenance"));
+        assert!(helper.contains("time_workflows::current_time_ms"));
+        assert!(helper.contains("DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES"));
+        assert!(helper.contains("DISPLAY_CLOCK_POLL_INTERVAL"));
+        assert!(!helper.contains("Ceremony"));
+        assert!(!helper.contains("UiUpdate::KeyRotationCeremonyStatus"));
+    }
+
+    #[test]
+    fn display_clock_constants_remain_stable_for_nonsemantic_ui_refresh() {
+        assert_eq!(DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES, 200);
+        assert_eq!(DISPLAY_CLOCK_POLL_INTERVAL, Duration::from_millis(1000));
     }
 }

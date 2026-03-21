@@ -37,6 +37,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Long-lived subscription exhaustion must become structural degraded state, not a log-only event.
 - Selected-channel bindings may only reflect the current authoritative channel projection; the shell must not preserve a missing `context_id` from prior UI state.
 - Converted ceremony-monitoring paths must consume typed upstream lifecycle terminality and surface timeout or rollback-incomplete outcomes explicitly; the TUI may not silently discard those terminal states.
+- Relative-time display clocks are local observed-only maintenance for formatting. They may refresh labels such as "2m ago", but they must not gate, infer, or repair parity-critical ceremony or readiness state.
 
 ### InvariantTerminalUiBoundary
 
