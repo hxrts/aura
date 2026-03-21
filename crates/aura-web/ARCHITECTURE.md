@@ -32,6 +32,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   from `aura-ui` rather than keeping a forked cancellation/spawner stack.
 - Harness bridge methods are deterministic and backwards-compatible.
 - Bridge responses that claim to return a channel binding must originate from authoritative selected-channel context materialization; selected ids without context are not a binding.
+- When bridge flows can only observe a selected channel id without authoritative
+  context, they must publish an explicit weak selection payload instead of a
+  binding-shaped response.
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.

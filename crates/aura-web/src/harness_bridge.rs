@@ -229,6 +229,18 @@ async fn selected_channel_binding(controller: &UiController) -> Result<(String, 
     Ok((channel_id.to_string(), context_id.to_string()))
 }
 
+fn semantic_channel_result(
+    channel_id: String,
+    context_id: Option<String>,
+) -> SemanticCommandResponse {
+    match context_id {
+        Some(context_id) => {
+            SemanticCommandResponse::accepted_authoritative_channel_binding(channel_id, context_id)
+        }
+        None => SemanticCommandResponse::accepted_channel_selection(channel_id),
+    }
+}
+
 fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
     let snapshot = controller.ui_snapshot();
     snapshot
@@ -369,7 +381,7 @@ async fn submit_semantic_command(
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_channel_binding(
+            Ok(semantic_channel_result(
                 created.channel_id.to_string(),
                 created.context_id.map(|context_id| context_id.to_string()),
             ))
@@ -569,20 +581,22 @@ async fn submit_semantic_command(
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             let (channel_id, context_id) = selected_channel_binding(&controller).await?;
-            Ok(SemanticCommandResponse::accepted_channel_binding(
-                channel_id,
-                Some(context_id),
-            ))
+            Ok(
+                SemanticCommandResponse::accepted_authoritative_channel_binding(
+                    channel_id, context_id,
+                ),
+            )
         }
         IntentAction::JoinChannel { channel_name } => {
             messaging_workflows::join_channel_by_name(controller.app_core(), &channel_name)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             let (channel_id, context_id) = selected_channel_binding(&controller).await?;
-            Ok(SemanticCommandResponse::accepted_channel_binding(
-                channel_id,
-                Some(context_id),
-            ))
+            Ok(
+                SemanticCommandResponse::accepted_authoritative_channel_binding(
+                    channel_id, context_id,
+                ),
+            )
         }
         IntentAction::InviteActorToChannel {
             authority_id,
