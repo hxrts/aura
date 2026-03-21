@@ -1649,6 +1649,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     };
                 let peers = sync.peers().await;
 
+                if peers.is_empty() && authority_peers.is_empty() {
+                    last_sync_error = Some(IntentError::validation_failed(
+                        "No sync peers are available for synchronization",
+                    ));
+                }
+
                 let sync_result = if peers.is_empty() {
                     Ok(())
                 } else {
@@ -4653,6 +4659,36 @@ mod tests {
         assert!(
             error.to_string().contains("sync_service"),
             "expected sync service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn trigger_sync_fails_when_no_peers_are_available() {
+        let authority = AuthorityId::new_from_entropy([26u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([27u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_sync()
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .trigger_sync()
+            .await
+            .expect_err("sync with no peers should fail explicitly");
+        assert!(
+            error
+                .to_string()
+                .contains("No sync peers are available for synchronization"),
+            "expected no-peers sync error, got: {error}"
         );
     }
 

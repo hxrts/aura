@@ -693,7 +693,11 @@ pub trait RuntimeBridge: Send + Sync {
     /// a real empty peer set.
     async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError>;
 
-    /// Trigger sync with peers (if sync service is available)
+    /// Trigger sync with peers.
+    ///
+    /// Implementations must fail explicitly when the sync service is absent or
+    /// when no sync peers are available, rather than reporting a no-op as
+    /// success.
     async fn trigger_sync(&self) -> Result<(), IntentError>;
 
     /// Process any pending ceremony envelopes/messages.
