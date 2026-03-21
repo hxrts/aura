@@ -6534,4 +6534,52 @@ mod tests {
         assert!(!branch.contains("sleep_ms(&app_core, 250)"));
         assert!(!branch.contains("for _ in 0..8"));
     }
+
+    #[test]
+    fn add_device_confirm_refresh_uses_typed_ceremony_status_handle() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-ui/src/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        let branch_start = source
+            .find("AddDeviceWizardStep::Confirm => {")
+            .unwrap_or_else(|| panic!("missing AddDeviceWizardStep::Confirm branch"));
+        let branch_end = source[branch_start..]
+            .find("Some(ModalState::CreateHome) => {")
+            .map(|offset| branch_start + offset)
+            .unwrap_or_else(|| panic!("missing CreateHome branch"));
+        let branch = &source[branch_start..branch_end];
+
+        assert!(branch.contains("runtime_device_enrollment_status_handle()"));
+        assert!(branch.contains("get_key_rotation_ceremony_status("));
+        assert!(branch.contains("update_runtime_device_enrollment_status("));
+        assert!(!branch.contains("sleep_ms(&app_core"));
+        assert!(!branch.contains("loop {"));
+    }
+
+    #[test]
+    fn add_device_confirm_display_is_driven_by_typed_status_fields() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-ui/src/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        let branch_start = source
+            .find("AddDeviceWizardStep::Confirm => {")
+            .unwrap_or_else(|| panic!("missing AddDeviceWizardStep::Confirm details branch"));
+        let branch_end = source[branch_start..]
+            .find("}\n                }\n            }\n        }\n        ModalState::ImportDeviceEnrollmentCode => {")
+            .map(|offset| branch_start + offset)
+            .unwrap_or_else(|| panic!("missing ImportDeviceEnrollmentCode details branch"));
+        let branch = &source[branch_start..branch_end];
+
+        assert!(branch.contains("state.accepted_count"));
+        assert!(branch.contains("state.total_count.max(1)"));
+        assert!(branch.contains("state.threshold.max(1)"));
+        assert!(branch.contains("if let Some(error) = &state.error_message"));
+        assert!(branch.contains("else if state.has_failed"));
+        assert!(branch.contains("else if state.is_complete"));
+        assert!(!branch.contains("time_workflows::sleep_ms"));
+    }
 }
