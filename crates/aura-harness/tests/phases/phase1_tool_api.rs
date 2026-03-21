@@ -6,7 +6,7 @@ use aura_harness::config::{
     InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
 };
 use aura_harness::coordinator::HarnessCoordinator;
-use aura_harness::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
+use aura_harness::tool_api::{ToolApi, ToolKey, ToolPayload, ToolRequest, ToolResponse};
 
 #[test]
 fn tool_api_primitives_control_local_pty_instance() {
@@ -114,41 +114,30 @@ fn tool_api_primitives_control_local_pty_instance() {
         instance_id: "alice".to_string(),
         screen_source: ScreenSource::Default,
     }) {
-        ToolResponse::Ok { payload } => payload,
+        ToolResponse::Ok {
+            payload: ToolPayload::DiagnosticScreenCapture(payload),
+        } => payload,
         ToolResponse::Error { message } => panic!("screen failed: {message}"),
+        ToolResponse::Ok { payload } => panic!("unexpected screen payload: {payload:?}"),
     };
-    let screen_text = screen_payload
-        .get("screen")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let authoritative_screen_text = screen_payload
-        .get("authoritative_screen")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let raw_screen_text = screen_payload
-        .get("raw_screen")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    assert_eq!(screen_text, authoritative_screen_text);
-    assert!(screen_text.contains("hello-pty"));
-    assert!(raw_screen_text.contains("hello-pty"));
+    assert!(
+        screen_payload
+            .diagnostic_authoritative_screen
+            .contains("hello-pty")
+    );
+    assert!(screen_payload.diagnostic_raw_screen.contains("hello-pty"));
 
     let tail_payload = match tool_api.handle_request(ToolRequest::TailLog {
         instance_id: "alice".to_string(),
         lines: 2,
     }) {
-        ToolResponse::Ok { payload } => payload,
+        ToolResponse::Ok {
+            payload: ToolPayload::TailLog(payload),
+        } => payload,
         ToolResponse::Error { message } => panic!("tail_log failed: {message}"),
+        ToolResponse::Ok { payload } => panic!("unexpected tail_log payload: {payload:?}"),
     };
-    let lines = tail_payload
-        .get("lines")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    assert_eq!(lines.len(), 2);
+    assert_eq!(tail_payload.lines.len(), 2);
 
     match tool_api.handle_request(ToolRequest::Restart {
         instance_id: "alice".to_string(),

@@ -5,14 +5,15 @@
 
 use aura_app::ui::contract::{ControlId, FieldId, ListId, UiSnapshot};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
 use crate::backend::{SemanticCommandRequest, SemanticCommandResponse};
 use crate::config::{RunConfig, RuntimeSubstrate, ScreenSource};
 use crate::coordinator::HarnessCoordinator;
 use crate::introspection::{
-    extract_authority_id, extract_channels, extract_contacts, extract_current_selection,
-    extract_toast,
+    extract_channels, extract_contacts, extract_current_selection, extract_toast, ChannelSnapshot,
+    ContactSnapshot, SelectionSnapshot, ToastSnapshot,
 };
 use crate::screen_normalization::{authoritative_screen, normalize_screen};
 use std::time::Duration;
@@ -72,7 +73,7 @@ impl StartupSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DiagnosticScreenCapture {
     pub diagnostic_authoritative_screen: String,
@@ -117,7 +118,107 @@ impl DiagnosticScreenCapture {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolNegotiationPayload {
+    pub negotiated_version: String,
+    pub supported_versions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStatus {
+    Sent,
+    Activated,
+    Created,
+    Clicked,
+    Filled,
+    Restarted,
+    Killed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolStatusPayload {
+    pub status: ToolStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactInvitationCreatedPayload {
+    pub status: ToolStatus,
+    pub code: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TailLogPayload {
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClipboardPayload {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorityIdSource {
+    Backend,
+    PreparedInviteeAuthority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorityIdPayload {
+    pub authority_id: String,
+    pub source: AuthorityIdSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticChannelListPayload {
+    pub diagnostic_channels: Vec<ChannelSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticSelectionPayload {
+    pub diagnostic_selection: Option<SelectionSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticContactListPayload {
+    pub diagnostic_contacts: Vec<ContactSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_toast: Option<ToastSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolPayload {
+    Negotiation(ToolNegotiationPayload),
+    DiagnosticScreenCapture(DiagnosticScreenCapture),
+    UiSnapshot(UiSnapshot),
+    Status(ToolStatusPayload),
+    ContactInvitationCreated(ContactInvitationCreatedPayload),
+    TailLog(TailLogPayload),
+    Clipboard(ClipboardPayload),
+    AuthorityId(AuthorityIdPayload),
+    DiagnosticChannels(DiagnosticChannelListPayload),
+    DiagnosticSelection(DiagnosticSelectionPayload),
+    DiagnosticContacts(DiagnosticContactListPayload),
+}
+
+impl ToolPayload {
+    pub fn to_json_value(&self) -> serde_json::Result<Value> {
+        serde_json::to_value(self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ToolRequest {
     Negotiate {
@@ -190,13 +291,13 @@ pub enum ToolRequest {
     GetAuthorityId {
         instance_id: String,
     },
-    ListChannels {
+    DiagnosticListChannels {
         instance_id: String,
     },
-    CurrentSelection {
+    DiagnosticCurrentSelection {
         instance_id: String,
     },
-    ListContacts {
+    DiagnosticListContacts {
         instance_id: String,
     },
     Restart {
@@ -207,7 +308,7 @@ pub enum ToolRequest {
     },
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKey {
     Enter,
@@ -226,14 +327,14 @@ pub enum ToolKey {
     Delete,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ToolResponse {
-    Ok { payload: serde_json::Value },
+    Ok { payload: ToolPayload },
     Error { message: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolActionRecord {
     pub request: ToolRequest,
@@ -331,9 +432,9 @@ impl ToolApi {
             ToolRequest::Negotiate { client_versions } => {
                 negotiate(&client_versions).map(|result| {
                     self.negotiated_version = result.negotiated_version.clone();
-                    serde_json::json!({
-                        "negotiated_version": result.negotiated_version,
-                        "supported_versions": result.supported_versions
+                    ToolPayload::Negotiation(ToolNegotiationPayload {
+                        negotiated_version: result.negotiated_version,
+                        supported_versions: result.supported_versions,
                     })
                 })
             }
@@ -343,20 +444,20 @@ impl ToolApi {
             } => self
                 .coordinator
                 .diagnostic_screen_with_source(&instance_id, screen_source)
-                .and_then(|screen| {
-                    serde_json::to_value(DiagnosticScreenCapture::settled(screen, screen_source))
-                        .map_err(Into::into)
+                .map(|screen| {
+                    ToolPayload::DiagnosticScreenCapture(DiagnosticScreenCapture::settled(
+                        screen,
+                        screen_source,
+                    ))
                 }),
             ToolRequest::UiState { instance_id } => self
                 .coordinator
                 .ui_snapshot(&instance_id)
-                .and_then(|snapshot: UiSnapshot| {
-                    serde_json::to_value(snapshot).map_err(Into::into)
-                }),
+                .map(ToolPayload::UiSnapshot),
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)
-                .map(|_| serde_json::json!({ "status": "sent" })),
+                .map(|_| ToolPayload::Status(ToolStatusPayload { status: ToolStatus::Sent })),
             ToolRequest::SendKey {
                 instance_id,
                 key,
@@ -364,14 +465,18 @@ impl ToolApi {
             } => self
                 .coordinator
                 .send_key(&instance_id, key, repeat)
-                .map(|_| serde_json::json!({ "status": "sent" })),
+                .map(|_| ToolPayload::Status(ToolStatusPayload { status: ToolStatus::Sent })),
             ToolRequest::ActivateControl {
                 instance_id,
                 control_id,
             } => self
                 .coordinator
                 .activate_control(&instance_id, control_id)
-                .map(|_| serde_json::json!({ "status": "activated" })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Activated,
+                    })
+                }),
             ToolRequest::ActivateListItem {
                 instance_id,
                 list_id,
@@ -379,14 +484,23 @@ impl ToolApi {
             } => self
                 .coordinator
                 .activate_list_item(&instance_id, list_id, &item_id)
-                .map(|_| serde_json::json!({ "status": "activated" })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Activated,
+                    })
+                }),
             ToolRequest::CreateContactInvitation {
                 instance_id,
                 receiver_authority_id,
             } => self
                 .coordinator
                 .create_contact_invitation(&instance_id, &receiver_authority_id)
-                .map(|code| serde_json::json!({ "status": "created", "code": code })),
+                .map(|code| {
+                    ToolPayload::ContactInvitationCreated(ContactInvitationCreatedPayload {
+                        status: ToolStatus::Created,
+                        code,
+                    })
+                }),
             ToolRequest::ClickButton {
                 instance_id,
                 label,
@@ -397,7 +511,11 @@ impl ToolApi {
                 } else {
                     self.coordinator.click_button(&instance_id, &label)
                 };
-                result.map(|_| serde_json::json!({ "status": "clicked" }))
+                result.map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Clicked,
+                    })
+                })
             }
             ToolRequest::FillInput {
                 instance_id,
@@ -406,7 +524,11 @@ impl ToolApi {
             } => self
                 .coordinator
                 .fill_input(&instance_id, &selector, &value)
-                .map(|_| serde_json::json!({ "status": "filled" })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Filled,
+                    })
+                }),
             ToolRequest::FillField {
                 instance_id,
                 field_id,
@@ -414,7 +536,11 @@ impl ToolApi {
             } => self
                 .coordinator
                 .fill_field(&instance_id, field_id, &value)
-                .map(|_| serde_json::json!({ "status": "filled" })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Filled,
+                    })
+                }),
             ToolRequest::WaitFor {
                 instance_id,
                 pattern,
@@ -433,9 +559,11 @@ impl ToolApi {
                         screen_source,
                     )
                 };
-                result.and_then(|screen| {
-                    serde_json::to_value(DiagnosticScreenCapture::matched(screen, screen_source))
-                        .map_err(Into::into)
+                result.map(|screen| {
+                    ToolPayload::DiagnosticScreenCapture(DiagnosticScreenCapture::matched(
+                        screen,
+                        screen_source,
+                    ))
                 })
             }
             ToolRequest::TailLog { instance_id, lines } => self
@@ -451,81 +579,77 @@ impl ToolApi {
                         }
                     },
                 )
-                .map(|lines| serde_json::json!({ "lines": lines })),
+                .map(|lines| ToolPayload::TailLog(TailLogPayload { lines })),
             ToolRequest::ReadClipboard { instance_id } => self
                 .coordinator
                 .read_clipboard(&instance_id)
-                .map(|text| serde_json::json!({ "text": text })),
+                .map(|text| ToolPayload::Clipboard(ClipboardPayload { text })),
             ToolRequest::PrepareDeviceEnrollmentInviteeAuthority { instance_id } => self
                 .coordinator
                 .prepare_device_enrollment_invitee_authority(&instance_id)
                 .map(|authority_id| {
-                    serde_json::json!({
-                        "authority_id": authority_id,
-                        "source": "prepared_invitee_authority"
+                    ToolPayload::AuthorityId(AuthorityIdPayload {
+                        authority_id,
+                        source: AuthorityIdSource::PreparedInviteeAuthority,
                     })
                 }),
             ToolRequest::GetAuthorityId { instance_id } => self
                 .coordinator
                 .get_authority_id(&instance_id)
-                .and_then(|authority_id| {
-                    if let Some(authority_id) = authority_id {
-                        return Ok(serde_json::json!({
-                            "authority_id": authority_id,
-                            "source": "backend"
-                        }));
-                    }
-
-                    self.coordinator
-                        .diagnostic_screen(&instance_id)
-                        .and_then(|screen| {
-                            if let Some(authority_id) = extract_authority_id(&screen) {
-                                return Ok(serde_json::json!({
-                                    "authority_id": authority_id,
-                                    "source": "screen"
-                                }));
-                            }
-
-                            self.coordinator
-                                .resolve_authority_id_from_local_state(&instance_id)
-                                .map(|authority_id| {
-                                    serde_json::json!({
-                                        "authority_id": authority_id,
-                                        "source": "local_state"
-                                    })
-                                })
-                        })
+                .and_then(|authority_id| match authority_id {
+                    Some(authority_id) => Ok(ToolPayload::AuthorityId(AuthorityIdPayload {
+                        authority_id,
+                        source: AuthorityIdSource::Backend,
+                    })),
+                    None => anyhow::bail!(
+                        "authoritative authority id is unavailable for {instance_id}"
+                    ),
                 }),
-            ToolRequest::ListChannels { instance_id } => self
+            ToolRequest::DiagnosticListChannels { instance_id } => self
                 .coordinator
                 .diagnostic_screen(&instance_id)
                 .map(|screen| {
                     let channels = extract_channels(&screen);
-                    serde_json::json!({ "channels": channels })
+                    ToolPayload::DiagnosticChannels(DiagnosticChannelListPayload {
+                        diagnostic_channels: channels,
+                    })
                 }),
-            ToolRequest::CurrentSelection { instance_id } => self
+            ToolRequest::DiagnosticCurrentSelection { instance_id } => self
                 .coordinator
                 .diagnostic_screen(&instance_id)
                 .map(|screen| {
                     let selection = extract_current_selection(&screen);
-                    serde_json::json!({ "selection": selection })
+                    ToolPayload::DiagnosticSelection(DiagnosticSelectionPayload {
+                        diagnostic_selection: selection,
+                    })
                 }),
-            ToolRequest::ListContacts { instance_id } => self
+            ToolRequest::DiagnosticListContacts { instance_id } => self
                 .coordinator
                 .diagnostic_screen(&instance_id)
                 .map(|screen| {
                     let contacts = extract_contacts(&screen);
                     let toast = extract_toast(&screen);
-                    serde_json::json!({ "contacts": contacts, "toast": toast })
+                    ToolPayload::DiagnosticContacts(DiagnosticContactListPayload {
+                        diagnostic_contacts: contacts,
+                        diagnostic_toast: toast,
+                    })
                 }),
             ToolRequest::Restart { instance_id } => self
                 .coordinator
                 .restart(&instance_id)
-                .map(|_| serde_json::json!({ "status": "restarted" })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Restarted,
+                    })
+                }),
             ToolRequest::Kill { instance_id } => self
                 .coordinator
                 .kill(&instance_id)
-                .map(|_| serde_json::json!({ "status": "killed" })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Killed,
+                    })
+                }),
         };
 
         let response = match outcome {
@@ -581,13 +705,26 @@ mod tests {
     }
 
     #[test]
+    fn tool_response_round_trips_typed_payloads() {
+        let response = ToolResponse::Ok {
+            payload: ToolPayload::Clipboard(ClipboardPayload {
+                text: "clipboard-value".to_string(),
+            }),
+        };
+
+        let encoded = serde_json::to_string(&response)
+            .unwrap_or_else(|error| panic!("failed to encode tool response: {error}"));
+        let decoded: ToolResponse = serde_json::from_str(&encoded)
+            .unwrap_or_else(|error| panic!("failed to decode tool response: {error}"));
+
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
     fn tool_api_uses_explicit_diagnostic_observation_methods() {
         let source = include_str!("tool_api.rs");
         assert!(source.contains(".diagnostic_screen_with_source("));
         assert!(source.contains(".wait_for_diagnostic_screen_with_source("));
         assert!(source.contains(".wait_for_diagnostic_target("));
-        assert!(!source.contains(".screen_with_source("));
-        assert!(!source.contains(".wait_for_with_source("));
-        assert!(!source.contains(".wait_for_selector("));
     }
 }

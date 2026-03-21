@@ -15,6 +15,8 @@ use aura_app::ui::scenarios::{
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{poll, PollFd, PollFlags};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
@@ -37,6 +39,44 @@ const MAX_TIMEOUT_MS: u64 = 600_000;
 enum BackendState {
     Stopped,
     Running,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserDiagnosticScreenPayload {
+    authoritative_screen: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserUiSnapshotEventPayload {
+    version: u64,
+    snapshot: UiSnapshot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserTailLogPayload {
+    lines: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserClipboardPayload {
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BrowserAuthorityIdPayload {
+    authority_id: String,
+}
+
+fn decode_rpc_payload<T: DeserializeOwned>(
+    payload: Value,
+    context: impl FnOnce() -> String,
+) -> Result<T> {
+    serde_json::from_value(payload).with_context(context)
 }
 
 struct RunningSession {
@@ -534,26 +574,26 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 }),
             )
         })?;
-        let screen = payload
-            .get("authoritative_screen")
-            .and_then(Value::as_str)
-            .or_else(|| payload.get("screen").and_then(Value::as_str))
-            .unwrap_or_default()
-            .to_string();
-        Ok(screen)
+        let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
+            format!(
+                "failed to decode browser diagnostic snapshot payload for instance {}",
+                self.config.id
+            )
+        })?;
+        Ok(payload.authoritative_screen)
     }
 
     fn diagnostic_dom_snapshot(&self) -> Result<String> {
         let payload = self.with_session(|session| {
             session.rpc_call("dom_snapshot", json!({ "instance_id": self.config.id }))
         })?;
-        let screen = payload
-            .get("authoritative_screen")
-            .and_then(Value::as_str)
-            .or_else(|| payload.get("screen").and_then(Value::as_str))
-            .unwrap_or_default()
-            .to_string();
-        Ok(screen)
+        let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
+            format!(
+                "failed to decode browser DOM diagnostic payload for instance {}",
+                self.config.id
+            )
+        })?;
+        Ok(payload.authoritative_screen)
     }
 
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
@@ -588,18 +628,16 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     .unwrap_or(u64::MAX)
                     .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
             )?;
-            let version = payload
-                .get("version")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| {
-                    anyhow!("browser ui event missing version for {}", self.config.id)
-                })?;
-            let snapshot = payload
-                .get("snapshot")
-                .cloned()
-                .ok_or_else(|| anyhow!("browser ui event missing snapshot for {}", self.config.id))
-                .and_then(|value| serde_json::from_value(value).map_err(Into::into))?;
-            Ok(UiSnapshotEvent { snapshot, version })
+            let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
+                format!(
+                    "failed to decode browser ui event payload for instance {}",
+                    self.config.id
+                )
+            })?;
+            Ok(UiSnapshotEvent {
+                snapshot: payload.snapshot,
+                version: payload.version,
+            })
         }))
     }
 
@@ -618,13 +656,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 }),
                 timeout_ms.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
             )?;
-            let screen = payload
-                .get("authoritative_screen")
-                .and_then(Value::as_str)
-                .or_else(|| payload.get("screen").and_then(Value::as_str))
-                .unwrap_or_default()
-                .to_string();
-            Ok(screen)
+            let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
+                format!(
+                    "failed to decode browser diagnostic wait-for-dom payload for instance {}",
+                    self.config.id
+                )
+            })?;
+            Ok(payload.authoritative_screen)
         }))
     }
 
@@ -643,13 +681,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 }),
                 timeout_ms.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
             )?;
-            let screen = payload
-                .get("authoritative_screen")
-                .and_then(Value::as_str)
-                .or_else(|| payload.get("screen").and_then(Value::as_str))
-                .unwrap_or_default()
-                .to_string();
-            Ok(screen)
+            let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
+                format!(
+                    "failed to decode browser diagnostic wait-for-target payload for instance {}",
+                    self.config.id
+                )
+            })?;
+            Ok(payload.authoritative_screen)
         }))
     }
 
@@ -690,14 +728,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 }),
             )
         })?;
-        let mut merged = payload
-            .get("lines")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|value| value.as_str().map(str::to_string))
-            .collect::<Vec<_>>();
+        let payload: BrowserTailLogPayload = decode_rpc_payload(payload, || {
+            format!(
+                "failed to decode browser tail_log payload for instance {}",
+                self.config.id
+            )
+        })?;
+        let mut merged = payload.lines;
 
         let stderr_tail = self
             .stderr_log
@@ -745,12 +782,13 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     "instance_id": self.config.id,
                 }),
             )?;
-            let text = payload
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .trim_end_matches(['\n', '\r'])
-                .to_string();
+            let payload: BrowserClipboardPayload = decode_rpc_payload(payload, || {
+                format!(
+                    "failed to decode browser clipboard payload for instance {}",
+                    self.config.id
+                )
+            })?;
+            let text = payload.text.trim_end_matches(['\n', '\r']).to_string();
             if text.trim().is_empty() {
                 bail!("clipboard for browser instance {} is empty", self.config.id);
             }
@@ -766,12 +804,17 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     "instance_id": self.config.id,
                 }),
             )?;
+            let payload: BrowserAuthorityIdPayload = decode_rpc_payload(payload, || {
+                format!(
+                    "failed to decode browser authority_id payload for instance {}",
+                    self.config.id
+                )
+            })?;
             let authority_id = payload
-                .get("authority_id")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string);
+                .authority_id
+                .trim()
+                .to_string();
+            let authority_id = (!authority_id.is_empty()).then_some(authority_id);
             Ok(authority_id)
         })
     }

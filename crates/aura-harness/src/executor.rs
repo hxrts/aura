@@ -1118,12 +1118,13 @@ fn execute_semantic_environment_action(
     tool_api: &mut ToolApi,
     scenario_rng: &mut DeterministicRng,
     fault_rng: &mut DeterministicRng,
-    _context: &mut ScenarioContext,
+    context: &mut ScenarioContext,
 ) -> Result<()> {
     match environment {
         EnvironmentAction::LaunchActors => Ok(()),
         EnvironmentAction::RestartActor { actor } => {
             let instance_id = actor.0.clone();
+            context.pending_projection_baseline.remove(&instance_id);
             dispatch(tool_api, ToolRequest::Restart { instance_id })
         }
         EnvironmentAction::KillActor { actor } => {
@@ -3283,12 +3284,24 @@ fn wait_for_semantic_state_snapshot(
     let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
     remember_snapshot_bindings(context, instance_id, &last_snapshot);
     let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
-    if baseline_satisfied(required_newer_than, &last_snapshot)
-        && semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id)
-    {
-        capture_semantic_wait_success_bindings(step, context, instance_id, &last_snapshot);
-        context.pending_projection_baseline.remove(instance_id);
-        return Ok(last_snapshot);
+    match classify_projection_freshness(required_newer_than, &last_snapshot) {
+        ProjectionFreshness::Satisfied => {
+            if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
+                capture_semantic_wait_success_bindings(step, context, instance_id, &last_snapshot);
+                context.pending_projection_baseline.remove(instance_id);
+                return Ok(last_snapshot);
+            }
+        }
+        ProjectionFreshness::Restarted { baseline, observed } => {
+            bail!(
+                "step {} semantic wait observed projection restart on instance {} before freshness was satisfied (baseline={:?} observed={:?})",
+                step.id,
+                instance_id,
+                baseline,
+                observed
+            );
+        }
+        ProjectionFreshness::Pending => {}
     }
     loop {
         if Instant::now() >= deadline {
@@ -3303,16 +3316,33 @@ fn wait_for_semantic_state_snapshot(
                 }
                 Ok(None) => match fetch_ui_snapshot(tool_api, instance_id) {
                     Ok(snapshot) => snapshot,
-                    Err(error) if is_browser_ui_snapshot_transient(&error) => {
+                    Err(error)
+                        if matches!(
+                            classify_browser_ui_snapshot_issue(&error),
+                            Some(BrowserUiSnapshotIssue::TransientTimeout)
+                        ) =>
+                    {
                         blocking_sleep(Duration::from_millis(100));
                         continue;
                     }
                     Err(error) => return Err(error),
                 },
-                Err(error) if is_browser_ui_snapshot_transient(&error) => {
+                Err(error)
+                    if matches!(
+                        classify_browser_ui_snapshot_issue(&error),
+                        Some(BrowserUiSnapshotIssue::TransientTimeout)
+                            | Some(BrowserUiSnapshotIssue::BrowserRestarted)
+                    ) =>
+                {
                     match fetch_ui_snapshot(tool_api, instance_id) {
                         Ok(snapshot) => snapshot,
-                        Err(fetch_error) if is_browser_ui_snapshot_transient(&fetch_error) => {
+                        Err(fetch_error)
+                            if matches!(
+                                classify_browser_ui_snapshot_issue(&fetch_error),
+                                Some(BrowserUiSnapshotIssue::TransientTimeout)
+                                    | Some(BrowserUiSnapshotIssue::BrowserRestarted)
+                            ) =>
+                        {
                             blocking_sleep(Duration::from_millis(100));
                             continue;
                         }
@@ -3329,12 +3359,24 @@ fn wait_for_semantic_state_snapshot(
             fetch_ui_snapshot(tool_api, instance_id)?
         };
         remember_snapshot_bindings(context, instance_id, &snapshot);
-        if baseline_satisfied(required_newer_than, &snapshot)
-            && semantic_wait_matches_for_instance(step, &snapshot, context, instance_id)
-        {
-            capture_semantic_wait_success_bindings(step, context, instance_id, &snapshot);
-            context.pending_projection_baseline.remove(instance_id);
-            return Ok(snapshot);
+        match classify_projection_freshness(required_newer_than, &snapshot) {
+            ProjectionFreshness::Satisfied => {
+                if semantic_wait_matches_for_instance(step, &snapshot, context, instance_id) {
+                    capture_semantic_wait_success_bindings(step, context, instance_id, &snapshot);
+                    context.pending_projection_baseline.remove(instance_id);
+                    return Ok(snapshot);
+                }
+            }
+            ProjectionFreshness::Restarted { baseline, observed } => {
+                bail!(
+                    "step {} semantic wait observed projection restart on instance {} before freshness was satisfied (baseline={:?} observed={:?})",
+                    step.id,
+                    instance_id,
+                    baseline,
+                    observed
+                );
+            }
+            ProjectionFreshness::Pending => {}
         }
         consume_projection_baseline(context, instance_id, &snapshot);
         last_snapshot = snapshot;
@@ -3353,16 +3395,34 @@ fn wait_for_semantic_state_snapshot(
     )
 }
 
-fn baseline_satisfied(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectionFreshness {
+    Satisfied,
+    Pending,
+    Restarted {
+        baseline: ProjectionRevision,
+        observed: ProjectionRevision,
+    },
+}
+
+fn classify_projection_freshness(
     required_newer_than: Option<ProjectionRevision>,
     snapshot: &UiSnapshot,
-) -> bool {
+) -> ProjectionFreshness {
     required_newer_than
         .map(|baseline| {
-            snapshot.revision.is_newer_than(baseline)
-                || snapshot.revision.semantic_seq < baseline.semantic_seq
+            if snapshot.revision.is_newer_than(baseline) {
+                ProjectionFreshness::Satisfied
+            } else if snapshot.revision.semantic_seq < baseline.semantic_seq {
+                ProjectionFreshness::Restarted {
+                    baseline,
+                    observed: snapshot.revision,
+                }
+            } else {
+                ProjectionFreshness::Pending
+            }
         })
-        .unwrap_or(true)
+        .unwrap_or(ProjectionFreshness::Satisfied)
 }
 
 fn consume_projection_baseline(
@@ -3373,22 +3433,31 @@ fn consume_projection_baseline(
     if context
         .pending_projection_baseline
         .get(instance_id)
-        .is_some_and(|baseline| {
-            snapshot.revision.is_newer_than(*baseline)
-                || snapshot.revision.semantic_seq < baseline.semantic_seq
-        })
+        .is_some_and(|baseline| snapshot.revision.is_newer_than(*baseline))
     {
         context.pending_projection_baseline.remove(instance_id);
     }
 }
 
-fn is_browser_ui_snapshot_transient(error: &anyhow::Error) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserUiSnapshotIssue {
+    TransientTimeout,
+    BrowserRestarted,
+}
+
+fn classify_browser_ui_snapshot_issue(error: &anyhow::Error) -> Option<BrowserUiSnapshotIssue> {
     let message = error.to_string();
-    message.contains("wait_for_ui_state timed out")
+    if message.contains("Target page, context or browser has been closed") {
+        return Some(BrowserUiSnapshotIssue::BrowserRestarted);
+    }
+    if message.contains("wait_for_ui_state timed out")
         || message.contains("request:ui_state timed out")
         || message.contains("Playwright driver ui_state timed out")
-        || message.contains("Target page, context or browser has been closed")
         || message.contains("ui_state timed out for request")
+    {
+        return Some(BrowserUiSnapshotIssue::TransientTimeout);
+    }
+    None
 }
 
 fn wait_for_parity(
@@ -3576,7 +3645,7 @@ fn dispatch_payload_in_lane(
         );
     }
     match tool_api.handle_request(request) {
-        ToolResponse::Ok { payload } => Ok(payload),
+        ToolResponse::Ok { payload } => payload.to_json_value().map_err(Into::into),
         ToolResponse::Error { message } => Err(anyhow!(message)),
     }
 }
@@ -3750,10 +3819,10 @@ mod tests {
             ToolRequest::GetAuthorityId {
                 instance_id: "alice".to_string(),
             },
-            ToolRequest::ListChannels {
+            ToolRequest::DiagnosticListChannels {
                 instance_id: "alice".to_string(),
             },
-            ToolRequest::CurrentSelection {
+            ToolRequest::DiagnosticCurrentSelection {
                 instance_id: "alice".to_string(),
             },
             ToolRequest::ReadClipboard {
@@ -5213,6 +5282,64 @@ mod tests {
             !production_source.contains(".get(\"authority_id\")"),
             "shared semantic executor must not field-peek authority_id out of raw JSON payloads"
         );
+    }
+
+    #[test]
+    fn projection_freshness_classifies_restart_explicitly() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let snapshot = UiSnapshot {
+            revision: ProjectionRevision {
+                semantic_seq: 3,
+                render_seq: Some(1),
+            },
+            ..UiSnapshot::loading(ScreenId::Chat)
+        };
+
+        assert!(matches!(
+            classify_projection_freshness(Some(baseline), &snapshot),
+            ProjectionFreshness::Restarted { baseline: observed_baseline, observed }
+                if observed_baseline == baseline && observed == snapshot.revision
+        ));
+    }
+
+    #[test]
+    fn projection_freshness_does_not_treat_restart_as_satisfied() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let snapshot = UiSnapshot {
+            revision: ProjectionRevision {
+                semantic_seq: 6,
+                render_seq: Some(9),
+            },
+            ..UiSnapshot::loading(ScreenId::Chat)
+        };
+
+        assert!(!matches!(
+            classify_projection_freshness(Some(baseline), &snapshot),
+            ProjectionFreshness::Satisfied
+        ));
+    }
+
+    #[test]
+    fn browser_ui_snapshot_issue_classifies_restart_and_timeout() {
+        let restart = anyhow!("Target page, context or browser has been closed");
+        let timeout = anyhow!("Playwright driver ui_state timed out for request 7");
+        let unknown = anyhow!("some other error");
+
+        assert_eq!(
+            classify_browser_ui_snapshot_issue(&restart),
+            Some(BrowserUiSnapshotIssue::BrowserRestarted)
+        );
+        assert_eq!(
+            classify_browser_ui_snapshot_issue(&timeout),
+            Some(BrowserUiSnapshotIssue::TransientTimeout)
+        );
+        assert_eq!(classify_browser_ui_snapshot_issue(&unknown), None);
     }
 
     #[test]

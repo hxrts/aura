@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use aura_harness::api_version::TOOL_API_VERSIONS;
 use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate};
 use aura_harness::coordinator::HarnessCoordinator;
-use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
+use aura_harness::tool_api::{ToolApi, ToolPayload, ToolRequest, ToolResponse};
 
 #[test]
 fn negotiation_accepts_legacy_and_current_client_versions() {
@@ -23,16 +23,13 @@ fn negotiation_accepts_legacy_and_current_client_versions() {
     });
 
     let payload = match response {
-        ToolResponse::Ok { payload } => payload,
+        ToolResponse::Ok {
+            payload: ToolPayload::Negotiation(payload),
+        } => payload,
         ToolResponse::Error { message } => panic!("negotiation failed unexpectedly: {message}"),
+        ToolResponse::Ok { payload } => panic!("unexpected negotiation payload: {payload:?}"),
     };
-
-    let negotiated = payload
-        .get("negotiated_version")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    assert_eq!(negotiated, "1.0");
+    assert_eq!(payload.negotiated_version, "1.0");
     assert_eq!(api.negotiated_version(), "1.0");
 }
 
@@ -50,7 +47,7 @@ fn negotiation_rejects_unknown_client_versions_with_guidance() {
     });
 
     let message = match response {
-        ToolResponse::Ok { payload } => panic!("expected error, got payload: {payload}"),
+        ToolResponse::Ok { payload } => panic!("expected error, got payload: {payload:?}"),
         ToolResponse::Error { message } => message,
     };
 

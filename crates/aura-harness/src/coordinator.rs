@@ -26,6 +26,7 @@ use crate::backend::{
     SemanticCommandResponse as BackendSemanticCommandResponse,
 };
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
+use crate::event_details;
 use crate::events::EventStream;
 use crate::runtime_substrate::RuntimeSubstrateController;
 use crate::screen_normalization::normalize_screen;
@@ -123,7 +124,7 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "web_server_ready",
                 None,
-                serde_json::json!({ "url": server.url }),
+                event_details!({ "url" => server.url.clone() }),
             );
         }
         self.runtime_substrate_controller.start()?;
@@ -161,7 +162,7 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "start",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend_kind }),
+                event_details!({ "backend" => backend_kind }),
             );
             eprintln!(
                 "[harness] startup phase=health_check begin instance={id} backend={backend_kind}"
@@ -174,16 +175,16 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "health_ok",
                 Some(id.clone()),
-                serde_json::json!({ "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis() }),
+                event_details!({ "timeout_ms" => BACKEND_HEALTH_TIMEOUT.as_millis() }),
             );
             if backend_kind == "playwright_browser" {
                 self.events.push(
                     "lifecycle",
                     "ready_ok",
                     Some(id.clone()),
-                    serde_json::json!({
-                        "timeout_ms": BACKEND_READY_TIMEOUT.as_millis(),
-                        "source": "playwright_startup_semantic_ready"
+                    event_details!({
+                        "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis(),
+                        "source" => "playwright_startup_semantic_ready"
                     }),
                 );
                 continue;
@@ -203,7 +204,7 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "ready_ok",
                 Some(id.clone()),
-                serde_json::json!({ "timeout_ms": BACKEND_READY_TIMEOUT.as_millis() }),
+                event_details!({ "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis() }),
             );
         }
         for id in browser_ids {
@@ -215,25 +216,25 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "start",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend_kind, "startup_mode": "parallel" }),
+                event_details!({ "backend" => backend_kind, "startup_mode" => "parallel" }),
             );
             self.events.push(
                 "lifecycle",
                 "health_ok",
                 Some(id.clone()),
-                serde_json::json!({
-                    "timeout_ms": BACKEND_HEALTH_TIMEOUT.as_millis(),
-                    "startup_mode": "parallel"
+                event_details!({
+                    "timeout_ms" => BACKEND_HEALTH_TIMEOUT.as_millis(),
+                    "startup_mode" => "parallel"
                 }),
             );
             self.events.push(
                 "lifecycle",
                 "ready_ok",
                 Some(id.clone()),
-                serde_json::json!({
-                    "timeout_ms": BACKEND_READY_TIMEOUT.as_millis(),
-                    "source": "playwright_startup_semantic_ready",
-                    "startup_mode": "parallel"
+                event_details!({
+                    "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis(),
+                    "source" => "playwright_startup_semantic_ready",
+                    "startup_mode" => "parallel"
                 }),
             );
         }
@@ -357,7 +358,7 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "clear_stale_state",
                 Some(instance_id.clone()),
-                serde_json::json!({ "data_dir": data_dir.display().to_string() }),
+                event_details!({ "data_dir" => data_dir.display().to_string() }),
             );
         }
         Ok(())
@@ -378,7 +379,7 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "stop",
                 Some(id.clone()),
-                serde_json::json!({ "backend": backend_kind }),
+                event_details!({ "backend" => backend_kind }),
             );
             self.wait_for_backend_stopped(id, BACKEND_TEARDOWN_TIMEOUT)?;
             self.verify_bind_address_released(id)?;
@@ -386,7 +387,7 @@ impl HarnessCoordinator {
                 "lifecycle",
                 "cleanup_ok",
                 Some(id.clone()),
-                serde_json::json!({ "timeout_ms": BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
+                event_details!({ "timeout_ms" => BACKEND_TEARDOWN_TIMEOUT.as_millis() }),
             );
         }
         self.runtime_substrate_controller.finish()?;
@@ -488,9 +489,12 @@ impl HarnessCoordinator {
             "observation",
             "ui_snapshot",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "screen": format!("{:?}", snapshot.screen).to_ascii_lowercase(),
-                "open_modal": snapshot.open_modal.map(|modal| format!("{modal:?}").to_ascii_lowercase()),
+            event_details!({
+                "screen" => format!("{:?}", snapshot.screen).to_ascii_lowercase(),
+                "open_modal" => snapshot
+                    .open_modal
+                    .map(|modal| format!("{modal:?}").to_ascii_lowercase())
+                    .unwrap_or_else(|| "none".to_string())
             }),
         );
         Ok(snapshot)
@@ -517,13 +521,14 @@ impl HarnessCoordinator {
             "observation",
             "ui_snapshot_event",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "version": event.version,
-                "screen": format!("{:?}", event.snapshot.screen).to_ascii_lowercase(),
-                "open_modal": event
+            event_details!({
+                "version" => event.version,
+                "screen" => format!("{:?}", event.snapshot.screen).to_ascii_lowercase(),
+                "open_modal" => event
                     .snapshot
                     .open_modal
-                    .map(|modal| format!("{modal:?}").to_ascii_lowercase()),
+                    .map(|modal| format!("{modal:?}").to_ascii_lowercase())
+                    .unwrap_or_else(|| "none".to_string())
             }),
         );
         Ok(Some(event))
@@ -559,7 +564,7 @@ impl HarnessCoordinator {
             "action",
             "send_keys",
             Some(instance_id.to_string()),
-            serde_json::json!({ "bytes": normalized.len() }),
+            event_details!({ "bytes" => normalized.len() }),
         );
         Ok(())
     }
@@ -573,9 +578,9 @@ impl HarnessCoordinator {
             "action",
             "send_key",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "key": format!("{key:?}").to_ascii_lowercase(),
-                "repeat": repeat.max(1)
+            event_details!({
+                "key" => format!("{key:?}").to_ascii_lowercase(),
+                "repeat" => repeat.max(1)
             }),
         );
         backend.as_trait_mut().send_key(key, repeat)
@@ -590,7 +595,7 @@ impl HarnessCoordinator {
             "action",
             "click_button",
             Some(instance_id.to_string()),
-            serde_json::json!({ "label": label }),
+            event_details!({ "label" => label }),
         );
         backend.as_raw_ui_mut()?.click_button(label)
     }
@@ -604,7 +609,7 @@ impl HarnessCoordinator {
             "action",
             "activate_control",
             Some(instance_id.to_string()),
-            serde_json::json!({ "control_id": control_id }),
+            event_details!({ "control_id" => format!("{control_id:?}") }),
         );
         backend.as_raw_ui_mut()?.activate_control(control_id)
     }
@@ -618,7 +623,7 @@ impl HarnessCoordinator {
             "action",
             "click_target",
             Some(instance_id.to_string()),
-            serde_json::json!({ "selector": selector }),
+            event_details!({ "selector" => selector }),
         );
         backend.as_raw_ui_mut()?.click_target(selector)
     }
@@ -632,9 +637,9 @@ impl HarnessCoordinator {
             "action",
             "fill_input",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "selector": selector,
-                "bytes": value.len()
+            event_details!({
+                "selector" => selector,
+                "bytes" => value.len()
             }),
         );
         backend.as_raw_ui_mut()?.fill_input(selector, value)
@@ -649,9 +654,9 @@ impl HarnessCoordinator {
             "action",
             "fill_field",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "field_id": field_id,
-                "bytes": value.len()
+            event_details!({
+                "field_id" => format!("{field_id:?}"),
+                "bytes" => value.len()
             }),
         );
         backend.as_raw_ui_mut()?.fill_field(field_id, value)
@@ -671,9 +676,9 @@ impl HarnessCoordinator {
             "action",
             "activate_list_item",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "list_id": list_id,
-                "item_id": item_id,
+            event_details!({
+                "list_id" => format!("{list_id:?}"),
+                "item_id" => item_id
             }),
         );
         backend
@@ -694,8 +699,8 @@ impl HarnessCoordinator {
             "action",
             "create_contact_invitation",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "receiver_authority_id": receiver_authority_id,
+            event_details!({
+                "receiver_authority_id" => receiver_authority_id
             }),
         );
         backend
@@ -717,8 +722,8 @@ impl HarnessCoordinator {
             "action",
             "submit_semantic_command_via_ui",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "intent": format!("{:?}", request.kind()).to_ascii_lowercase(),
+            event_details!({
+                "intent" => format!("{:?}", request.kind()).to_ascii_lowercase()
             }),
         );
         backend
@@ -761,12 +766,12 @@ impl HarnessCoordinator {
                     "observation",
                     "wait_for",
                     Some(instance_id.to_string()),
-                    serde_json::json!({
-                        "pattern": pattern,
-                        "normalized_pattern": normalize_screen(pattern),
-                        "attempts": 1,
-                        "matched_view": "normalized",
-                        "source": format!("{source:?}").to_ascii_lowercase()
+                    event_details!({
+                        "pattern" => pattern,
+                        "normalized_pattern" => normalize_screen(pattern),
+                        "attempts" => 1_u64,
+                        "matched_view" => "normalized",
+                        "source" => format!("{source:?}").to_ascii_lowercase()
                     }),
                 );
                 return Ok(screen);
@@ -788,12 +793,12 @@ impl HarnessCoordinator {
                     "observation",
                     "wait_for",
                     Some(instance_id.to_string()),
-                    serde_json::json!({
-                        "pattern": pattern,
-                        "normalized_pattern": normalize_screen(pattern),
-                        "attempts": attempts + 1,
-                        "matched_view": "normalized",
-                        "source": format!("{source:?}").to_ascii_lowercase()
+                    event_details!({
+                        "pattern" => pattern,
+                        "normalized_pattern" => normalize_screen(pattern),
+                        "attempts" => attempts + 1,
+                        "matched_view" => "normalized",
+                        "source" => format!("{source:?}").to_ascii_lowercase()
                     }),
                 );
                 return Ok(screen);
@@ -814,11 +819,11 @@ impl HarnessCoordinator {
             "error",
             "wait_for_timeout",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "pattern": pattern,
-                "normalized_pattern": normalize_screen(pattern),
-                "timeout_ms": timeout_ms,
-                "source": format!("{source:?}").to_ascii_lowercase()
+            event_details!({
+                "pattern" => pattern,
+                "normalized_pattern" => normalize_screen(pattern),
+                "timeout_ms" => timeout_ms,
+                "source" => format!("{source:?}").to_ascii_lowercase()
             }),
         );
         bail!(
@@ -845,9 +850,9 @@ impl HarnessCoordinator {
                 "observation",
                 "wait_for_selector",
                 Some(instance_id.to_string()),
-                serde_json::json!({
-                    "selector": selector,
-                    "timeout_ms": timeout_ms,
+                event_details!({
+                    "selector" => selector,
+                    "timeout_ms" => timeout_ms
                 }),
             );
             return Ok(screen);
@@ -869,7 +874,7 @@ impl HarnessCoordinator {
             "observation",
             "tail_log",
             Some(instance_id.to_string()),
-            serde_json::json!({ "requested_lines": lines, "returned_lines": result.len() }),
+            event_details!({ "requested_lines" => lines, "returned_lines" => result.len() }),
         );
         Ok(result)
     }
@@ -885,9 +890,7 @@ impl HarnessCoordinator {
             "observation",
             "read_clipboard",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "bytes": text.len()
-            }),
+            event_details!({ "bytes" => text.len() }),
         );
         Ok(text)
     }
@@ -902,8 +905,8 @@ impl HarnessCoordinator {
             "observation",
             "get_authority_id",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "source": if authority_id.is_some() { "backend" } else { "unavailable" }
+            event_details!({
+                "source" => if authority_id.is_some() { "backend" } else { "unavailable" }
             }),
         );
         Ok(authority_id)
@@ -929,10 +932,10 @@ impl HarnessCoordinator {
                     "observation",
                     "prepare_device_enrollment_invitee_authority",
                     Some(instance_id.to_string()),
-                    serde_json::json!({
-                        "source": authority_path.display().to_string(),
-                        "mode": "reused",
-                        "authority_id": authority_id,
+                    event_details!({
+                        "source" => authority_path.display().to_string(),
+                        "mode" => "reused",
+                        "authority_id" => authority_id
                     }),
                 );
                 return Ok(authority_id.to_string());
@@ -962,10 +965,10 @@ impl HarnessCoordinator {
             "observation",
             "prepare_device_enrollment_invitee_authority",
             Some(instance_id.to_string()),
-            serde_json::json!({
-                "source": authority_path.display().to_string(),
-                "mode": "created",
-                "authority_id": authority_id,
+            event_details!({
+                "source" => authority_path.display().to_string(),
+                "mode" => "created",
+                "authority_id" => authority_id.clone()
             }),
         );
 
@@ -982,9 +985,9 @@ impl HarnessCoordinator {
                     "lifecycle",
                     "prepare_device_enrollment_invitee_authority_ready",
                     Some(instance_id.to_string()),
-                    serde_json::json!({
-                        "authority_id": authority_id,
-                        "timeout_ms": BACKEND_READY_TIMEOUT.as_millis()
+                    event_details!({
+                        "authority_id" => authority_id.clone(),
+                        "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis()
                     }),
                 );
             }
@@ -1004,10 +1007,10 @@ impl HarnessCoordinator {
                     "lifecycle",
                     "prepare_device_enrollment_invitee_authority_ready",
                     Some(instance_id.to_string()),
-                    serde_json::json!({
-                        "authority_id": authority_id,
-                        "device_id": provisional_device_id,
-                        "timeout_ms": BACKEND_READY_TIMEOUT.as_millis()
+                    event_details!({
+                        "authority_id" => authority_id.clone(),
+                        "device_id" => provisional_device_id.clone(),
+                        "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis()
                     }),
                 );
             }
@@ -1025,7 +1028,7 @@ impl HarnessCoordinator {
             "lifecycle",
             "restart",
             Some(instance_id.to_string()),
-            serde_json::json!({}),
+            event_details!(),
         );
         backend.as_trait_mut().restart()
     }
@@ -1039,7 +1042,7 @@ impl HarnessCoordinator {
             "lifecycle",
             "kill",
             Some(instance_id.to_string()),
-            serde_json::json!({}),
+            event_details!(),
         );
         backend.as_trait_mut().stop()
     }
@@ -1047,78 +1050,6 @@ impl HarnessCoordinator {
     pub fn event_snapshot(&self) -> Vec<crate::events::HarnessEvent> {
         self.events.snapshot()
     }
-
-    pub fn resolve_authority_id_from_local_state(&mut self, instance_id: &str) -> Result<String> {
-        let mode = self
-            .instance_modes
-            .get(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        if !matches!(mode, InstanceMode::Local) {
-            bail!("get_authority_id fallback is only supported for local instances");
-        }
-
-        let data_dir = self
-            .instance_data_dirs
-            .get(instance_id)
-            .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
-        let epoch_dir = data_dir.join("secure_store").join("epoch_state");
-        let journal_facts_dir = data_dir.join("journal").join("facts");
-        let epoch_authorities = read_authority_ids_from_dir(&epoch_dir);
-        let (mut authority_ids, source_dir) = if epoch_authorities.is_empty() {
-            let journal_authorities = read_authority_ids_from_dir(&journal_facts_dir);
-            if journal_authorities.is_empty() {
-                bail!(
-                    "failed reading local authority state {} and {}: no authority directories found",
-                    epoch_dir.display(),
-                    journal_facts_dir.display()
-                );
-            }
-            (journal_authorities, journal_facts_dir)
-        } else {
-            (epoch_authorities, epoch_dir)
-        };
-
-        match authority_ids.len() {
-            1 => {
-                let authority_id = authority_ids.remove(0);
-                self.events.push(
-                    "observation",
-                    "resolve_authority_id_local_state",
-                    Some(instance_id.to_string()),
-                    serde_json::json!({
-                        "source": source_dir.display().to_string(),
-                        "authority_id": authority_id
-                    }),
-                );
-                Ok(authority_id)
-            }
-            0 => bail!(
-                "no local authority ids found in {} for instance {}",
-                source_dir.display(),
-                instance_id
-            ),
-            _ => bail!(
-                "multiple local authority ids found in {} for instance {}: {:?}",
-                source_dir.display(),
-                instance_id,
-                authority_ids
-            ),
-        }
-    }
-}
-
-fn read_authority_ids_from_dir(path: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(path) else {
-        return Vec::new();
-    };
-    let mut authority_ids = entries
-        .filter_map(std::result::Result::ok)
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| name.starts_with("authority-"))
-        .collect::<Vec<_>>();
-    authority_ids.sort();
-    authority_ids.dedup();
-    authority_ids
 }
 
 struct BrowserAppUrlProvision {
@@ -1428,7 +1359,7 @@ mod tests {
     use super::{
         clear_directory_contents, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
     };
-    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
+    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
     use std::net::TcpListener;
     use std::path::PathBuf;
 
@@ -1489,64 +1420,6 @@ mod tests {
         let screen = "Welcome to Aura Access: Limited";
         assert!(wait_pattern_matches(screen, "Map → Limited"));
         assert!(wait_pattern_matches(screen, "Map -> Limited"));
-    }
-
-    #[test]
-    fn resolve_authority_id_from_local_state_reads_epoch_directory() {
-        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
-        let data_dir = temp.path().join("alice");
-        let epoch_dir = data_dir.join("secure_store").join("epoch_state");
-        std::fs::create_dir_all(&epoch_dir).unwrap_or_else(|error| panic!("{error}"));
-        let authority_id = "authority-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-        std::fs::create_dir(epoch_dir.join(authority_id)).unwrap_or_else(|error| panic!("{error}"));
-
-        let run = RunConfig {
-            schema_version: 1,
-            run: RunSection {
-                name: "authority-id-test".to_string(),
-                pty_rows: Some(10),
-                pty_cols: Some(40),
-                artifact_dir: None,
-                global_budget_ms: None,
-                step_budget_ms: None,
-                seed: None,
-                max_cpu_percent: None,
-                max_memory_bytes: None,
-                max_open_files: None,
-                require_remote_artifact_sync: false,
-                runtime_substrate: crate::config::RuntimeSubstrate::default(),
-            },
-            instances: vec![InstanceConfig {
-                id: "alice".to_string(),
-                mode: InstanceMode::Local,
-                data_dir,
-                device_id: None,
-                bind_address: "127.0.0.1:45001".to_string(),
-                demo_mode: false,
-                command: Some("bash".to_string()),
-                args: vec!["-lc".to_string(), "cat".to_string()],
-                env: vec![],
-                log_path: None,
-                ssh_host: None,
-                ssh_user: None,
-                ssh_port: None,
-                ssh_strict_host_key_checking: true,
-                ssh_known_hosts_file: None,
-                ssh_fingerprint: None,
-                ssh_require_fingerprint: false,
-                ssh_dry_run: true,
-                remote_workdir: None,
-                lan_discovery: None,
-                tunnel: None::<TunnelConfig>,
-            }],
-        };
-
-        let mut coordinator =
-            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
-        let resolved = coordinator
-            .resolve_authority_id_from_local_state("alice")
-            .unwrap_or_else(|error| panic!("{error}"));
-        assert_eq!(resolved, authority_id);
     }
 
     #[test]
