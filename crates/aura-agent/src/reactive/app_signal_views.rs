@@ -1094,15 +1094,6 @@ impl ChatSignalView {
             }
         }
 
-        if let Some(home) = homes.current_home() {
-            if !candidates
-                .iter()
-                .any(|candidate: &HomeState| candidate.id == home.id)
-            {
-                candidates.push(home.clone());
-            }
-        }
-
         candidates
     }
 
@@ -1139,11 +1130,11 @@ impl ChatSignalView {
 
         let homes = match self.reactive.read(&*HOMES_SIGNAL).await {
             Ok(homes) => homes,
-            Err(_) => return true,
+            Err(_) => return false,
         };
         let candidates = Self::collect_moderation_homes(&homes, context_id, channel_id);
         if candidates.is_empty() {
-            return true;
+            return false;
         }
 
         if candidates.iter().any(|home| home.is_banned(&sender_id)) {
@@ -1159,23 +1150,17 @@ impl ChatSignalView {
         let sender_is_member = candidates
             .iter()
             .any(|home| home.member(&sender_id).is_some());
-        if has_member_roster && !sender_is_member {
-            let chat_state = match self.reactive.read(&*CHAT_SIGNAL).await {
-                Ok(chat) => chat,
-                Err(_) => return true,
-            };
-            if let Some(channel) = chat_state.channel(&channel_id) {
-                if channel.member_ids.contains(&sender_id) || !channel.member_ids.is_empty() {
-                    return true;
-                }
-            }
+        if !has_member_roster {
+            return false;
+        }
+        if !sender_is_member {
             tracing::debug!(
                 context_id = %context_id,
                 channel_id = %channel_id,
                 sender_id = %sender_id,
-                "Allowing inbound message despite stale membership roster"
+                "Dropping inbound message because moderation membership is unavailable or denies sender"
             );
-            return true;
+            return false;
         }
 
         true
@@ -1731,7 +1716,7 @@ mod tests {
     }
 
     #[test]
-    fn select_moderation_home_fails_open_for_ambiguous_context() {
+    fn select_moderation_home_rejects_ambiguous_context() {
         let context_id = ContextId::new_from_entropy([12u8; 32]);
         let owner = AuthorityId::new_from_entropy([1u8; 32]);
 
@@ -1759,7 +1744,83 @@ mod tests {
             ChatSignalView::select_moderation_home(&homes, context_id, unknown_channel_id);
         assert!(
             selected.is_none(),
-            "ambiguous context without channel-authoritative home should fail open"
+            "ambiguous context without channel-authoritative home should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn sender_allowed_for_context_denies_when_homes_unavailable() {
+        let reactive = ReactiveHandler::new();
+        let own_authority = AuthorityId::new_from_entropy([35u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                own_authority,
+            )
+            .unwrap(),
+        );
+        let view = ChatSignalView::new(own_authority, reactive, effects);
+
+        let allowed = view
+            .sender_allowed_for_context(
+                ContextId::new_from_entropy([36u8; 32]),
+                ChannelId::from_bytes([37u8; 32]),
+                AuthorityId::new_from_entropy([38u8; 32]),
+                1_700_000_000_000,
+            )
+            .await;
+
+        assert!(
+            !allowed,
+            "missing moderation state must fail closed for inbound sender gating"
+        );
+    }
+
+    #[tokio::test]
+    async fn sender_allowed_for_context_denies_when_context_is_ambiguous() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([39u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                own_authority,
+            )
+            .unwrap(),
+        );
+        let view = ChatSignalView::new(own_authority, reactive.clone(), effects);
+        let context_id = ContextId::new_from_entropy([40u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([41u8; 32]);
+
+        let mut homes = HomesState::new();
+        homes.add_home(HomeState::new(
+            ChannelId::from_bytes([42u8; 32]),
+            Some("home-a".to_string()),
+            own_authority,
+            0,
+            context_id,
+        ));
+        homes.add_home(HomeState::new(
+            ChannelId::from_bytes([43u8; 32]),
+            Some("home-b".to_string()),
+            own_authority,
+            0,
+            context_id,
+        ));
+        reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
+
+        let allowed = view
+            .sender_allowed_for_context(
+                context_id,
+                ChannelId::from_bytes([44u8; 32]),
+                sender_id,
+                1_700_000_000_001,
+            )
+            .await;
+
+        assert!(
+            !allowed,
+            "ambiguous moderation context must fail closed for inbound sender gating"
         );
     }
 
