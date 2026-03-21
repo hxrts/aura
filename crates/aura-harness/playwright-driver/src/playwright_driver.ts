@@ -610,6 +610,17 @@ function runSelfTest() {
     "default observation must fail diagnostically before any recovery path runs",
   );
   assert(
+    String(readStructuredUiState).includes("__AURA_UI_PUBLICATION_STATE__") &&
+      String(readStructuredUiState).includes(
+        "__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__",
+      ),
+    "structured observation must surface explicit browser publication diagnostics",
+  );
+  assert(
+    String(readStructuredUiState).includes("ui_state_publication_unavailable:"),
+    "structured observation must fail closed with explicit publication-state detail",
+  );
+  assert(
     OBSERVATION_METHODS.has("ui_state") &&
       !ACTION_METHODS.has("ui_state") &&
       !RECOVERY_METHODS.has("ui_state"),
@@ -2337,9 +2348,18 @@ async function readStructuredUiState(
           return window.__AURA_HARNESS_OBSERVE__.ui_state();
         }
         if (typeof window.__AURA_UI_STATE__ === "function") {
-          return window.__AURA_UI_STATE__();
+          const payload = window.__AURA_UI_STATE__();
+          if (payload != null) {
+            return payload;
+          }
         }
-        return null;
+        throw new Error(
+          `ui_state_publication_unavailable:${JSON.stringify({
+            ui_state: window.__AURA_UI_PUBLICATION_STATE__ ?? null,
+            render_heartbeat:
+              window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__ ?? null,
+          })}`,
+        );
       });
     })(),
     fallbackTimeoutMs,

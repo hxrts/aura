@@ -45,6 +45,9 @@ thread_local! {
     static RUNTIME_IDENTITY_STAGER: RefCell<Option<Arc<dyn Fn(String) -> js_sys::Promise>>> = const { RefCell::new(None) };
 }
 
+const UI_PUBLICATION_STATE_KEY: &str = "__AURA_UI_PUBLICATION_STATE__";
+const RENDER_HEARTBEAT_PUBLICATION_STATE_KEY: &str = "__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__";
+
 fn submit_create_account_in_background(controller: Arc<UiController>, nickname: String) {
     shared_web_task_owner().spawn_local(async move {
         web_sys::console::log_1(
@@ -663,18 +666,34 @@ fn publish_ui_snapshot_now(
         return false;
     }
 
-    let _ = Reflect::set(
+    let cache_publish = Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
         &value,
     );
-    let _ = Reflect::set(
+    let json_publish = Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_UI_STATE_JSON__"),
         &JsValue::from_str(&json),
     );
 
-    let binding_mode = Reflect::get(
+    let mut publication_issues = Vec::new();
+    let cache_published = match cache_publish {
+        Ok(()) => true,
+        Err(error) => {
+            publication_issues.push(format!("cache_publish_failed: {}", js_value_detail(&error)));
+            false
+        }
+    };
+    let json_published = match json_publish {
+        Ok(()) => true,
+        Err(error) => {
+            publication_issues.push(format!("json_publish_failed: {}", js_value_detail(&error)));
+            false
+        }
+    };
+
+    let (binding_mode, driver_push_published) = Reflect::get(
         window.as_ref(),
         &JsValue::from_str("__AURA_DRIVER_PUSH_UI_STATE"),
     )
@@ -682,12 +701,15 @@ fn publish_ui_snapshot_now(
     .and_then(|candidate| candidate.dyn_into::<Function>().ok())
     .map(|function| {
         if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
+            publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
             log_js_callback_error("driver UI state push", &error);
+            ("driver_push", false)
+        } else {
+            ("driver_push", true)
         }
-        "driver_push"
     })
-    .unwrap_or("console_only");
-    if binding_mode == "console_only" {
+    .unwrap_or(("window_cache_only", false));
+    if binding_mode == "window_cache_only" {
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "[aura-ui-publish]binding={binding_mode};screen={screen:?};modal={modal:?};ops={operation_count}",
         )));
@@ -696,7 +718,25 @@ fn publish_ui_snapshot_now(
         )));
         web_sys::console::log_1(&JsValue::from_str(&format!("[aura-ui-json]{json}")));
     }
-    true
+
+    let has_observable_publication = cache_published || json_published || driver_push_published;
+    let (status, detail) = if !has_observable_publication {
+        ("unavailable", publication_issues.join(" | "))
+    } else if publication_issues.is_empty() {
+        ("published", "published".to_string())
+    } else {
+        ("degraded", publication_issues.join(" | "))
+    };
+    update_publication_state(
+        window,
+        UI_PUBLICATION_STATE_KEY,
+        "ui_state",
+        status,
+        &detail,
+        binding_mode,
+    );
+
+    has_observable_publication
 }
 
 fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbeat) {
@@ -710,38 +750,130 @@ fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbea
         return;
     };
 
-    let _ = Reflect::set(
+    let heartbeat_publish = Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_RENDER_HEARTBEAT__"),
         &value,
     );
-    let _ = Reflect::set(
+    let heartbeat_json_publish = Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_RENDER_HEARTBEAT_JSON__"),
         &JsValue::from_str(&json),
     );
 
-    if let Ok(function) = Reflect::get(
+    let mut publication_issues = Vec::new();
+    let heartbeat_published = match heartbeat_publish {
+        Ok(()) => true,
+        Err(error) => {
+            publication_issues.push(format!(
+                "heartbeat_publish_failed: {}",
+                js_value_detail(&error)
+            ));
+            false
+        }
+    };
+    let heartbeat_json_published = match heartbeat_json_publish {
+        Ok(()) => true,
+        Err(error) => {
+            publication_issues.push(format!(
+                "heartbeat_json_publish_failed: {}",
+                js_value_detail(&error)
+            ));
+            false
+        }
+    };
+
+    let driver_push_published = if let Ok(function) = Reflect::get(
         window.as_ref(),
         &JsValue::from_str("__AURA_DRIVER_PUSH_RENDER_HEARTBEAT"),
     )
     .and_then(|candidate| candidate.dyn_into::<Function>())
     {
         if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
+            publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
             log_js_callback_error("driver render heartbeat push", &error);
+            false
+        } else {
+            true
         }
-    }
+    } else {
+        false
+    };
+
+    let binding_mode = if driver_push_published {
+        "driver_push"
+    } else {
+        "window_cache_only"
+    };
+    let has_observable_publication =
+        heartbeat_published || heartbeat_json_published || driver_push_published;
+    let (status, detail) = if !has_observable_publication {
+        ("unavailable", publication_issues.join(" | "))
+    } else if publication_issues.is_empty() {
+        ("published", "published".to_string())
+    } else {
+        ("degraded", publication_issues.join(" | "))
+    };
+    update_publication_state(
+        window,
+        RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+        "render_heartbeat",
+        status,
+        &detail,
+        binding_mode,
+    );
 }
 
-fn log_js_callback_error(context: &str, error: &JsValue) {
-    let detail = error
+fn js_value_detail(error: &JsValue) -> String {
+    error
         .as_string()
         .or_else(|| {
             JSON::stringify(error)
                 .ok()
                 .and_then(|value| value.as_string())
         })
-        .unwrap_or_else(|| format!("{error:?}"));
+        .unwrap_or_else(|| format!("{error:?}"))
+}
+
+fn update_publication_state(
+    window: &web_sys::Window,
+    key: &str,
+    surface: &str,
+    status: &str,
+    detail: &str,
+    binding_mode: &str,
+) {
+    let state = Object::new();
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("surface"),
+        &JsValue::from_str(surface),
+    );
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("status"),
+        &JsValue::from_str(status),
+    );
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("detail"),
+        &JsValue::from_str(detail),
+    );
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("binding_mode"),
+        &JsValue::from_str(binding_mode),
+    );
+    if let Err(error) = Reflect::set(window.as_ref(), &JsValue::from_str(key), state.as_ref()) {
+        web_sys::console::error_1(&JsValue::from_str(&format!(
+            "[web-harness] failed to update publication state {key}: {}",
+            js_value_detail(&error)
+        )));
+    }
+}
+
+fn log_js_callback_error(context: &str, error: &JsValue) {
+    let detail = js_value_detail(error);
     web_sys::console::error_1(&JsValue::from_str(&format!(
         "[web-harness] {context} failed: {detail}"
     )));
@@ -799,44 +931,39 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     }
 }
 
-fn serialize_ui_snapshot(snapshot: &UiSnapshot) -> JsValue {
-    match to_value(snapshot)
-        .ok()
-        .and_then(|value| JSON::stringify(&value).ok())
-        .and_then(|value| value.as_string())
-    {
-        Some(value) => JsValue::from_str(&value),
-        None => {
-            web_sys::console::error_1(&JsValue::from_str(&format!(
-                "failed to serialize UiSnapshot to JSON string"
-            )));
-            JsValue::NULL
-        }
-    }
-}
-
-fn serialized_published_ui_snapshot(
-    window: &web_sys::Window,
-    controller: &UiController,
-) -> JsValue {
-    let live_snapshot = controller.ui_snapshot();
-    let live_json = serialize_ui_snapshot(&live_snapshot);
-    let published = Reflect::get(
+fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {
+    let published_json = Reflect::get(
         window.as_ref(),
         &JsValue::from_str("__AURA_UI_STATE_JSON__"),
     )
     .ok()
     .filter(|value| !value.is_null() && !value.is_undefined());
 
-    let Some(published) = published else {
-        return live_json;
-    };
+    if let Some(published_json) = published_json {
+        if published_json.as_string().is_some() {
+            return published_json;
+        }
+    }
 
-    let Some(_published_json) = published.as_string() else {
-        return live_json;
-    };
+    let published_cache = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
+    )
+    .ok()
+    .filter(|value| !value.is_null() && !value.is_undefined());
+    if let Some(published_cache) = published_cache {
+        return published_cache;
+    }
 
-    published
+    update_publication_state(
+        window,
+        UI_PUBLICATION_STATE_KEY,
+        "ui_state",
+        "unavailable",
+        "semantic_snapshot_not_published",
+        "observation_only",
+    );
+    JsValue::NULL
 }
 
 fn update_semantic_debug(event: &str, detail: Option<&str>) {
@@ -1022,13 +1149,13 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
     snapshot.forget();
 
     let ui_state = Closure::wrap(Box::new(move || -> JsValue {
-        let Ok(controller) = current_controller() else {
+        if current_controller().is_err() {
+            return JsValue::NULL;
+        }
+        let Some(window) = web_sys::window() else {
             return JsValue::NULL;
         };
-        let Some(window) = web_sys::window() else {
-            return serialize_ui_snapshot(&controller.ui_snapshot());
-        };
-        serialized_published_ui_snapshot(&window, &controller)
+        published_ui_snapshot_value(&window)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         &observe,
@@ -1315,14 +1442,30 @@ try {
         &JsValue::from_str("__AURA_HARNESS_OBSERVE__"),
         &observe,
     )?;
+    update_publication_state(
+        &window,
+        UI_PUBLICATION_STATE_KEY,
+        "ui_state",
+        "unavailable",
+        "semantic_snapshot_not_published_yet",
+        "observation_only",
+    );
+    update_publication_state(
+        &window,
+        RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+        "render_heartbeat",
+        "unavailable",
+        "render_heartbeat_not_published_yet",
+        "observation_only",
+    );
     let read_only_ui_state = Closure::wrap(Box::new(move || -> JsValue {
-        let Ok(controller) = current_controller() else {
+        if current_controller().is_err() {
+            return JsValue::NULL;
+        }
+        let Some(window) = web_sys::window() else {
             return JsValue::NULL;
         };
-        let Some(window) = web_sys::window() else {
-            return serialize_ui_snapshot(&controller.ui_snapshot());
-        };
-        serialized_published_ui_snapshot(&window, &controller)
+        published_ui_snapshot_value(&window)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         window.as_ref(),

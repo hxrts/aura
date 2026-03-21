@@ -43,6 +43,12 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   do not mistake acceptance for success.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
 - Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
+- Browser semantic observation must fail closed when published semantic state is
+  unavailable; it must not repair observation by reading a live controller
+  snapshot behind the harness bridge.
+- Missing or degraded semantic snapshot/render-heartbeat publication must be
+  surfaced explicitly through browser-side publication state, not just console
+  logging or `null`/default fallbacks.
 - Harness mode may change instrumentation and render stability, but not business-flow semantics.
 - Shared browser-flow execution must go through the semantic command bridge and real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
 - Playwright-to-page semantic submission uses the page-owned semantic queue
@@ -69,6 +75,7 @@ Failure mode:
 - Browser harness runs must infer state from DOM text or ad hoc JS scraping.
 - Post-action hangs cannot be attributed to semantic state vs render convergence.
 - State reads silently repair stale state or hide observation side effects.
+- Publish failures disappear into logs while the bridge still appears healthy.
 
 Verification hooks:
 - Browser harness contract tests
@@ -127,6 +134,9 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 - Explicit bridge entrypoints currently include semantic command submission,
   observed snapshot/render publication, and runtime identity staging for
   owned browser rebootstrap during create-account style flows.
+- The browser also exports explicit diagnostic publication-state globals for
+  semantic snapshot and render-heartbeat availability so harness failures can
+  distinguish unavailable publication from stale render convergence.
 - Runtime identity staging and bootstrap handoff completion semantics are part
   of that compatibility surface; changes must preserve the distinction between
   accepted/enqueued work and completed bootstrap state.

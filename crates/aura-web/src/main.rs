@@ -1571,6 +1571,31 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn web_harness_ui_state_observation_fails_closed_without_published_snapshot() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+        let source = std::fs::read_to_string(&bridge_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", bridge_path.display()));
+
+        assert!(source.contains("__AURA_UI_PUBLICATION_STATE__"));
+        assert!(source.contains("semantic_snapshot_not_published"));
+        assert!(!source.contains("return live_json;"));
+    }
+
+    #[test]
+    fn web_harness_publication_failures_are_structurally_observable() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+        let source = std::fs::read_to_string(&bridge_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", bridge_path.display()));
+
+        assert!(source.contains("__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__"));
+        assert!(source.contains("\"degraded\""));
+        assert!(source.contains("\"unavailable\""));
+        assert!(source.contains("driver_push_failed"));
+    }
+
+    #[test]
     fn web_background_sync_exit_is_structurally_visible() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let main_path = repo_root.join("crates/aura-web/src/main.rs");
