@@ -36,6 +36,9 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Shared screen and modal structure remains stable enough for semantic harness execution and render-convergence checks.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from `aura-app::ui_contract`; they are not locally reinvented here.
 - Parity-relevant ceremony progress in shared modals must consume upstream-owned lifecycle helpers from `aura-app::ui::workflows`; `aura-ui` must not keep bespoke poll/sleep loops for those paths.
+- Device-enrollment import and accept flows must rely on the upstream
+  invitation workflow's bounded convergence contract rather than adding a
+  frontend-local runtime pre-warm or peer-connectivity loop in `aura-ui`.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every other screen.
 

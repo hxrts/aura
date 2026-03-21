@@ -39,8 +39,7 @@ use aura_app::ui::workflows::moderator as moderator_workflows;
 use aura_app::ui::workflows::{
     access as access_workflows, contacts as contacts_workflows, context as context_workflows,
     invitation as invitation_workflows, messaging as messaging_workflows, query as query_workflows,
-    recovery as recovery_workflows, runtime as runtime_workflows, settings as settings_workflows,
-    time as time_workflows,
+    recovery as recovery_workflows, settings as settings_workflows, time as time_workflows,
 };
 use aura_app::ui_contract::{bridged_operation_statuses, ChannelFactKey, RuntimeFact};
 use aura_app::views::chat::{is_note_to_self_channel_name, NOTE_TO_SELF_CHANNEL_NAME};
@@ -1431,22 +1430,6 @@ fn submit_runtime_modal_action(
                                 .runtime_error_toast("Code is not a device enrollment invitation");
                             rerender_for_import();
                             return;
-                        }
-
-                        if let Ok(runtime) = runtime_workflows::require_runtime(&app_core).await {
-                            for _ in 0..8 {
-                                runtime_workflows::converge_runtime(&runtime).await;
-                                if runtime_workflows::ensure_runtime_peer_connectivity(
-                                    &runtime,
-                                    "device_enrollment_accept",
-                                )
-                                .await
-                                .is_ok()
-                                {
-                                    break;
-                                }
-                                let _ = time_workflows::sleep_ms(&app_core, 250).await;
-                            }
                         }
 
                         match invitation_workflows::accept_device_enrollment_invitation(
@@ -6527,5 +6510,28 @@ mod tests {
         assert!(helper.contains("CeremonyLifecycleState::TimedOut"));
         assert!(!helper.contains("sleep_ms(&app_core_for_status, 1_000)"));
         assert!(!helper.contains("loop {"));
+    }
+
+    #[test]
+    fn import_device_enrollment_uses_upstream_acceptance_without_local_prewarm_loop() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-ui/src/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        let branch_start = source
+            .find("Some(ModalState::ImportDeviceEnrollmentCode) => {")
+            .unwrap_or_else(|| panic!("missing ImportDeviceEnrollmentCode branch"));
+        let branch_end = source[branch_start..]
+            .find("Some(ModalState::CreateInvitation) => {")
+            .map(|offset| branch_start + offset)
+            .unwrap_or_else(|| panic!("missing CreateInvitation branch"));
+        let branch = &source[branch_start..branch_end];
+
+        assert!(branch.contains("accept_device_enrollment_invitation("));
+        assert!(!branch.contains("ensure_runtime_peer_connectivity("));
+        assert!(!branch.contains("converge_runtime(&runtime)"));
+        assert!(!branch.contains("sleep_ms(&app_core, 250)"));
+        assert!(!branch.contains("for _ in 0..8"));
     }
 }
