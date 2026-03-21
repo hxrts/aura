@@ -331,6 +331,9 @@ Rules:
   or return optimistic domain sketches when they claim to return a postcondition;
   converted chat/message/group queries and mutations reduce committed facts
   directly before returning.
+- Converted runtime choreography start paths must surface typed start-failure
+  reasons such as duplicate active session or stale task binding; caller retry
+  policy must bind to that typed reason rather than parsing error strings.
 
 ### Verification Hooks
 
