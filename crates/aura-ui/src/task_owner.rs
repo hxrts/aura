@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
+use std::task::{Poll, Waker};
 
 use async_trait::async_trait;
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
@@ -12,12 +13,12 @@ use futures::{
     future::{BoxFuture, LocalBoxFuture},
     FutureExt,
 };
-use tokio::sync::watch;
 
 #[derive(Debug)]
+#[allow(clippy::disallowed_types)]
 struct UiTaskCancellationState {
     cancelled: AtomicBool,
-    shutdown_tx: watch::Sender<bool>,
+    waiters: Mutex<Vec<Waker>>,
 }
 
 impl UiTaskCancellationState {
@@ -25,11 +26,35 @@ impl UiTaskCancellationState {
         if self.cancelled.swap(true, Ordering::SeqCst) {
             return;
         }
-        let _ = self.shutdown_tx.send(true);
+        let waiters = {
+            let mut waiters = self
+                .waiters
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            std::mem::take(&mut *waiters)
+        };
+        for waiter in waiters {
+            waiter.wake();
+        }
     }
 
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    fn register_waiter(&self, waker: &Waker) -> bool {
+        if self.is_cancelled() {
+            return true;
+        }
+        let mut waiters = self
+            .waiters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.is_cancelled() {
+            return true;
+        }
+        waiters.push(waker.clone());
+        false
     }
 }
 
@@ -41,21 +66,14 @@ struct UiTaskCancellationToken {
 #[async_trait]
 impl CancellationToken for UiTaskCancellationToken {
     async fn cancelled(&self) {
-        if self.state.is_cancelled() {
-            return;
-        }
-        let mut shutdown_rx = self.state.shutdown_tx.subscribe();
-        if *shutdown_rx.borrow() {
-            return;
-        }
-        loop {
-            if shutdown_rx.changed().await.is_err() {
-                return;
+        futures::future::poll_fn(|cx| {
+            if self.state.register_waiter(cx.waker()) {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
             }
-            if *shutdown_rx.borrow() {
-                return;
-            }
-        }
+        })
+        .await;
     }
 
     fn is_cancelled(&self) -> bool {
@@ -128,10 +146,9 @@ pub(crate) struct UiTaskOwner {
 
 impl UiTaskOwner {
     fn new() -> Self {
-        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         let cancellation_state = Arc::new(UiTaskCancellationState {
             cancelled: AtomicBool::new(false),
-            shutdown_tx,
+            waiters: Mutex::new(Vec::new()),
         });
         let inner = Arc::new(UiTaskSpawnerImpl::new(cancellation_state));
         let shutdown = OwnedShutdownToken::attached(inner.cancellation_token());
