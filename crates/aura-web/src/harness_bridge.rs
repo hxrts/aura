@@ -14,9 +14,7 @@ use aura_app::ui::workflows::ceremonies as ceremony_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
-use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
-use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::RuntimeFact;
 use aura_core::{types::identifiers::ChannelId, AuthorityId, DeviceId};
 use aura_ui::UiController;
@@ -461,22 +459,6 @@ async fn submit_semantic_command(
                     &format!("[web-harness] clear_pending_device_enrollment_code failed: {error}")
                         .into(),
                 );
-            }
-
-            for _ in 0..8 {
-                runtime_workflows::converge_runtime(&runtime).await;
-                if runtime_workflows::ensure_runtime_peer_connectivity(
-                    &runtime,
-                    "device_enrollment_accept",
-                )
-                .await
-                .is_ok()
-                {
-                    break;
-                }
-                time_workflows::sleep_ms(&app_core, 250)
-                    .await
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
             }
 
             invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation_info)
