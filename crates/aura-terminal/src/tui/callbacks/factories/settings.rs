@@ -12,6 +12,53 @@ async fn physical_sleep(duration: Duration) {
         .await;
 }
 
+fn key_rotation_lifecycle_toast(
+    kind: aura_app::ui::types::CeremonyKind,
+    state: aura_app::ui::workflows::ceremonies::CeremonyLifecycleState,
+) -> Option<ToastMessage> {
+    let (id_prefix, label) = match kind {
+        aura_app::ui::types::CeremonyKind::GuardianRotation => {
+            ("guardian-ceremony", "Guardian ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::DeviceRotation => {
+            ("mfa-ceremony", "Multifactor ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::DeviceEnrollment => {
+            ("device-enrollment", "Device enrollment")
+        }
+        aura_app::ui::types::CeremonyKind::DeviceRemoval => ("device-removal", "Device removal"),
+        aura_app::ui::types::CeremonyKind::Recovery => ("recovery-ceremony", "Recovery ceremony"),
+        aura_app::ui::types::CeremonyKind::Invitation => {
+            ("invitation-ceremony", "Invitation ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::RendezvousSecureChannel => {
+            ("rendezvous-ceremony", "Rendezvous ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::OtaActivation => {
+            ("ota-activation-ceremony", "OTA activation ceremony")
+        }
+    };
+
+    match state {
+        aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::TimedOut => {
+            Some(ToastMessage::error(
+                format!("{id_prefix}-lifecycle-timeout"),
+                format!("{label} did not settle before timeout"),
+            ))
+        }
+        aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::FailedRollbackIncomplete => {
+            Some(ToastMessage::error(
+                format!("{id_prefix}-rollback-incomplete"),
+                format!(
+                    "{label} failed and rollback was incomplete; manual intervention may be required"
+                ),
+            ))
+        }
+        aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::Completed
+        | aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::Failed => None,
+    }
+}
+
 /// All callbacks for the settings screen
 #[derive(Clone)]
 pub struct SettingsCallbacks {
@@ -194,10 +241,14 @@ impl SettingsCallbacks {
 
                     let tx_monitor = tx.clone();
                     spawn_ctx(ctx.clone(), async move {
-                        let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
+                        let policy =
+                            aura_app::ui::workflows::ceremonies::CeremonyPollPolicy::with_interval(
+                                Duration::from_millis(500),
+                            );
+                        match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
                             ctx.app_core_raw(),
                             &status_handle,
-                            Duration::from_millis(500),
+                            policy,
                             |status| {
                                 let _ = send_ui_update_lossy(
                                     &tx_monitor,
@@ -219,7 +270,48 @@ impl SettingsCallbacks {
                             },
                             physical_sleep,
                         )
-                        .await;
+                        .await
+                        {
+                            Ok(lifecycle) => {
+                                if lifecycle.state
+                                    == aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::TimedOut
+                                {
+                                    let _ = send_ui_update_lossy(
+                                        &tx_monitor,
+                                        UiUpdate::KeyRotationCeremonyStatus {
+                                            ceremony_id: lifecycle.status.ceremony_id.to_string(),
+                                            kind: lifecycle.status.kind,
+                                            accepted_count: lifecycle.status.accepted_count,
+                                            total_count: lifecycle.status.total_count,
+                                            threshold: lifecycle.status.threshold,
+                                            is_complete: lifecycle.status.is_complete,
+                                            has_failed: lifecycle.status.has_failed,
+                                            accepted_participants: lifecycle
+                                                .status
+                                                .accepted_participants
+                                                .clone(),
+                                            error_message: lifecycle.status.error_message.clone(),
+                                            pending_epoch: lifecycle.status.pending_epoch,
+                                            agreement_mode: lifecycle.status.agreement_mode,
+                                            reversion_risk: lifecycle.status.reversion_risk,
+                                        },
+                                    );
+                                }
+                                if let Some(toast) =
+                                    key_rotation_lifecycle_toast(lifecycle.status.kind, lifecycle.state)
+                                {
+                                    send_ui_update_required(&tx_monitor, UiUpdate::ToastAdded(toast))
+                                        .await;
+                                }
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    ceremony_id = %status_handle.ceremony_id(),
+                                    error = %error,
+                                    "device enrollment monitor failed"
+                                );
+                            }
+                        }
                     });
                 });
             },
@@ -378,6 +470,34 @@ impl SettingsCallbacks {
                 );
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn add_device_monitor_uses_typed_lifecycle_outcomes() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let settings_path =
+            repo_root.join("crates/aura-terminal/src/tui/callbacks/factories/settings.rs");
+        let settings_source = std::fs::read_to_string(&settings_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", settings_path.display()));
+
+        let add_device_start = settings_source
+            .find("fn make_add_device(")
+            .unwrap_or_else(|| panic!("missing make_add_device"));
+        let remove_device_start = settings_source[add_device_start..]
+            .find("fn make_remove_device(")
+            .map(|offset| add_device_start + offset)
+            .unwrap_or_else(|| panic!("missing make_remove_device"));
+        let add_device_branch = &settings_source[add_device_start..remove_device_start];
+
+        assert!(add_device_branch.contains("monitor_key_rotation_ceremony_with_policy("));
+        assert!(!add_device_branch.contains("monitor_key_rotation_ceremony("));
+        assert!(add_device_branch.contains("CeremonyLifecycleState::TimedOut"));
+        assert!(add_device_branch.contains("key_rotation_lifecycle_toast("));
     }
 }
 

@@ -37,7 +37,8 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
-    monitor_key_rotation_ceremony, start_device_threshold_ceremony, start_guardian_ceremony,
+    monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
+    start_guardian_ceremony, CeremonyLifecycleState, CeremonyPollPolicy,
 };
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
@@ -81,6 +82,67 @@ async fn effect_sleep(duration: std::time::Duration) {
     let _ = PhysicalTimeHandler::new()
         .sleep_ms(duration.as_millis() as u64)
         .await;
+}
+
+fn key_rotation_status_update(
+    status: &aura_app::runtime_bridge::KeyRotationCeremonyStatus,
+) -> UiUpdate {
+    UiUpdate::KeyRotationCeremonyStatus {
+        ceremony_id: status.ceremony_id.to_string(),
+        kind: status.kind,
+        accepted_count: status.accepted_count,
+        total_count: status.total_count,
+        threshold: status.threshold,
+        is_complete: status.is_complete,
+        has_failed: status.has_failed,
+        accepted_participants: status.accepted_participants.clone(),
+        error_message: status.error_message.clone(),
+        pending_epoch: status.pending_epoch,
+        agreement_mode: status.agreement_mode,
+        reversion_risk: status.reversion_risk,
+    }
+}
+
+fn key_rotation_lifecycle_toast(
+    kind: aura_app::ui::types::CeremonyKind,
+    state: CeremonyLifecycleState,
+) -> Option<ToastMessage> {
+    let (id_prefix, label) = match kind {
+        aura_app::ui::types::CeremonyKind::GuardianRotation => {
+            ("guardian-ceremony", "Guardian ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::DeviceRotation => {
+            ("mfa-ceremony", "Multifactor ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::DeviceEnrollment => {
+            ("device-enrollment", "Device enrollment")
+        }
+        aura_app::ui::types::CeremonyKind::DeviceRemoval => ("device-removal", "Device removal"),
+        aura_app::ui::types::CeremonyKind::Recovery => ("recovery-ceremony", "Recovery ceremony"),
+        aura_app::ui::types::CeremonyKind::Invitation => {
+            ("invitation-ceremony", "Invitation ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::RendezvousSecureChannel => {
+            ("rendezvous-ceremony", "Rendezvous ceremony")
+        }
+        aura_app::ui::types::CeremonyKind::OtaActivation => {
+            ("ota-activation-ceremony", "OTA activation ceremony")
+        }
+    };
+
+    match state {
+        CeremonyLifecycleState::TimedOut => Some(ToastMessage::error(
+            format!("{id_prefix}-lifecycle-timeout"),
+            format!("{label} did not settle before timeout"),
+        )),
+        CeremonyLifecycleState::FailedRollbackIncomplete => Some(ToastMessage::error(
+            format!("{id_prefix}-rollback-incomplete"),
+            format!(
+                "{label} failed and rollback was incomplete; manual intervention may be required"
+            ),
+        )),
+        CeremonyLifecycleState::Completed | CeremonyLifecycleState::Failed => None,
+    }
 }
 
 #[allow(clippy::expect_used)]
@@ -3913,31 +3975,63 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     let tasks = tasks.clone();
                                                     let tasks_handle = tasks;
                                                     tasks_handle.spawn(async move {
-                                                        let _ = monitor_key_rotation_ceremony(
+                                                        let policy = CeremonyPollPolicy::with_interval(
+                                                            std::time::Duration::from_millis(500),
+                                                        );
+                                                        match monitor_key_rotation_ceremony_with_policy(
                                                             &app_core_monitor,
                                                             &status_handle,
-                                                            tokio::time::Duration::from_millis(500),
+                                                            policy,
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
-                                                                    let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                                        ceremony_id: status.ceremony_id.to_string(),
-                                                                        kind: status.kind,
-                                                                        accepted_count: status.accepted_count,
-                                                                        total_count: status.total_count,
-                                                                        threshold: status.threshold,
-                                                                        is_complete: status.is_complete,
-                                                                        has_failed: status.has_failed,
-                                                                        accepted_participants: status.accepted_participants.clone(),
-                                                                        error_message: status.error_message.clone(),
-                                                                        pending_epoch: status.pending_epoch,
-                                                                        agreement_mode: status.agreement_mode,
-                                                                        reversion_risk: status.reversion_risk,
-                                                                    });
+                                                                    let _ = tx.try_send(
+                                                                        key_rotation_status_update(status),
+                                                                    );
                                                                 }
                                                             },
                                                             effect_sleep,
                                                         )
-                                                        .await;
+                                                        .await
+                                                        {
+                                                            Ok(lifecycle) => {
+                                                                if lifecycle.state
+                                                                    == CeremonyLifecycleState::TimedOut
+                                                                {
+                                                                    if let Some(tx) =
+                                                                        update_tx_monitor.clone()
+                                                                    {
+                                                                        let _ = tx.try_send(
+                                                                            key_rotation_status_update(
+                                                                                &lifecycle.status,
+                                                                            ),
+                                                                        );
+                                                                    }
+                                                                }
+                                                                if let Some(toast) =
+                                                                    key_rotation_lifecycle_toast(
+                                                                        lifecycle.status.kind,
+                                                                        lifecycle.state,
+                                                                    )
+                                                                {
+                                                                    if let Some(tx) =
+                                                                        update_tx_monitor.clone()
+                                                                    {
+                                                                        let _ = tx.try_send(
+                                                                            UiUpdate::ToastAdded(
+                                                                                toast,
+                                                                            ),
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(error) => {
+                                                                tracing::warn!(
+                                                                    ceremony_id = %status_handle.ceremony_id(),
+                                                                    error = %error,
+                                                                    "guardian ceremony monitor failed"
+                                                                );
+                                                            }
+                                                        }
                                                     });
                                                 }
                                                 Err(e) => {
@@ -4056,31 +4150,63 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     let tasks = tasks.clone();
                                                     let tasks_handle = tasks;
                                                     tasks_handle.spawn(async move {
-                                                        let _ = monitor_key_rotation_ceremony(
+                                                        let policy = CeremonyPollPolicy::with_interval(
+                                                            std::time::Duration::from_millis(500),
+                                                        );
+                                                        match monitor_key_rotation_ceremony_with_policy(
                                                             &app_core_monitor,
                                                             &status_handle,
-                                                            tokio::time::Duration::from_millis(500),
+                                                            policy,
                                                             |status| {
                                                                 if let Some(tx) = update_tx_monitor.clone() {
-                                                                    let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                                                        ceremony_id: status.ceremony_id.to_string(),
-                                                                        kind: status.kind,
-                                                                        accepted_count: status.accepted_count,
-                                                                        total_count: status.total_count,
-                                                                        threshold: status.threshold,
-                                                                        is_complete: status.is_complete,
-                                                                        has_failed: status.has_failed,
-                                                                        accepted_participants: status.accepted_participants.clone(),
-                                                                        error_message: status.error_message.clone(),
-                                                                        pending_epoch: status.pending_epoch,
-                                                                        agreement_mode: status.agreement_mode,
-                                                                        reversion_risk: status.reversion_risk,
-                                                                    });
+                                                                    let _ = tx.try_send(
+                                                                        key_rotation_status_update(status),
+                                                                    );
                                                                 }
                                                             },
                                                             effect_sleep,
                                                         )
-                                                        .await;
+                                                        .await
+                                                        {
+                                                            Ok(lifecycle) => {
+                                                                if lifecycle.state
+                                                                    == CeremonyLifecycleState::TimedOut
+                                                                {
+                                                                    if let Some(tx) =
+                                                                        update_tx_monitor.clone()
+                                                                    {
+                                                                        let _ = tx.try_send(
+                                                                            key_rotation_status_update(
+                                                                                &lifecycle.status,
+                                                                            ),
+                                                                        );
+                                                                    }
+                                                                }
+                                                                if let Some(toast) =
+                                                                    key_rotation_lifecycle_toast(
+                                                                        lifecycle.status.kind,
+                                                                        lifecycle.state,
+                                                                    )
+                                                                {
+                                                                    if let Some(tx) =
+                                                                        update_tx_monitor.clone()
+                                                                    {
+                                                                        let _ = tx.try_send(
+                                                                            UiUpdate::ToastAdded(
+                                                                                toast,
+                                                                            ),
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(error) => {
+                                                                tracing::warn!(
+                                                                    ceremony_id = %status_handle.ceremony_id(),
+                                                                    error = %error,
+                                                                    "multifactor ceremony monitor failed"
+                                                                );
+                                                            }
+                                                        }
                                                     });
                                                 }
                                                 Err(e) => {
