@@ -6,7 +6,7 @@ pub mod components;
 pub mod keyboard;
 pub mod model;
 pub mod snapshot;
-mod task_owner;
+pub mod task_owner;
 
 pub use app::AuraUiRoot;
 pub use clipboard::{ClipboardPort, MemoryClipboard};
