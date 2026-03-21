@@ -35,6 +35,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Parity-critical callback families must require the appropriate owner type at the API boundary; ownerless callbacks are observed-only.
 - Snapshot contention must be surfaced explicitly on parity-relevant paths; the shell may not treat lock contention as an empty authoritative state.
 - Long-lived subscription exhaustion must become structural degraded state, not a log-only event.
+- Selected-channel bindings may only reflect the current authoritative channel projection; the shell must not preserve a missing `context_id` from prior UI state.
 
 ### InvariantTerminalUiBoundary
 

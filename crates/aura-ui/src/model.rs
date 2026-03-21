@@ -14,7 +14,6 @@ use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, QuiescenceSnapshot, RuntimeFact,
     SemanticOperationPhase, SemanticOperationStatus,
 };
-use aura_app::views::chat::{NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC};
 use aura_app::{
     ui::contract::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
@@ -81,6 +80,7 @@ fn demo_authority_id(seed: &str) -> AuthorityId {
 
 #[derive(Debug, Clone)]
 pub struct ChannelRow {
+    pub id: String,
     pub name: String,
     pub selected: bool,
     pub topic: String,
@@ -617,11 +617,7 @@ impl UiModel {
             account_setup_error: None,
             screen: ScreenId::Neighborhood,
             settings_section: SettingsSection::Profile,
-            channels: vec![ChannelRow {
-                name: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
-                selected: true,
-                topic: NOTE_TO_SELF_CHANNEL_TOPIC.to_string(),
-            }],
+            channels: Vec::new(),
             contacts: Vec::new(),
             authorities: Vec::new(),
             messages: Vec::new(),
@@ -651,7 +647,7 @@ impl UiModel {
             secondary_device_name: None,
             selected_contact_id: None,
             selected_authority_id: None,
-            selected_channel: Some(NOTE_TO_SELF_CHANNEL_NAME.to_string()),
+            selected_channel: None,
             selected_neighborhood_member_key: None,
             selected_notification_id: None,
             contact_details: false,
@@ -659,6 +655,14 @@ impl UiModel {
     }
 
     pub fn selected_channel_name(&self) -> Option<&str> {
+        let selected_id = self.selected_channel.as_deref()?;
+        self.channels
+            .iter()
+            .find(|row| row.id == selected_id)
+            .map(|row| row.name.as_str())
+    }
+
+    pub fn selected_channel_id(&self) -> Option<&str> {
         self.selected_channel.as_deref()
     }
 
@@ -1069,25 +1073,19 @@ impl UiModel {
     }
 
     pub fn select_channel_by_name(&mut self, name: &str) {
-        let mut found = false;
+        let selected_id = self
+            .channels
+            .iter()
+            .find(|row| row.name.eq_ignore_ascii_case(name))
+            .map(|row| row.id.clone());
+        self.select_channel_id(selected_id.as_deref());
+    }
+
+    pub fn select_channel_id(&mut self, id: Option<&str>) {
+        self.selected_channel = id.map(ToString::to_string);
         for row in &mut self.channels {
-            let matches = row.name.eq_ignore_ascii_case(name);
-            row.selected = matches;
-            if matches {
-                found = true;
-            }
+            row.selected = Some(row.id.as_str()) == id;
         }
-        if !found {
-            for row in &mut self.channels {
-                row.selected = false;
-            }
-            self.channels.push(ChannelRow {
-                name: name.to_string(),
-                selected: true,
-                topic: String::new(),
-            });
-        }
-        self.selected_channel = Some(name.to_string());
     }
 
     pub fn select_home(&mut self, id: impl Into<String>, name: impl Into<String>) {
@@ -1271,11 +1269,12 @@ impl UiModel {
             .or_else(|| self.notification_ids.first().cloned());
     }
 
-    pub fn replace_channels(&mut self, channels: Vec<(String, String)>) {
+    pub fn replace_channels(&mut self, channels: Vec<(String, String, String)>) {
         let previous = self.selected_channel.clone();
         self.channels = channels
             .into_iter()
-            .map(|(name, topic)| ChannelRow {
+            .map(|(id, name, topic)| ChannelRow {
+                id,
                 name,
                 selected: false,
                 topic,
@@ -1287,18 +1286,15 @@ impl UiModel {
             return;
         }
 
-        let selected_name = previous
-            .and_then(|name| {
+        let selected_id = previous
+            .and_then(|id| {
                 self.channels
                     .iter()
-                    .find(|row| row.name.eq_ignore_ascii_case(&name))
-                    .map(|row| row.name.clone())
+                    .find(|row| row.id == id)
+                    .map(|row| row.id.clone())
             })
-            .unwrap_or_else(|| self.channels[0].name.clone());
-        self.selected_channel = Some(selected_name.clone());
-        for row in &mut self.channels {
-            row.selected = row.name == selected_name;
-        }
+            .unwrap_or_else(|| self.channels[0].id.clone());
+        self.select_channel_id(Some(&selected_id));
     }
 
     pub fn replace_contacts(&mut self, contacts: Vec<(AuthorityId, String, bool)>) {
@@ -1371,16 +1367,16 @@ impl UiModel {
     pub fn selected_channel_topic(&self) -> &str {
         self.channels
             .iter()
-            .find(|row| Some(row.name.as_str()) == self.selected_channel_name())
+            .find(|row| Some(row.id.as_str()) == self.selected_channel_id())
             .map(|row| row.topic.as_str())
             .unwrap_or("")
     }
 
     pub fn set_selected_channel_topic(&mut self, value: String) {
-        let selected_name = self.selected_channel.clone();
-        if let Some(channel) = selected_name
+        let selected_id = self.selected_channel.clone();
+        if let Some(channel) = selected_id
             .as_deref()
-            .and_then(|name| self.channels.iter_mut().find(|row| row.name == name))
+            .and_then(|id| self.channels.iter_mut().find(|row| row.id == id))
         {
             channel.topic = value;
         }
@@ -1392,8 +1388,8 @@ impl UiModel {
         }
         let max = self.channels.len() as i32 - 1;
         let current_index = self
-            .selected_channel_name()
-            .and_then(|name| self.channels.iter().position(|row| row.name == name))
+            .selected_channel_id()
+            .and_then(|id| self.channels.iter().position(|row| row.id == id))
             .unwrap_or_default();
         let mut next = current_index as i32 + delta;
         if next < 0 {
@@ -1402,11 +1398,8 @@ impl UiModel {
         if next > max {
             next = 0;
         }
-        let selected_name = self.channels[next as usize].name.clone();
-        self.selected_channel = Some(selected_name.clone());
-        for row in &mut self.channels {
-            row.selected = row.name == selected_name;
-        }
+        let selected_id = self.channels[next as usize].id.clone();
+        self.select_channel_id(Some(&selected_id));
     }
 
     pub fn secondary_device_name(&self) -> Option<&str> {
@@ -1450,7 +1443,7 @@ impl UiModel {
             .channels
             .iter()
             .map(|channel| ListItemSnapshot {
-                id: channel.name.clone(),
+                id: channel.id.clone(),
                 selected: channel.selected,
                 confirmation: ConfirmationState::Confirmed,
                 is_current: false,
@@ -1462,7 +1455,7 @@ impl UiModel {
                 items: channel_items,
             });
         }
-        if let Some(channel) = self.selected_channel_name() {
+        if let Some(channel) = self.selected_channel_id() {
             selections.push(SelectionSnapshot {
                 list: ListId::Channels,
                 item_id: channel.to_string(),
@@ -1750,6 +1743,11 @@ impl UiController {
         self.request_rerender();
     }
 
+    pub fn select_channel_by_id(&self, id: &str) {
+        write_model(&self.model).select_channel_id(Some(id));
+        self.request_rerender();
+    }
+
     pub fn select_home(&self, id: impl Into<String>, name: impl Into<String>) {
         write_model(&self.model).select_home(id, name);
         self.request_rerender();
@@ -1831,7 +1829,7 @@ impl UiController {
 
     pub fn publish_runtime_channels_projection(
         &self,
-        channels: Vec<(String, String)>,
+        channels: Vec<(String, String, String)>,
         facts: Vec<RuntimeFact>,
     ) {
         self.try_update_model(|model| {

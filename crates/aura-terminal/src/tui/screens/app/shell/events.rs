@@ -34,19 +34,19 @@ pub(super) fn handle_channel_selection_change(
     }
     {
         let mut guard = selected_channel_binding.write();
-        let previous = guard.clone();
         *guard = channels
             .get(idx)
-            .map(|channel| SelectedChannelBinding::merged_from_channel(channel, previous.as_ref()));
+            .map(SelectedChannelBinding::from_authoritative_channel);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_committed_selected_channel_id;
+    use super::{handle_channel_selection_change, resolve_committed_selected_channel_id};
     use crate::tui::state::TuiState;
     use crate::tui::types::Channel;
     use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn committed_channel_resolution_requires_authoritative_selection() {
@@ -66,6 +66,44 @@ mod tests {
         assert_eq!(
             resolve_committed_selected_channel_id(&state, &channels),
             None
+        );
+    }
+
+    #[test]
+    fn selection_change_drops_non_authoritative_preserved_context() {
+        let mut current = TuiState::new();
+        current.chat.selected_channel = 3;
+
+        let mut next = TuiState::new();
+        next.chat.selected_channel = 0;
+
+        let channels = Arc::new(parking_lot::RwLock::new(vec![Channel::new(
+            "channel-1",
+            "General",
+        )]));
+        let selected_channel_id = Arc::new(parking_lot::RwLock::new(None));
+        let selected_channel_binding = Arc::new(parking_lot::RwLock::new(Some(
+            super::SelectedChannelBinding {
+                channel_id: "channel-1".to_string(),
+                context_id: Some("ctx-123".to_string()),
+            },
+        )));
+
+        handle_channel_selection_change(
+            &current,
+            &next,
+            &channels,
+            &selected_channel_id,
+            &selected_channel_binding,
+        );
+
+        assert_eq!(*selected_channel_id.read(), Some("channel-1".to_string()));
+        assert_eq!(
+            *selected_channel_binding.read(),
+            Some(super::SelectedChannelBinding {
+                channel_id: "channel-1".to_string(),
+                context_id: None,
+            })
         );
     }
 
