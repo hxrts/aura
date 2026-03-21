@@ -827,54 +827,15 @@ cfg_if! {
                         let mut committed_bootstrap = committed_bootstrap;
                         let mut bootstrap_error = bootstrap_error;
                         future_to_promise(async move {
-                            shared_web_task_owner().spawn_local(async move {
-                                let _guard = rebootstrap_lock.lock().await;
-                                let epoch = bootstrap_epoch() + 1;
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "[web-bootstrap] handoff start epoch={epoch} detail={}",
-                                        handoff.detail()
-                                    )
-                                    .into(),
-                                );
-                                bootstrap_epoch.set(epoch);
-
-                                web_sys::console::log_1(
-                                    &format!(
-                                        "[web-bootstrap] runner start epoch={epoch} detail={}",
-                                        handoff.detail()
-                                    )
-                                    .into(),
-                                );
-                                match bootstrap_controller().await {
-                                    Ok(state) => {
-                                        web_sys::console::log_1(
-                                            &format!(
-                                                "[web-bootstrap] runner ok epoch={epoch} detail={}",
-                                                handoff.detail()
-                                            )
-                                            .into(),
-                                        );
-                                        bootstrap_error.set(None);
-                                        committed_bootstrap.set(Some(state));
-                                    }
-                                    Err(error) => {
-                                        web_sys::console::error_1(
-                                            &format!(
-                                                "[web-bootstrap] runner error epoch={epoch} detail={} error={}",
-                                                handoff.detail(),
-                                                error.user_message()
-                                            )
-                                            .into(),
-                                        );
-                                        if committed_bootstrap().is_none() {
-                                            bootstrap_error.set(Some(error.clone()));
-                                        } else {
-                                            log_web_error("error", &error);
-                                        }
-                                    }
-                                }
-                            });
+                            complete_bootstrap_handoff(
+                                rebootstrap_lock,
+                                bootstrap_epoch,
+                                committed_bootstrap,
+                                bootstrap_error,
+                                handoff,
+                            )
+                            .await
+                            .map_err(|error| JsValue::from_str(&error.user_message()))?;
                             Ok(JsValue::UNDEFINED)
                         })
                     }
@@ -1540,6 +1501,64 @@ cfg_if! {
                 }
             });
         }
+
+        async fn complete_bootstrap_handoff(
+            rebootstrap_lock: Arc<Mutex<()>>,
+            mut bootstrap_epoch: Signal<u64>,
+            mut committed_bootstrap: Signal<Option<BootstrapState>>,
+            mut bootstrap_error: Signal<Option<WebUiError>>,
+            handoff: harness_bridge::BootstrapHandoff,
+        ) -> Result<(), WebUiError> {
+            let _guard = rebootstrap_lock.lock().await;
+            let epoch = bootstrap_epoch() + 1;
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] handoff start epoch={epoch} detail={}",
+                    handoff.detail()
+                )
+                .into(),
+            );
+            bootstrap_epoch.set(epoch);
+
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] runner start epoch={epoch} detail={}",
+                    handoff.detail()
+                )
+                .into(),
+            );
+
+            match bootstrap_controller().await {
+                Ok(state) => {
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-bootstrap] runner ok epoch={epoch} detail={}",
+                            handoff.detail()
+                        )
+                        .into(),
+                    );
+                    bootstrap_error.set(None);
+                    committed_bootstrap.set(Some(state));
+                    Ok(())
+                }
+                Err(error) => {
+                    web_sys::console::error_1(
+                        &format!(
+                            "[web-bootstrap] runner error epoch={epoch} detail={} error={}",
+                            handoff.detail(),
+                            error.user_message()
+                        )
+                        .into(),
+                    );
+                    if committed_bootstrap().is_none() {
+                        bootstrap_error.set(Some(error.clone()));
+                    } else {
+                        log_web_error("error", &error);
+                    }
+                    Err(error)
+                }
+            }
+        }
     } else {
         fn main() {
             eprintln!("aura-web is a wasm32 frontend. Build with target wasm32-unknown-unknown.");
@@ -1592,5 +1611,26 @@ mod tests {
         assert!(helper
             .contains("runtime_error_toast(\"Ceremony acceptance paused; refresh to resume\")"));
         assert!(helper.contains("\"WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_bootstrap_handoff_waits_for_completion() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let helper_start = source
+            .find("async fn complete_bootstrap_handoff")
+            .unwrap_or_else(|| panic!("missing complete_bootstrap_handoff"));
+        let helper_end = source[helper_start..]
+            .find("} else {")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper.contains("bootstrap_controller().await"));
+        assert!(helper.contains("Err(error)"));
+        assert!(!helper.contains("spawn_local(async move"));
     }
 }
