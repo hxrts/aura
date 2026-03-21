@@ -18,7 +18,7 @@ use crate::ui_contract::{
     SemanticOperationCausality, SemanticOperationError, SemanticOperationKind,
     SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
 };
-use crate::workflows::signals::{emit_signal, read_signal_or_default};
+use crate::workflows::signals::{emit_signal, read_signal};
 use crate::AppCore;
 
 pub(in crate::workflows) type SemanticOperationContext =
@@ -580,12 +580,24 @@ pub(in crate::workflows) fn issue_channel_membership_ready_proof(
 
 #[allow(dead_code)]
 #[aura_macros::authoritative_source(kind = "signal")]
+pub(in crate::workflows) async fn authoritative_semantic_facts_snapshot(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<Vec<AuthoritativeSemanticFact>, AuraError> {
+    read_signal(
+        app_core,
+        &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+        AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
+    )
+    .await
+}
+
+#[aura_macros::authoritative_source(kind = "signal")]
 pub(in crate::workflows) async fn prove_channel_membership_ready(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
 ) -> Result<ChannelMembershipReadyProof, AuraError> {
     let channel_id_string = channel_id.to_string();
-    let facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    let facts = authoritative_semantic_facts_snapshot(app_core).await?;
     if facts.iter().any(|fact| {
         matches!(
             fact,
@@ -984,28 +996,15 @@ where
     F: FnOnce(&mut Vec<AuthoritativeSemanticFact>),
 {
     let _guard = AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE.lock().await;
-    let mut facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    let mut facts = authoritative_semantic_facts_snapshot(app_core).await?;
     update(&mut facts);
-    let result = emit_signal(
+    emit_signal(
         app_core,
         &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-        facts.clone(),
+        facts,
         AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
     )
-    .await;
-    match result {
-        Ok(()) => Ok(()),
-        Err(_first_err) => {
-            // Single retry — re-emit the already-mutated facts.
-            emit_signal(
-                app_core,
-                &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-                facts,
-                AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
-            )
-            .await
-        }
-    }
+    .await
 }
 
 /// Publish one authoritative semantic fact, replacing any prior fact with the same key.
@@ -1185,7 +1184,24 @@ mod tests {
     use super::*;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use crate::ui_contract::{SemanticOperationKind, SemanticOperationPhase};
+    use crate::workflows::signals::read_signal_or_default;
     use crate::{AppConfig, AppCore};
+
+    #[tokio::test]
+    async fn authoritative_semantic_facts_snapshot_requires_registered_signal() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+
+        let error = authoritative_semantic_facts_snapshot(&app_core)
+            .await
+            .expect_err("authoritative semantic facts should require a registered signal");
+        assert!(
+            error.to_string().contains("Signal not found")
+                || error.to_string().contains("semantic_facts"),
+            "unexpected error: {error}"
+        );
+    }
 
     #[tokio::test]
     async fn concurrent_authoritative_fact_updates_do_not_lose_entries() {

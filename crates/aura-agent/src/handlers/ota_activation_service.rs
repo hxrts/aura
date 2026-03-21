@@ -34,22 +34,6 @@ pub struct OtaActivationServiceApi {
 }
 
 impl OtaActivationServiceApi {
-    /// Create a new OTA activation service with default configuration.
-    pub fn new(
-        effects: Arc<AuraEffectSystem>,
-        authority_context: AuthorityContext,
-    ) -> AgentResult<Self> {
-        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
-        let ceremony_runner =
-            CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new(time_effects));
-        Self::new_with_runner_and_config(
-            effects,
-            authority_context,
-            ceremony_runner,
-            OTACeremonyConfig::default(),
-        )
-    }
-
     /// Create a new OTA activation service with a shared ceremony runner.
     pub fn new_with_runner(
         effects: Arc<AuraEffectSystem>,
@@ -65,7 +49,7 @@ impl OtaActivationServiceApi {
     }
 
     /// Create a new OTA activation service with a shared runner and explicit config.
-    pub fn new_with_runner_and_config(
+    pub(crate) fn new_with_runner_and_config(
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,

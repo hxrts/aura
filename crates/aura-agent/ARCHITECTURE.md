@@ -322,6 +322,11 @@ Rules:
 - Do not replace `MoveOwned` session/delegation transfer with an actor mailbox.
 - Do not route long-lived mutable service ownership through move-owned handles.
 - Do not author runtime-visible mutation/publication without the relevant capability gate.
+- Public service APIs must take shared runtime-owned `TaskSupervisor` /
+  `CeremonyRunner` roots from the runtime graph; they must not construct
+  private owner trees internally.
+- Service health must degrade structurally when maintenance obligations fail;
+  loop-local logging is not a substitute for degraded lifecycle state.
 
 ### Verification Hooks
 

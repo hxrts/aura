@@ -114,7 +114,7 @@ pub async fn set_context(
 /// - 1: Partial access (default)
 /// - 2: Full access
 ///
-/// OWNERSHIP: observed-display-update
+/// OWNERSHIP: semantic-workflow-publication
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -210,11 +210,42 @@ fn resolve_home_name(
         .unwrap_or_else(|| home_id.to_string())
 }
 
+fn write_homes_and_neighborhood_views(
+    core: &mut AppCore,
+    homes: &HomesState,
+    neighborhood: &NeighborhoodState,
+) {
+    core.views_mut().set_homes(homes.clone());
+    core.views_mut().set_neighborhood(neighborhood.clone());
+}
+
+async fn publish_neighborhood_projection(
+    app_core: &Arc<RwLock<AppCore>>,
+    neighborhood_state: NeighborhoodState,
+) -> Result<(), AuraError> {
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        neighborhood_state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await
+}
+
+async fn publish_homes_and_neighborhood_projection(
+    app_core: &Arc<RwLock<AppCore>>,
+    homes_state: HomesState,
+    neighborhood_state: NeighborhoodState,
+) -> Result<(), AuraError> {
+    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
+    publish_neighborhood_projection(app_core, neighborhood_state).await
+}
+
 /// Create or select the active neighborhood.
 ///
 /// This is a local-first workflow that stamps a deterministic neighborhood ID
 /// and updates `NEIGHBORHOOD_SIGNAL`.
-// OWNERSHIP: observed-display-update
+// OWNERSHIP: semantic-workflow-publication
 pub async fn create_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
@@ -250,13 +281,7 @@ pub async fn create_neighborhood(
         neighborhood
     };
 
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        neighborhood_state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
+    publish_neighborhood_projection(app_core, neighborhood_state).await?;
 
     Ok(neighborhood_id)
 }
@@ -264,7 +289,7 @@ pub async fn create_neighborhood(
 /// Add a home as a member of the active neighborhood and apply allocation budget.
 ///
 /// The workflow is idempotent per home ID for the currently active neighborhood.
-// OWNERSHIP: observed-display-update
+// OWNERSHIP: semantic-workflow-publication
 pub async fn add_home_to_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -302,26 +327,17 @@ pub async fn add_home_to_neighborhood(
             }
         }
 
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes.clone());
-        core.views_mut().set_neighborhood(neighborhood.clone());
+        write_homes_and_neighborhood_views(&mut core, &homes, &neighborhood);
         (homes, neighborhood)
     };
 
-    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        neighborhood_state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
+    publish_homes_and_neighborhood_projection(app_core, homes_state, neighborhood_state).await?;
 
     Ok(())
 }
 
 /// Force direct one_hop_link between local home and the target home in the active neighborhood.
-// OWNERSHIP: observed-display-update
+// OWNERSHIP: semantic-workflow-publication
 pub async fn link_home_one_hop_link(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -357,13 +373,7 @@ pub async fn link_home_one_hop_link(
         neighborhood
     };
 
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        neighborhood_state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
+    publish_neighborhood_projection(app_core, neighborhood_state).await?;
 
     Ok(())
 }
@@ -372,7 +382,7 @@ pub async fn link_home_one_hop_link(
 ///
 /// This is currently a local-first workflow. It creates a deterministic home ID,
 /// updates `HOMES_SIGNAL`, and makes the home visible in `NEIGHBORHOOD_SIGNAL`.
-// OWNERSHIP: observed-display-update
+// OWNERSHIP: semantic-workflow-publication
 async fn create_home_with_creator(
     app_core: &Arc<RwLock<AppCore>>,
     creator: AuthorityId,
@@ -447,20 +457,11 @@ async fn create_home_with_creator(
             });
         }
 
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes.clone());
-        core.views_mut().set_neighborhood(neighborhood.clone());
+        write_homes_and_neighborhood_views(&mut core, &homes, &neighborhood);
         (homes, neighborhood)
     };
 
-    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        neighborhood_state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
+    publish_homes_and_neighborhood_projection(app_core, homes_state, neighborhood_state).await?;
 
     let _ = description;
     Ok(home_id)
@@ -600,17 +601,11 @@ pub async fn ensure_local_home_projection(
             });
         }
 
+        write_homes_and_neighborhood_views(&mut core, &homes, &neighborhood);
         (homes, neighborhood)
     };
 
-    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        neighborhood_state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
+    publish_homes_and_neighborhood_projection(app_core, homes_state, neighborhood_state).await?;
     Ok(())
 }
 
@@ -908,6 +903,7 @@ mod tests {
     async fn test_move_position_selects_known_target_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([11u8; 32]);
 
         let home_a = ChannelId::from_bytes(hash(b"home-a"));
@@ -949,6 +945,17 @@ mod tests {
             });
             core.views_mut().set_neighborhood(neighborhood);
         }
+        emit_signal(
+            &app_core,
+            &*HOMES_SIGNAL,
+            {
+                let core = app_core.read().await;
+                core.views().get_homes()
+            },
+            HOMES_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
 
         move_position(&app_core, &home_b.to_string(), "full")
             .await

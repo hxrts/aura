@@ -3,7 +3,6 @@
 //! This module contains messaging operations that are portable across all frontends.
 //! Uses typed reactive signals for state reads/writes.
 
-use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
 use crate::ui_contract::{
     AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, ChannelFactKey, OperationId,
     OperationInstanceId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
@@ -28,12 +27,12 @@ use crate::workflows::runtime_error_classification::{
     InvitationAcceptErrorClass,
 };
 use crate::workflows::semantic_facts::{
-    issue_channel_invitation_created_proof, issue_message_committed_proof,
-    prove_channel_membership_ready, replace_authoritative_semantic_facts_of_kind,
-    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
-    SemanticWorkflowOwner,
+    authoritative_semantic_facts_snapshot, issue_channel_invitation_created_proof,
+    issue_message_committed_proof, prove_channel_membership_ready,
+    replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
+    update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
-use crate::workflows::signals::{read_signal, read_signal_or_default};
+use crate::workflows::signals::read_signal;
 use crate::{
     core::IntentError,
     runtime_bridge::{InvitationBridgeType, InvitationInfo, RuntimeBridge},
@@ -65,9 +64,9 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
-#[allow(clippy::disallowed_types)]
-type InviteStageTracker = Arc<std::sync::Mutex<&'static str>>;
+type InviteStageTracker = Arc<Mutex<&'static str>>;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 pub(crate) const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
@@ -138,12 +137,12 @@ async fn timeout_workflow_stage_with_deadline<T>(
 
 #[allow(clippy::disallowed_types)]
 fn new_invite_stage_tracker(stage: &'static str) -> InviteStageTracker {
-    Arc::new(std::sync::Mutex::new(stage))
+    Arc::new(Mutex::new(stage))
 }
 
 fn update_invite_stage(tracker: &Option<InviteStageTracker>, stage: &'static str) {
     if let Some(tracker) = tracker {
-        if let Ok(mut guard) = tracker.lock() {
+        if let Ok(mut guard) = tracker.try_lock() {
             *guard = stage;
         }
     }
@@ -332,6 +331,8 @@ enum SendMessageError {
     RecipientResolutionNotReady { channel_id: ChannelId },
     #[error("Peer channel establishment is not complete for channel {channel_id}")]
     DeliveryNotReady { channel_id: ChannelId },
+    #[error("Authoritative readiness facts are unavailable: {detail}")]
+    ReadinessFactsUnavailable { detail: String },
     #[error(
         "AMP channel bootstrap is unavailable for channel {channel_id} in context {context_id}"
     )]
@@ -371,6 +372,11 @@ impl SendMessageError {
                 SemanticFailureCode::PeerChannelNotEstablished,
             )
             .with_detail(format!("channel_id={channel_id}")),
+            Self::ReadinessFactsUnavailable { detail } => SemanticOperationError::new(
+                SemanticFailureDomain::Internal,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(format!("semantic_readiness_unavailable: {detail}")),
             Self::ChannelBootstrapUnavailable {
                 channel_id,
                 context_id,
@@ -471,7 +477,11 @@ async fn require_send_message_readiness(
     app_core: &Arc<RwLock<AppCore>>,
     channel: AuthoritativeChannelRef,
 ) -> Result<MessageSendReadiness, SendMessageError> {
-    let facts = read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    let facts = authoritative_semantic_facts_snapshot(app_core)
+        .await
+        .map_err(|error| SendMessageError::ReadinessFactsUnavailable {
+            detail: error.to_string(),
+        })?;
     let channel_id = channel.channel_id();
     let readiness = authoritative_send_readiness_for_channel(&facts, channel);
     if !readiness.recipient_resolution_ready {
@@ -3562,7 +3572,7 @@ async fn invite_user_to_channel_with_context_owned(
         TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
             let stage = stage_tracker
                 .as_ref()
-                .and_then(|tracker| tracker.lock().ok().map(|guard| *guard))
+                .and_then(|tracker| tracker.try_lock().ok().map(|guard| *guard))
                 .unwrap_or("operation");
             AuraError::from(super::error::WorkflowError::TimedOut {
                 operation: "invite_user_to_channel",
@@ -5548,5 +5558,22 @@ mod tests {
             .await
             .expect("expected contact id string to resolve");
         assert_eq!(by_id, bob_id);
+    }
+
+    #[tokio::test]
+    async fn require_send_message_readiness_fails_when_authoritative_facts_are_unavailable() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let channel = AuthoritativeChannelRef::new(
+            ChannelId::from_bytes(hash(b"semantic-readiness-channel")),
+            ContextId::new_from_entropy(hash(b"semantic-readiness-context")),
+        );
+
+        let error = require_send_message_readiness(&app_core, channel)
+            .await
+            .expect_err("readiness should fail when authoritative facts are unavailable");
+        assert!(matches!(
+            error,
+            SendMessageError::ReadinessFactsUnavailable { .. }
+        ));
     }
 }

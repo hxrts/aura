@@ -39,6 +39,7 @@ impl MaintenanceServiceState {
 struct RuntimeMaintenanceShared {
     tasks: RwLock<Option<TaskGroup>>,
     state: RwLock<MaintenanceServiceState>,
+    degraded_reasons: RwLock<Vec<String>>,
     lifecycle: Mutex<()>,
 }
 
@@ -75,6 +76,7 @@ impl RuntimeMaintenanceService {
             shared: Arc::new(RuntimeMaintenanceShared {
                 tasks: RwLock::new(None),
                 state: RwLock::new(MaintenanceServiceState::Stopped),
+                degraded_reasons: RwLock::new(Vec::new()),
                 lifecycle: Mutex::new(()),
             }),
         }
@@ -82,6 +84,22 @@ impl RuntimeMaintenanceService {
 
     async fn mark_state(&self, next: MaintenanceServiceState) {
         *self.shared.state.write().await = next;
+    }
+
+    async fn record_degraded_reason(&self, reason: impl Into<String>) {
+        let reason = reason.into();
+        let mut degraded = self.shared.degraded_reasons.write().await;
+        if !degraded.iter().any(|existing| existing == &reason) {
+            degraded.push(reason);
+        }
+    }
+
+    async fn clear_degraded_reason_contains(&self, marker: &str) {
+        self.shared
+            .degraded_reasons
+            .write()
+            .await
+            .retain(|reason| !reason.contains(marker));
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
@@ -92,6 +110,7 @@ impl RuntimeMaintenanceService {
         }
         validate_actor_transition(self.name(), current.phase(), ActorLifecyclePhase::Starting)?;
         self.mark_state(MaintenanceServiceState::Starting).await;
+        self.shared.degraded_reasons.write().await.clear();
 
         let tasks = context.tasks().group(self.name());
         self.spawn_loops(tasks.clone(), context.time_effects())
@@ -131,6 +150,7 @@ impl RuntimeMaintenanceService {
                 Err(error)
             }
             None => {
+                self.shared.degraded_reasons.write().await.clear();
                 self.mark_state(MaintenanceServiceState::Stopped).await;
                 Ok(())
             }
@@ -148,6 +168,7 @@ impl RuntimeMaintenanceService {
         ))
         .map_err(|error| ServiceError::startup_failed(self.name(), error.to_string()))?;
         let effects = self.effects.clone();
+        let acceptance_service = self.clone();
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
                 let _acceptance_task_handle = tasks.spawn_local_interval_until_named(
@@ -157,15 +178,25 @@ impl RuntimeMaintenanceService {
                     move || {
                         let effects = effects.clone();
                         let handler = invitation_handler.clone();
+                        let acceptance_service = acceptance_service.clone();
                         async move {
                             if let Err(error) = handler
                                 .process_contact_invitation_acceptances(effects.clone())
                                 .await
                             {
+                                acceptance_service
+                                    .record_degraded_reason(format!(
+                                        "invitation_acceptance: {error}"
+                                    ))
+                                    .await;
                                 tracing::debug!(
                                     error = %error,
                                     "Failed to process contact invitation acceptances"
                                 );
+                            } else {
+                                acceptance_service
+                                    .clear_degraded_reason_contains("invitation_acceptance")
+                                    .await;
                             }
                             true
                         }
@@ -179,15 +210,25 @@ impl RuntimeMaintenanceService {
                     move || {
                         let effects = effects.clone();
                         let handler = invitation_handler.clone();
+                        let acceptance_service = acceptance_service.clone();
                         async move {
                             if let Err(error) = handler
                                 .process_contact_invitation_acceptances(effects.clone())
                                 .await
                             {
+                                acceptance_service
+                                    .record_degraded_reason(format!(
+                                        "invitation_acceptance: {error}"
+                                    ))
+                                    .await;
                                 tracing::debug!(
                                     error = %error,
                                     "Failed to process contact invitation acceptances"
                                 );
+                            } else {
+                                acceptance_service
+                                    .clear_degraded_reason_contains("invitation_acceptance")
+                                    .await;
                             }
                             true
                         }
@@ -198,6 +239,7 @@ impl RuntimeMaintenanceService {
 
         if let Some(rendezvous_handler) = self.rendezvous_handler.clone() {
             let effects = self.effects.clone();
+            let handshake_service = self.clone();
             cfg_if::cfg_if! {
                 if #[cfg(target_arch = "wasm32")] {
                     let _handshake_task_handle = tasks.spawn_local_interval_until_named(
@@ -207,14 +249,24 @@ impl RuntimeMaintenanceService {
                         move || {
                             let effects = effects.clone();
                             let handler = rendezvous_handler.clone();
+                            let handshake_service = handshake_service.clone();
                             async move {
                                 if let Err(error) =
                                     handler.process_handshake_envelopes(effects.clone()).await
                                 {
+                                    handshake_service
+                                        .record_degraded_reason(format!(
+                                            "rendezvous_handshakes: {error}"
+                                        ))
+                                        .await;
                                     tracing::debug!(
                                         error = %error,
                                         "Failed to process rendezvous handshake envelopes"
                                     );
+                                } else {
+                                    handshake_service
+                                        .clear_degraded_reason_contains("rendezvous_handshakes")
+                                        .await;
                                 }
                                 true
                             }
@@ -228,14 +280,24 @@ impl RuntimeMaintenanceService {
                         move || {
                             let effects = effects.clone();
                             let handler = rendezvous_handler.clone();
+                            let handshake_service = handshake_service.clone();
                             async move {
                                 if let Err(error) =
                                     handler.process_handshake_envelopes(effects.clone()).await
                                 {
+                                    handshake_service
+                                        .record_degraded_reason(format!(
+                                            "rendezvous_handshakes: {error}"
+                                        ))
+                                        .await;
                                     tracing::debug!(
                                         error = %error,
                                         "Failed to process rendezvous handshake envelopes"
                                     );
+                                } else {
+                                    handshake_service
+                                        .clear_degraded_reason_contains("rendezvous_handshakes")
+                                        .await;
                                 }
                                 true
                             }
@@ -249,6 +311,7 @@ impl RuntimeMaintenanceService {
             (self.sync_manager.clone(), self.rendezvous_manager.clone())
         {
             let interval = sync_peer_reconcile_interval(&sync_manager);
+            let reconcile_service = self.clone();
             let _reconcile_task_handle = tasks.spawn_interval_until_named(
                 "sync_peer_reconcile",
                 time_effects.clone(),
@@ -256,6 +319,7 @@ impl RuntimeMaintenanceService {
                 move || {
                     let sync_manager = sync_manager.clone();
                     let rendezvous_manager = rendezvous_manager.clone();
+                    let reconcile_service = reconcile_service.clone();
                     async move {
                         let desired_peers: HashSet<DeviceId> = rendezvous_manager
                             .list_reachable_peer_devices()
@@ -274,6 +338,9 @@ impl RuntimeMaintenanceService {
                             sync_manager.add_peer(peer).await;
                         }
 
+                        reconcile_service
+                            .clear_degraded_reason_contains("sync_peer_reconcile")
+                            .await;
                         true
                     }
                 },
@@ -284,17 +351,23 @@ impl RuntimeMaintenanceService {
             (self.rendezvous_manager.clone(), self.lan_transport.clone())
         {
             if let Err(error) = self.publish_initial_lan_descriptor().await {
+                self.record_degraded_reason(format!("initial_lan_descriptor: {error}"))
+                    .await;
                 tracing::warn!(
                     event = "runtime.service.lifecycle.post_start_failed",
                     service = self.name(),
                     error = %error,
                     "Maintenance service failed to publish the initial LAN descriptor"
                 );
+            } else {
+                self.clear_degraded_reason_contains("initial_lan_descriptor")
+                    .await;
             }
 
             let effects = self.effects.clone();
             let authority_id = self.authority_id;
             let device_id = self.device_id;
+            let lan_refresh_service = self.clone();
             cfg_if::cfg_if! {
                 if #[cfg(target_arch = "wasm32")] {
                     let _descriptor_refresh_task_handle = tasks.spawn_local_interval_until_named(
@@ -305,10 +378,18 @@ impl RuntimeMaintenanceService {
                             let rendezvous_manager = rendezvous_manager.clone();
                             let lan_transport = lan_transport.clone();
                             let effects = effects.clone();
+                            let lan_refresh_service = lan_refresh_service.clone();
                             async move {
                                 let now_ms = match effects.time_effects().physical_time().await {
                                     Ok(time) => time.ts_ms,
-                                    Err(_) => return true,
+                                    Err(error) => {
+                                        lan_refresh_service
+                                            .record_degraded_reason(format!(
+                                                "lan_descriptor_refresh_clock: {error}"
+                                            ))
+                                            .await;
+                                        return true;
+                                    }
                                 };
                                 let context_id =
                                     ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
@@ -322,10 +403,24 @@ impl RuntimeMaintenanceService {
                                     )
                                     .await
                                     {
+                                        lan_refresh_service.record_degraded_reason(format!(
+                                            "lan_descriptor_refresh: {error}"
+                                        ))
+                                        .await;
                                         tracing::debug!(
                                             error = %error,
                                             "Failed to refresh LAN descriptor"
                                         );
+                                    } else {
+                                        lan_refresh_service
+                                            .clear_degraded_reason_contains(
+                                                "lan_descriptor_refresh_clock",
+                                            )
+                                            .await;
+                                        lan_refresh_service.clear_degraded_reason_contains(
+                                            "lan_descriptor_refresh",
+                                        )
+                                        .await;
                                     }
                                 }
                                 true
@@ -341,10 +436,18 @@ impl RuntimeMaintenanceService {
                             let rendezvous_manager = rendezvous_manager.clone();
                             let lan_transport = lan_transport.clone();
                             let effects = effects.clone();
+                            let lan_refresh_service = lan_refresh_service.clone();
                             async move {
                                 let now_ms = match effects.time_effects().physical_time().await {
                                     Ok(time) => time.ts_ms,
-                                    Err(_) => return true,
+                                    Err(error) => {
+                                        lan_refresh_service
+                                            .record_degraded_reason(format!(
+                                                "lan_descriptor_refresh_clock: {error}"
+                                            ))
+                                            .await;
+                                        return true;
+                                    }
                                 };
                                 let context_id =
                                     ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
@@ -358,10 +461,24 @@ impl RuntimeMaintenanceService {
                                     )
                                     .await
                                     {
+                                        lan_refresh_service.record_degraded_reason(format!(
+                                            "lan_descriptor_refresh: {error}"
+                                        ))
+                                        .await;
                                         tracing::debug!(
                                             error = %error,
                                             "Failed to refresh LAN descriptor"
                                         );
+                                    } else {
+                                        lan_refresh_service
+                                            .clear_degraded_reason_contains(
+                                                "lan_descriptor_refresh_clock",
+                                            )
+                                            .await;
+                                        lan_refresh_service.clear_degraded_reason_contains(
+                                            "lan_descriptor_refresh",
+                                        )
+                                        .await;
                                     }
                                 }
                                 true
@@ -423,7 +540,14 @@ impl RuntimeService for RuntimeMaintenanceService {
             },
             MaintenanceServiceState::Running => {
                 if self.shared.tasks.read().await.is_some() {
-                    ServiceHealth::Healthy
+                    let degraded = self.shared.degraded_reasons.read().await;
+                    if degraded.is_empty() {
+                        ServiceHealth::Healthy
+                    } else {
+                        ServiceHealth::Degraded {
+                            reason: degraded.join("; "),
+                        }
+                    }
                 } else {
                     ServiceHealth::Unhealthy {
                         reason: "maintenance task group missing".to_string(),
@@ -431,5 +555,50 @@ impl RuntimeService for RuntimeMaintenanceService {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::TaskSupervisor;
+    use aura_core::effects::time::PhysicalTimeEffects;
+
+    #[tokio::test]
+    async fn maintenance_service_reports_degraded_when_failures_are_recorded() {
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let config = crate::core::AgentConfig {
+            device_id: DeviceId::new_from_entropy([2u8; 32]),
+            ..Default::default()
+        };
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority_id).unwrap(),
+        );
+        let service = RuntimeMaintenanceService::new(
+            effects.clone(),
+            authority_id,
+            config.device_id,
+            None,
+            None,
+            None,
+            None,
+        );
+        *service.shared.state.write().await = MaintenanceServiceState::Running;
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(effects.time_effects().clone());
+        let tasks = TaskSupervisor::new();
+        *service.shared.tasks.write().await = Some(tasks.group("maintenance_test"));
+        service
+            .record_degraded_reason("initial_lan_descriptor: publish failed")
+            .await;
+
+        let health = service.health().await;
+        assert_eq!(
+            health,
+            ServiceHealth::Degraded {
+                reason: "initial_lan_descriptor: publish failed".to_string(),
+            }
+        );
+        let _ = time_effects;
     }
 }
