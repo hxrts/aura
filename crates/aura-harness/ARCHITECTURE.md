@@ -49,7 +49,9 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Explicit lane capability contract: shared-semantic, raw-UI, and diagnostic-observation access are declared separately at preflight time; SSH is diagnostic-only until it implements the shared semantic contract.
 - The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.
 - Shared semantic execution must not keep a duplicate lifecycle graph, phase cache, or heuristic identifier repair path for accounts, contacts, channels, or messaging state.
+- Executor sequencing carries typed submission evidence into contract-declared `before_next_intent` waits; it must not rebuild a pending convergence graph or discharge post-operation progress locally.
 - Parity-critical create/join/accept shared-channel flows must receive canonical operation handles and channel bindings from the authoritative submission/receipt path; post-hoc polling repair is forbidden.
+- Local PTY shared-semantic submissions must treat harness command receipts as the only success witness at issue time. Visible homes, modal closure, message appearance, selected-list bindings, and `Submitting` are not semantic completion signals.
 - Raw renderer capture is diagnostic-only and is exposed through explicitly named `diagnostic_*` observation surfaces; typed `UiSnapshot` / `UiSnapshotEvent` remain the only authoritative shared-semantic observation plane, and diagnostic query APIs keep the `diagnostic_*` naming through the tool boundary.
 - Time-bounded loops in shared semantic code are allowed only for infrastructure readiness, transport, or bounded observation waits whose owner is explicit; ownership transfer itself must not depend on settle windows or heuristic polling.
 - Do not add backwards-compatibility, migration, fallback, or legacy code paths for removed shared-semantic harness behavior. Delete obsolete paths instead.
@@ -163,6 +165,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 
 - Treat `SharedSemanticBackend` plus `UiSnapshot` / `UiSnapshotEvent` as the primary shared-semantic contract. If you need raw screen or DOM data, the API and variable names must say `diagnostic`.
 - When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
+- If a convenience helper still needs exported data after submission, the follow-on wait must bind to an authoritative runtime event or projection contract, not a modal/screen side effect.
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 
 ## Testing

@@ -13,10 +13,11 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use aura_app::scenario_contract::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
+    SemanticSubmissionHandle, SubmissionState,
 };
 use aura_app::ui::contract::{
-    ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, OperationState,
-    ScreenId, UiReadiness, UiSnapshot,
+    ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, ScreenId,
+    UiReadiness, UiSnapshot,
 };
 use nix::errno::Errno;
 use nix::sys::signal;
@@ -40,18 +41,12 @@ enum BackendState {
     Running,
 }
 
-const PLACEHOLDER_HOME_ID: &str =
-    "channel:0000000000000000000000000000000000000000000000000000000000000000";
-
-fn selected_channel_binding(snapshot: &UiSnapshot) -> Option<ChannelBinding> {
+fn selected_channel_ref(snapshot: &UiSnapshot) -> Option<String> {
     snapshot
         .selections
         .iter()
         .find(|selection| selection.list == ListId::Channels)
-        .map(|selection| ChannelBinding {
-            channel_id: selection.item_id.clone(),
-            context_id: None,
-        })
+        .map(|selection| selection.item_id.clone())
 }
 
 fn into_ui_operation_handle(
@@ -147,15 +142,50 @@ fn require_channel_binding_submission(
     }
 }
 
-fn observe_exact_operation_state(
-    snapshot: &UiSnapshot,
-    handle: &UiOperationHandle,
-) -> Option<OperationState> {
-    snapshot
-        .operations
-        .iter()
-        .find(|operation| operation.id == *handle.id() && operation.instance_id == *handle.instance_id())
-        .map(|operation| operation.state)
+fn require_contact_invitation_submission(
+    receipt: HarnessUiCommandReceipt,
+    operation_name: &str,
+) -> Result<(UiOperationHandle, Option<ContactInvitationCode>)> {
+    match receipt {
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation,
+            value: Some(SemanticCommandValue::ContactInvitationCode { code }),
+        } => Ok((
+            into_ui_operation_handle(operation),
+            Some(ContactInvitationCode { code }),
+        )),
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation,
+            value: None,
+        }
+        | HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation,
+            value: Some(SemanticCommandValue::None),
+        } => Ok((into_ui_operation_handle(operation), None)),
+        HarnessUiCommandReceipt::AcceptedWithOperation {
+            operation: _,
+            value: Some(SemanticCommandValue::ChannelBinding { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned an unexpected channel binding payload"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::ContactInvitationCode { .. }),
+        }
+        | HarnessUiCommandReceipt::Accepted { value: None }
+        | HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::None),
+        } => anyhow::bail!(
+            "{operation_name} accepted without exact operation handle"
+        ),
+        HarnessUiCommandReceipt::Accepted {
+            value: Some(SemanticCommandValue::ChannelBinding { .. }),
+        } => anyhow::bail!(
+            "{operation_name} returned an unexpected channel binding payload without a canonical operation handle"
+        ),
+        HarnessUiCommandReceipt::Rejected { reason } => {
+            anyhow::bail!("{operation_name} rejected: {reason}")
+        }
+    }
 }
 
 struct RunningSession {
@@ -193,42 +223,6 @@ pub struct LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
-    fn await_channel_binding_for_operation(
-        &self,
-        handle: &UiOperationHandle,
-        operation_name: &str,
-        timeout: Duration,
-    ) -> Result<SubmittedAction<ChannelBinding>> {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            match observe_exact_operation_state(&snapshot, handle) {
-                Some(OperationState::Succeeded) => {
-                    let binding = selected_channel_binding(&snapshot).ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "{operation_name} succeeded without an authoritative selected channel binding"
-                        )
-                    })?;
-                    return Ok(SubmittedAction::with_ui_operation(binding, handle.clone()));
-                }
-                Some(OperationState::Failed) => {
-                    anyhow::bail!("{operation_name} failed before publishing a channel binding");
-                }
-                _ => {}
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "{operation_name} did not publish a successful authoritative channel binding within {:?}",
-                    timeout
-                );
-            }
-            if let Some(session) = self.session.as_ref() {
-                self.ensure_session_alive(session, operation_name)?;
-            }
-            blocking_sleep(Duration::from_millis(100));
-        }
-    }
-
     fn reader_thread_alive(session: &RunningSession) -> bool {
         session
             .reader_thread
@@ -1474,18 +1468,32 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 Ok(SemanticCommandResponse::accepted_without_value())
             }
             IntentAction::CreateAccount { account_name } => {
-                let submitted = self.submit_create_account(&account_name)?;
+                let handle = require_ui_operation_handle(
+                    self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {
+                        account_name: account_name.to_string(),
+                    })?,
+                    "create_account",
+                )?;
                 Ok(SemanticCommandResponse {
-                    submission: submitted.submission,
-                    handle: submitted.handle,
+                    submission: SubmissionState::Accepted,
+                    handle: SemanticSubmissionHandle {
+                        ui_operation: Some(handle),
+                    },
                     value: SemanticCommandValue::None,
                 })
             }
             IntentAction::CreateHome { home_name } => {
-                let submitted = self.submit_create_home(&home_name)?;
+                let handle = require_ui_operation_handle(
+                    self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {
+                        home_name: home_name.to_string(),
+                    })?,
+                    "create_home",
+                )?;
                 Ok(SemanticCommandResponse {
-                    submission: submitted.submission,
-                    handle: submitted.handle,
+                    submission: SubmissionState::Accepted,
+                    handle: SemanticSubmissionHandle {
+                        ui_operation: Some(handle),
+                    },
                     value: SemanticCommandValue::None,
                 })
             }
@@ -1522,12 +1530,22 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 receiver_authority_id,
                 ..
             } => {
-                let submitted = self.submit_create_contact_invitation(&receiver_authority_id)?;
+                let (handle, code) = require_contact_invitation_submission(
+                    self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {
+                        receiver_authority_id: receiver_authority_id.to_string(),
+                    })?,
+                    "create_contact_invitation",
+                )?;
                 Ok(SemanticCommandResponse {
-                    submission: submitted.submission,
-                    handle: submitted.handle,
-                    value: SemanticCommandValue::ContactInvitationCode {
-                        code: submitted.value.code,
+                    submission: SubmissionState::Accepted,
+                    handle: SemanticSubmissionHandle {
+                        ui_operation: Some(handle),
+                    },
+                    value: match code {
+                        Some(code) => SemanticCommandValue::ContactInvitationCode {
+                            code: code.code,
+                        },
+                        None => SemanticCommandValue::None,
                     },
                 })
             }
@@ -1582,10 +1600,22 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 })
             }
             IntentAction::SendChatMessage { message } => {
-                let submitted = self.submit_send_chat_message(&message)?;
+                if selected_channel_ref(&self.ui_snapshot()?).is_none() {
+                    anyhow::bail!(
+                        "submit_send_chat_message requires an authoritative selected channel reference"
+                    );
+                }
+                let handle = require_ui_operation_handle(
+                    self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
+                        content: message.to_string(),
+                    })?,
+                    "send_chat_message",
+                )?;
                 Ok(SemanticCommandResponse {
-                    submission: submitted.submission,
-                    handle: submitted.handle,
+                    submission: SubmissionState::Accepted,
+                    handle: SemanticSubmissionHandle {
+                        ui_operation: Some(handle),
+                    },
                     value: SemanticCommandValue::None,
                 })
             }
@@ -1594,94 +1624,22 @@ impl SharedSemanticBackend for LocalPtyBackend {
 
     fn submit_create_account(&mut self, account_name: &str) -> Result<SubmittedAction<()>> {
         let handle = require_ui_operation_handle(
-            self.send_harness_command(&HarnessUiCommand::CreateAccount {
+            self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {
                 account_name: account_name.to_string(),
             })?,
             "create_account",
         )?;
-        let issue_deadline = Instant::now() + Duration::from_secs(30);
-        let mut restarted = false;
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let visible_home_id = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Homes)
-                .and_then(|list| {
-                    list.items
-                        .iter()
-                        .find(|item| item.id != PLACEHOLDER_HOME_ID)
-                        .map(|item| item.id.clone())
-                });
-            let operation_state =
-                snapshot.operation_state_for_instance(handle.id(), handle.instance_id());
-            if operation_state == Some(aura_app::ui::contract::OperationState::Failed) {
-                let latest_toast = snapshot
-                    .toasts
-                    .last()
-                    .map(|toast| toast.message.clone())
-                    .unwrap_or_default();
-                let log_tail = self.tail_log(20).unwrap_or_default().join("\n");
-                anyhow::bail!(
-                    "submit_create_account: account creation failed; screen={:?}; latest_toast={:?}; log_tail={}",
-                    snapshot.screen,
-                    latest_toast,
-                    log_tail
-                );
-            }
-            if snapshot.screen != ScreenId::Onboarding && snapshot.readiness == UiReadiness::Ready {
-                if let Some(home_id) = visible_home_id {
-                    self.send_harness_command(&HarnessUiCommand::SelectHome { home_id })?;
-                }
-                return Ok(SubmittedAction::with_ui_operation((), handle));
-            }
-            if !restarted
-                && operation_state == Some(aura_app::ui::contract::OperationState::Succeeded)
-            {
-                self.stop()?;
-                self.start()?;
-                restarted = true;
-                continue;
-            }
-            if Instant::now() >= issue_deadline {
-                anyhow::bail!(
-                    "submit_create_account: account creation did not materialize a real home after restart handoff"
-                );
-            }
-            blocking_sleep(Duration::from_millis(100));
-        }
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
         let handle = require_ui_operation_handle(
-            self.send_harness_command(&HarnessUiCommand::CreateHome {
+            self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {
                 home_name: home_name.to_string(),
             })?,
             "create_home",
         )?;
-        let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            let created_home = snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Homes)
-                .and_then(|list| {
-                    list.items
-                        .iter()
-                        .find(|item| item.id != PLACEHOLDER_HOME_ID)
-                        .map(|item| item.id.clone())
-                });
-            if let Some(home_id) = created_home {
-                self.send_harness_command(&HarnessUiCommand::SelectHome { home_id })?;
-                return Ok(SubmittedAction::with_ui_operation((), handle));
-            }
-            if Instant::now() >= deadline {
-                break;
-            }
-            blocking_sleep(Duration::from_millis(80));
-        }
-        anyhow::bail!("submit_create_home did not produce a non-placeholder home")
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
     fn submit_create_channel(
@@ -1694,29 +1652,22 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 channel_name: channel_name.to_string(),
             })
             .with_context(|| operation_name.clone())?;
-        match require_channel_binding_submission(receipt.clone(), "submit_create_channel") {
-            Ok(submitted) => Ok(submitted),
-            Err(_) => {
-                let handle = require_ui_operation_handle(receipt, "submit_create_channel")?;
-                self.await_channel_binding_for_operation(
-                    &handle,
-                    "submit_create_channel",
-                    Duration::from_secs(15),
-                )
-            }
-        }
+        require_channel_binding_submission(receipt, "submit_create_channel")
     }
 
     fn submit_create_contact_invitation(
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let handle = require_ui_operation_handle(
-            self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {
+        let (handle, exported_code) = require_contact_invitation_submission(
+            self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {
                 receiver_authority_id: receiver_authority_id.to_string(),
             })?,
             "create_contact_invitation",
         )?;
+        if let Some(code) = exported_code {
+            return Ok(SubmittedAction::with_ui_operation(code, handle));
+        }
         let code_deadline = Instant::now() + Duration::from_secs(5);
         let code = loop {
             let snapshot = self.ui_snapshot()?;
@@ -1730,22 +1681,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             blocking_sleep(Duration::from_millis(50));
         };
-
-        if self.ui_snapshot()?.open_modal == Some(ModalId::InvitationCode) {
-            self.send_harness_command(&HarnessUiCommand::DismissTransient)?;
-        }
-        let close_deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if self.ui_snapshot()?.open_modal != Some(ModalId::InvitationCode) {
-                break;
-            }
-            if Instant::now() >= close_deadline {
-                anyhow::bail!(
-                    "submit_create_contact_invitation did not close InvitationCode modal"
-                );
-            }
-            blocking_sleep(Duration::from_millis(50));
-        }
         Ok(SubmittedAction::with_ui_operation(
             ContactInvitationCode { code },
             handle,
@@ -1799,61 +1734,24 @@ impl SharedSemanticBackend for LocalPtyBackend {
         let receipt = self.send_harness_command_receipt(&HarnessUiCommand::JoinChannel {
             channel_name: channel_name.to_string(),
         })?;
-        match require_channel_binding_submission(receipt.clone(), "join_channel") {
-            Ok(submitted) => Ok(submitted),
-            Err(_) => {
-                let handle = require_ui_operation_handle(receipt, "join_channel")?;
-                self.await_channel_binding_for_operation(
-                    &handle,
-                    "join_channel",
-                    Duration::from_secs(15),
-                )
-            }
-        }
+        require_channel_binding_submission(receipt, "join_channel")
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        fn message_visible(snapshot: &UiSnapshot, expected: &str) -> bool {
-            snapshot
-                .messages
-                .iter()
-                .any(|message| message.content.contains(expected))
-        }
-
         let snapshot = self.ui_snapshot()?;
-        if selected_channel_binding(&snapshot).is_none() {
+        if selected_channel_ref(&snapshot).is_none() {
             anyhow::bail!(
-                "submit_send_chat_message requires an authoritative selected channel binding"
+                "submit_send_chat_message requires an authoritative selected channel reference"
             );
         }
 
         let handle = require_ui_operation_handle(
-            self.send_harness_command(&HarnessUiCommand::SendChatMessage {
+            self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
                 content: message.to_string(),
             })?,
             "send_chat_message",
         )?;
-        let first_deadline = Instant::now() + Duration::from_millis(1500);
-        loop {
-            let snapshot = self.ui_snapshot()?;
-            match snapshot.operation_state_for_instance(handle.id(), handle.instance_id()) {
-                Some(OperationState::Failed) => {
-                    anyhow::bail!("submit_send_chat_message: runtime send failed");
-                }
-                Some(OperationState::Succeeded) if message_visible(&snapshot, message) => {
-                    return Ok(SubmittedAction::with_ui_operation((), handle));
-                }
-                Some(OperationState::Submitting) | Some(OperationState::Succeeded) => {
-                    return Ok(SubmittedAction::with_ui_operation((), handle));
-                }
-                _ => {}
-            }
-            if Instant::now() >= first_deadline {
-                break;
-            }
-            blocking_sleep(Duration::from_millis(80));
-        }
-        anyhow::bail!("submit_send_chat_message: send_message never reached a live submitted state")
+        Ok(SubmittedAction::with_ui_operation((), handle))
     }
 }
 
@@ -1974,12 +1872,17 @@ mod tests {
             .unwrap_or_else(|| panic!("missing submit_accept_contact_invitation"));
         let invitation_branch = &source[invitation_start..invitation_end];
         assert!(source.contains("fn submit_create_account"));
-        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::CreateAccount {"));
+        assert!(source.contains(
+            "self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {"
+        ));
         assert!(source.contains("fn submit_create_home"));
-        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::CreateHome {"));
+        assert!(source.contains(
+            "self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {"
+        ));
         assert!(source.contains("fn submit_create_contact_invitation"));
-        assert!(source
-            .contains("self.send_harness_command(&HarnessUiCommand::CreateContactInvitation {"));
+        assert!(source.contains(
+            "self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {"
+        ));
         assert!(
             source.contains("self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {")
         );
@@ -1995,8 +1898,7 @@ mod tests {
             source.contains("self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {")
         );
         assert!(source.contains("self.send_harness_command(&HarnessUiCommand::SelectChannel {"));
-        assert!(source.contains("self.send_harness_command(&HarnessUiCommand::SelectHome {"));
-        assert!(invitation_branch
+        assert!(!invitation_branch
             .contains("self.send_harness_command(&HarnessUiCommand::DismissTransient)?;"));
         assert!(!invitation_branch
             .contains("self.activate_control(ControlId::ContactsCreateInvitationButton)?;"));
@@ -2006,6 +1908,7 @@ mod tests {
         assert!(!invitation_branch.contains(
             "wait_for_modal_visible(self, ModalId::CreateInvitation, Duration::from_secs(5))?;"
         ));
+        assert!(!invitation_branch.contains("ModalId::InvitationCode"));
     }
 
     #[test]
@@ -2055,6 +1958,18 @@ mod tests {
         assert!(
             !semantic_submission_block.contains("wait_for_operation_submission("),
             "shared semantic local PTY submissions must not repair missing handles by polling for likely operation instances"
+        );
+        assert!(
+            !semantic_submission_block.contains("SelectHome"),
+            "shared semantic local PTY submissions must not infer create success from visible homes"
+        );
+        assert!(
+            !semantic_submission_block.contains("OperationState::Submitting"),
+            "shared semantic local PTY submissions must not treat Submitting as semantic success"
+        );
+        assert!(
+            !semantic_submission_block.contains("await_channel_binding_for_operation"),
+            "shared semantic local PTY submissions must not repair missing channel bindings after issue"
         );
         assert!(
             source.contains("fn require_ui_operation_handle("),

@@ -110,7 +110,6 @@ struct ScenarioContext {
     current_channel_binding: BTreeMap<String, ChannelBinding>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
-    pending_convergence: BTreeMap<String, Vec<BarrierDeclaration>>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +117,13 @@ struct SharedTraceMetadata {
     instance_id: String,
     request: SharedActionRequest,
     handle: SharedActionHandle,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SubmissionEvidence {
+    handle: Option<UiOperationHandle>,
+    channel_binding: Option<ChannelBinding>,
+    runtime_event_detail: Option<String>,
 }
 
 #[cfg(test)]
@@ -135,23 +141,6 @@ enum WaitContractRef<'a> {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SharedSemanticBinding {
-    CreateAccount,
-    CreateHome,
-    CreateChannel,
-    StartDeviceEnrollment,
-    ImportDeviceEnrollmentCode,
-    RemoveSelectedDevice,
-    SwitchAuthority,
-    CreateContactInvitation,
-    AcceptContactInvitation,
-    JoinChannel,
-    InviteActorToChannel,
-    AcceptPendingChannelInvitation,
-    SendChatMessage,
-}
-
 fn record_current_channel_binding(
     context: &mut ScenarioContext,
     instance_id: &str,
@@ -160,30 +149,6 @@ fn record_current_channel_binding(
     context
         .current_channel_binding
         .insert(instance_id.to_string(), binding);
-}
-
-fn ensure_post_operation_convergence_satisfied_for_binding(
-    step_id: &str,
-    binding: SharedSemanticBinding,
-    context: &ScenarioContext,
-    instance_id: &str,
-) -> Result<()> {
-    let Some(pending) = context.pending_convergence.get(instance_id) else {
-        return Ok(());
-    };
-    bail!("step {step_id} convergence-contract violation for {binding:?}: pending {pending:?}");
-}
-
-fn ensure_post_operation_convergence_satisfied(
-    step: &SemanticStep,
-    context: &ScenarioContext,
-    instance_id: &str,
-) -> Result<()> {
-    let SemanticAction::Intent(intent) = &step.action else {
-        return Ok(());
-    };
-    let binding = semantic_binding_for_intent(intent);
-    ensure_post_operation_convergence_satisfied_for_binding(&step.id, binding, context, instance_id)
 }
 
 impl Default for ExecutionBudgets {
@@ -691,7 +656,6 @@ fn execute_compatibility_step(
                         step.timeout_ms.unwrap_or(step_budget_ms),
                     ),
                 )?;
-                record_authoritative_convergence_progress(step, context, &instance_id);
                 return Ok(());
             }
             let selector = match step.selector.as_deref() {
@@ -1094,10 +1058,6 @@ fn execute_semantic_step(
                     )
                 }
             };
-            if result.is_ok() {
-                let progress_step = semantic_progress_step(step, expectation)?;
-                record_authoritative_convergence_progress(&progress_step, context, &instance_id);
-            }
             result
         }
     }
@@ -1151,36 +1111,6 @@ fn execute_semantic_environment_action(
     }
 }
 
-fn semantic_binding_for_intent(intent: &IntentAction) -> SharedSemanticBinding {
-    match intent {
-        IntentAction::OpenScreen(_) => unreachable!("OpenScreen handled directly"),
-        IntentAction::CreateAccount { .. } => SharedSemanticBinding::CreateAccount,
-        IntentAction::CreateHome { .. } => SharedSemanticBinding::CreateHome,
-        IntentAction::CreateChannel { .. } => SharedSemanticBinding::CreateChannel,
-        IntentAction::StartDeviceEnrollment { .. } => SharedSemanticBinding::StartDeviceEnrollment,
-        IntentAction::ImportDeviceEnrollmentCode { .. } => {
-            SharedSemanticBinding::ImportDeviceEnrollmentCode
-        }
-        IntentAction::OpenSettingsSection(_) => {
-            unreachable!("OpenSettingsSection handled directly")
-        }
-        IntentAction::RemoveSelectedDevice { .. } => SharedSemanticBinding::RemoveSelectedDevice,
-        IntentAction::SwitchAuthority { .. } => SharedSemanticBinding::SwitchAuthority,
-        IntentAction::CreateContactInvitation { .. } => {
-            SharedSemanticBinding::CreateContactInvitation
-        }
-        IntentAction::AcceptContactInvitation { .. } => {
-            SharedSemanticBinding::AcceptContactInvitation
-        }
-        IntentAction::AcceptPendingChannelInvitation => {
-            SharedSemanticBinding::AcceptPendingChannelInvitation
-        }
-        IntentAction::JoinChannel { .. } => SharedSemanticBinding::JoinChannel,
-        IntentAction::InviteActorToChannel { .. } => SharedSemanticBinding::InviteActorToChannel,
-        IntentAction::SendChatMessage { .. } => SharedSemanticBinding::SendChatMessage,
-    }
-}
-
 fn execute_semantic_intent(
     step: &SemanticStep,
     intent: &IntentAction,
@@ -1189,17 +1119,17 @@ fn execute_semantic_intent(
     context: &mut ScenarioContext,
 ) -> Result<()> {
     let intent = resolve_intent_templates(intent, context)?;
-    let binding = semantic_binding_for_intent(&intent);
     let instance_id = resolve_required_semantic_instance(step)?;
     let metadata_step = semantic_metadata_step(step);
     enforce_action_preconditions(step, tool_api, context, &intent, step_budget_ms)?;
-    ensure_post_operation_convergence_satisfied(step, context, &instance_id)?;
+    let contract = intent.contract();
+    let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
 
     match &intent {
         IntentAction::CreateAccount { .. } | IntentAction::CreateHome { .. } => {
-            let operation = match binding {
-                SharedSemanticBinding::CreateAccount => "create_account",
-                SharedSemanticBinding::CreateHome => "create_home",
+            let operation = match &intent {
+                IntentAction::CreateAccount { .. } => "create_account",
+                IntentAction::CreateHome { .. } => "create_home",
                 _ => unreachable!(),
             };
             let response = submit_shared_intent(
@@ -1226,9 +1156,22 @@ fn execute_semantic_intent(
             )?;
             let (channel_binding, handle) =
                 require_channel_binding_submission(&metadata_step, "create_channel", response)?;
-            record_submission_handle(context, &instance_id, handle);
+            record_submission_handle(context, &instance_id, handle.clone());
             let _ = channel_name;
-            record_current_channel_binding(context, &instance_id, channel_binding);
+            record_current_channel_binding(context, &instance_id, channel_binding.clone());
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle,
+                    channel_binding: Some(channel_binding),
+                    runtime_event_detail: None,
+                },
+            )?;
             Ok(())
         }
         IntentAction::StartDeviceEnrollment {
@@ -1346,15 +1289,29 @@ fn execute_semantic_intent(
                 intent.clone(),
             )?;
             let (code, handle) = require_contact_invitation_submission(&metadata_step, response)?;
-            record_submission_handle(context, &instance_id, handle);
+            record_submission_handle(context, &instance_id, handle.clone());
+            let snapshot = wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle,
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
+            )?;
+            let code = code.unwrap_or_else(|| {
+                extract_invitation_code(&snapshot).unwrap_or_default()
+            });
             if let Some(code_name) = code_name.as_deref() {
                 context.vars.insert(code_name.to_string(), code);
             }
             Ok(())
         }
         IntentAction::AcceptContactInvitation { .. } => {
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1367,45 +1324,20 @@ fn execute_semantic_intent(
                 "accept_contact_invitation",
                 response,
             )?;
-            record_submission_handle(context, &instance_id, operation_handle);
-            let mut contact_link_step = semantic_wait_step(&metadata_step);
-            contact_link_step.runtime_event_kind = Some(RuntimeEventKind::ContactLinkReady);
-            let remaining_ms = deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .max(1) as u64;
-            if convergence_stage(
+            record_submission_handle(context, &instance_id, operation_handle.clone());
+            wait_for_contract_barriers(
                 &metadata_step,
-                "contact_link",
-                wait_for_semantic_state(
-                    &contact_link_step,
-                    tool_api,
-                    context,
-                    &instance_id,
-                    remaining_ms,
-                ),
-            )
-            .is_err()
-            {
-                let remaining_ms = deadline
-                    .saturating_duration_since(Instant::now())
-                    .as_millis()
-                    .max(1) as u64;
-                let mut contacts_step = semantic_wait_step(&metadata_step);
-                contacts_step.list_id = Some(ListId::Contacts);
-                contacts_step.count = Some(1);
-                convergence_stage(
-                    &metadata_step,
-                    "contacts_list",
-                    wait_for_semantic_state(
-                        &contacts_step,
-                        tool_api,
-                        context,
-                        &instance_id,
-                        remaining_ms,
-                    ),
-                )?;
-            }
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle: operation_handle,
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
+            )?;
             Ok(())
         }
         IntentAction::JoinChannel { channel_name } => {
@@ -1421,13 +1353,25 @@ fn execute_semantic_intent(
                 "join_channel",
                 response,
             )?;
-            record_submission_handle(context, &instance_id, Some(handle));
+            record_submission_handle(context, &instance_id, Some(handle.clone()));
             let _ = channel_name;
-            record_current_channel_binding(context, &instance_id, channel_binding);
+            record_current_channel_binding(context, &instance_id, channel_binding.clone());
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle: Some(handle),
+                    channel_binding: Some(channel_binding),
+                    runtime_event_detail: None,
+                },
+            )?;
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let explicit_channel_id = context
                 .current_channel_binding
                 .get(&instance_id)
@@ -1455,24 +1399,22 @@ fn execute_semantic_intent(
                 response,
             )?;
             record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
-            convergence_stage(
+            wait_for_contract_barriers(
                 &metadata_step,
-                "invite_actor_to_channel_operation",
-                wait_for_operation_handle_state(
-                    &metadata_step,
-                    tool_api,
-                    &instance_id,
-                    timeout_ms,
-                    &operation_handle,
-                    OperationState::Succeeded,
-                ),
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle: Some(operation_handle),
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
             )?;
-            declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
         IntentAction::AcceptPendingChannelInvitation => {
-            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
-            let contract = intent.contract();
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1486,22 +1428,22 @@ fn execute_semantic_intent(
                 response,
             )?;
             record_submission_handle(context, &instance_id, Some(operation_handle.clone()));
-            convergence_stage(
+            wait_for_contract_barriers(
                 &metadata_step,
-                "accept_pending_channel_invitation_operation",
-                wait_for_operation_handle_state(
-                    &metadata_step,
-                    tool_api,
-                    &instance_id,
-                    timeout_ms,
-                    &operation_handle,
-                    OperationState::Succeeded,
-                ),
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle: Some(operation_handle),
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
             )?;
-            declare_post_operation_convergence(context, &instance_id, &contract);
             Ok(())
         }
-        IntentAction::SendChatMessage { .. } => {
+        IntentAction::SendChatMessage { message } => {
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
@@ -1518,6 +1460,19 @@ fn execute_semantic_intent(
                     response,
                 )?),
             );
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle: context.last_operation_handle.get(&instance_id).cloned(),
+                    channel_binding: None,
+                    runtime_event_detail: Some(message.clone()),
+                },
+            )?;
             Ok(())
         }
         IntentAction::OpenScreen(_) | IntentAction::OpenSettingsSection(_) => unreachable!(),
@@ -1745,13 +1700,6 @@ fn semantic_expectation_wait_step(
         }
     }
     Ok(wait_step)
-}
-
-fn semantic_progress_step(
-    step: &SemanticStep,
-    expectation: &Expectation,
-) -> Result<CompatibilityStep> {
-    semantic_expectation_wait_step(step, expectation)
 }
 
 fn format_toast_kind(value: ToastKind) -> String {
@@ -2500,6 +2448,161 @@ fn wait_for_runtime_event_snapshot(
     wait_for_semantic_state_snapshot(&wait_step, tool_api, context, instance_id, timeout_ms)
 }
 
+fn barrier_runtime_event_detail(
+    barrier: &BarrierDeclaration,
+    evidence: &SubmissionEvidence,
+) -> Option<String> {
+    match barrier {
+        BarrierDeclaration::RuntimeEvent(
+            RuntimeEventKind::ChannelJoined
+            | RuntimeEventKind::ChannelMembershipReady
+            | RuntimeEventKind::RecipientPeersResolved
+            | RuntimeEventKind::MessageDeliveryReady,
+        ) => evidence
+            .channel_binding
+            .as_ref()
+            .map(|binding| binding.channel_id.clone()),
+        BarrierDeclaration::RuntimeEvent(RuntimeEventKind::MessageCommitted) => {
+            evidence.runtime_event_detail.clone()
+        }
+        _ => None,
+    }
+}
+
+fn wait_for_contract_barriers(
+    step: &CompatibilityStep,
+    tool_api: &mut ToolApi,
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    timeout_ms: u64,
+    contract: &SharedActionContract,
+    evidence: &SubmissionEvidence,
+) -> Result<UiSnapshot> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
+    for barrier in &contract.barriers.before_next_intent {
+        let remaining_ms = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis()
+            .max(1) as u64;
+        last_snapshot = match barrier {
+            BarrierDeclaration::Modal(modal_id) => {
+                let mut wait_step = semantic_wait_step(step);
+                wait_step.modal_id = Some(*modal_id);
+                convergence_stage(
+                    step,
+                    "contract_modal",
+                    wait_for_semantic_state_snapshot(
+                        &wait_step,
+                        tool_api,
+                        context,
+                        instance_id,
+                        remaining_ms,
+                    ),
+                )?
+            }
+            BarrierDeclaration::OperationState {
+                operation_id,
+                state,
+            } => {
+                let handle = evidence.handle.as_ref().ok_or_else(|| {
+                    anyhow!(
+                        "step {} contract barrier for {:?} requires canonical ui operation handle {}:{:?}",
+                        step.id,
+                        contract.intent,
+                        operation_id.0,
+                        state
+                    )
+                })?;
+                if handle.id() != operation_id {
+                    bail!(
+                        "step {} contract barrier for {:?} requires handle for {} but observed {}",
+                        step.id,
+                        contract.intent,
+                        operation_id.0,
+                        handle.id().0
+                    );
+                }
+                convergence_stage(
+                    step,
+                    "contract_operation_state",
+                    wait_for_operation_handle_state(
+                        step,
+                        tool_api,
+                        instance_id,
+                        remaining_ms,
+                        handle,
+                        *state,
+                    ),
+                )?;
+                fetch_ui_snapshot(tool_api, instance_id)?
+            }
+            BarrierDeclaration::RuntimeEvent(kind) => {
+                let mut wait_step = semantic_wait_step(step);
+                wait_step.runtime_event_kind = Some(*kind);
+                wait_step.contains = barrier_runtime_event_detail(barrier, evidence);
+                convergence_stage(
+                    step,
+                    "contract_runtime_event",
+                    wait_for_semantic_state_snapshot(
+                        &wait_step,
+                        tool_api,
+                        context,
+                        instance_id,
+                        remaining_ms,
+                    ),
+                )?
+            }
+            BarrierDeclaration::Screen(screen) => {
+                let mut wait_step = semantic_wait_step(step);
+                wait_step.screen_id = Some(*screen);
+                convergence_stage(
+                    step,
+                    "contract_screen",
+                    wait_for_semantic_state_snapshot(
+                        &wait_step,
+                        tool_api,
+                        context,
+                        instance_id,
+                        remaining_ms,
+                    ),
+                )?
+            }
+            BarrierDeclaration::Readiness(readiness) => {
+                let mut wait_step = semantic_wait_step(step);
+                wait_step.readiness = Some(*readiness);
+                convergence_stage(
+                    step,
+                    "contract_readiness",
+                    wait_for_semantic_state_snapshot(
+                        &wait_step,
+                        tool_api,
+                        context,
+                        instance_id,
+                        remaining_ms,
+                    ),
+                )?
+            }
+            BarrierDeclaration::Quiescence(quiescence) => {
+                let mut wait_step = semantic_wait_step(step);
+                wait_step.quiescence = Some(quiescence.clone());
+                convergence_stage(
+                    step,
+                    "contract_quiescence",
+                    wait_for_semantic_state_snapshot(
+                        &wait_step,
+                        tool_api,
+                        context,
+                        instance_id,
+                        remaining_ms,
+                    ),
+                )?
+            }
+        };
+    }
+    Ok(last_snapshot)
+}
+
 fn wait_for_operation_handle_state(
     step: &CompatibilityStep,
     tool_api: &mut ToolApi,
@@ -3113,20 +3216,26 @@ fn require_channel_binding_submission_with_exact_handle(
 fn require_contact_invitation_submission(
     step: &CompatibilityStep,
     response: SemanticCommandResponse,
-) -> Result<(String, Option<UiOperationHandle>)> {
+) -> Result<(Option<String>, Option<UiOperationHandle>)> {
     match response.value {
         SemanticCommandValue::ContactInvitationCode { code } => {
-            Ok((code, response.handle.ui_operation))
+            Ok((Some(code), response.handle.ui_operation))
         }
-        SemanticCommandValue::None => bail!(
-            "step {} issue stage failed for create_contact_invitation: missing contact invitation code payload",
-            step.id
-        ),
+        SemanticCommandValue::None => Ok((None, response.handle.ui_operation)),
         SemanticCommandValue::ChannelBinding { .. } => bail!(
             "step {} issue stage failed for create_contact_invitation: unexpected channel binding payload",
             step.id
         ),
     }
+}
+
+fn extract_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
+    snapshot.runtime_events.iter().rev().find_map(|event| {
+        if let RuntimeFact::InvitationCodeReady { code: Some(code), .. } = &event.fact {
+            return Some(code.clone());
+        }
+        None
+    })
 }
 
 fn issue_stage<T>(step: &CompatibilityStep, result: Result<T>) -> Result<T> {
@@ -3147,89 +3256,6 @@ fn convergence_stage<T>(step: &CompatibilityStep, label: &str, result: Result<T>
             step.action
         )
     })
-}
-
-fn pending_convergence_mut<'a>(
-    context: &'a mut ScenarioContext,
-    instance_id: &str,
-) -> &'a mut Vec<BarrierDeclaration> {
-    context
-        .pending_convergence
-        .entry(instance_id.to_string())
-        .or_default()
-}
-
-fn declare_post_operation_convergence(
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    contract: &SharedActionContract,
-) {
-    let Some(convergence) = contract.post_operation_convergence.as_ref() else {
-        return;
-    };
-    let pending = pending_convergence_mut(context, instance_id);
-    pending.extend(convergence.required_before_next_intent.iter().cloned());
-}
-
-fn clear_satisfied_post_operation_convergence(
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    step: &CompatibilityStep,
-) {
-    if let Some(shared_barrier) = cross_actor_satisfied_barrier(step) {
-        let mut cleared_instances = Vec::new();
-        for (pending_instance, pending) in &mut context.pending_convergence {
-            pending.retain(|required| required != &shared_barrier);
-            if pending.is_empty() {
-                cleared_instances.push(pending_instance.clone());
-            }
-        }
-        for pending_instance in cleared_instances {
-            context.pending_convergence.remove(&pending_instance);
-        }
-        return;
-    }
-
-    let Some(pending) = context.pending_convergence.get_mut(instance_id) else {
-        return;
-    };
-    pending.retain(|required| !step_satisfies_barrier(step, required));
-    if pending.is_empty() {
-        context.pending_convergence.remove(instance_id);
-    }
-}
-
-fn cross_actor_satisfied_barrier(step: &CompatibilityStep) -> Option<BarrierDeclaration> {
-    match (step.action, step.runtime_event_kind) {
-        (CompatibilityAction::WaitFor, Some(RuntimeEventKind::PendingHomeInvitationReady)) => Some(
-            BarrierDeclaration::RuntimeEvent(RuntimeEventKind::PendingHomeInvitationReady),
-        ),
-        _ => None,
-    }
-}
-
-fn step_satisfies_barrier(step: &CompatibilityStep, barrier: &BarrierDeclaration) -> bool {
-    match (step.action, barrier) {
-        (CompatibilityAction::WaitFor, BarrierDeclaration::RuntimeEvent(expected)) => {
-            step.runtime_event_kind == Some(*expected)
-        }
-        (CompatibilityAction::WaitFor, BarrierDeclaration::Readiness(expected)) => {
-            step.readiness == Some(*expected)
-        }
-        (CompatibilityAction::WaitFor, BarrierDeclaration::Screen(expected)) => {
-            step.screen_id == Some(*expected)
-        }
-        (CompatibilityAction::WaitFor, BarrierDeclaration::Quiescence(_)) => false,
-        _ => false,
-    }
-}
-
-fn record_authoritative_convergence_progress(
-    step: &CompatibilityStep,
-    context: &mut ScenarioContext,
-    instance_id: &str,
-) {
-    clear_satisfied_post_operation_convergence(context, instance_id, step);
 }
 
 fn semantic_modal_name(modal: ModalId) -> &'static str {
@@ -5092,74 +5118,6 @@ mod tests {
             WaitContractRef::Modal(ModalId::AddDevice),
         )
         .is_err());
-    }
-
-    #[test]
-    fn missing_sync_prerequisites_fail_as_convergence_contract_violations() {
-        let mut context = ScenarioContext::default();
-        context.pending_convergence.insert(
-            "alice".to_string(),
-            vec![BarrierDeclaration::RuntimeEvent(
-                RuntimeEventKind::PendingHomeInvitationReady,
-            )],
-        );
-        let error = ensure_post_operation_convergence_satisfied_for_binding(
-            "send-too-early",
-            SharedSemanticBinding::SendChatMessage,
-            &context,
-            "alice",
-        )
-        .err()
-        .unwrap_or_else(|| panic!("missing convergence must fail before the next shared intent"));
-        assert!(error.to_string().contains("convergence-contract violation"));
-        assert!(
-            error.to_string().contains("PendingHomeInvitationReady"),
-            "error should surface the missing convergence requirement"
-        );
-    }
-
-    #[test]
-    fn next_intent_cannot_discharge_pending_channel_membership_convergence() {
-        let mut context = ScenarioContext::default();
-        context.pending_convergence.insert(
-            "bob".to_string(),
-            vec![BarrierDeclaration::RuntimeEvent(
-                RuntimeEventKind::ChannelMembershipReady,
-            )],
-        );
-        let error = ensure_post_operation_convergence_satisfied_for_binding(
-            "join-channel",
-            SharedSemanticBinding::JoinChannel,
-            &context,
-            "bob",
-        )
-        .err()
-        .unwrap_or_else(|| panic!("next shared intent must not discharge pending convergence"));
-        assert!(error.to_string().contains("convergence-contract violation"));
-    }
-
-    #[test]
-    fn pending_home_invitation_wait_clears_cross_actor_convergence() {
-        let mut context = ScenarioContext::default();
-        context.pending_convergence.insert(
-            "alice".to_string(),
-            vec![BarrierDeclaration::RuntimeEvent(
-                RuntimeEventKind::PendingHomeInvitationReady,
-            )],
-        );
-        let step = crate::config::CompatibilityStep {
-            id: "bob-pending-home-invitation-ready".to_string(),
-            instance: Some("bob".to_string()),
-            action: crate::config::CompatibilityAction::WaitFor,
-            runtime_event_kind: Some(RuntimeEventKind::PendingHomeInvitationReady),
-            ..Default::default()
-        };
-
-        clear_satisfied_post_operation_convergence(&mut context, "bob", &step);
-        assert!(
-            context.pending_convergence.is_empty(),
-            "cross-actor pending-home convergence should clear across the shared flow"
-        );
     }
 
     #[test]

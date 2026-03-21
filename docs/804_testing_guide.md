@@ -105,6 +105,8 @@ For parity-critical waits and assertions:
 
 - waits must bind to declared readiness, event, or quiescence conditions
 - waits may also bind to typed operation handles or strictly newer authoritative projections when the shared contract defines them
+- executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers; do not keep a second harness-local convergence graph
+- semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or `Submitting`
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
 - harness mode may change instrumentation and render stability, but it must not change business-flow semantics
 
