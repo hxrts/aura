@@ -141,6 +141,10 @@ Converted semantic-owner paths also follow two stricter publication rules:
   unverifiable scope/home state as success, and they may not upgrade legacy
   `dm:` descriptors or empty observed membership into canonical participant
   truth
+- strong-command create intent may carry a normalized channel name, but it may
+  not synthesize a canonical `ChannelId` or `CommandScope::Channel` before the
+  runtime materializes that channel; until then, completion is `Accepted`, not
+  replicated by fabricated identity
 
 ## Testing
 
