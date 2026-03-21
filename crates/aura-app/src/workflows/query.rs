@@ -19,7 +19,8 @@ use std::sync::Arc;
 /// **Returns**: List of participant names
 /// **Signal pattern**: Read-only operation (no emission)
 ///
-/// For DM channels, returns self + that contact when known.
+/// For DM channels, returns self + known members from materialized channel
+/// state.
 /// For group channels, returns self + known members from channel state.
 pub async fn list_participants(
     app_core: &Arc<RwLock<AppCore>>,
@@ -42,7 +43,6 @@ pub async fn list_participants(
     };
 
     if let Some(channel_entry) = channel_entry {
-        let mut added_members = false;
         for member_id in &channel_entry.member_ids {
             let name = if let Some(contact) = contacts.contact(member_id) {
                 effective_name(contact)
@@ -51,38 +51,13 @@ pub async fn list_participants(
             };
             if seen.insert(name.clone()) {
                 participants.push(name);
-                added_members = true;
             }
         }
 
-        // Group channel membership may lag behind channel creation/join updates.
-        // Fall back to known contacts so `/who` remains useful in live sessions.
-        if !channel_entry.is_dm && !added_members {
-            for contact in contacts.all_contacts() {
-                let name = effective_name(contact);
-                if seen.insert(name.clone()) {
-                    participants.push(name);
-                }
-            }
-        }
         return Ok(participants);
     }
 
-    // Backwards-compatible fallback: DM channels encoded as "dm:<contact_id>".
-    if channel.starts_with("dm:") {
-        let contact_id_str = channel.strip_prefix("dm:").unwrap_or("");
-        if let Ok(contact_id) = parse_authority_id(contact_id_str) {
-            if let Some(contact) = contacts.contact(&contact_id) {
-                participants.push(effective_name(contact));
-            } else {
-                participants.push(contact_id_str.to_string());
-            }
-        } else {
-            participants.push(contact_id_str.to_string());
-        }
-    }
-
-    Ok(participants)
+    Err(AuraError::not_found(channel.to_string()))
 }
 
 /// List participants in a channel by canonical channel ID.
@@ -220,11 +195,9 @@ fn effective_name(contact: &Contact) -> String {
 #[allow(clippy::default_trait_access)]
 mod tests {
     use super::*;
-    use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
-    use crate::views::{Contact, ContactsState};
-    use crate::workflows::signals::emit_signal;
+    use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
     use crate::AppConfig;
-    use aura_core::types::identifiers::AuthorityId;
+    use aura_core::types::identifiers::{AuthorityId, ChannelId};
 
     #[tokio::test]
     async fn test_list_contacts() {
@@ -246,10 +219,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_user_info_reads_contacts_signal() {
+    async fn test_get_user_info_reads_materialized_contacts() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
         let bob = Contact {
@@ -262,14 +234,11 @@ mod tests {
             is_online: true,
             read_receipt_policy: Default::default(),
         };
-        emit_signal(
-            &app_core,
-            &*CONTACTS_SIGNAL,
-            ContactsState::from_contacts(vec![bob.clone()]),
-            CONTACTS_SIGNAL_NAME,
-        )
-        .await
-        .unwrap();
+        {
+            let mut core = app_core.write().await;
+            core.views_mut()
+                .set_contacts(ContactsState::from_contacts(vec![bob.clone()]));
+        }
 
         let by_name = get_user_info(&app_core, "bob").await.unwrap();
         assert_eq!(by_name.id, bob_id);
@@ -279,12 +248,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_participants() {
+    async fn test_list_participants_requires_materialized_channel() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
-        // DM channel should include "You" + target
-        let participants = list_participants(&app_core, "dm:user-123").await.unwrap();
-        assert!(participants.contains(&"You".to_string()));
+        let error = list_participants(&app_core, "dm:user-123")
+            .await
+            .expect_err("legacy dm descriptors should not be upgraded into channel truth");
+        assert!(matches!(error, AuraError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_list_participants_does_not_fallback_to_all_contacts() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let bob_id = AuthorityId::new_from_entropy([8u8; 32]);
+        let bob = Contact {
+            id: bob_id,
+            nickname: "Bob".to_string(),
+            nickname_suggestion: None,
+            is_guardian: false,
+            is_member: false,
+            last_interaction: None,
+            is_online: true,
+            read_receipt_policy: Default::default(),
+        };
+        let channel_id = ChannelId::from_bytes([9u8; 32]);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut()
+                .set_contacts(ContactsState::from_contacts(vec![bob]));
+            core.views_mut()
+                .set_chat(ChatState::from_channels(vec![Channel {
+                    id: channel_id,
+                    context_id: None,
+                    name: "empty-room".to_string(),
+                    topic: None,
+                    channel_type: ChannelType::Home,
+                    unread_count: 0,
+                    is_dm: false,
+                    member_ids: Vec::new(),
+                    member_count: 1,
+                    last_message: None,
+                    last_message_time: None,
+                    last_activity: 0,
+                    last_finalized_epoch: 0,
+                }]));
+        }
+
+        let participants = list_participants(&app_core, "empty-room")
+            .await
+            .expect("materialized channel should still resolve");
+        assert_eq!(participants, vec!["You".to_string()]);
     }
 }

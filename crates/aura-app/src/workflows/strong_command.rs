@@ -493,8 +493,9 @@ impl PlannedCommand {
     pub fn consistency_requirement(&self) -> ConsistencyRequirement {
         match self {
             Self::General(plan) => consistency_for_resolved(&plan.operation),
-            Self::Membership(_) => ConsistencyRequirement::Replicated,
-            Self::Moderation(_) | Self::Moderator(_) => ConsistencyRequirement::Enforced,
+            Self::Membership(plan) => consistency_for_resolved(&plan.operation.command),
+            Self::Moderation(plan) => consistency_for_resolved(&plan.operation.command),
+            Self::Moderator(plan) => consistency_for_resolved(&plan.operation.command),
         }
     }
 }
@@ -542,6 +543,10 @@ pub const COMMAND_CONSISTENCY_TABLE: &[CommandConsistencySpec] = &[
     CommandConsistencySpec {
         command: "unmute",
         requirement: ConsistencyRequirement::Enforced,
+    },
+    CommandConsistencySpec {
+        command: "invite",
+        requirement: ConsistencyRequirement::Accepted,
     },
     CommandConsistencySpec {
         command: "op",
@@ -1296,23 +1301,14 @@ async fn consistency_invariant_holds(
                     .chat
                     .channel(&channel_id.0)
                     .is_none_or(|channel| channel.member_count == 0),
-                Err(_) => {
-                    // Scope resolution failed — treat as satisfied rather
-                    // than looping forever.  The leave operation already
-                    // executed; if the channel can't be found the leave
-                    // effectively succeeded.
-                    true
-                }
+                Err(_) => false,
             },
             _ => false,
         },
         PlannedCommand::Moderation(plan) => {
             let home = match home_for_scope(&snapshot, &plan.scope) {
                 Some(value) => value,
-                // Home not resolvable (not yet synced, or context removed).
-                // Treat as satisfied to avoid spinning forever — the
-                // operation already executed.
-                None => return true,
+                None => return false,
             };
             match &plan.operation.command {
                 ResolvedCommand::Kick { target, .. } => home.member(&target.0).is_none(),
@@ -1320,20 +1316,14 @@ async fn consistency_invariant_holds(
                 ResolvedCommand::Unban { target } => !home.ban_list.contains_key(&target.0),
                 ResolvedCommand::Mute { target, .. } => home.mute_list.contains_key(&target.0),
                 ResolvedCommand::Unmute { target } => !home.mute_list.contains_key(&target.0),
-                // Invite consistency is fire-and-forget: the invitation is
-                // dispatched asynchronously and there is no local state to
-                // verify synchronously.  Returning `true` means the
-                // consistency loop treats the operation as immediately
-                // accepted rather than waiting for a state change that
-                // cannot be observed locally.
-                ResolvedCommand::Invite { .. } => true,
+                ResolvedCommand::Invite { .. } => false,
                 _ => false,
             }
         }
         PlannedCommand::Moderator(plan) => {
             let home = match home_for_scope(&snapshot, &plan.scope) {
                 Some(value) => value,
-                None => return true, // Same rationale as Moderation above.
+                None => return false,
             };
             match &plan.operation.command {
                 ResolvedCommand::Op { target } => home.member(&target.0).is_some_and(|member| {
@@ -1361,25 +1351,20 @@ fn home_for_scope<'a>(
         CommandScope::Channel {
             channel_id,
             context_id,
-        } => snapshot
-            .homes
-            .home_state(&channel_id.0)
-            .or_else(|| {
-                context_id.and_then(|context| {
-                    snapshot
-                        .homes
-                        .iter()
-                        .find(|(_, home)| home.context_id == Some(context.0))
-                        .map(|(_, home)| home)
-                })
+        } => snapshot.homes.home_state(&channel_id.0).or_else(|| {
+            context_id.and_then(|context| {
+                snapshot
+                    .homes
+                    .iter()
+                    .find(|(_, home)| home.context_id == Some(context.0))
+                    .map(|(_, home)| home)
             })
-            .or_else(|| snapshot.homes.current_home()),
+        }),
         CommandScope::Context { context_id } => snapshot
             .homes
             .iter()
             .find(|(_, home)| home.context_id == Some(context_id.0))
-            .map(|(_, home)| home)
-            .or_else(|| snapshot.homes.current_home()),
+            .map(|(_, home)| home),
         CommandScope::Global => snapshot.homes.current_home(),
     }
 }
@@ -2255,7 +2240,7 @@ mod tests {
         });
 
         let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
-        assert_eq!(state, ConsistencyState::Enforced);
+        assert_eq!(state, ConsistencyState::TimedOutPartial);
     }
 
     #[cfg(feature = "signals")]
@@ -2334,7 +2319,7 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
-    async fn consistency_barrier_treats_missing_home_scope_as_enforced() {
+    async fn consistency_barrier_treats_missing_home_scope_as_partial_timeout() {
         let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
         let missing_channel = ChannelId::from_bytes([45u8; 32]);
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([46u8; 32]));
@@ -2355,7 +2340,69 @@ mod tests {
         });
 
         let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
-        assert_eq!(state, ConsistencyState::Enforced);
+        assert_eq!(state, ConsistencyState::TimedOutPartial);
+    }
+
+    #[tokio::test]
+    async fn invite_plan_uses_accepted_consistency_requirement() {
+        let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([49u8; 32]));
+        let channel_id = ResolvedChannelId(ChannelId::from_bytes([50u8; 32]));
+        let plan = PlannedCommand::Moderation(CommandPlan {
+            actor: None,
+            scope: CommandScope::Channel {
+                channel_id,
+                context_id: None,
+            },
+            preconditions: vec![
+                PlanPrecondition::TargetExists(target),
+                PlanPrecondition::ChannelExists(channel_id),
+            ],
+            operation: ModerationPlan {
+                command: ResolvedCommand::Invite { target },
+            },
+        });
+
+        assert_eq!(
+            plan.consistency_requirement(),
+            ConsistencyRequirement::Accepted
+        );
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn home_for_channel_scope_does_not_fallback_to_current_home() {
+        use crate::views::home::HomesState;
+
+        let scoped_channel_id = ChannelId::from_bytes([51u8; 32]);
+        let current_home_id = ChannelId::from_bytes([52u8; 32]);
+        let current_context_id = ContextId::new_from_entropy([53u8; 32]);
+        let creator = AuthorityId::new_from_entropy([54u8; 32]);
+
+        let mut homes = HomesState::new();
+        homes.add_home_with_auto_select(crate::views::home::HomeState::new(
+            current_home_id,
+            Some("current-home".to_string()),
+            creator,
+            0,
+            current_context_id,
+        ));
+
+        let snapshot = StateSnapshot {
+            homes,
+            ..StateSnapshot::default()
+        };
+
+        let resolved = home_for_scope(
+            &snapshot,
+            &CommandScope::Channel {
+                channel_id: ResolvedChannelId(scoped_channel_id),
+                context_id: None,
+            },
+        );
+        assert!(
+            resolved.is_none(),
+            "channel-scoped lookup should not silently fall back to current home"
+        );
     }
 
     #[cfg(feature = "signals")]
