@@ -236,6 +236,9 @@ canonical channel or invitation metadata from weaker facts such as membership
 events or raw identifiers. If runtime acceptance or reconciliation needs to
 materialize canonical metadata, one explicit owned handler path must do that
 end to end before reactive views are allowed to enrich the projection.
+Fact commit is the completion boundary for converted runtime-owned invitation
+acceptance and inbound transport materialization paths; those paths must not
+wait for an uncorrelated "next reactive view update" before returning success.
 
 Runtime bridge lookup follows the same strong-ref rule:
 

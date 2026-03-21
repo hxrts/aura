@@ -1353,8 +1353,6 @@ async fn handle_inbound_transport_envelope(
                         error = %err,
                         "LAN transport failed to commit incoming chat fact envelope"
                     );
-                } else {
-                    effects.await_next_view_update().await;
                 }
                 return None;
             }
