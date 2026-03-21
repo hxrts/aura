@@ -1,0 +1,5 @@
+error: weak_identifier domain must be one of `channel`, `invitation`, `ceremony`, `home`, or `home_scope`
+ --> tests/boundaries/weak_identifier_invalid_domain.rs:1:41
+  |
+1 | #[aura_macros::weak_identifier(domain = "contact")]
+  |                                         ^^^^^^^^^

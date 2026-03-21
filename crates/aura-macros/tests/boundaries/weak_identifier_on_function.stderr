@@ -1,0 +1,7 @@
+error: #[weak_identifier] may only be applied to structs or enums
+ --> tests/boundaries/weak_identifier_on_function.rs:1:1
+  |
+1 | #[aura_macros::weak_identifier(domain = "invitation")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::weak_identifier` (in Nightly builds, run with -Z macro-backtrace for more info)

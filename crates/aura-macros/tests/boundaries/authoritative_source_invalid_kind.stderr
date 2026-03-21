@@ -1,0 +1,5 @@
+error: authoritative_source kind must be one of `runtime`, `signal`, `app_core`, or `proof_issuer`
+ --> tests/boundaries/authoritative_source_invalid_kind.rs:1:44
+  |
+1 | #[aura_macros::authoritative_source(kind = "view")]
+  |                                            ^^^^^^

@@ -27,6 +27,9 @@ _nix-nightly *ARGS:
 _harness action *ARGS:
     scripts/harness/cmd.sh {{ action }} {{ ARGS }}
 
+_ownership-lint mode *PATHS:
+    cargo run -q -p aura-macros --bin ownership_lints -- {{ mode }} {{ PATHS }}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Build
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -623,9 +626,9 @@ ci-user-flow-policy:
 ci-harness-ownership-policy:
     bash scripts/check/ownership-category-declarations.sh
     bash scripts/check/harness-actor-vs-move-ownership.sh
-    bash scripts/check/harness-readiness-ownership.sh
+    just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
     bash scripts/check/harness-typed-semantic-errors.sh
-    bash scripts/check/harness-move-ownership-boundary.sh
+    just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
     bash scripts/check/harness-authoritative-fact-boundary.sh
 
 ci-ownership-policy:
@@ -666,7 +669,7 @@ ci-ownership-categories:
     bash scripts/check/ownership-category-declarations.sh
 
 ci-actor-lifecycle:
-    bash scripts/check/actor-owned-task-spawn.sh
+    just _ownership-lint actor-owned-task-spawn crates/aura-agent/src crates/aura-app/src crates/aura-core/src crates/aura-effects/src crates/aura-harness/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src
 
 ci-move-semantics:
     cargo test -p aura-core --test compile_fail -- --nocapture
@@ -681,74 +684,74 @@ ci-typed-errors:
     bash scripts/check/typed-error-boundary.sh
 
 ci-semantic-owner-awaits:
-    bash scripts/check/semantic-owner-bounded-awaits.sh
+    just _ownership-lint semantic-owner-bounded-awaits crates/aura-terminal/src/tui/callbacks
 
 ci-semantic-owner-detached-continuation:
-    bash scripts/check/semantic-owner-detached-continuation.sh
+    just _ownership-lint semantic-owner-detached-continuation crates/aura-app/src crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
 
 ci-semantic-owner-no-spawn:
-    bash scripts/check/semantic-owner-no-spawn.sh
+    just _ownership-lint semantic-owner-no-spawn crates/aura-app/src crates/aura-terminal/src crates/aura-web/src
 
 ci-semantic-owner-proof-success:
-    bash scripts/check/semantic-owner-proof-success.sh
+    just _ownership-lint semantic-owner-proof-success crates/aura-app/src crates/aura-terminal/src crates/aura-web/src
 
 ci-workflow-proof-bearing-success:
-    bash scripts/check/workflow-proof-bearing-success.sh
+    just _ownership-lint workflow-proof-bearing-success crates/aura-app/src/workflows
 
 ci-proof-issuer-authoritative-source:
-    bash scripts/check/proof-issuer-authoritative-source.sh
+    just _ownership-lint proof-issuer-authoritative-source crates/aura-app/src/workflows
 
 ci-device-enrollment-authority-contract:
     bash scripts/check/device-enrollment-authority-contract.sh
 
 ci-workflow-no-view-reads:
-    bash scripts/check/workflow-no-view-reads-for-decisions.sh
+    just _ownership-lint workflow-no-view-reads-for-decisions crates/aura-app/src/workflows
 
 ci-workflow-no-view-writes:
-    bash scripts/check/workflow-no-view-writes.sh
+    just _ownership-lint workflow-no-view-writes crates/aura-app/src/workflows
 
 ci-workflow-no-fallback-defaults:
-    bash scripts/check/workflow-no-fallback-defaults.sh
+    just _ownership-lint workflow-no-fallback-defaults crates/aura-app/src/workflows
 
 ci-workflow-no-view-derived-readiness:
-    bash scripts/check/workflow-no-view-derived-readiness.sh
+    just _ownership-lint workflow-no-view-derived-readiness crates/aura-app/src/workflows
 
 ci-workflow-no-view-derived-recipient-resolution:
-    bash scripts/check/workflow-no-view-derived-recipient-resolution.sh
+    just _ownership-lint workflow-no-view-derived-recipient-resolution crates/aura-app/src/workflows
 
 ci-workflow-unbounded-runtime-awaits:
-    bash scripts/check/workflow-unbounded-runtime-awaits.sh
+    just _ownership-lint workflow-unbounded-runtime-awaits crates/aura-app/src crates/aura-terminal/src/tui crates/aura-web/src crates/aura-ui/src
 
 ci-weak-to-strong-identifier-upgrade:
-    bash scripts/check/weak-to-strong-identifier-upgrade.sh
+    just _ownership-lint weak-to-strong-identifier-upgrade crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
 
 ci-workflow-ownership-tag-ratchet:
     bash scripts/check/workflow-ownership-tag-ratchet.sh
 
 ci-parity-critical-ignored-results:
-    bash scripts/check/parity-critical-ignored-results.sh
+    just _ownership-lint parity-critical-ignored-results crates/aura-app/src/workflows crates/aura-agent/src/handlers
 
 ci-best-effort-side-effects:
-    bash scripts/check/best-effort-side-effect-boundary.sh
+    just _ownership-lint best-effort-side-effect-boundary crates
 
 ci-observed-layer-boundaries:
     bash scripts/check/observed-layer-authorship.sh
 
 ci-frontend-handoff-boundary:
-    bash scripts/check/frontend-semantic-handoff-boundary.sh
+    just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
 
 ci-timeout-policy:
-    bash scripts/check/timeout-policy-boundary.sh
+    just _ownership-lint timeout-policy-boundary crates/aura-app/src/workflows crates/aura-agent/src/handlers/invitation crates/aura-agent/src/runtime_bridge crates/aura-agent/src/runtime/effects crates/aura-terminal/src/tui crates/aura-harness/src
 
 ci-timeout-time-domains:
-    bash scripts/check/timeout-time-domain-usage.sh
+    just _ownership-lint time-domain-usage crates/aura-journal/src crates/aura-authorization/src crates/aura-signature/src crates/aura-store/src crates/aura-transport/src crates/aura-mpst/src crates/aura-macros/src crates/aura-protocol/src crates/aura-guards/src crates/aura-consensus/src crates/aura-amp/src crates/aura-anti-entropy/src crates/aura-authentication/src crates/aura-chat/src crates/aura-invitation/src crates/aura-recovery/src crates/aura-relational/src crates/aura-rendezvous/src crates/aura-social/src crates/aura-sync/src
 
 # Choreography wiring lint
 ci-choreo:
     scripts/check/choreo-wiring.sh
 
 ci-async-session-ownership:
-    bash scripts/check/async-session-ownership.sh
+    just _ownership-lint async-session-ownership crates/aura-agent/src/handlers crates/aura-agent/src/runtime/services crates/aura-agent/src/runtime_bridge
 
 ci-async-concurrency-envelope:
     bash scripts/check/async-concurrency-envelope.sh
@@ -760,13 +763,13 @@ ci-runtime-instrumentation-schema:
     bash scripts/check/runtime-instrumentation-schema.sh
 
 ci-harness-readiness-ownership:
-    bash scripts/check/harness-readiness-ownership.sh
+    just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
 
 ci-harness-typed-semantic-errors:
     bash scripts/check/harness-typed-semantic-errors.sh
 
 ci-harness-move-ownership-boundary:
-    bash scripts/check/harness-move-ownership-boundary.sh
+    just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
 
 ci-harness-authoritative-fact-boundary:
     bash scripts/check/harness-authoritative-fact-boundary.sh

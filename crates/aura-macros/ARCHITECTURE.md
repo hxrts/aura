@@ -15,6 +15,7 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 | `aura_test` attribute macro: Async test setup with tracing | |
 | `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax` | |
 | `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints | |
+| Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier` | Unchecked ownership marker comments or ad hoc tags |
 
 ## Dependencies
 
@@ -38,6 +39,7 @@ Choreography annotations must project deterministically into runtime metadata.
 
 Enforcement locus:
 - src proc-macro parsing captures guard, flow, and leakage annotations.
+- ownership marker attrs validate required metadata and target item shape.
 - Expansion outputs remain compile-time only and avoid runtime side effects.
 
 Failure mode:
@@ -99,6 +101,7 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | Valid actor_owned rejected | `boundaries/actor_owned_valid.rs` | covered (pass) |
 | Valid capability_boundary rejected | `boundaries/capability_boundary_valid.rs` | covered (pass) |
 | Valid ownership_lifecycle rejected | `boundaries/ownership_lifecycle_valid.rs` | covered (pass) |
+| Valid authoritative_source / strong_reference / weak_identifier rejected | `boundaries/authoritative_source_valid.rs`, `boundaries/strong_reference_valid.rs`, `boundaries/weak_identifier_valid.rs` | covered (pass) |
 | Invalid flow_cost silently accepted | `boundaries/invalid_flow_cost.rs` | covered (compile_fail) |
 | Invalid guard_capability accepted | `boundaries/invalid_guard_capability.rs` | covered (compile_fail) |
 | Self-send accepted | `boundaries/incoherent_self_send.rs` | covered (compile_fail) |
@@ -112,6 +115,9 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | actor_owned bypass without macro | `boundaries/actor_owned_bypass_without_macro.rs` | covered (compile_fail) |
 | capability_boundary missing category | `boundaries/capability_boundary_missing_category.rs` | covered (compile_fail) |
 | ownership_lifecycle invalid variant | `boundaries/ownership_lifecycle_invalid_variant.rs` | covered (compile_fail) |
+| authoritative_source metadata or target invalid | `boundaries/authoritative_source_missing_kind.rs`, `boundaries/authoritative_source_invalid_kind.rs`, `boundaries/authoritative_source_on_struct.rs` | covered (compile_fail) |
+| strong_reference metadata or target invalid | `boundaries/strong_reference_missing_domain.rs`, `boundaries/strong_reference_invalid_domain.rs`, `boundaries/strong_reference_on_function.rs` | covered (compile_fail) |
+| weak_identifier metadata or target invalid | `boundaries/weak_identifier_missing_domain.rs`, `boundaries/weak_identifier_invalid_domain.rs`, `boundaries/weak_identifier_on_function.rs` | covered (compile_fail) |
 
 ## References
 
