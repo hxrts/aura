@@ -35,6 +35,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
+- Browser bootstrap/rebootstrap bridge promises resolve on completion of the
+  owned bootstrap transition, not merely on enqueue, so harness/browser callers
+  do not mistake acceptance for success.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
 - Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
 - Harness mode may change instrumentation and render stability, but not business-flow semantics.
@@ -121,6 +124,9 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 - Explicit bridge entrypoints currently include semantic command submission,
   observed snapshot/render publication, and runtime identity staging for
   owned browser rebootstrap during create-account style flows.
+- Runtime identity staging and bootstrap handoff completion semantics are part
+  of that compatibility surface; changes must preserve the distinction between
+  accepted/enqueued work and completed bootstrap state.
 - Additive fields and additive non-breaking methods are allowed when old callers continue to observe the same behavior.
 - Breaking request/response or observation-shape changes must update explicit compatibility metadata and tests.
 
