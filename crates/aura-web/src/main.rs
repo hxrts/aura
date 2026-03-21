@@ -1213,28 +1213,6 @@ cfg_if! {
                                 .into(),
                             );
 
-                            for _ in 0..8 {
-                                runtime_workflows::converge_runtime(&runtime).await;
-                                if runtime_workflows::ensure_runtime_peer_connectivity(
-                                    &runtime,
-                                    "device_enrollment_accept",
-                                )
-                                .await
-                                .is_ok()
-                                {
-                                    break;
-                                }
-                                time_workflows::sleep_ms(&app_core, 250)
-                                    .await
-                                    .map_err(|error| {
-                                        WebUiError::operation(
-                                            WebUiOperation::ImportDeviceEnrollmentCode,
-                                            "WEB_DEVICE_ENROLLMENT_SLEEP_FAILED",
-                                            error.to_string(),
-                                        )
-                                    })?;
-                            }
-
                             invitation_workflows::accept_device_enrollment_invitation(
                                 &app_core,
                                 &invitation_info,
