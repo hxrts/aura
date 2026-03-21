@@ -97,6 +97,9 @@ For parity-critical observation:
 - observation surfaces must be side-effect free
 - recovery and retries must be explicit and separate from observation
 - DOM/text fallback paths are diagnostics only and must not become success-path observation behavior
+- browser semantic observation must fail closed when the published snapshot is
+  unavailable; it must not silently repair by reading a live controller/model
+  snapshot behind the harness bridge
 - channel-binding responses must either carry authoritative context materialization or fail explicitly; selected ids or labels alone are not semantic bindings
 - channel list item ids and selected-channel snapshot ids must stay keyed by canonical channel ids when the runtime projection already provides them; harness/browser code should not round-trip through display labels on those paths
 - diagnostic tool/query surfaces should say `diagnostic_*` at the API boundary when they are derived from screen/DOM capture rather than authoritative semantic state
@@ -179,7 +182,7 @@ final CI entrypoints:
 - `just ci-harness-ownership-policy` for the harness-specific ownership policy
 - `just ci-user-flow-policy` for shared UX governance and documentation sync
 
-The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). Browser harness failures also surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__` and `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`; those globals are diagnostic-only and do not replace the authoritative `UiSnapshot`/`RenderHeartbeat` payloads. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
 ### Shared Semantic Ownership Inventory
 
