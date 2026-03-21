@@ -26,8 +26,9 @@ use crate::tui::tasks::UiTaskOwner;
 // TUI uses *_by_name variants for string-based user input
 pub use aura_app::ui::workflows::messaging::{
     close_channel_by_name, create_channel_with_authoritative_binding, join_channel_by_name,
-    leave_channel_by_name, send_action_by_name, send_direct_message, send_message,
-    send_message_by_name, set_topic_by_name, start_direct_chat,
+    leave_channel_by_name, send_action_by_name, send_direct_message,
+    send_direct_message_to_authority, send_message, send_message_by_name, set_topic_by_name,
+    start_direct_chat,
 };
 
 fn compact_send_error(error: &aura_core::AuraError) -> String {
@@ -126,7 +127,16 @@ pub async fn handle_messaging(
         EffectCommand::SendDirectMessage { target, content } => {
             // Use workflow for business logic
             let timestamp = super::time::current_time_ms(app_core).await;
-            match send_direct_message(app_core, target, content, timestamp).await {
+            let result = if let Ok(authority_id) =
+                target.parse::<aura_core::types::identifiers::AuthorityId>()
+            {
+                send_direct_message_to_authority(app_core, authority_id, content, timestamp)
+                    .await
+                    .map(|channel_id| channel_id.to_string())
+            } else {
+                send_direct_message(app_core, target, content, timestamp).await
+            };
+            match result {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::DirectMessageSent {
                     channel_id: dm_channel_id,
                 })),

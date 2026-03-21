@@ -289,6 +289,9 @@ pub struct TuiState {
     /// True while the shell is waiting for a startup runtime bootstrap to converge.
     pub pending_runtime_bootstrap: bool,
 
+    /// Long-lived subscriptions that have permanently degraded.
+    pub degraded_subscriptions: HashMap<String, String>,
+
     /// Runtime facts exported from owned TUI transitions.
     pub runtime_facts: Vec<RuntimeFact>,
 }
@@ -416,6 +419,23 @@ impl TuiState {
         let key = fact.key();
         self.runtime_facts.retain(|existing| existing.key() != key);
         self.runtime_facts.push(fact);
+    }
+
+    pub fn mark_subscription_degraded(
+        &mut self,
+        signal_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> bool {
+        let signal_id = signal_id.into();
+        let reason = reason.into();
+        let changed = self.degraded_subscriptions.get(&signal_id) != Some(&reason);
+        self.degraded_subscriptions.insert(signal_id, reason);
+        changed
+    }
+
+    #[must_use]
+    pub fn degraded_subscription_count(&self) -> usize {
+        self.degraded_subscriptions.len()
     }
 
     pub fn clear_runtime_fact_kind(&mut self, kind: RuntimeEventKind) {
@@ -735,6 +755,31 @@ mod tests {
         let third = state.exported_operation_snapshots();
         assert_eq!(third[0].instance_id, first_instance);
         assert_eq!(third[0].state, OperationState::Succeeded);
+    }
+
+    #[test]
+    fn degraded_subscriptions_are_structural_and_deduplicated() {
+        let mut state = TuiState::new();
+
+        assert!(state.mark_subscription_degraded("chat", "retry budget exhausted"));
+        assert_eq!(state.degraded_subscription_count(), 1);
+        assert_eq!(
+            state.degraded_subscriptions.get("chat"),
+            Some(&"retry budget exhausted".to_string())
+        );
+
+        assert!(!state.mark_subscription_degraded("chat", "retry budget exhausted"));
+        assert_eq!(state.degraded_subscription_count(), 1);
+
+        assert!(state.mark_subscription_degraded("chat", "signal closed"));
+        assert_eq!(state.degraded_subscription_count(), 1);
+        assert_eq!(
+            state.degraded_subscriptions.get("chat"),
+            Some(&"signal closed".to_string())
+        );
+
+        assert!(state.mark_subscription_degraded("network", "subscription cancelled"));
+        assert_eq!(state.degraded_subscription_count(), 2);
     }
 
     #[test]

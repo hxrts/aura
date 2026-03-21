@@ -24,16 +24,18 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::{EffectCommand, OpResponse};
 use crate::tui::semantic_lifecycle::{
-    authoritative_operation_status_update, LocalTerminalOperationOwner,
-    SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
+    apply_handed_off_terminal_status, authoritative_operation_status_update,
+    LocalTerminalOperationOwner, SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
 };
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
+use async_lock::RwLock;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui_contract::{
-    ChannelFactKey, InvitationFactKind, OperationState, RuntimeEventKind, RuntimeFact,
-    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationStatus,
+    ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
+    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
+    SemanticOperationStatus, WorkflowTerminalOutcome,
 };
 use aura_core::AuthorityId;
 use futures::FutureExt;
@@ -61,6 +63,204 @@ async fn send_ui_update_reliable(tx: &UiUpdateSender, update: UiUpdate) {
 fn enqueue_ui_update_required(ctx: Arc<IoContext>, tx: UiUpdateSender, update: UiUpdate) {
     spawn_ctx(ctx, async move {
         send_ui_update_required(&tx, update).await;
+    });
+}
+
+fn panic_detail(panic_context: &'static str, panic: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = panic.downcast_ref::<&str>() {
+        format!("{panic_context} panicked: {message}")
+    } else if let Some(message) = panic.downcast_ref::<String>() {
+        format!("{panic_context} panicked: {message}")
+    } else {
+        format!("{panic_context} panicked")
+    }
+}
+
+async fn emit_error_toast(tx: &UiUpdateSender, scope: &'static str, message: impl Into<String>) {
+    send_ui_update_reliable(
+        tx,
+        UiUpdate::ToastAdded(ToastMessage::error(scope, message)),
+    )
+    .await;
+}
+
+fn spawn_local_terminal_result_callback<
+    T,
+    Action,
+    ActionFut,
+    Success,
+    SuccessFut,
+    Failure,
+    FailureFut,
+>(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    operation: LocalTerminalOperationOwner,
+    panic_context: &'static str,
+    action: Action,
+    on_success: Success,
+    on_failure: Failure,
+) where
+    T: Send + 'static,
+    Action: FnOnce(Arc<IoContext>) -> ActionFut + Send + 'static,
+    ActionFut: Future<Output = crate::error::TerminalResult<T>> + Send + 'static,
+    Success: FnOnce(UiUpdateSender, T) -> SuccessFut + Send + 'static,
+    SuccessFut: Future<Output = ()> + Send + 'static,
+    Failure: FnOnce(UiUpdateSender, crate::error::TerminalError) -> FailureFut + Send + 'static,
+    FailureFut: Future<Output = ()> + Send + 'static,
+{
+    spawn_ctx(ctx.clone(), async move {
+        match std::panic::AssertUnwindSafe(action(ctx))
+            .catch_unwind()
+            .await
+        {
+            Ok(Ok(value)) => {
+                operation.succeed().await;
+                on_success(tx, value).await;
+            }
+            Ok(Err(error)) => {
+                operation.fail(error.to_string()).await;
+                on_failure(tx, error).await;
+            }
+            Err(_) => {
+                let error =
+                    crate::error::TerminalError::Operation(format!("panic in {panic_context}"));
+                operation.fail(error.to_string()).await;
+                on_failure(tx, error).await;
+            }
+        }
+    });
+}
+
+fn spawn_observed_dispatch_callback<Success, SuccessFut, Failure, FailureFut>(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    command: EffectCommand,
+    on_success: Success,
+    on_failure: Failure,
+) where
+    Success: FnOnce(UiUpdateSender) -> SuccessFut + Send + 'static,
+    SuccessFut: Future<Output = ()> + Send + 'static,
+    Failure: FnOnce(crate::error::TerminalError) -> FailureFut + Send + 'static,
+    FailureFut: Future<Output = ()> + Send + 'static,
+{
+    let dispatch_ctx = ctx.clone();
+    spawn_ctx(ctx, async move {
+        match dispatch_ctx.dispatch(command).await {
+            Ok(()) => on_success(tx).await,
+            Err(error) => on_failure(error).await,
+        }
+    });
+}
+
+fn spawn_observed_result_callback<T, Action, ActionFut, Success, SuccessFut, Failure, FailureFut>(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    panic_context: &'static str,
+    action: Action,
+    on_success: Success,
+    on_failure: Failure,
+) where
+    T: Send + 'static,
+    Action: FnOnce(Arc<IoContext>) -> ActionFut + Send + 'static,
+    ActionFut: Future<Output = crate::error::TerminalResult<T>> + Send + 'static,
+    Success: FnOnce(UiUpdateSender, T) -> SuccessFut + Send + 'static,
+    SuccessFut: Future<Output = ()> + Send + 'static,
+    Failure: FnOnce(UiUpdateSender, crate::error::TerminalError) -> FailureFut + Send + 'static,
+    FailureFut: Future<Output = ()> + Send + 'static,
+{
+    spawn_ctx(ctx.clone(), async move {
+        match std::panic::AssertUnwindSafe(action(ctx))
+            .catch_unwind()
+            .await
+        {
+            Ok(Ok(value)) => on_success(tx, value).await,
+            Ok(Err(error)) => on_failure(tx, error).await,
+            Err(panic) => {
+                let detail = panic_detail(panic_context, panic.as_ref());
+                on_failure(tx, crate::error::TerminalError::Operation(detail)).await;
+            }
+        }
+    });
+}
+
+fn spawn_handoff_workflow_callback<T, Fut, F>(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    operation: WorkflowHandoffOperationOwner,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+    scope: SemanticOperationTransferScope,
+    toast_scope: &'static str,
+    failure_prefix: &'static str,
+    panic_context: &'static str,
+    workflow: F,
+) where
+    T: Send + 'static,
+    Fut: Future<Output = WorkflowTerminalOutcome<T>> + Send + 'static,
+    F: FnOnce(
+            Arc<RwLock<aura_app::ui::types::AppCore>>,
+            Option<aura_app::ui_contract::OperationInstanceId>,
+        ) -> Fut
+        + Send
+        + 'static,
+{
+    let app_core = ctx.app_core_raw().clone();
+    let operation_instance_id = operation.harness_handle().instance_id().clone();
+    spawn_ctx(ctx, async move {
+        let workflow_instance_id = Some(operation_instance_id.clone());
+        let _ = operation.handoff_to_app_workflow(scope);
+
+        match std::panic::AssertUnwindSafe(workflow(app_core.clone(), workflow_instance_id))
+            .catch_unwind()
+            .await
+        {
+            Ok(WorkflowTerminalOutcome {
+                result: Ok(_),
+                terminal,
+            }) => {
+                if let Err(error) = apply_handed_off_terminal_status(
+                    &app_core,
+                    &tx,
+                    operation_id,
+                    operation_instance_id,
+                    kind,
+                    terminal,
+                )
+                .await
+                {
+                    emit_error_toast(&tx, toast_scope, error).await;
+                }
+            }
+            Ok(WorkflowTerminalOutcome {
+                result: Err(error),
+                terminal,
+            }) => {
+                let _ = apply_handed_off_terminal_status(
+                    &app_core,
+                    &tx,
+                    operation_id,
+                    operation_instance_id.clone(),
+                    kind,
+                    terminal,
+                )
+                .await;
+                emit_error_toast(&tx, toast_scope, format!("{failure_prefix}: {error}")).await;
+            }
+            Err(panic) => {
+                let detail = panic_detail(panic_context, panic.as_ref());
+                let _ = apply_handed_off_terminal_status(
+                    &app_core,
+                    &tx,
+                    operation_id,
+                    operation_instance_id,
+                    kind,
+                    None,
+                )
+                .await;
+                emit_error_toast(&tx, toast_scope, detail).await;
+            }
+        }
     });
 }
 
@@ -385,51 +585,31 @@ impl AppCallbacks {
     fn make_create_account(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateAccountCallback {
         Arc::new(
             move |nickname_suggestion: String, operation: LocalTerminalOperationOwner| {
-                let ctx = ctx.clone();
-                let tx = tx.clone();
-                spawn_ctx(ctx.clone(), async move {
-                    let account_result = std::panic::AssertUnwindSafe(async {
-                        ctx.create_account(&nickname_suggestion).await
-                    })
-                    .catch_unwind()
-                    .await;
-
-                    match account_result {
-                        Ok(Ok(())) => {
-                            tracing::info!("tui create_account callback succeeded");
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()),
-                            )
-                            .await;
-                            operation.succeed().await;
-                            send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
-                        }
-                        Ok(Err(e)) => {
-                            tracing::error!("tui create_account callback failed: {e}");
-                            operation.fail(e.to_string()).await;
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::operation_failed(UiOperation::CreateAccount, e),
-                            )
-                            .await;
-                        }
-                        Err(_) => {
-                            tracing::error!("tui create_account callback panicked");
-                            operation.fail("panic in CreateAccount callback").await;
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::operation_failed(
-                                    UiOperation::CreateAccount,
-                                    crate::error::TerminalError::Operation(
-                                        "panic in CreateAccount callback".to_string(),
-                                    ),
-                                ),
-                            )
-                            .await;
-                        }
-                    }
-                });
+                let create_nickname = nickname_suggestion.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "CreateAccount callback",
+                    move |ctx| async move { ctx.create_account(&create_nickname).await },
+                    move |tx, ()| async move {
+                        tracing::info!("tui create_account callback succeeded");
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::NicknameSuggestionChanged(nickname_suggestion),
+                        )
+                        .await;
+                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
+                    },
+                    |tx, error| async move {
+                        tracing::error!("tui create_account callback failed: {error}");
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed(UiOperation::CreateAccount, error),
+                        )
+                        .await;
+                    },
+                );
             },
         )
     }
@@ -440,35 +620,34 @@ impl AppCallbacks {
     ) -> ImportDeviceEnrollmentCallback {
         Arc::new(
             move |code: String, operation: LocalTerminalOperationOwner| {
-                let ctx = ctx.clone();
-                let tx = tx.clone();
-                spawn_ctx(ctx.clone(), async move {
-                    match ctx.import_device_enrollment_code(&code).await {
-                        Ok(()) => {
-                            operation.succeed().await;
-                            send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::success(
-                                    "devices",
-                                    "Device enrollment invitation accepted",
-                                )),
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            operation.fail(e.to_string()).await;
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::operation_failed(
-                                    UiOperation::ImportDeviceEnrollmentCode,
-                                    e,
-                                ),
-                            )
-                            .await;
-                        }
-                    }
-                });
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "ImportDeviceEnrollmentDuringOnboarding callback",
+                    move |ctx| async move { ctx.import_device_enrollment_code(&code).await },
+                    |tx, ()| async move {
+                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::success(
+                                "devices",
+                                "Device enrollment invitation accepted",
+                            )),
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::operation_failed(
+                                UiOperation::ImportDeviceEnrollmentCode,
+                                error,
+                            ),
+                        )
+                        .await;
+                    },
+                );
             },
         )
     }

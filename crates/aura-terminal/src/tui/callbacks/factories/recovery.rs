@@ -24,97 +24,89 @@ impl RecoveryCallbacks {
 
     fn make_start_recovery(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RecoveryCallback {
         Arc::new(move || {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::StartRecovery;
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(&tx, UiUpdate::RecoveryStarted).await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::StartRecovery,
+                |tx| async move {
+                    send_ui_update_required(&tx, UiUpdate::RecoveryStarted).await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
     fn make_add_guardian(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RecoveryCallback {
         Arc::new(move || {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let cmd = EffectCommand::InviteGuardian { contact_id: None };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::GuardianAdded {
-                                contact_id: "unknown".to_string(),
-                            },
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::InviteGuardian { contact_id: None },
+                |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::GuardianAdded {
+                            contact_id: "unknown".to_string(),
+                        },
+                    )
+                    .await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
     fn make_select_guardian(ctx: Arc<IoContext>, tx: UiUpdateSender) -> GuardianSelectCallback {
         Arc::new(move |contact_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let contact_id_clone = contact_id.clone();
-            let cmd = EffectCommand::InviteGuardian {
-                contact_id: Some(contact_id),
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::GuardianSelected {
-                                contact_id: contact_id_clone,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::InviteGuardian {
+                    contact_id: Some(contact_id),
+                },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::GuardianSelected {
+                            contact_id: contact_id_clone,
+                        },
+                    )
+                    .await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 
     fn make_submit_approval(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ApprovalCallback {
         Arc::new(move |request_id: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
             let request_id_clone = request_id.clone();
-            let cmd = EffectCommand::SubmitGuardianApproval {
-                guardian_id: request_id,
-            };
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ApprovalSubmitted {
-                                request_id: request_id_clone,
-                            },
-                        )
-                        .await;
-                    }
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
-                    }
-                }
-            });
+            spawn_observed_dispatch_callback(
+                ctx.clone(),
+                tx.clone(),
+                EffectCommand::SubmitGuardianApproval {
+                    guardian_id: request_id,
+                },
+                move |tx| async move {
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ApprovalSubmitted {
+                            request_id: request_id_clone,
+                        },
+                    )
+                    .await;
+                },
+                |error| async move {
+                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                },
+            );
         })
     }
 }

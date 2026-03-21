@@ -32,6 +32,9 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - The TUI must expose shared semantic command ingress through its real update/event loop; command handling may not depend on render-time polling.
 - Parity-critical semantic export must not depend on placeholder IDs, override-backed lists, or heuristic runtime-event inference.
 - The TUI is an `Observed` plus command-ingress surface for shared semantic flows. It may submit commands and render lifecycle, but it must not own terminal semantic truth for parity-critical operations.
+- Parity-critical callback families must require the appropriate owner type at the API boundary; ownerless callbacks are observed-only.
+- Snapshot contention must be surfaced explicitly on parity-relevant paths; the shell may not treat lock contention as an empty authoritative state.
+- Long-lived subscription exhaustion must become structural degraded state, not a log-only event.
 
 ### InvariantTerminalUiBoundary
 
@@ -73,6 +76,7 @@ For shared semantic flows, `aura-terminal` uses `Observed` for render state, pro
 - Shared semantic command ingress and receipt handling through the real TUI update/event loop.
 - Authoritative semantic lifecycle/readiness mirroring consumed from `aura-app::ui_contract` and `aura-app::workflows::semantic_facts`, never authored locally.
 - Callback factories and subscription bridges that may adapt authoritative operation state for rendering, but may not publish terminal semantic truth.
+- Explicit shell-owned degraded-state publication for permanently failed frontend subscriptions.
 
 ### Verification Hooks
 

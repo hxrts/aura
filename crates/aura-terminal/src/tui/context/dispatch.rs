@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 
+use super::snapshots::StateSnapshotAvailability;
 use super::{SnapshotHelper, ToastHelper};
 use crate::error::{TerminalError, TerminalResult};
 use crate::tui::components::copy_to_clipboard;
@@ -442,9 +443,21 @@ impl DispatchHelper {
                 if has_explicit_admin_scope(command) {
                     return Ok(());
                 }
-                let snapshot = self.snapshots.try_state_snapshot();
-                aura_app::ui::authorization::require_admin(snapshot.as_ref(), command_name(command))
-                    .map_err(|e| TerminalError::Capability(e.to_string()))
+                match self.snapshots.state_snapshot_availability() {
+                    StateSnapshotAvailability::Available(snapshot) => {
+                        aura_app::ui::authorization::require_admin(
+                            Some(&snapshot),
+                            command_name(command),
+                        )
+                        .map_err(|e| TerminalError::Capability(e.to_string()))
+                    }
+                    StateSnapshotAvailability::Contended => Err(TerminalError::Capability(
+                        format!(
+                            "{} requires an authoritative home snapshot, but the snapshot lock is contended",
+                            command_name(command)
+                        ),
+                    )),
+                }
             }
         }
     }
@@ -498,6 +511,7 @@ fn has_explicit_admin_scope(command: &EffectCommand) -> bool {
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Tests use expect() for cleaner error handling
 mod tests {
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -512,8 +526,12 @@ mod tests {
     use aura_effects::time::PhysicalTimeHandler;
 
     use crate::handlers::tui::TuiMode;
-    use crate::tui::context::{InitializedAppCore, IoContext};
+    use crate::tui::context::{AccountFilesHelper, DispatchHelper, InitializedAppCore, IoContext};
+    use crate::tui::context::{SnapshotHelper, ToastHelper};
     use crate::tui::effects::EffectCommand;
+    use crate::tui::effects::OperationalHandler;
+    use crate::tui::tasks::UiTaskOwner;
+    use crate::tui::types::ChannelMode;
     use crate::TerminalError;
 
     async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
@@ -548,6 +566,27 @@ mod tests {
             }
             Err(TimeoutRunError::Operation(error)) => match error {},
         }
+    }
+
+    fn test_dispatch_helper(app_core: Arc<RwLock<AppCore>>, base_path: PathBuf) -> DispatchHelper {
+        DispatchHelper::new(
+            Arc::new(OperationalHandler::new(
+                app_core.clone(),
+                Arc::new(UiTaskOwner::new()),
+            )),
+            SnapshotHelper::new(app_core, "test-device"),
+            ToastHelper::new(),
+            AccountFilesHelper::new(
+                base_path,
+                "test-device".to_string(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            ),
+            Arc::new(RwLock::new(std::collections::HashSet::new())),
+            Arc::new(RwLock::new(None)),
+            Arc::new(RwLock::new(
+                std::collections::HashMap::<String, ChannelMode>::new(),
+            )),
+        )
     }
 
     #[tokio::test]
@@ -610,6 +649,38 @@ mod tests {
                 !message.contains("Unknown command"),
                 "CreateAccount must be handled, not rejected as unknown. Got: {message}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_authorization_reports_snapshot_contention_explicitly() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).expect("Failed to create test AppCore"),
+        ));
+        {
+            let mut core = app_core.write().await;
+            core.init_signals()
+                .await
+                .expect("Failed to init signals for test AppCore");
+        }
+
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let dispatch = test_dispatch_helper(app_core.clone(), dir.path().to_path_buf());
+        let _guard = app_core.write().await;
+
+        let error = dispatch
+            .check_authorization(&EffectCommand::Shutdown)
+            .expect_err("contended snapshot must reject admin command");
+
+        match error {
+            TerminalError::Capability(message) => {
+                assert!(
+                    message.contains("authoritative home snapshot")
+                        && message.contains("contended"),
+                    "expected explicit contention message, got: {message}"
+                );
+            }
+            other => panic!("expected capability error, got: {other:?}"),
         }
     }
 }

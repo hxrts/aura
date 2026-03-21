@@ -74,6 +74,12 @@ use crate::error::TerminalResult;
 use crate::tui::context::{InitializedAppCore, IoContext};
 use crate::tui::tasks::UiTaskOwner;
 
+#[derive(Debug, Clone)]
+pub enum AppSnapshotAvailability {
+    Available(aura_app::ui::types::StateSnapshot),
+    Contended,
+}
+
 // =============================================================================
 // AppCore Context for iocraft
 // =============================================================================
@@ -139,14 +145,11 @@ impl AppCoreContext {
     ///
     /// This is useful for initializing iocraft State<T> values.
     #[must_use]
-    pub fn snapshot(&self) -> aura_app::ui::types::StateSnapshot {
-        // Use try_read to avoid blocking in sync context
-        // Fall back to default if lock is held
-        self.app_core
-            .raw()
-            .try_read()
-            .map(|guard| guard.snapshot())
-            .unwrap_or_default()
+    pub fn snapshot(&self) -> AppSnapshotAvailability {
+        match self.app_core.raw().try_read() {
+            Some(guard) => AppSnapshotAvailability::Available(guard.snapshot()),
+            None => AppSnapshotAvailability::Contended,
+        }
     }
 
     /// Dispatch an effect command through IoContext
@@ -241,7 +244,10 @@ impl AppCoreContext {
 ///
 /// Maximum outer retry attempts before giving up on a signal subscription.
 /// At 2s max backoff this is ~6+ minutes of retrying before the loop exits.
+#[cfg(not(test))]
 const MAX_SUBSCRIPTION_RETRIES: u32 = 200;
+#[cfg(test)]
+const MAX_SUBSCRIPTION_RETRIES: u32 = 1;
 const SUBSCRIPTION_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const SUBSCRIPTION_MAX_BACKOFF: Duration = Duration::from_secs(2);
 
@@ -278,6 +284,19 @@ pub async fn subscribe_signal_with_retry<T, F>(
     T: Clone + Send + Sync + 'static,
     F: FnMut(T) + Send + 'static,
 {
+    subscribe_signal_with_retry_report(app_core, signal, on_value, |_| {}).await;
+}
+
+pub async fn subscribe_signal_with_retry_report<T, F, G>(
+    app_core: InitializedAppCore,
+    signal: &'static Signal<T>,
+    on_value: F,
+    on_terminal_failure: G,
+) where
+    T: Clone + Send + Sync + 'static,
+    F: FnMut(T) + Send + 'static,
+    G: Fn(String) + Send + 'static,
+{
     let reactive: ReactiveHandler = {
         let core = app_core.raw().read().await;
         core.reactive().clone()
@@ -285,6 +304,7 @@ pub async fn subscribe_signal_with_retry<T, F>(
 
     let last_emitted = Arc::new(Mutex::new(None::<String>));
     let on_value = Arc::new(Mutex::new(on_value));
+    let on_terminal_failure = Arc::new(on_terminal_failure);
     let time = PhysicalTimeHandler::new();
     let retry_policy = subscription_retry_policy();
 
@@ -340,6 +360,9 @@ pub async fn subscribe_signal_with_retry<T, F>(
             attempts_used,
             last_error,
         }) => {
+            (*on_terminal_failure)(format!(
+                "attempts exhausted after {attempts_used} retries: {last_error}"
+            ));
             tracing::warn!(
                 signal = %signal.id(),
                 attempts_used,
@@ -348,6 +371,7 @@ pub async fn subscribe_signal_with_retry<T, F>(
             );
         }
         Err(RetryRunError::Timeout(error)) => {
+            (*on_terminal_failure)(format!("retry budget handling timed out: {error}"));
             tracing::warn!(
                 signal = %signal.id(),
                 error = %error,
@@ -707,6 +731,14 @@ impl CallbackContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, LazyLock, Mutex};
+
+    use async_lock::RwLock;
+    use aura_app::ui::types::AppConfig;
+    use tokio::sync::oneshot;
+
+    static UNREGISTERED_TEST_SIGNAL: LazyLock<Signal<u64>> =
+        LazyLock::new(|| Signal::new("test:unregistered"));
 
     #[test]
     fn test_snapshot_state() {
@@ -771,5 +803,42 @@ mod tests {
 
         let neighborhood = NeighborhoodSnapshot::default();
         assert!(neighborhood.homes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn subscribe_signal_with_retry_report_invokes_terminal_failure_for_unregistered_signal() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).expect("Failed to create test AppCore"),
+        ));
+        let app_core = InitializedAppCore::new(app_core)
+            .await
+            .expect("Failed to init signals");
+
+        let (tx, rx) = oneshot::channel();
+        let sender = Arc::new(Mutex::new(Some(tx)));
+        subscribe_signal_with_retry_report(
+            app_core,
+            &UNREGISTERED_TEST_SIGNAL,
+            |_| {},
+            move |reason| {
+                if let Some(tx) = sender.lock().expect("poisoned sender mutex").take() {
+                    let _ = tx.send(reason);
+                }
+            },
+        )
+        .await;
+
+        let reason = rx
+            .await
+            .expect("terminal failure callback should receive a reason");
+        assert!(
+            reason.contains("attempts exhausted")
+                || reason.contains("retry budget handling timed out"),
+            "unexpected terminal failure reason: {reason}"
+        );
+        assert!(
+            reason.contains("Reactive signal not registered: test:unregistered"),
+            "terminal failure reason should preserve the signal registration error: {reason}"
+        );
     }
 }
