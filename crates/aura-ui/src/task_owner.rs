@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 
 use async_trait::async_trait;
@@ -9,15 +9,15 @@ use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::{OwnedShutdownToken, OwnedTaskSpawner};
 use dioxus::prelude::spawn;
 use futures::{
+    channel::oneshot,
     future::{BoxFuture, LocalBoxFuture},
     FutureExt,
 };
-use tokio::sync::watch;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct UiTaskCancellationState {
     cancelled: AtomicBool,
-    shutdown_tx: watch::Sender<bool>,
+    waiters: Mutex<Vec<oneshot::Sender<()>>>,
 }
 
 impl UiTaskCancellationState {
@@ -25,7 +25,14 @@ impl UiTaskCancellationState {
         if self.cancelled.swap(true, Ordering::SeqCst) {
             return;
         }
-        let _ = self.shutdown_tx.send(true);
+
+        let waiters = {
+            let mut guard = self.waiters.lock().expect("ui task waiters lock poisoned");
+            std::mem::take(&mut *guard)
+        };
+        for waiter in waiters {
+            let _ = waiter.send(());
+        }
     }
 
     fn is_cancelled(&self) -> bool {
@@ -44,18 +51,20 @@ impl CancellationToken for UiTaskCancellationToken {
         if self.state.is_cancelled() {
             return;
         }
-        let mut shutdown_rx = self.state.shutdown_tx.subscribe();
-        if *shutdown_rx.borrow() {
-            return;
-        }
-        loop {
-            if shutdown_rx.changed().await.is_err() {
+
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut waiters = self
+                .state
+                .waiters
+                .lock()
+                .expect("ui task waiters lock poisoned");
+            if self.state.is_cancelled() {
                 return;
             }
-            if *shutdown_rx.borrow() {
-                return;
-            }
+            waiters.push(tx);
         }
+        let _ = rx.await;
     }
 
     fn is_cancelled(&self) -> bool {
@@ -128,11 +137,7 @@ pub(crate) struct UiTaskOwner {
 
 impl UiTaskOwner {
     fn new() -> Self {
-        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        let cancellation_state = Arc::new(UiTaskCancellationState {
-            cancelled: AtomicBool::new(false),
-            shutdown_tx,
-        });
+        let cancellation_state = Arc::new(UiTaskCancellationState::default());
         let inner = Arc::new(UiTaskSpawnerImpl::new(cancellation_state));
         let shutdown = OwnedShutdownToken::attached(inner.cancellation_token());
         let spawner = OwnedTaskSpawner::new(inner.clone(), shutdown);
