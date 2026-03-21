@@ -39,6 +39,10 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Device-enrollment import and accept flows must rely on the upstream
   invitation workflow's bounded convergence contract rather than adding a
   frontend-local runtime pre-warm or peer-connectivity loop in `aura-ui`.
+- The add-device confirmation display and refresh path must read typed
+  `CeremonyStatusHandle` lifecycle status from `aura-app::ui::workflows`
+  rather than inferring progress from local timers, local counters, or modal
+  transitions alone.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every other screen.
 
