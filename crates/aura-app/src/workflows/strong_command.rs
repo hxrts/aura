@@ -9,7 +9,6 @@
 
 use crate::core::StateSnapshot;
 use crate::views::Contact;
-use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::{
     normalize_channel_name, parse_chat_command, ChatCommand, CommandError,
 };
@@ -39,32 +38,46 @@ pub struct ResolvedChannelId(pub ChannelId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResolvedContextId(pub ContextId);
 
-/// Canonical result of channel resolution for commands that may target an
-/// existing channel or intentionally create one later.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChannelResolveOutcome {
-    Existing {
-        channel_id: ResolvedChannelId,
-        context_id: Option<ResolvedContextId>,
-    },
-    WillCreate {
-        channel_id: ResolvedChannelId,
-        channel_name: String,
-    },
+/// Canonical existing channel target resolved by `CommandResolver`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExistingChannelResolution {
+    channel_id: ResolvedChannelId,
+    context_id: Option<ResolvedContextId>,
 }
 
-impl ChannelResolveOutcome {
+impl ExistingChannelResolution {
     #[must_use]
     pub const fn channel_id(&self) -> ResolvedChannelId {
-        match self {
-            Self::Existing { channel_id, .. } | Self::WillCreate { channel_id, .. } => *channel_id,
-        }
+        self.channel_id
     }
 
     #[must_use]
     pub const fn context_id(&self) -> Option<ResolvedContextId> {
+        self.context_id
+    }
+}
+
+/// Canonical result of channel resolution for commands that may target an
+/// existing channel or intentionally create one later.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelResolveOutcome {
+    Existing(ExistingChannelResolution),
+    WillCreate { channel_name: String },
+}
+
+impl ChannelResolveOutcome {
+    #[must_use]
+    pub const fn context_id(&self) -> Option<ResolvedContextId> {
         match self {
-            Self::Existing { context_id, .. } => *context_id,
+            Self::Existing(channel) => channel.context_id(),
+            Self::WillCreate { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn existing_channel(&self) -> Option<ExistingChannelResolution> {
+        match self {
+            Self::Existing(channel) => Some(*channel),
             Self::WillCreate { .. } => None,
         }
     }
@@ -305,7 +318,7 @@ pub enum ResolvedCommand {
     },
     Mode {
         channel_name: String,
-        channel: ChannelResolveOutcome,
+        channel: ExistingChannelResolution,
         flags: String,
     },
 }
@@ -493,7 +506,13 @@ impl PlannedCommand {
     pub fn consistency_requirement(&self) -> ConsistencyRequirement {
         match self {
             Self::General(plan) => consistency_for_resolved(&plan.operation),
-            Self::Membership(plan) => consistency_for_resolved(&plan.operation.command),
+            Self::Membership(plan) => match &plan.operation.command {
+                ResolvedCommand::Join {
+                    channel: ChannelResolveOutcome::WillCreate { .. },
+                    ..
+                } => ConsistencyRequirement::Accepted,
+                _ => consistency_for_resolved(&plan.operation.command),
+            },
             Self::Moderation(plan) => consistency_for_resolved(&plan.operation.command),
             Self::Moderator(plan) => consistency_for_resolved(&plan.operation.command),
         }
@@ -702,7 +721,7 @@ impl CommandResolver {
             }),
             ParsedCommand::Mode { channel, flags } => {
                 let channel_name = normalize_channel_name(&channel);
-                let channel = self.resolve_channel(snapshot.state(), &channel, false)?;
+                let channel = self.resolve_existing_channel(snapshot.state(), &channel)?;
                 Ok(ResolvedCommand::Mode {
                     channel_name,
                     channel,
@@ -729,14 +748,16 @@ impl CommandResolver {
                 channel_name,
                 channel,
             } => {
-                let scope = CommandScope::Channel {
-                    channel_id: channel.channel_id(),
-                    context_id: channel.context_id(),
+                let (scope, preconditions) = match channel {
+                    ChannelResolveOutcome::Existing(channel) => (
+                        CommandScope::Channel {
+                            channel_id: channel.channel_id(),
+                            context_id: channel.context_id(),
+                        },
+                        vec![PlanPrecondition::ChannelExists(channel.channel_id())],
+                    ),
+                    ChannelResolveOutcome::WillCreate { .. } => (CommandScope::Global, Vec::new()),
                 };
-                let mut preconditions = Vec::new();
-                if matches!(channel, ChannelResolveOutcome::Existing { .. }) {
-                    preconditions.push(PlanPrecondition::ChannelExists(channel.channel_id()));
-                }
                 Ok(PlannedCommand::Membership(CommandPlan {
                     actor,
                     scope,
@@ -751,7 +772,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Leave => {
                 let channel =
-                    self.resolve_current_channel(snapshot, current_channel_hint, "leave", false)?;
+                    self.resolve_current_channel(snapshot, current_channel_hint, "leave")?;
                 Ok(PlannedCommand::Membership(CommandPlan {
                     actor,
                     scope: CommandScope::Channel {
@@ -769,7 +790,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Kick { target, reason } => {
                 let channel =
-                    self.resolve_current_channel(snapshot, current_channel_hint, "kick", false)?;
+                    self.resolve_current_channel(snapshot, current_channel_hint, "kick")?;
                 Ok(PlannedCommand::Moderation(CommandPlan {
                     actor,
                     scope: CommandScope::Channel {
@@ -788,8 +809,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Ban { target, reason } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel =
-                        self.resolve_current_channel(snapshot, Some(hint), "ban", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "ban")?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -809,8 +829,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Unban { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel =
-                        self.resolve_current_channel(snapshot, Some(hint), "unban", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "unban")?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -830,8 +849,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Mute { target, duration } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel =
-                        self.resolve_current_channel(snapshot, Some(hint), "mute", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "mute")?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -851,8 +869,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Unmute { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel =
-                        self.resolve_current_channel(snapshot, Some(hint), "unmute", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "unmute")?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -872,7 +889,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Invite { target } => {
                 let channel =
-                    self.resolve_current_channel(snapshot, current_channel_hint, "invite", false)?;
+                    self.resolve_current_channel(snapshot, current_channel_hint, "invite")?;
                 Ok(PlannedCommand::Moderation(CommandPlan {
                     actor,
                     scope: CommandScope::Channel {
@@ -890,8 +907,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Op { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel =
-                        self.resolve_current_channel(snapshot, Some(hint), "op", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "op")?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -911,8 +927,7 @@ impl CommandResolver {
             }
             ResolvedCommand::Deop { target } => {
                 let scope = if let Some(hint) = current_channel_hint {
-                    let channel =
-                        self.resolve_current_channel(snapshot, Some(hint), "deop", false)?;
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "deop")?;
                     CommandScope::Channel {
                         channel_id: channel.channel_id(),
                         context_id: channel.context_id(),
@@ -958,7 +973,6 @@ impl CommandResolver {
                             snapshot,
                             current_channel_hint,
                             command_name(&command),
-                            false,
                         )?;
                         CommandScope::Channel {
                             channel_id: channel.channel_id(),
@@ -993,12 +1007,11 @@ impl CommandResolver {
         snapshot: &ResolverSnapshot,
         current_channel_hint: Option<&str>,
         command: &'static str,
-        allow_create: bool,
-    ) -> Result<ChannelResolveOutcome, CommandResolverError> {
+    ) -> Result<ExistingChannelResolution, CommandResolverError> {
         let Some(current_channel_hint) = current_channel_hint else {
             return Err(CommandResolverError::MissingCurrentChannel { command });
         };
-        self.resolve_channel(snapshot.state(), current_channel_hint, allow_create)
+        self.resolve_existing_channel(snapshot.state(), current_channel_hint)
     }
 
     fn ensure_fresh(&self, snapshot: &ResolverSnapshot) -> Result<(), CommandResolverError> {
@@ -1089,6 +1102,46 @@ impl CommandResolver {
         input: &str,
         allow_create: bool,
     ) -> Result<ChannelResolveOutcome, CommandResolverError> {
+        match self.resolve_existing_channel(state, input) {
+            Ok(channel) => return Ok(ChannelResolveOutcome::Existing(channel)),
+            Err(CommandResolverError::UnknownTarget {
+                target: ResolveTarget::Channel,
+                ..
+            }) => {}
+            Err(err) => return Err(err),
+        }
+
+        if allow_create {
+            let normalized = normalize_channel_name(input);
+            let normalized = normalized.trim();
+            if normalized.is_empty() {
+                return Err(CommandResolverError::UnknownTarget {
+                    target: ResolveTarget::Channel,
+                    input: input.to_string(),
+                });
+            }
+            if normalized.parse::<ChannelId>().is_ok() {
+                return Err(CommandResolverError::UnknownTarget {
+                    target: ResolveTarget::Channel,
+                    input: input.to_string(),
+                });
+            }
+            return Ok(ChannelResolveOutcome::WillCreate {
+                channel_name: normalized.to_string(),
+            });
+        }
+
+        Err(CommandResolverError::UnknownTarget {
+            target: ResolveTarget::Channel,
+            input: normalize_channel_name(input),
+        })
+    }
+
+    fn resolve_existing_channel(
+        &self,
+        state: &StateSnapshot,
+        input: &str,
+    ) -> Result<ExistingChannelResolution, CommandResolverError> {
         let normalized = normalize_channel_name(input);
         let normalized = normalized.trim();
         if normalized.is_empty() {
@@ -1100,15 +1153,9 @@ impl CommandResolver {
 
         if let Ok(channel_id) = normalized.parse::<ChannelId>() {
             if let Some(ctx) = resolve_channel_context(state, channel_id) {
-                return Ok(ChannelResolveOutcome::Existing {
+                return Ok(ExistingChannelResolution {
                     channel_id: ResolvedChannelId(channel_id),
                     context_id: ctx,
-                });
-            }
-            if allow_create {
-                return Ok(ChannelResolveOutcome::WillCreate {
-                    channel_id: ResolvedChannelId(channel_id),
-                    channel_name: normalized.to_string(),
                 });
             }
             return Err(CommandResolverError::UnknownTarget {
@@ -1130,7 +1177,7 @@ impl CommandResolver {
                 .next()
                 .map(|(id, (name, context))| (*id, (name, *context)))
             {
-                return Ok(ChannelResolveOutcome::Existing {
+                return Ok(ExistingChannelResolution {
                     channel_id: ResolvedChannelId(channel_id),
                     context_id,
                 });
@@ -1146,15 +1193,6 @@ impl CommandResolver {
                 target: ResolveTarget::Channel,
                 input: normalized.to_string(),
                 candidates,
-            });
-        }
-
-        if allow_create {
-            return Ok(ChannelResolveOutcome::WillCreate {
-                channel_id: ResolvedChannelId(
-                    ChannelRef::Name(normalized.to_string()).to_channel_id(),
-                ),
-                channel_name: normalized.to_string(),
             });
         }
 
@@ -1293,9 +1331,9 @@ async fn consistency_invariant_holds(
     let snapshot = app_core.read().await.snapshot();
     match plan {
         PlannedCommand::Membership(plan) => match &plan.operation.command {
-            ResolvedCommand::Join { channel, .. } => {
-                snapshot.chat.channel(&channel.channel_id().0).is_some()
-            }
+            ResolvedCommand::Join { channel, .. } => channel
+                .existing_channel()
+                .is_some_and(|channel| snapshot.chat.channel(&channel.channel_id().0).is_some()),
             ResolvedCommand::Leave => match scope_channel_id(&plan.scope, "leave") {
                 Ok(channel_id) => snapshot
                     .chat
@@ -1406,13 +1444,16 @@ async fn execute_membership(
             channel_name,
             channel,
         } => match channel {
-            ChannelResolveOutcome::Existing { channel_id, .. } => {
+            ChannelResolveOutcome::Existing(channel) => {
                 let authoritative_channel =
-                    messaging::require_authoritative_context_id_for_channel(app_core, channel_id.0)
-                        .await
-                        .map(|context_id| {
-                            messaging::authoritative_channel_ref(channel_id.0, context_id)
-                        })?;
+                    messaging::require_authoritative_context_id_for_channel(
+                        app_core,
+                        channel.channel_id().0,
+                    )
+                    .await
+                    .map(|context_id| {
+                        messaging::authoritative_channel_ref(channel.channel_id().0, context_id)
+                    })?;
                 messaging::join_channel(app_core, authoritative_channel)
                     .await
                     .map(|_| ())
@@ -1949,7 +1990,6 @@ mod tests {
                 assert_eq!(channel.channel_id(), ResolvedChannelId(channel_id));
                 assert_eq!(channel_name, "slash-lab");
                 assert_eq!(flags, "+m");
-                assert!(!channel.is_will_create());
             }
             other => panic!("unexpected command: {other:?}"),
         }
@@ -1975,19 +2015,37 @@ mod tests {
                 channel_name,
                 channel:
                     ChannelResolveOutcome::WillCreate {
-                        channel_id,
                         channel_name: outcome_name,
                     },
             } => {
                 assert_eq!(channel_name, "typo-room");
                 assert_eq!(outcome_name, "typo-room");
-                assert_eq!(
-                    channel_id,
-                    ResolvedChannelId(ChannelRef::Name("typo-room".to_string()).to_channel_id())
-                );
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn resolver_rejects_unknown_join_channel_id_without_materialization() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let resolver = CommandResolver::default();
+        let snapshot = resolver.capture_snapshot(&app_core).await;
+        let unknown_channel_id = ChannelId::from_bytes([9u8; 32]).to_string();
+
+        let resolved = resolver.resolve(
+            ParsedCommand::Join {
+                channel: unknown_channel_id.clone(),
+            },
+            &snapshot,
+        );
+
+        assert_eq!(
+            resolved,
+            Err(CommandResolverError::UnknownTarget {
+                target: ResolveTarget::Channel,
+                input: unknown_channel_id,
+            })
+        );
     }
 
     #[tokio::test]
@@ -2023,18 +2081,10 @@ mod tests {
             .expect("join should treat unmatched channel name as create intent");
         match join {
             ResolvedCommand::Join {
-                channel:
-                    ChannelResolveOutcome::WillCreate {
-                        channel_id,
-                        channel_name,
-                    },
+                channel: ChannelResolveOutcome::WillCreate { channel_name },
                 ..
             } => {
                 assert_eq!(channel_name, "slash-lab");
-                assert_eq!(
-                    channel_id,
-                    ResolvedChannelId(ChannelRef::Name("slash-lab".to_string()).to_channel_id())
-                );
             }
             other => panic!("unexpected join resolution: {other:?}"),
         }
@@ -2088,10 +2138,10 @@ mod tests {
     fn membership_plan_accepts_join_and_leave() {
         let valid_join = ResolvedCommand::Join {
             channel_name: "slash-lab".to_string(),
-            channel: ChannelResolveOutcome::Existing {
+            channel: ChannelResolveOutcome::Existing(ExistingChannelResolution {
                 channel_id: ResolvedChannelId(ChannelId::from_bytes([13u8; 32])),
                 context_id: None,
-            },
+            }),
         };
         let valid_leave = ResolvedCommand::Leave;
         let invalid = ResolvedCommand::Nick {
@@ -2112,7 +2162,7 @@ mod tests {
         let channel = ResolvedChannelId(ChannelId::from_bytes([15u8; 32]));
         let channel_mode = ResolvedCommand::Mode {
             channel_name: "slash-lab".to_string(),
-            channel: ChannelResolveOutcome::Existing {
+            channel: ExistingChannelResolution {
                 channel_id: channel,
                 context_id: None,
             },
@@ -2122,10 +2172,10 @@ mod tests {
         assert_eq!(
             consistency_for_resolved(&ResolvedCommand::Join {
                 channel_name: "slash-lab".to_string(),
-                channel: ChannelResolveOutcome::Existing {
+                channel: ChannelResolveOutcome::Existing(ExistingChannelResolution {
                     channel_id: channel,
                     context_id: None,
-                },
+                }),
             }),
             ConsistencyRequirement::Replicated
         );
@@ -2142,6 +2192,40 @@ mod tests {
         );
         assert_eq!(
             consistency_for_resolved(&ResolvedCommand::Who),
+            ConsistencyRequirement::Accepted
+        );
+    }
+
+    #[tokio::test]
+    async fn join_create_plan_uses_global_scope_and_accepted_consistency() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let resolver = CommandResolver::default();
+        let snapshot = resolver.capture_snapshot(&app_core).await;
+
+        let resolved = resolver
+            .resolve(
+                ParsedCommand::Join {
+                    channel: "future-room".to_string(),
+                },
+                &snapshot,
+            )
+            .expect("join create intent should resolve");
+        let plan = resolver
+            .plan(resolved, &snapshot, None, None)
+            .expect("join create plan should succeed");
+
+        match &plan {
+            PlannedCommand::Membership(plan) => {
+                assert_eq!(plan.scope, CommandScope::Global);
+                assert!(
+                    plan.preconditions.is_empty(),
+                    "create intent should not claim canonical channel preconditions"
+                );
+            }
+            other => panic!("unexpected plan: {other:?}"),
+        }
+        assert_eq!(
+            plan.consistency_requirement(),
             ConsistencyRequirement::Accepted
         );
     }
@@ -2281,10 +2365,10 @@ mod tests {
             operation: MembershipPlan {
                 command: ResolvedCommand::Join {
                     channel_name: "replicated-room".to_string(),
-                    channel: ChannelResolveOutcome::Existing {
+                    channel: ChannelResolveOutcome::Existing(ExistingChannelResolution {
                         channel_id: ResolvedChannelId(channel_id),
                         context_id: None,
-                    },
+                    }),
                 },
             },
         });
