@@ -216,8 +216,6 @@ impl<'a> InvitationContactHandler<'a> {
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
 
-                effects.await_next_view_update().await;
-
                 let mut updated = invitation.clone();
                 updated.status = InvitationStatus::Accepted;
                 InvitationHandler::persist_created_invitation(
@@ -340,8 +338,6 @@ impl<'a> InvitationContactHandler<'a> {
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
 
-                effects.await_next_view_update().await;
-
                 let mut updated = invitation.clone();
                 updated.status = InvitationStatus::Accepted;
                 InvitationHandler::persist_created_invitation(
@@ -402,7 +398,6 @@ impl<'a> InvitationContactHandler<'a> {
                     .commit_relational_facts(vec![fact])
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
-                effects.await_next_view_update().await;
 
                 processed = processed.saturating_add(1);
                 continue;
