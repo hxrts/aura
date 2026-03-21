@@ -15,12 +15,12 @@ use futures::{
 };
 
 #[derive(Debug, Default)]
-struct UiTaskCancellationState {
+struct FrontendTaskCancellationState {
     cancelled: AtomicBool,
     waiters: Mutex<Vec<oneshot::Sender<()>>>,
 }
 
-impl UiTaskCancellationState {
+impl FrontendTaskCancellationState {
     fn signal_shutdown(&self) {
         if self.cancelled.swap(true, Ordering::SeqCst) {
             return;
@@ -41,12 +41,12 @@ impl UiTaskCancellationState {
 }
 
 #[derive(Clone)]
-struct UiTaskCancellationToken {
-    state: Arc<UiTaskCancellationState>,
+struct FrontendTaskCancellationToken {
+    state: Arc<FrontendTaskCancellationState>,
 }
 
 #[async_trait]
-impl CancellationToken for UiTaskCancellationToken {
+impl CancellationToken for FrontendTaskCancellationToken {
     async fn cancelled(&self) {
         if self.state.is_cancelled() {
             return;
@@ -72,14 +72,37 @@ impl CancellationToken for UiTaskCancellationToken {
     }
 }
 
-#[derive(Debug)]
-struct UiTaskSpawnerImpl {
-    cancellation_state: Arc<UiTaskCancellationState>,
+#[derive(Clone, Copy, Debug)]
+pub struct FrontendTaskRuntime {
+    spawn: fn(BoxFuture<'static, ()>),
+    spawn_local: fn(LocalBoxFuture<'static, ()>),
 }
 
-impl UiTaskSpawnerImpl {
-    fn new(cancellation_state: Arc<UiTaskCancellationState>) -> Self {
-        Self { cancellation_state }
+impl FrontendTaskRuntime {
+    #[must_use]
+    pub const fn new(
+        spawn: fn(BoxFuture<'static, ()>),
+        spawn_local: fn(LocalBoxFuture<'static, ()>),
+    ) -> Self {
+        Self { spawn, spawn_local }
+    }
+}
+
+#[derive(Debug)]
+struct FrontendTaskSpawnerImpl {
+    cancellation_state: Arc<FrontendTaskCancellationState>,
+    runtime: FrontendTaskRuntime,
+}
+
+impl FrontendTaskSpawnerImpl {
+    fn new(
+        cancellation_state: Arc<FrontendTaskCancellationState>,
+        runtime: FrontendTaskRuntime,
+    ) -> Self {
+        Self {
+            cancellation_state,
+            runtime,
+        }
     }
 
     fn signal_shutdown(&self) {
@@ -87,26 +110,22 @@ impl UiTaskSpawnerImpl {
     }
 }
 
-impl TaskSpawner for UiTaskSpawnerImpl {
+impl TaskSpawner for FrontendTaskSpawnerImpl {
     fn spawn(&self, fut: BoxFuture<'static, ()>) {
-        spawn(async move {
-            fut.await;
-        });
+        (self.runtime.spawn)(fut);
     }
 
     fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
-        spawn(async move {
+        (self.runtime.spawn)(Box::pin(async move {
             futures::select! {
                 _ = token.cancelled().fuse() => {}
                 _ = fut.fuse() => {}
             }
-        });
+        }));
     }
 
     fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
-        spawn(async move {
-            fut.await;
-        });
+        (self.runtime.spawn_local)(fut);
     }
 
     fn spawn_local_cancellable(
@@ -114,58 +133,107 @@ impl TaskSpawner for UiTaskSpawnerImpl {
         fut: LocalBoxFuture<'static, ()>,
         token: Arc<dyn CancellationToken>,
     ) {
-        spawn(async move {
+        (self.runtime.spawn_local)(Box::pin(async move {
             futures::select! {
                 _ = token.cancelled().fuse() => {}
                 _ = fut.fuse() => {}
             }
-        });
+        }));
     }
 
     fn cancellation_token(&self) -> Arc<dyn CancellationToken> {
-        Arc::new(UiTaskCancellationToken {
+        Arc::new(FrontendTaskCancellationToken {
             state: self.cancellation_state.clone(),
         })
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct UiTaskOwner {
-    inner: Arc<UiTaskSpawnerImpl>,
+pub struct FrontendTaskOwner {
+    inner: Arc<FrontendTaskSpawnerImpl>,
     spawner: OwnedTaskSpawner,
 }
 
-impl UiTaskOwner {
-    fn new() -> Self {
-        let cancellation_state = Arc::new(UiTaskCancellationState::default());
-        let inner = Arc::new(UiTaskSpawnerImpl::new(cancellation_state));
+impl FrontendTaskOwner {
+    #[must_use]
+    pub fn new(runtime: FrontendTaskRuntime) -> Self {
+        let cancellation_state = Arc::new(FrontendTaskCancellationState::default());
+        let inner = Arc::new(FrontendTaskSpawnerImpl::new(cancellation_state, runtime));
         let shutdown = OwnedShutdownToken::attached(inner.cancellation_token());
         let spawner = OwnedTaskSpawner::new(inner.clone(), shutdown);
         Self { inner, spawner }
     }
 
-    fn spawn_local<F>(&self, fut: F)
+    pub fn spawn<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.spawner.spawn(Box::pin(fut));
+    }
+
+    pub fn spawn_cancellable<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.spawner.spawn_cancellable(Box::pin(fut));
+    }
+
+    pub fn spawn_local<F>(&self, fut: F)
     where
         F: std::future::Future<Output = ()> + 'static,
     {
         self.spawner.spawn_local(Box::pin(fut));
     }
+
+    pub fn spawn_local_cancellable<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + 'static,
+    {
+        self.spawner.spawn_local_cancellable(Box::pin(fut));
+    }
+
+    #[must_use]
+    pub fn owned_spawner(&self) -> OwnedTaskSpawner {
+        self.spawner.clone()
+    }
+
+    pub fn shutdown(&self) {
+        self.inner.signal_shutdown();
+    }
 }
 
-impl Drop for UiTaskOwner {
+impl Default for FrontendTaskOwner {
+    fn default() -> Self {
+        Self::new(FrontendTaskRuntime::new(spawn_boxed, spawn_local_boxed))
+    }
+}
+
+impl Drop for FrontendTaskOwner {
     fn drop(&mut self) {
         self.inner.signal_shutdown();
     }
 }
 
-thread_local! {
-    static SHARED_UI_TASK_OWNER: RefCell<Option<UiTaskOwner>> = const { RefCell::new(None) };
+fn spawn_boxed(fut: BoxFuture<'static, ()>) {
+    spawn(async move {
+        fut.await;
+    });
 }
 
-fn shared_ui_task_owner() -> UiTaskOwner {
+fn spawn_local_boxed(fut: LocalBoxFuture<'static, ()>) {
+    spawn(async move {
+        fut.await;
+    });
+}
+
+thread_local! {
+    static SHARED_UI_TASK_OWNER: RefCell<Option<FrontendTaskOwner>> = const { RefCell::new(None) };
+}
+
+fn shared_ui_task_owner() -> FrontendTaskOwner {
     SHARED_UI_TASK_OWNER.with(|slot| {
         let mut slot = slot.borrow_mut();
-        slot.get_or_insert_with(UiTaskOwner::new).clone()
+        slot.get_or_insert_with(FrontendTaskOwner::default).clone()
     })
 }
 
@@ -174,4 +242,42 @@ where
     F: std::future::Future<Output = ()> + 'static,
 {
     shared_ui_task_owner().spawn_local(fut);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FrontendTaskOwner, FrontendTaskRuntime};
+
+    fn noop_spawn_boxed(_: futures::future::BoxFuture<'static, ()>) {}
+
+    fn noop_spawn_local_boxed(_: futures::future::LocalBoxFuture<'static, ()>) {}
+
+    #[test]
+    fn shared_frontend_task_owner_shutdown_marks_owned_spawner_cancelled() {
+        let owner = FrontendTaskOwner::new(FrontendTaskRuntime::new(
+            noop_spawn_boxed,
+            noop_spawn_local_boxed,
+        ));
+        let spawner = owner.owned_spawner();
+        assert!(!spawner.shutdown_token().is_cancelled());
+
+        owner.shutdown();
+
+        assert!(spawner.shutdown_token().is_cancelled());
+    }
+
+    #[test]
+    fn shared_frontend_task_owner_drop_marks_owned_spawner_cancelled() {
+        let spawner = {
+            let owner = FrontendTaskOwner::new(FrontendTaskRuntime::new(
+                noop_spawn_boxed,
+                noop_spawn_local_boxed,
+            ));
+            let spawner = owner.owned_spawner();
+            assert!(!spawner.shutdown_token().is_cancelled());
+            spawner
+        };
+
+        assert!(spawner.shutdown_token().is_cancelled());
+    }
 }

@@ -28,6 +28,8 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 - Browser-only APIs stay in this crate.
 - Shared UI behavior remains in `aura-ui`.
+- Browser task ownership reuses the shared frontend task-owner implementation
+  from `aura-ui` rather than keeping a forked cancellation/spawner stack.
 - Harness bridge methods are deterministic and backwards-compatible.
 - Bridge responses that claim to return a channel binding must originate from authoritative selected-channel context materialization; selected ids without context are not a binding.
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
@@ -89,6 +91,7 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 | Browser semantic lifecycle rendering | `Observed` | authoritative semantic facts from `aura-app` | browser presentation state only | harness, user-visible rendering |
 | Render-convergence and projection publication | `Observed` | browser projection/export path | bridge/publication code only | Playwright/harness |
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
+| Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper reused from `aura-ui::task_owner` | shared frontend task-owner implementation | browser shell wiring only | harness, render layer |
 
 ### Capability-Gated Points
 
