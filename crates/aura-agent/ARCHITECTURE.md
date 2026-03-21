@@ -251,6 +251,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - invitation-triggered home signal materialization must flow through the
   declared reactive home-signal owner path in `reactive/app_signal_views.rs`,
   not through handler-local signal read/patch/emit logic
+- runtime bridge query APIs must fail explicitly when the required runtime
+  service is absent; they may not silently degrade absence into empty success
+  values that look like authoritative state
 
 ## Canonical Host/VM Boundary
 

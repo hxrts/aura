@@ -1606,11 +1606,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         false
     }
     async fn try_get_sync_peers(&self) -> Result<Vec<DeviceId>, IntentError> {
-        Ok(if let Some(sync) = self.agent.runtime().sync() {
-            sync.peers().await
-        } else {
-            Vec::new()
-        })
+        let Some(sync) = self.agent.runtime().sync() else {
+            return Err(service_unavailable("sync_service"));
+        };
+        Ok(sync.peers().await)
     }
 
     async fn trigger_sync(&self) -> Result<(), IntentError> {
@@ -4627,6 +4626,33 @@ mod tests {
         assert!(
             resolved.is_empty(),
             "imported channel invitation must not become an authoritative channel resolution result"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_sync_peers_requires_sync_service() {
+        let authority = AuthorityId::new_from_entropy([18u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([19u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_sync_peers()
+            .await
+            .expect_err("missing sync service should be explicit");
+        assert!(
+            error.to_string().contains("sync_service"),
+            "expected sync service error, got: {error}"
         );
     }
 }
