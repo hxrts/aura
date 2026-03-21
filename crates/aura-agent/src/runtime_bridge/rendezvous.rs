@@ -13,14 +13,16 @@ pub(super) async fn get_discovered_peers(
     }
 }
 
-pub(super) async fn get_rendezvous_status(bridge: &AgentRuntimeBridge) -> RendezvousStatus {
+pub(super) async fn get_rendezvous_status(
+    bridge: &AgentRuntimeBridge,
+) -> Result<RendezvousStatus, IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        RendezvousStatus {
+        Ok(RendezvousStatus {
             is_running: rendezvous.is_running().await,
             cached_peers: rendezvous.list_cached_peers().await.len(),
-        }
+        })
     } else {
-        RendezvousStatus::default()
+        Err(service_unavailable("rendezvous_service"))
     }
 }
 
