@@ -1877,7 +1877,7 @@ const ACTOR_SPAWN_APPROVED_SUFFIXES: &[&str] = &[
     "crates/aura-harness/src/executor.rs",
     "crates/aura-terminal/src/tui/tasks.rs",
     "crates/aura-testkit/src/infrastructure/time.rs",
-    "crates/aura-ui/src/app.rs",
+    "crates/aura-ui/src/task_owner.rs",
     "crates/aura-web/src/harness_bridge.rs",
     "crates/aura-web/src/main.rs",
     "crates/aura-web/src/task_owner.rs",
@@ -2013,7 +2013,11 @@ fn scan_actor_owned_task_spawn(file: &Path, syntax: &File) -> Vec<String> {
                 let path = path.replace(' ', "");
                 let is_raw_spawn = matches!(
                     path.as_str(),
-                    "tokio::spawn" | "std::thread::spawn" | "thread::spawn" | "spawn_local"
+                    "tokio::spawn"
+                        | "std::thread::spawn"
+                        | "thread::spawn"
+                        | "spawn_local"
+                        | "spawn"
                 );
                 let is_unbounded = matches!(
                     path.as_str(),

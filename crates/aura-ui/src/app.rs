@@ -15,6 +15,7 @@ use crate::model::{
     UiController, UiModel, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
     DEFAULT_CAPABILITY_PARTIAL,
 };
+use crate::task_owner::spawn_ui;
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
@@ -1162,7 +1163,7 @@ fn submit_runtime_modal_action(
                     let rerender_for_start = rerender.clone();
                     let invitee_authority_id =
                         next_device_enrollment_invitee_authority_id(&controller, &name);
-                    spawn(async move {
+                    spawn_ui(async move {
                         match ceremony_workflows::start_device_enrollment_ceremony(
                             &app_core,
                             name.clone(),
@@ -1184,7 +1185,7 @@ fn submit_runtime_modal_action(
                                 let controller_for_status = controller.clone();
                                 let app_core_for_status = app_core.clone();
                                 let rerender_for_status = rerender_for_start.clone();
-                                spawn(async move {
+                                spawn_ui(async move {
                                     loop {
                                         let _ =
                                             time_workflows::sleep_ms(&app_core_for_status, 1_000)
@@ -1243,7 +1244,7 @@ fn submit_runtime_modal_action(
 
                     let app_core = controller.app_core().clone();
                     let rerender_for_status = rerender.clone();
-                    spawn(async move {
+                    spawn_ui(async move {
                         match controller.runtime_device_enrollment_status_handle() {
                             Some(status_handle) => {
                                 match ceremony_workflows::get_key_rotation_ceremony_status(
@@ -1283,7 +1284,7 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match context_workflows::create_home(&app_core, Some(name.clone()), None).await {
                     Ok(_) => controller.complete_runtime_home_created(&name),
                     Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -1306,7 +1307,7 @@ fn submit_runtime_modal_action(
             let app_core = controller.app_core().clone();
             let controller_for_import = controller.clone();
             let rerender_for_import = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 controller_for_import.push_log("accept_invitation import_details start");
                 harness_log("accept_invitation import_details start");
                 match invitation_workflows::import_invitation_details(&app_core, &code).await {
@@ -1462,7 +1463,7 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_import = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match invitation_workflows::import_invitation_details(&app_core, &code).await {
                     Ok(invitation) => {
                         let invitation_info = invitation.info().clone();
@@ -1523,7 +1524,7 @@ fn submit_runtime_modal_action(
             }
 
             let app_core = controller.app_core().clone();
-            spawn(async move {
+            spawn_ui(async move {
                 tracing::info!("create_invitation submit start");
                 let receiver_id = match receiver.parse::<AuthorityId>() {
                     Ok(value) => value,
@@ -1607,7 +1608,7 @@ fn submit_runtime_modal_action(
                 };
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
@@ -1665,7 +1666,7 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_topic = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
@@ -1706,7 +1707,7 @@ fn submit_runtime_modal_action(
                 .as_ref()
                 .map(|model| matches!(model.screen, ScreenId::Settings))
                 .unwrap_or(false);
-            spawn(async move {
+            spawn_ui(async move {
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
@@ -1749,7 +1750,7 @@ fn submit_runtime_modal_action(
             };
             let app_core = controller.app_core().clone();
             let rerender_for_remove = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 let authority_id = contact.authority_id.to_string();
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
@@ -1772,7 +1773,7 @@ fn submit_runtime_modal_action(
         Some(ModalState::RequestRecovery) => {
             let app_core = controller.app_core().clone();
             let rerender_for_recovery = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match recovery_workflows::start_recovery_from_state(&app_core).await {
                     Ok(_) => controller.complete_runtime_modal_success("Recovery process started"),
                     Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -1800,7 +1801,7 @@ fn submit_runtime_modal_action(
             };
             let app_core = controller.app_core().clone();
             let rerender_for_guardians = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 let ids: Vec<AuthorityId> = selected_indices
                     .iter()
                     .filter_map(|idx| contacts_runtime.contacts.get(*idx))
@@ -1843,7 +1844,7 @@ fn submit_runtime_modal_action(
             };
             let app_core = controller.app_core().clone();
             let rerender_for_remove = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match ceremony_workflows::start_device_removal_ceremony(
                     &app_core,
                     device.id.clone(),
@@ -1889,7 +1890,7 @@ fn submit_runtime_modal_action(
             };
             let app_core = controller.app_core().clone();
             let rerender_for_mfa = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 let Some(mfa_state) = model.mfa_setup_modal() else {
                     rerender_for_mfa();
                     return;
@@ -1955,7 +1956,7 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_moderator = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 let result = if member.is_moderator {
                     moderator_workflows::revoke_moderator(
                         &app_core,
@@ -2042,7 +2043,7 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_override = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match access_workflows::set_access_override(
                     &app_core,
                     Some(selected_home_id.as_str()),
@@ -2091,7 +2092,7 @@ fn submit_runtime_modal_action(
 
             let app_core = controller.app_core().clone();
             let rerender_for_caps = rerender.clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match access_workflows::configure_home_capabilities(
                     &app_core,
                     Some(selected_home_id.as_str()),
@@ -2137,7 +2138,7 @@ fn cancel_runtime_modal_action(
 
     let app_core = controller.app_core().clone();
     let rerender_for_cancel = rerender.clone();
-    spawn(async move {
+    spawn_ui(async move {
         match controller.take_runtime_device_enrollment_ceremony() {
             Some(handle) => {
                 match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, handle).await {
@@ -2168,7 +2169,7 @@ fn submit_runtime_chat_input(
 
     let app_core = controller.app_core().clone();
     let controller_for_task = controller.clone();
-    spawn(async move {
+    spawn_ui(async move {
         let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
             Ok(value) => value,
             Err(error) => {
@@ -2466,7 +2467,7 @@ fn handle_runtime_character_shortcut(
     match (model.screen, key) {
         (ScreenId::Neighborhood, "m") => {
             let app_core = controller.app_core().clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match context_workflows::create_neighborhood(&app_core, "Neighborhood".to_string())
                     .await
                 {
@@ -2484,7 +2485,7 @@ fn handle_runtime_character_shortcut(
                 return true;
             };
             let app_core = controller.app_core().clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match context_workflows::add_home_to_neighborhood(&app_core, &home_id).await {
                     Ok(_) => controller.info_toast("Home added to neighborhood"),
                     Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -2500,7 +2501,7 @@ fn handle_runtime_character_shortcut(
                 return true;
             };
             let app_core = controller.app_core().clone();
-            spawn(async move {
+            spawn_ui(async move {
                 match context_workflows::link_home_one_hop_link(&app_core, &home_id).await {
                     Ok(_) => controller.info_toast("Direct one-hop link created"),
                     Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -2627,7 +2628,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         last_chat_selection_key.set(selected_channel_key);
 
         let controller_for_reload = controller_for_chat_selection.clone();
-        spawn(async move {
+        spawn_ui(async move {
             chat_for_selection_change
                 .set(load_chat_runtime_view(controller_for_reload.clone()).await);
             controller_for_reload.request_rerender();
@@ -2643,20 +2644,20 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_initial = neighborhood_runtime;
         let controller_for_initial = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             runtime_for_initial.set(load_neighborhood_runtime_view(controller_for_initial).await);
         });
 
         let mut chat_for_initial = chat_runtime;
         let controller_for_chat_initial = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             chat_for_initial.set(load_chat_runtime_view(controller_for_chat_initial.clone()).await);
             controller_for_chat_initial.request_rerender();
         });
 
         let mut contacts_for_initial = contacts_runtime;
         let controller_for_contacts_initial = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             contacts_for_initial
                 .set(load_contacts_runtime_view(controller_for_contacts_initial.clone()).await);
             controller_for_contacts_initial.request_rerender();
@@ -2664,7 +2665,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut settings_for_initial = settings_runtime;
         let controller_for_settings_initial = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             settings_for_initial
                 .set(load_settings_runtime_view(controller_for_settings_initial.clone()).await);
             controller_for_settings_initial.request_rerender();
@@ -2672,7 +2673,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut notifications_for_initial = notifications_runtime;
         let controller_for_notifications_initial = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             notifications_for_initial.set(
                 load_notifications_runtime_view(controller_for_notifications_initial.clone()).await,
             );
@@ -2681,7 +2682,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_neighborhood = neighborhood_runtime;
         let controller_for_neighborhood = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_neighborhood.app_core().read().await;
                 core.subscribe(&*NEIGHBORHOOD_SIGNAL)
@@ -2698,7 +2699,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_homes = neighborhood_runtime;
         let controller_for_homes = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_homes.app_core().read().await;
                 core.subscribe(&*HOMES_SIGNAL)
@@ -2715,7 +2716,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_contacts = neighborhood_runtime;
         let controller_for_contacts = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_contacts.app_core().read().await;
                 core.subscribe(&*CONTACTS_SIGNAL)
@@ -2732,7 +2733,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut contacts_for_contacts_signal = contacts_runtime;
         let controller_for_contacts_signal = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_contacts_signal.app_core().read().await;
                 core.subscribe(&*CONTACTS_SIGNAL)
@@ -2749,7 +2750,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut contacts_for_discovered_peers = contacts_runtime;
         let controller_for_discovered_peers = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_discovered_peers.app_core().read().await;
                 core.subscribe(&*DISCOVERED_PEERS_SIGNAL)
@@ -2766,7 +2767,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_chat = neighborhood_runtime;
         let controller_for_chat = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_chat.app_core().read().await;
                 core.subscribe(&*CHAT_SIGNAL)
@@ -2783,7 +2784,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut chat_for_chat_signal = chat_runtime;
         let controller_for_chat_signal = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_chat_signal.app_core().read().await;
                 core.subscribe(&*CHAT_SIGNAL)
@@ -2800,7 +2801,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_network = neighborhood_runtime;
         let controller_for_network = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_network.app_core().read().await;
                 core.subscribe(&*NETWORK_STATUS_SIGNAL)
@@ -2817,7 +2818,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut runtime_for_transport = neighborhood_runtime;
         let controller_for_transport = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_transport.app_core().read().await;
                 core.subscribe(&*TRANSPORT_PEERS_SIGNAL)
@@ -2834,7 +2835,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut settings_for_settings_signal = settings_runtime;
         let controller_for_settings_signal = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_settings_signal.app_core().read().await;
                 core.subscribe(&*SETTINGS_SIGNAL)
@@ -2851,7 +2852,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut settings_for_recovery_signal = settings_runtime;
         let controller_for_recovery_signal = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_recovery_signal.app_core().read().await;
                 core.subscribe(&*RECOVERY_SIGNAL)
@@ -2868,7 +2869,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut notifications_for_invites = notifications_runtime;
         let controller_for_invites = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_invites.app_core().read().await;
                 core.subscribe(&*INVITATIONS_SIGNAL)
@@ -2885,7 +2886,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut notifications_for_recovery = notifications_runtime;
         let controller_for_notifications_recovery = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_notifications_recovery
                     .app_core()
@@ -2907,7 +2908,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
 
         let mut notifications_for_errors = notifications_runtime;
         let controller_for_errors = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_errors.app_core().read().await;
                 core.subscribe(&*ERROR_SIGNAL)
@@ -2923,7 +2924,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
         });
 
         let controller_for_authoritative_operations = controller_for_runtime.clone();
-        spawn(async move {
+        spawn_ui(async move {
             let Ok(mut stream) = ({
                 let core = controller_for_authoritative_operations
                     .app_core()
@@ -3023,7 +3024,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
             tabindex: 0,
             autofocus: true,
             onmounted: move |mounted| {
-                spawn(async move {
+                spawn_ui(async move {
                     let _ = mounted.data().set_focus(true).await;
                 });
             },
@@ -4001,7 +4002,7 @@ fn NeighborhoodScreen(
                                                 let app_core = controller.app_core().clone();
                                                 let mut tick = render_tick;
                                                 let home_name = home_name.clone();
-                                                spawn(async move {
+                                                spawn_ui(async move {
                                                     match context_workflows::move_position(
                                                         &app_core,
                                                         &target_home_id,
@@ -4596,7 +4597,7 @@ fn ContactsScreen(
                                             let controller = controller.clone();
                                             let app_core = controller.app_core().clone();
                                             let authority_id = contact.authority_id;
-                                            spawn(async move {
+                                            spawn_ui(async move {
                                                 match invitation_workflows::create_contact_invitation(
                                                     &app_core,
                                                     authority_id,
@@ -4693,7 +4694,7 @@ fn ContactsScreen(
                                         move |_| {
                                             let controller = start_chat_controller.clone();
                                             let app_core = controller.app_core().clone();
-                                            spawn(async move {
+                                            spawn_ui(async move {
                                                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                                                     Ok(value) => value,
                                                     Err(error) => {
@@ -4740,7 +4741,7 @@ fn ContactsScreen(
                                                         .selected_channel_name()
                                                         .map(str::to_string)
                                                 });
-                                            spawn(async move {
+                                            spawn_ui(async move {
                                                 let Some(channel_name) = selected_channel_name else {
                                                     controller.runtime_error_toast("Select a channel first");
                                                     return;
@@ -4901,7 +4902,7 @@ fn NotificationsScreen(
                                                     let app_core = controller.app_core().clone();
                                                     let mut tick = render_tick;
                                                     let invitation_id = accept_invitation_id.clone();
-                                                    spawn(async move {
+                                                    spawn_ui(async move {
                                                         match invitation_workflows::accept_invitation_by_str(&app_core, &invitation_id).await {
                                                             Ok(_) => controller.complete_runtime_modal_success("Invitation accepted"),
                                                             Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -4920,7 +4921,7 @@ fn NotificationsScreen(
                                                     let app_core = controller.app_core().clone();
                                                     let mut tick = render_tick;
                                                     let invitation_id = decline_invitation_id.clone();
-                                                    spawn(async move {
+                                                    spawn_ui(async move {
                                                         match invitation_workflows::decline_invitation_by_str(&app_core, &invitation_id).await {
                                                             Ok(()) => controller.complete_runtime_modal_success("Invitation declined"),
                                                             Err(error) => controller.runtime_error_toast(error.to_string()),
@@ -4943,7 +4944,7 @@ fn NotificationsScreen(
                                                     let app_core = controller.app_core().clone();
                                                     let mut tick = render_tick;
                                                     let invitation_id = invitation_id.clone();
-                                                    spawn(async move {
+                                                    spawn_ui(async move {
                                                         match invitation_workflows::export_invitation_by_str(&app_core, &invitation_id).await {
                                                             Ok(code) => {
                                                                 controller.write_clipboard(&code);
@@ -4968,7 +4969,7 @@ fn NotificationsScreen(
                                                     let app_core = controller.app_core().clone();
                                                     let mut tick = render_tick;
                                                     let ceremony_id = ceremony_id.clone();
-                                                    spawn(async move {
+                                                    spawn_ui(async move {
                                                         match recovery_workflows::approve_recovery(
                                                             &app_core,
                                                             &CeremonyId::new(ceremony_id),
