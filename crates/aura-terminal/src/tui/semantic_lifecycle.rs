@@ -300,6 +300,10 @@ impl LocalTerminalOperationOwner {
         self.0.harness_handle()
     }
 
+    pub(crate) fn ui_update_instance_id(&self) -> Option<OperationInstanceId> {
+        Some(self.0.instance_id.clone())
+    }
+
     pub(crate) async fn succeed(self) {
         self.0.succeed().await;
     }
@@ -328,6 +332,10 @@ impl WorkflowHandoffOperationOwner {
 
     pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
         self.0.harness_handle()
+    }
+
+    pub(crate) fn workflow_instance_id(&self) -> Option<OperationInstanceId> {
+        Some(self.0.instance_id.clone())
     }
 
     pub(crate) fn handoff_to_app_workflow(

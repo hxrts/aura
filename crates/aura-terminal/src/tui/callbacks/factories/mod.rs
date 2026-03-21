@@ -208,7 +208,7 @@ fn spawn_handoff_workflow_callback<T, Fut, F>(
     let app_core = ctx.app_core_raw().clone();
     let operation_instance_id = operation.harness_handle().instance_id().clone();
     spawn_ctx(ctx, async move {
-        let workflow_instance_id = Some(operation_instance_id.clone());
+        let workflow_instance_id = operation.workflow_instance_id();
         let _ = operation.handoff_to_app_workflow(scope);
 
         match std::panic::AssertUnwindSafe(workflow(app_core.clone(), workflow_instance_id))
