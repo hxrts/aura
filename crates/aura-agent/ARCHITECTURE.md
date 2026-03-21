@@ -327,6 +327,10 @@ Rules:
   private owner trees internally.
 - Service health must degrade structurally when maintenance obligations fail;
   loop-local logging is not a substitute for degraded lifecycle state.
+- Runtime service APIs must not wait on generic "next reactive update" signals
+  or return optimistic domain sketches when they claim to return a postcondition;
+  converted chat/message/group queries and mutations reduce committed facts
+  directly before returning.
 
 ### Verification Hooks
 
