@@ -11,6 +11,7 @@ use cache::InvitationCacheHandler;
 use channel::InvitationChannelHandler;
 use contact::InvitationContactHandler;
 use crate::core::{default_context_id_for_authority, AgentError, AgentResult, AuthorityContext};
+use crate::reactive::app_signal_views;
 use crate::runtime::services::InvitationManager;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use crate::runtime::{open_owned_manifest_vm_session_admitted, AuraEffectSystem};
@@ -21,11 +22,8 @@ use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
 use guardian::InvitationGuardianHandler;
-use aura_app::signal_defs::HOMES_SIGNAL;
-use aura_app::views::home::{HomeMember, HomeRole, HomeState, HomesState};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::amp::{ChannelBootstrapPackage, ChannelCreateParams};
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
@@ -1156,183 +1154,6 @@ impl InvitationHandler {
             .await
     }
 
-    async fn materialize_home_signal_for_channel_invitation(
-        &self,
-        effects: &AuraEffectSystem,
-        invite: &ChannelInviteDetails,
-    ) -> AgentResult<()> {
-        let reactive = effects.reactive_handler();
-        let mut homes: HomesState = match reactive.read(&*HOMES_SIGNAL).await {
-            Ok(state) => state,
-            Err(_) => {
-                let _ = reactive
-                    .register(&*HOMES_SIGNAL, HomesState::default())
-                    .await;
-                reactive.read(&*HOMES_SIGNAL).await.unwrap_or_default()
-            }
-        };
-
-        let own_id = self.context.authority.authority_id();
-        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
-        let mut changed = false;
-
-        if !homes.has_home(&invite.channel_id) {
-            let mut home = HomeState::new(
-                invite.channel_id,
-                Some(invite.home_name.clone()),
-                invite.sender_id,
-                now_ms,
-                invite.context_id,
-            );
-
-            if invite.sender_id != own_id {
-                if let Some(owner) = home.member_mut(&invite.sender_id) {
-                    owner.name = invite.sender_id.to_string();
-                    owner.is_online = false;
-                    owner.last_seen = Some(now_ms);
-                }
-                home.my_role = HomeRole::Participant;
-            }
-
-            if home.member(&own_id).is_none() {
-                home.add_member(HomeMember {
-                    id: own_id,
-                    name: "You".to_string(),
-                    role: HomeRole::Participant,
-                    is_online: true,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-            }
-
-            homes.add_home(home);
-            if homes.current_home_id().is_none() {
-                homes.select_home(Some(invite.channel_id));
-            }
-            changed = true;
-        } else if let Some(home) = homes.home_mut(&invite.channel_id) {
-            if home.context_id != Some(invite.context_id) {
-                home.context_id = Some(invite.context_id);
-                changed = true;
-            }
-
-            if invite.sender_id != own_id && home.member(&own_id).is_none() {
-                home.add_member(HomeMember {
-                    id: own_id,
-                    name: "You".to_string(),
-                    role: HomeRole::Participant,
-                    is_online: true,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-                changed = true;
-            }
-
-            if invite.sender_id != own_id && matches!(home.my_role, HomeRole::Member) {
-                home.my_role = HomeRole::Participant;
-                changed = true;
-            }
-        }
-
-        if !changed {
-            return Ok(());
-        }
-
-        if homes.current_home_id().is_none() && homes.has_home(&invite.channel_id) {
-            homes.select_home(Some(invite.channel_id));
-        }
-
-        reactive
-            .emit(&*HOMES_SIGNAL, homes)
-            .await
-            .map_err(|e| AgentError::effects(format!("emit homes signal: {e}")))?;
-
-        Ok(())
-    }
-
-    async fn materialize_home_signal_for_channel_acceptance(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation: &Invitation,
-    ) -> AgentResult<()> {
-        use aura_effects::ReactiveEffects;
-
-        let InvitationType::Channel {
-            home_id,
-            nickname_suggestion,
-            ..
-        } = &invitation.invitation_type
-        else {
-            return Ok(());
-        };
-
-        let reactive = effects.reactive_handler();
-        let mut homes: HomesState = match reactive.read(&*HOMES_SIGNAL).await {
-            Ok(state) => state,
-            Err(_) => {
-                let _ = reactive
-                    .register(&*HOMES_SIGNAL, HomesState::default())
-                    .await;
-                reactive.read(&*HOMES_SIGNAL).await.unwrap_or_default()
-            }
-        };
-
-        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
-        let mut changed = false;
-        let home_name = require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
-
-        if !homes.has_home(home_id) {
-            let mut home = HomeState::new(
-                *home_id,
-                Some(home_name),
-                invitation.sender_id,
-                now_ms,
-                invitation.context_id,
-            );
-            if home.member(&invitation.receiver_id).is_none() {
-                home.add_member(HomeMember {
-                    id: invitation.receiver_id,
-                    name: invitation.receiver_id.to_string(),
-                    role: HomeRole::Participant,
-                    is_online: false,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-            }
-            homes.add_home(home);
-            changed = true;
-        } else if let Some(home) = homes.home_mut(home_id) {
-            if home.context_id != Some(invitation.context_id) {
-                home.context_id = Some(invitation.context_id);
-                changed = true;
-            }
-            if home.member(&invitation.receiver_id).is_none() {
-                home.add_member(HomeMember {
-                    id: invitation.receiver_id,
-                    name: invitation.receiver_id.to_string(),
-                    role: HomeRole::Participant,
-                    is_online: false,
-                    joined_at: now_ms,
-                    last_seen: Some(now_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-                changed = true;
-            }
-        }
-
-        if changed {
-            reactive
-                .emit(&*HOMES_SIGNAL, homes)
-                .await
-                .map_err(|e| AgentError::effects(format!("emit homes signal: {e}")))?;
-        }
-
-        Ok(())
-    }
-
     async fn materialize_channel_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,
@@ -1904,11 +1725,31 @@ impl InvitationHandler {
                             ))
                         })?;
                     if response.0.accepted {
-                        self.materialize_home_signal_for_channel_acceptance(
-                            effects.as_ref(),
-                            invitation,
-                        )
-                        .await?;
+                        if let InvitationType::Channel {
+                            home_id,
+                            nickname_suggestion,
+                            ..
+                        } = &invitation.invitation_type
+                        {
+                            let reactive = effects.reactive_handler();
+                            let now_ms =
+                                Self::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                            let home_name = require_channel_invitation_name(
+                                *home_id,
+                                nickname_suggestion.clone(),
+                            )?;
+                            app_signal_views::materialize_home_signal_for_channel_acceptance(
+                                &reactive,
+                                *home_id,
+                                &home_name,
+                                invitation.sender_id,
+                                invitation.receiver_id,
+                                invitation.context_id,
+                                now_ms,
+                            )
+                            .await
+                            .map_err(AgentError::runtime)?;
+                        }
                     }
                     let status = if response.0.accepted {
                         aura_invitation::InvitationAckStatus::Accepted
@@ -2814,12 +2655,16 @@ async fn execute_record_receipt(
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use crate::reactive::app_signal_views;
     use crate::runtime::effects::AuraEffectSystem;
+    use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL};
+    use aura_app::views::home::{HomeRole, HomesState};
     use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
     use aura_core::types::identifiers::{
         AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
     };
     use aura_core::DeviceId;
+    use aura_effects::reactive::ReactiveHandler;
     use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
@@ -2849,6 +2694,123 @@ mod tests {
 
     fn canonical_home_id(seed: u8) -> ChannelId {
         ChannelId::from_bytes([seed; 32])
+    }
+
+    async fn register_test_app_signals(effects: &AuraEffectSystem) {
+        register_app_signals(&effects.reactive_handler())
+            .await
+            .unwrap();
+    }
+
+    async fn attach_test_rendezvous_manager(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+    ) -> Arc<crate::runtime::TaskSupervisor> {
+        let manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            authority_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+        let tasks = Arc::new(crate::runtime::TaskSupervisor::new());
+        let service_context = crate::runtime::services::RuntimeServiceContext::new(
+            tasks.clone(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(&manager, &service_context)
+            .await
+            .unwrap();
+        tasks
+    }
+
+    async fn cache_test_peer_descriptor(
+        effects: &AuraEffectSystem,
+        local_authority: AuthorityId,
+        peer: AuthorityId,
+        addr: &str,
+        now_ms: u64,
+    ) {
+        let manager = effects
+            .rendezvous_manager()
+            .expect("test rendezvous manager should be attached");
+        let hint = TransportHint::tcp_direct(addr.trim_start_matches("tcp://")).unwrap();
+        let peer_context_id = default_context_id_for_authority(peer);
+        manager
+            .cache_descriptor(RendezvousDescriptor {
+                authority_id: peer,
+                device_id: None,
+                context_id: peer_context_id,
+                transport_hints: vec![hint.clone()],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: now_ms.saturating_sub(1),
+                valid_until: now_ms.saturating_add(86_400_000),
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .unwrap();
+
+        let local_context_id = default_context_id_for_authority(local_authority);
+        if local_context_id != peer_context_id {
+            manager
+                .cache_descriptor(RendezvousDescriptor {
+                    authority_id: peer,
+                    device_id: None,
+                    context_id: local_context_id,
+                    transport_hints: vec![hint],
+                    handshake_psk_commitment: [0u8; 32],
+                    public_key: [0u8; 32],
+                    valid_from: now_ms.saturating_sub(1),
+                    valid_until: now_ms.saturating_add(86_400_000),
+                    nonce: [0u8; 32],
+                    nickname_suggestion: None,
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn accept_invitation_without_notification(
+        handler: &InvitationHandler,
+        effects: Arc<AuraEffectSystem>,
+        invitation_id: &InvitationId,
+    ) {
+        let now_ms = InvitationHandler::best_effort_current_timestamp_ms(&effects).await;
+        handler
+            .validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
+            .await
+            .unwrap();
+
+        let snapshot = handler.build_snapshot(effects.as_ref()).await;
+        let outcome = handler
+            .service
+            .prepare_accept_invitation(&snapshot, invitation_id);
+        execute_guard_outcome_for_accept(outcome, &handler.context.authority, effects.as_ref())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn channel_home_materialization_requires_registered_homes_signal() {
+        let reactive = ReactiveHandler::new();
+
+        let error = app_signal_views::materialize_home_signal_for_channel_invitation(
+            &reactive,
+            AuthorityId::new_from_entropy([1u8; 32]),
+            canonical_home_id(1),
+            "shared-parity-lab",
+            AuthorityId::new_from_entropy([2u8; 32]),
+            ContextId::new_from_entropy([3u8; 32]),
+            0,
+        )
+        .await
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("requires registered homes signal"),
+            "unexpected error: {message}"
+        );
     }
 
     #[tokio::test]
@@ -3152,10 +3114,8 @@ mod tests {
         assert_eq!(imported.sender_id, sender_id);
         assert_eq!(imported.receiver_id, own_authority);
 
-        handler
-            .accept_invitation(effects.clone(), &imported.invitation_id)
-            .await
-            .unwrap();
+        accept_invitation_without_notification(&handler, effects.clone(), &imported.invitation_id)
+            .await;
 
         let committed = effects.load_committed_facts(own_authority).await.unwrap();
 
@@ -3683,7 +3643,8 @@ mod tests {
         let sender_context = AuthorityContext::new(sender_id);
         let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-        let sender_service = InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
+        let sender_service =
+            InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
 
         let context_id = ContextId::new_from_entropy([209u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-sender-propagation"));
@@ -3771,7 +3732,6 @@ mod tests {
         .await
         .expect("created invitation should remain accessible");
         assert_eq!(stored.status, InvitationStatus::Accepted);
-
     }
 
     #[tokio::test]
@@ -3799,7 +3759,8 @@ mod tests {
         let sender_context = AuthorityContext::new(sender_id);
         let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-        let sender_service = InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
+        let sender_service =
+            InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
 
         let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
             sender_id,
@@ -3831,6 +3792,9 @@ mod tests {
         )
         .await
         .unwrap();
+
+        register_test_app_signals(sender_effects.as_ref()).await;
+        register_test_app_signals(receiver_effects.as_ref()).await;
 
         let now_ms = 1_700_000_000_000;
         sender_handler
@@ -3921,7 +3885,7 @@ mod tests {
             .reactive_handler()
             .read(&*HOMES_SIGNAL)
             .await
-            .unwrap_or_default();
+            .unwrap();
         let home = homes
             .home_state(&channel_id)
             .expect("sender should materialize channel acceptance home state");
@@ -4073,10 +4037,34 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([213u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([214u8; 32]);
         let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
         let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
         );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55113",
+            1_700_000_000_000,
+        )
+        .await;
 
         let invitation_id = InvitationId::new("inv-materialize-home-1");
         let home_id = canonical_home_id(13);
@@ -4135,7 +4123,7 @@ mod tests {
             .reactive_handler()
             .read(&*HOMES_SIGNAL)
             .await
-            .unwrap_or_default();
+            .unwrap();
         let home = homes
             .home_state(&expected_channel)
             .expect("accepted invitation should materialize home state");
@@ -4153,6 +4141,16 @@ mod tests {
             AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
         );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55116",
+            1_700_000_000_000,
+        )
+        .await;
 
         let invitation_id = InvitationId::new("inv-materialize-home-raw-name");
         let home_id = canonical_home_id(16);
@@ -4191,10 +4189,8 @@ mod tests {
             .await
             .unwrap();
 
-        handler
-            .accept_invitation(effects.clone(), &imported.invitation_id)
-            .await
-            .unwrap();
+        accept_invitation_without_notification(&handler, effects.clone(), &imported.invitation_id)
+            .await;
 
         let committed = effects.load_committed_facts(receiver_id).await.unwrap();
         let found_named_update = committed.iter().any(|fact| {
@@ -4228,10 +4224,34 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([217u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
         let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
         let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
         );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55114",
+            1_700_000_000_000,
+        )
+        .await;
 
         let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
         let home_id = canonical_home_id(14);
@@ -4299,10 +4319,34 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([215u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([216u8; 32]);
         let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
         let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
         );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55115",
+            1_700_000_000_000,
+        )
+        .await;
 
         let invitation_id = InvitationId::new("inv-materialize-home-context");
         let custom_context = ContextId::new_from_entropy([55u8; 32]);
@@ -4366,7 +4410,7 @@ mod tests {
             .reactive_handler()
             .read(&*HOMES_SIGNAL)
             .await
-            .unwrap_or_default();
+            .unwrap();
         let home = homes
             .home_state(&expected_channel)
             .expect("accepted invitation should materialize home state");

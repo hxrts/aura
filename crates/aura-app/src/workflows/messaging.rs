@@ -813,12 +813,14 @@ async fn ensure_runtime_note_to_self_channel(
         "ensure_runtime_note_to_self_channel",
         "amp_create_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.amp_create_channel(ChannelCreateParams {
-            context: context_id,
-            channel: Some(channel_id),
-            skip_window: None,
-            topic: Some(NOTE_TO_SELF_CHANNEL_TOPIC.to_string()),
-        }),
+        || {
+            runtime.amp_create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: Some(NOTE_TO_SELF_CHANNEL_TOPIC.to_string()),
+            })
+        },
     )
     .await;
 
@@ -837,11 +839,13 @@ async fn ensure_runtime_note_to_self_channel(
         "ensure_runtime_note_to_self_channel",
         "amp_join_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.amp_join_channel(ChannelJoinParams {
-            context: context_id,
-            channel: channel_id,
-            participant: authority_id,
-        }),
+        || {
+            runtime.amp_join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: authority_id,
+            })
+        },
     )
     .await
     {
@@ -871,7 +875,7 @@ async fn ensure_runtime_note_to_self_channel(
         )
         .await
         .map_err(|e| super::error::runtime_call("persist note-to-self channel", e))?
-            .map_err(|e| super::error::runtime_call("persist note-to-self channel", e))?;
+        .map_err(|e| super::error::runtime_call("persist note-to-self channel", e))?;
     }
 
     Ok(channel_id)
@@ -1060,7 +1064,7 @@ async fn try_join_via_pending_channel_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?
-        .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
+    .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
     let Some(invitation) =
         select_pending_channel_invitation(&pending, runtime.authority_id(), requested_channel_id)
     else {
@@ -1104,12 +1108,11 @@ async fn try_join_via_pending_channel_invitation(
         tracing::debug!(error = %_e, "refresh_account after invitation accept failed");
     }
 
-    let local_channel_id =
-        local_channel_id_for_accepted_pending_invitation(app_core, &invitation, invited_channel_id)
-            .await;
+    let local_channel_id = invited_channel_id;
     let channel_name_hint = match &invitation.invitation_type {
         InvitationBridgeType::Channel {
-            nickname_suggestion, ..
+            nickname_suggestion,
+            ..
         } => nickname_suggestion.as_deref(),
         _ => None,
     };
@@ -1232,8 +1235,15 @@ async fn enforce_home_join_allowed(
 
 async fn next_observed_projection_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) -> u64 {
     let chat = observed_chat_snapshot(app_core).await;
-    let channel_activity = chat.all_channels().map(|channel| channel.last_activity).max();
-    let message_activity = chat.all_messages().into_iter().map(|message| message.timestamp).max();
+    let channel_activity = chat
+        .all_channels()
+        .map(|channel| channel.last_activity)
+        .max();
+    let message_activity = chat
+        .all_messages()
+        .into_iter()
+        .map(|message| message.timestamp)
+        .max();
 
     channel_activity
         .into_iter()
@@ -1376,30 +1386,6 @@ pub async fn resolve_authoritative_context_id_for_channel(
         {
             return Some(context_id);
         }
-        if let Ok(Ok(pending)) = timeout_runtime_call(
-            &runtime,
-            "resolve_authoritative_context_id_for_channel",
-            "try_list_pending_invitations",
-            MESSAGING_RUNTIME_QUERY_TIMEOUT,
-            || runtime.try_list_pending_invitations(),
-        )
-        .await
-        {
-            if let Some(context_id) = pending
-                .into_iter()
-                .filter(|invitation| invitation.sender_id != runtime.authority_id())
-                .find_map(|invitation| match invitation.invitation_type {
-                    InvitationBridgeType::Channel {
-                        home_id,
-                        context_id,
-                        ..
-                    } if home_id.parse::<ChannelId>().ok() == Some(channel_id) => context_id,
-                    _ => None,
-                })
-            {
-                return Some(context_id);
-            }
-        }
     }
     None
 }
@@ -1426,74 +1412,6 @@ pub async fn require_authoritative_context_id_for_channel(
         })
 }
 
-pub(crate) async fn authoritative_local_channel_id_for_context(
-    app_core: &Arc<RwLock<AppCore>>,
-    context_id: ContextId,
-    channel_name_hint: Option<&str>,
-) -> Option<ChannelId> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime().cloned()
-    };
-    let runtime = runtime?;
-
-    let channel_name_hint = channel_name_hint?;
-    let matches = timeout_runtime_call(
-        &runtime,
-        "authoritative_local_channel_id_for_context",
-        "resolve_authoritative_channel_ids_by_name",
-        MESSAGING_RUNTIME_QUERY_TIMEOUT,
-        || runtime.resolve_authoritative_channel_ids_by_name(channel_name_hint),
-    )
-    .await
-        .ok()?;
-    let matches = matches.ok()?;
-    for channel_id in matches {
-        if timeout_runtime_call(
-            &runtime,
-            "authoritative_local_channel_id_for_context",
-            "resolve_amp_channel_context",
-            MESSAGING_RUNTIME_QUERY_TIMEOUT,
-            || runtime.resolve_amp_channel_context(channel_id),
-        )
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .flatten()
-            == Some(context_id)
-        {
-            return Some(channel_id);
-        }
-    }
-    None
-}
-
-async fn local_channel_id_for_accepted_pending_invitation(
-    app_core: &Arc<RwLock<AppCore>>,
-    invitation: &InvitationInfo,
-    fallback_channel_id: ChannelId,
-) -> ChannelId {
-    match &invitation.invitation_type {
-        InvitationBridgeType::Channel {
-            context_id,
-            nickname_suggestion,
-            ..
-        } => {
-            let Some(context_id) = *context_id else {
-                return fallback_channel_id;
-            };
-            authoritative_local_channel_id_for_context(
-                app_core,
-                context_id,
-                nickname_suggestion.as_deref(),
-            )
-            .await
-            .unwrap_or(fallback_channel_id)
-        }
-        _ => fallback_channel_id,
-    }
-}
-
 async fn canonical_channel_name_hint_for_invite(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -1510,7 +1428,10 @@ async fn canonical_channel_name_hint_for_invite(
     }
 
     let parsed_input = routing::parse_channel_ref(channel_name_or_id)?;
-    if matches!(parsed_input, crate::workflows::channel_ref::ChannelSelector::Id(_)) {
+    if matches!(
+        parsed_input,
+        crate::workflows::channel_ref::ChannelSelector::Id(_)
+    ) {
         return Err(super::error::WorkflowError::Precondition(
             "channel invitation creation requires canonical channel metadata, not a raw channel id hint",
         )
@@ -1544,26 +1465,26 @@ async fn resolve_authoritative_channel_binding_from_input(
             timeout_runtime_call(
                 &runtime,
                 "resolve_authoritative_channel_binding_from_input",
-                "resolve_authoritative_channel_bindings_by_name",
+                "identify_materialized_channel_bindings_by_name",
                 MESSAGING_RUNTIME_QUERY_TIMEOUT,
-                || runtime.resolve_authoritative_channel_bindings_by_name(normalized_name),
+                || runtime.identify_materialized_channel_bindings_by_name(normalized_name),
             )
             .await
             .map_err(|error| {
                 AuraError::from(super::error::runtime_call(
-                    "resolve authoritative channel bindings by name",
+                    "identify materialized channel bindings by name",
                     error,
                 ))
             })?
-                .map_err(|error| {
-                    AuraError::from(super::error::runtime_call(
-                        "resolve authoritative channel bindings by name",
-                        error,
-                    ))
-                })?
-                .into_iter()
-                .next()
-                .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
+            .map_err(|error| {
+                AuraError::from(super::error::runtime_call(
+                    "identify materialized channel bindings by name",
+                    error,
+                ))
+            })?
+            .into_iter()
+            .next()
+            .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
         }
     }
 }
@@ -1667,13 +1588,13 @@ async fn authoritative_recipient_peers_for_channel(
             source: AuraError::agent(error.to_string()),
         },
     )?
-        .map_err(
-            |error| super::error::WorkflowError::AuthoritativeParticipantsLookup {
-                channel: channel_id.to_string(),
-                context: context_id.to_string(),
-                source: AuraError::agent(error.to_string()),
-            },
-        )?;
+    .map_err(
+        |error| super::error::WorkflowError::AuthoritativeParticipantsLookup {
+            channel: channel_id.to_string(),
+            context: context_id.to_string(),
+            source: AuraError::agent(error.to_string()),
+        },
+    )?;
 
     for _ in 0..3 {
         let mut recipients = last
@@ -1711,13 +1632,13 @@ async fn authoritative_recipient_peers_for_channel(
                 source: AuraError::agent(error.to_string()),
             }
         })?
-            .map_err(|error| {
-                super::error::WorkflowError::AuthoritativeParticipantsLookupAfterConvergence {
-                    channel: channel_id.to_string(),
-                    context: context_id.to_string(),
-                    source: AuraError::agent(error.to_string()),
-                }
-            })?;
+        .map_err(|error| {
+            super::error::WorkflowError::AuthoritativeParticipantsLookupAfterConvergence {
+                channel: channel_id.to_string(),
+                context: context_id.to_string(),
+                source: AuraError::agent(error.to_string()),
+            }
+        })?;
     }
 
     last.retain(|authority| *authority != self_authority);
@@ -2230,11 +2151,13 @@ async fn join_channel_with_name_hint(
         "join_channel_with_name_hint",
         "amp_join_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.amp_join_channel(ChannelJoinParams {
-            context: context_id,
-            channel: channel_id,
-            participant: runtime.authority_id(),
-        }),
+        || {
+            runtime.amp_join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: runtime.authority_id(),
+            })
+        },
     )
     .await
     .map_err(|error| AuraError::internal(error.to_string()))?
@@ -2276,12 +2199,12 @@ async fn join_channel_with_name_hint(
             error,
         ))
     })?
-        .map_err(|error| {
-            AuraError::from(super::error::runtime_call(
-                "resend channel invitation acceptance notifications",
-                error,
-            ))
-        })?;
+    .map_err(|error| {
+        AuraError::from(super::error::runtime_call(
+            "resend channel invitation acceptance notifications",
+            error,
+        ))
+    })?;
 
     Ok(())
 }
@@ -2407,22 +2330,22 @@ async fn join_channel_by_name_owned(
         return Ok(());
     }
 
-    let binding = match resolve_authoritative_channel_binding_from_input(app_core, channel_name).await
-    {
-        Ok(binding) => binding,
-        Err(error) => {
-            owner
-                .publish_failure(
-                    SemanticOperationError::new(
-                        SemanticFailureDomain::Command,
-                        SemanticFailureCode::InternalError,
+    let binding =
+        match resolve_authoritative_channel_binding_from_input(app_core, channel_name).await {
+            Ok(binding) => binding,
+            Err(error) => {
+                owner
+                    .publish_failure(
+                        SemanticOperationError::new(
+                            SemanticFailureDomain::Command,
+                            SemanticFailureCode::InternalError,
+                        )
+                        .with_detail(error.to_string()),
                     )
-                    .with_detail(error.to_string()),
-                )
-                .await?;
-            return Err(error);
-        }
-    };
+                    .await?;
+                return Err(error);
+            }
+        };
     let channel_id = binding.channel_id;
     let authoritative_channel = authoritative_channel_ref(binding.channel_id, binding.context_id);
     if let Ok(proof) = prove_channel_membership_ready(app_core, channel_id).await {
@@ -2489,15 +2412,17 @@ pub async fn leave_channel(
         "leave_channel",
         "amp_leave_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.amp_leave_channel(ChannelLeaveParams {
-            context: context_id,
-            channel: channel_id,
-            participant: runtime.authority_id(),
-        }),
+        || {
+            runtime.amp_leave_channel(ChannelLeaveParams {
+                context: context_id,
+                channel: channel_id,
+                participant: runtime.authority_id(),
+            })
+        },
     )
     .await
     .map_err(|e| super::error::runtime_call("leave channel", e))?
-        .map_err(|e| super::error::runtime_call("leave channel", e))?;
+    .map_err(|e| super::error::runtime_call("leave channel", e))?;
 
     // Preserve canonical channel identity for future join operations.
     apply_authoritative_membership_projection(app_core, channel_id, context_id, false, None)
@@ -2550,14 +2475,16 @@ pub async fn close_channel(
         "close_channel",
         "amp_close_channel",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || runtime.amp_close_channel(ChannelCloseParams {
-            context: context_id,
-            channel: channel_id,
-        }),
+        || {
+            runtime.amp_close_channel(ChannelCloseParams {
+                context: context_id,
+                channel: channel_id,
+            })
+        },
     )
     .await
     .map_err(|e| super::error::runtime_call("close channel", e))?
-        .map_err(|e| super::error::runtime_call("close channel", e))?;
+    .map_err(|e| super::error::runtime_call("close channel", e))?;
 
     let fact =
         ChatFact::channel_closed_ms(context_id, channel_id, timestamp_ms, runtime.authority_id())
@@ -2573,7 +2500,7 @@ pub async fn close_channel(
     )
     .await
     .map_err(|e| super::error::runtime_call("persist channel close", e))?
-        .map_err(|e| super::error::runtime_call("persist channel close", e))?;
+    .map_err(|e| super::error::runtime_call("persist channel close", e))?;
 
     Ok(())
 }
@@ -2610,7 +2537,7 @@ pub async fn set_topic(
     )
     .await
     .map_err(|e| super::error::runtime_call("set channel topic", e))?
-        .map_err(|e| super::error::runtime_call("set channel topic", e))?;
+    .map_err(|e| super::error::runtime_call("set channel topic", e))?;
 
     Ok(())
 }
@@ -2849,7 +2776,7 @@ async fn send_message_ref_owned(
             )
             .await
             .map_err(|e| super::error::runtime_call("persist note-to-self message", e))?
-                .map_err(|e| super::error::runtime_call("persist note-to-self message", e))?;
+            .map_err(|e| super::error::runtime_call("persist note-to-self message", e))?;
             (sender_id, message_id)
         } else {
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
@@ -2872,21 +2799,25 @@ async fn send_message_ref_owned(
                 .publish_phase(SemanticOperationPhase::AuthoritativeContextReady)
                 .await?;
             if channel_id != note_to_self_channel_id(sender_id) {
-                let readiness = match require_send_message_readiness(app_core, authoritative_channel)
-                    .await
-                {
-                    Ok(readiness) => readiness,
-                    Err(SendMessageError::DeliveryNotReady { .. }) => {
-                        let _ =
-                            warm_channel_connectivity(app_core, &runtime, authoritative_channel)
-                                .await;
-                        match require_send_message_readiness(app_core, authoritative_channel).await {
-                            Ok(readiness) => readiness,
-                            Err(error) => return fail_send_message(owner, error).await,
+                let readiness =
+                    match require_send_message_readiness(app_core, authoritative_channel).await {
+                        Ok(readiness) => readiness,
+                        Err(SendMessageError::DeliveryNotReady { .. }) => {
+                            let _ = warm_channel_connectivity(
+                                app_core,
+                                &runtime,
+                                authoritative_channel,
+                            )
+                            .await;
+                            match require_send_message_readiness(app_core, authoritative_channel)
+                                .await
+                            {
+                                Ok(readiness) => readiness,
+                                Err(error) => return fail_send_message(owner, error).await,
+                            }
                         }
-                    }
-                    Err(error) => return fail_send_message(owner, error).await,
-                };
+                        Err(error) => return fail_send_message(owner, error).await,
+                    };
                 if readiness.recipient_resolution_ready {
                     owner
                         .publish_phase(SemanticOperationPhase::RecipientResolutionReady)
@@ -3066,7 +2997,7 @@ async fn send_message_ref_owned(
                 )
                 .await
                 .map_err(|e| super::error::runtime_call("persist message", e))?
-                    .map_err(|e| super::error::runtime_call("persist message", e))?;
+                .map_err(|e| super::error::runtime_call("persist message", e))?;
 
                 if let Err(error) = deliver_message_fact_remotely(
                     app_core,
@@ -3274,12 +3205,14 @@ pub async fn start_direct_chat_with_authority(
             "start_direct_chat_with_authority",
             "amp_create_channel",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.amp_create_channel(ChannelCreateParams {
-                context: context_id,
-                channel: Some(channel_id),
-                skip_window: None,
-                topic: Some(format!("Direct messages with {contact_id}")),
-            }),
+            || {
+                runtime.amp_create_channel(ChannelCreateParams {
+                    context: context_id,
+                    channel: Some(channel_id),
+                    skip_window: None,
+                    topic: Some(format!("Direct messages with {contact_id}")),
+                })
+            },
         )
         .await;
         if let Err(error) = create_result {
@@ -3293,30 +3226,34 @@ pub async fn start_direct_chat_with_authority(
             "start_direct_chat_with_authority",
             "amp_join_channel_self",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.amp_join_channel(ChannelJoinParams {
-                context: context_id,
-                channel: channel_id,
-                participant: runtime.authority_id(),
-            }),
+            || {
+                runtime.amp_join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant: runtime.authority_id(),
+                })
+            },
         )
         .await
         .map_err(|error| super::error::runtime_call("join direct channel", error))?
-            .map_err(|error| super::error::runtime_call("join direct channel", error))?;
+        .map_err(|error| super::error::runtime_call("join direct channel", error))?;
 
         timeout_runtime_call(
             &runtime,
             "start_direct_chat_with_authority",
             "amp_join_channel_contact",
             MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.amp_join_channel(ChannelJoinParams {
-                context: context_id,
-                channel: channel_id,
-                participant: contact_authority,
-            }),
+            || {
+                runtime.amp_join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant: contact_authority,
+                })
+            },
         )
         .await
         .map_err(|error| super::error::runtime_call("add contact to direct channel", error))?
-            .map_err(|error| super::error::runtime_call("add contact to direct channel", error))?;
+        .map_err(|error| super::error::runtime_call("add contact to direct channel", error))?;
 
         let chat_fact = ChatFact::channel_created_ms(
             context_id,
@@ -3338,7 +3275,7 @@ pub async fn start_direct_chat_with_authority(
         )
         .await
         .map_err(|error| super::error::runtime_call("persist direct channel", error))?
-            .map_err(|error| super::error::runtime_call("persist direct channel", error))?;
+        .map_err(|error| super::error::runtime_call("persist direct channel", error))?;
 
         reduce_chat_fact_observed(app_core, &chat_fact).await?;
         send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
@@ -3600,12 +3537,9 @@ async fn invite_user_to_channel_with_context_owned(
             resolve_chat_channel_id_from_state_or_input(app_core, channel_name_or_id),
         )
         .await?;
-        let channel_name_hint = canonical_channel_name_hint_for_invite(
-            app_core,
-            channel_id,
-            channel_name_or_id,
-        )
-        .await?;
+        let channel_name_hint =
+            canonical_channel_name_hint_for_invite(app_core, channel_id, channel_name_or_id)
+                .await?;
         update_invite_stage(&stage_tracker, "invite_authority_to_channel");
 
         invite_authority_to_channel_with_context(
@@ -4868,8 +4802,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_channel_name_hint_for_invite_uses_existing_channel_name_for_id_input()
-    {
+    async fn test_canonical_channel_name_hint_for_invite_uses_existing_channel_name_for_id_input() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -5186,35 +5119,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authoritative_local_channel_id_for_context_uses_runtime_resolution() {
-        let config = AppConfig::default();
-        let owner = AuthorityId::new_from_entropy([19u8; 32]);
-        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
-        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
-        let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(config, runtime_bridge).unwrap(),
-        ));
-        let authoritative_channel_id = ChannelId::from_bytes(hash(b"authoritative-home-id"));
-        let context_id = ContextId::new_from_entropy([20u8; 32]);
-        runtime.set_authoritative_channel_name_matches(
-            "shared-parity-lab",
-            vec![authoritative_channel_id],
-        );
-        runtime.set_amp_channel_context(authoritative_channel_id, context_id);
-
-        let resolved = authoritative_local_channel_id_for_context(
-            &app_core,
-            context_id,
-            Some("shared-parity-lab"),
-        )
-        .await
-        .expect("runtime-backed channel identity should resolve");
-
-        assert_eq!(resolved, authoritative_channel_id);
-    }
-
-    #[tokio::test]
-    async fn local_channel_id_for_accepted_pending_invitation_uses_canonical_channel_identity() {
+    async fn resolve_authoritative_context_id_for_channel_ignores_pending_invitation_fallbacks() {
         let config = AppConfig::default();
         let owner = AuthorityId::new_from_entropy([21u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
@@ -5222,20 +5127,15 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(config, runtime_bridge).unwrap(),
         ));
-        let canonical_channel_id = ChannelId::from_bytes(hash(b"canonical-accepted-home-id"));
+        let channel_id = ChannelId::from_bytes(hash(b"canonical-accepted-home-id"));
         let context_id = ContextId::new_from_entropy([22u8; 32]);
-        runtime.set_authoritative_channel_name_matches(
-            "shared-parity-lab",
-            vec![canonical_channel_id],
-        );
-        runtime.set_amp_channel_context(canonical_channel_id, context_id);
 
         let invitation = InvitationInfo {
             invitation_id: InvitationId::new("inv-local-context".to_string()),
             sender_id: AuthorityId::new_from_entropy([23u8; 32]),
             receiver_id: owner,
             invitation_type: InvitationBridgeType::Channel {
-                home_id: canonical_channel_id.to_string(),
+                home_id: channel_id.to_string(),
                 context_id: Some(context_id),
                 nickname_suggestion: Some("shared-parity-lab".to_string()),
             },
@@ -5244,15 +5144,11 @@ mod tests {
             expires_at_ms: None,
             message: None,
         };
+        runtime.set_pending_invitations(vec![invitation]);
 
-        let resolved = local_channel_id_for_accepted_pending_invitation(
-            &app_core,
-            &invitation,
-            canonical_channel_id,
-        )
-        .await;
+        let resolved = resolve_authoritative_context_id_for_channel(&app_core, channel_id).await;
 
-        assert_eq!(resolved, canonical_channel_id);
+        assert_eq!(resolved, None);
     }
 
     #[tokio::test]

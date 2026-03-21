@@ -87,7 +87,7 @@ pub struct MockRuntimeBridge {
     /// Mock authoritative AMP contexts keyed by channel.
     amp_channel_contexts: Arc<RwLock<HashMap<ChannelId, ContextId>>>,
     /// Mock authoritative channel-name matches keyed by normalized name.
-    authoritative_channel_name_matches: Arc<RwLock<HashMap<String, Vec<ChannelId>>>>,
+    materialized_channel_name_matches: Arc<RwLock<HashMap<String, Vec<ChannelId>>>>,
     /// Authoritative moderation statuses keyed by (context, channel, authority).
     moderation_statuses: ModerationStatuses,
 }
@@ -133,7 +133,7 @@ impl MockRuntimeBridge {
             amp_channel_state_exists: Arc::new(RwLock::new(true)),
             amp_channel_participants: Arc::new(RwLock::new(HashMap::new())),
             amp_channel_contexts: Arc::new(RwLock::new(HashMap::new())),
-            authoritative_channel_name_matches: Arc::new(RwLock::new(HashMap::new())),
+            materialized_channel_name_matches: Arc::new(RwLock::new(HashMap::new())),
             moderation_statuses: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -289,13 +289,13 @@ impl MockRuntimeBridge {
             .insert(channel_id, context_id);
     }
 
-    /// Configure authoritative channel ids returned for a given channel name.
-    pub async fn set_authoritative_channel_name_matches(
+    /// Configure materialized channel ids returned for a given channel name.
+    pub async fn set_materialized_channel_name_matches(
         &self,
         channel_name: impl Into<String>,
         channel_ids: Vec<ChannelId>,
     ) {
-        self.authoritative_channel_name_matches
+        self.materialized_channel_name_matches
             .write()
             .await
             .insert(channel_name.into().trim().to_ascii_lowercase(), channel_ids);
@@ -499,12 +499,12 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(None)
     }
 
-    async fn resolve_authoritative_channel_ids_by_name(
+    async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
     ) -> Result<Vec<ChannelId>, IntentError> {
         Ok(self
-            .authoritative_channel_name_matches
+            .materialized_channel_name_matches
             .read()
             .await
             .get(&channel_name.trim().to_ascii_lowercase())

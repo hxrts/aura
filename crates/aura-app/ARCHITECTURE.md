@@ -105,6 +105,9 @@ Strict authoritative-ref rule for parity-critical workflows:
 - raw identifiers may reference but may not authorize
 - parity-critical helpers may not re-resolve context, ownership, or readiness
   from weaker ids after authoritative handoff
+- boundary-time name lookup may identify only already-materialized runtime
+  channels; it may not mine pending invitations or renderer-local hints to
+  repair missing authoritative context
 - fallback/default helpers such as `*_or_fallback` are forbidden on
   parity-critical paths
 - once canonical entity metadata has an owned materialization path, downstream

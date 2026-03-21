@@ -237,6 +237,18 @@ events or raw identifiers. If runtime acceptance or reconciliation needs to
 materialize canonical metadata, one explicit owned handler path must do that
 end to end before reactive views are allowed to enrich the projection.
 
+Runtime bridge lookup follows the same strong-ref rule:
+
+- context-scoped routing may use only descriptors bound to the requested
+  context, not cross-context or "any descriptor" fallback
+- channel-context answers must come from materialized runtime-owned context
+  state, not invitation storage or local chat-fact repair
+- name lookup may identify only already-materialized channels; it may not
+  upgrade imported invitation metadata into an authoritative binding
+- invitation-triggered home signal materialization must flow through the
+  declared reactive home-signal owner path in `reactive/app_signal_views.rs`,
+  not through handler-local signal read/patch/emit logic
+
 ## Canonical Host/VM Boundary
 
 `aura-agent` aligns with Telltale's canonical execution model. The only legal path from external async input to session mutation:

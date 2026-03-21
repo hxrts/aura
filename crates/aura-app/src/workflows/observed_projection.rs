@@ -75,7 +75,7 @@ pub async fn reduce_chat_fact_observed(
     let state = {
         let current_state = {
             let core = app_core.read().await;
-            core.snapshot().chat
+            core.views().get_chat()
         };
         let mut core = app_core.write().await;
         let mut state = current_state;
@@ -129,15 +129,15 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
             };
 
             if let Some(channel) = state.channel_mut(&channel_id) {
-                channel.context_id = context_id.or(channel.context_id);
+                channel.context_id = context_id;
                 channel.name = name;
                 channel.topic = topic;
                 channel.is_dm = is_dm;
                 channel.channel_type = channel_type;
-                channel.member_count = channel.member_count.max(member_count);
-                channel.last_activity = channel.last_activity.max(created_at);
+                channel.member_count = member_count;
+                channel.last_activity = created_at;
             } else {
-                let canonical = Channel {
+                state.upsert_channel(Channel {
                     id: channel_id,
                     context_id,
                     name,
@@ -151,20 +151,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                     last_message_time: None,
                     last_activity: created_at,
                     last_finalized_epoch: 0,
-                };
-                let stale_id = state
-                    .all_channels()
-                    .find(|channel| {
-                        channel.id != channel_id
-                            && channel.name.eq_ignore_ascii_case(&canonical.name)
-                            && channel.is_dm == canonical.is_dm
-                    })
-                    .map(|channel| channel.id);
-                if let Some(stale_id) = stale_id {
-                    state.rebind_channel_identity(&stale_id, canonical);
-                } else {
-                    state.upsert_channel(canonical);
-                }
+                });
             }
         }
         ChatDelta::ChannelRemoved { channel_id } => {
@@ -188,8 +175,6 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .transpose()?;
-            let canonical_name = name.clone().unwrap_or_else(|| channel_id.to_string());
-
             if let Some(channel) = state.channel_mut(&channel_id) {
                 if let Some(context_id) = context_id {
                     channel.context_id = Some(context_id);
@@ -201,25 +186,24 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                     channel.topic = topic;
                 }
                 if let Some(member_count) = member_count {
-                    channel.member_count = if member_count == 0 {
-                        0
-                    } else {
-                        channel.member_count.max(member_count)
-                    };
+                    channel.member_count = member_count;
                 }
                 if let Some(member_ids) = member_ids {
                     channel.member_ids = member_ids;
                 }
             } else {
+                let Some(name) = name else {
+                    return Ok(());
+                };
                 let initial_member_ids: Vec<AuthorityId> = match member_ids {
                     Some(member_ids) => member_ids,
                     None => Vec::new(),
                 };
                 let initial_member_count = member_count.unwrap_or(1);
-                let canonical = Channel {
+                state.upsert_channel(Channel {
                     id: channel_id,
                     context_id,
-                    name: canonical_name.clone(),
+                    name,
                     topic,
                     channel_type: ChannelType::Home,
                     unread_count: 0,
@@ -230,20 +214,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                     last_message_time: None,
                     last_activity: 0,
                     last_finalized_epoch: 0,
-                };
-                let stale_id = state
-                    .all_channels()
-                    .find(|channel| {
-                        channel.id != channel_id
-                            && !channel.is_dm
-                            && channel.name.eq_ignore_ascii_case(&canonical_name)
-                    })
-                    .map(|channel| channel.id);
-                if let Some(stale_id) = stale_id {
-                    state.rebind_channel_identity(&stale_id, canonical);
-                } else {
-                    state.upsert_channel(canonical);
-                }
+                });
             }
         }
         ChatDelta::MessageAdded {
@@ -340,6 +311,119 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::views::chat::{Channel, ChannelType};
+    use aura_core::hash::hash;
+    use aura_core::types::identifiers::ContextId;
+
+    #[test]
+    fn channel_added_replaces_canonical_fields_without_preserving_stale_context() {
+        let channel_id = ChannelId::from_bytes(hash(b"observed-projection-strict-channel"));
+        let stale_context = ContextId::new_from_entropy([1u8; 32]);
+        let canonical_context = ContextId::new_from_entropy([2u8; 32]);
+        let mut state = ChatState::from_channels([Channel {
+            id: channel_id,
+            context_id: Some(stale_context),
+            name: "old".to_string(),
+            topic: Some("old-topic".to_string()),
+            channel_type: ChannelType::Home,
+            unread_count: 7,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 9,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 100,
+            last_finalized_epoch: 0,
+        }]);
+
+        apply_chat_delta_reduced(
+            &mut state,
+            ChatDelta::ChannelAdded {
+                channel_id: channel_id.to_string(),
+                context_id: Some(canonical_context.to_string()),
+                name: "shared-parity-lab".to_string(),
+                topic: Some("canonical-topic".to_string()),
+                is_dm: false,
+                member_count: 2,
+                created_at: 10,
+                creator_id: AuthorityId::new_from_entropy([3u8; 32]).to_string(),
+            },
+        )
+        .expect("apply channel added");
+
+        let channel = state.channel(&channel_id).expect("channel must exist");
+        assert_eq!(channel.context_id, Some(canonical_context));
+        assert_eq!(channel.name, "shared-parity-lab");
+        assert_eq!(channel.topic.as_deref(), Some("canonical-topic"));
+        assert_eq!(channel.member_count, 2);
+        assert_eq!(channel.last_activity, 10);
+    }
+
+    #[test]
+    fn channel_updated_without_canonical_name_does_not_materialize_unknown_channel() {
+        let channel_id = ChannelId::from_bytes(hash(b"observed-projection-missing-name"));
+        let mut state = ChatState::default();
+
+        apply_chat_delta_reduced(
+            &mut state,
+            ChatDelta::ChannelUpdated {
+                channel_id: channel_id.to_string(),
+                context_id: Some(ContextId::new_from_entropy([4u8; 32]).to_string()),
+                name: None,
+                topic: Some("topic".to_string()),
+                member_count: Some(2),
+                member_ids: None,
+            },
+        )
+        .expect("apply channel updated");
+
+        assert!(state.channel(&channel_id).is_none());
+    }
+
+    #[test]
+    fn channel_added_does_not_rebind_existing_channel_by_name() {
+        let stale_id = ChannelId::from_bytes(hash(b"observed-projection-stale-id"));
+        let canonical_id = ChannelId::from_bytes(hash(b"observed-projection-canonical-id"));
+        let mut state = ChatState::from_channels([Channel {
+            id: stale_id,
+            context_id: Some(ContextId::new_from_entropy([5u8; 32])),
+            name: "shared-parity-lab".to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        }]);
+
+        apply_chat_delta_reduced(
+            &mut state,
+            ChatDelta::ChannelAdded {
+                channel_id: canonical_id.to_string(),
+                context_id: Some(ContextId::new_from_entropy([6u8; 32]).to_string()),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                is_dm: false,
+                member_count: 2,
+                created_at: 10,
+                creator_id: AuthorityId::new_from_entropy([7u8; 32]).to_string(),
+            },
+        )
+        .expect("apply channel added");
+
+        assert!(state.channel(&stale_id).is_some());
+        assert!(state.channel(&canonical_id).is_some());
+        assert_eq!(state.channel_count(), 2);
+    }
 }
 
 /// Observed-only projection update helper for recovery state.

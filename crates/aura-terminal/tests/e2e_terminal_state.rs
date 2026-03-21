@@ -2423,7 +2423,7 @@ async fn test_channel_mode_operations() {
         .set_amp_channel_context(home_id, home_context_id)
         .await;
     mock_bridge
-        .set_authoritative_channel_name_matches("another-channel", vec![home_id])
+        .set_materialized_channel_name_matches("another-channel", vec![home_id])
         .await;
 
     // Initially no mode set

@@ -164,6 +164,9 @@ Anti-patterns to avoid:
 - reducers that call time/network/storage directly (no longer `Pure`)
 - reactive/view code inventing channel names from raw ids or membership events
   instead of consuming an owned canonical materialization path
+- runtime or workflow code mining pending invitations, optimistic sketches, or
+  cross-context routing cache entries to repair a missing authoritative
+  binding/context after handoff
 
 ## Contributor Requirement
 

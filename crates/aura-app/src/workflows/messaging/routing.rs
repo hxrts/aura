@@ -44,15 +44,15 @@ pub(super) async fn resolve_chat_channel_id_from_state_or_input(
     timeout_runtime_call(
         &runtime,
         "resolve_chat_channel_id_from_state_or_input",
-        "resolve_authoritative_channel_ids_by_name",
+        "identify_materialized_channel_ids_by_name",
         ROUTING_RUNTIME_TIMEOUT,
-        || runtime.resolve_authoritative_channel_ids_by_name(normalized_name),
+        || runtime.identify_materialized_channel_ids_by_name(normalized_name),
     )
     .await?
-        .map_err(|error| error::runtime_call("resolve authoritative channel ids by name", error))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
+    .map_err(|error| error::runtime_call("identify materialized channel ids by name", error))?
+    .into_iter()
+    .next()
+    .ok_or_else(|| AuraError::not_found(normalized_name.to_string()))
 }
 
 #[aura_macros::authoritative_source(kind = "runtime")]
@@ -83,12 +83,12 @@ pub(super) async fn matching_chat_channel_ids(
     let matches = timeout_runtime_call(
         &runtime,
         "matching_chat_channel_ids",
-        "resolve_authoritative_channel_ids_by_name",
+        "identify_materialized_channel_ids_by_name",
         ROUTING_RUNTIME_TIMEOUT,
-        || runtime.resolve_authoritative_channel_ids_by_name(normalized_name),
+        || runtime.identify_materialized_channel_ids_by_name(normalized_name),
     )
     .await?
-        .map_err(|error| error::runtime_call("resolve authoritative channel ids by name", error))?;
+    .map_err(|error| error::runtime_call("identify materialized channel ids by name", error))?;
     Ok(matches)
 }
 
@@ -185,13 +185,13 @@ pub(super) async fn context_id_for_channel(
         || runtime.resolve_amp_channel_context(channel_id),
     )
     .await?
-        .map_err(|error| error::runtime_call("resolve authoritative channel context", error))?
-        .ok_or_else(|| {
-            WorkflowError::MissingAuthoritativeContext {
-                channel: channel_id.to_string(),
-            }
-            .into()
-        })
+    .map_err(|error| error::runtime_call("resolve authoritative channel context", error))?
+    .ok_or_else(|| {
+        WorkflowError::MissingAuthoritativeContext {
+            channel: channel_id.to_string(),
+        }
+        .into()
+    })
 }
 
 #[cfg(test)]
@@ -205,7 +205,7 @@ mod tests {
         let authority = AuthorityId::new_from_entropy([9u8; 32]);
         let bridge = Arc::new(OfflineRuntimeBridge::new(authority));
         let canonical_id = ChannelId::from_bytes(hash(b"routing-canonical"));
-        bridge.set_authoritative_channel_name_matches("shared-parity-lab", vec![canonical_id]);
+        bridge.set_materialized_channel_name_matches("shared-parity-lab", vec![canonical_id]);
         let core = AppCore::with_runtime(AppConfig::default(), bridge).expect("runtime-backed app");
         let app_core = Arc::new(RwLock::new(core));
 

@@ -2402,7 +2402,7 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
         let channel_id = ChannelId::from_bytes([44u8; 32]);
         let context_id = ContextId::new_from_entropy([48u8; 32]);
-        runtime.set_authoritative_channel_name_matches("semantic-room", vec![channel_id]);
+        runtime.set_materialized_channel_name_matches("semantic-room", vec![channel_id]);
         runtime.set_amp_channel_context(channel_id, context_id);
         let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
         let app_core = Arc::new(RwLock::new(
