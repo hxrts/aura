@@ -18,9 +18,9 @@ pub struct SettingsCallbacks {
     pub on_update_mfa: Arc<dyn Fn(MfaPolicy) + Send + Sync>,
     pub on_update_nickname_suggestion: UpdateNicknameSuggestionCallback,
     pub on_update_threshold: UpdateThresholdCallback,
-    pub on_add_device: AddDeviceCallback,
+    pub(crate) on_add_device: AddDeviceCallback,
     pub on_remove_device: RemoveDeviceCallback,
-    pub on_import_device_enrollment_on_mobile: ImportDeviceEnrollmentCallback,
+    pub(crate) on_import_device_enrollment_on_mobile: ImportDeviceEnrollmentCallback,
 }
 
 impl SettingsCallbacks {
@@ -130,7 +130,9 @@ impl SettingsCallbacks {
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
         Arc::new(
-            move |nickname_suggestion: String, invitee_authority_id: AuthorityId| {
+            move |nickname_suggestion: String,
+                  invitee_authority_id: AuthorityId,
+                  operation: LocalTerminalOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
@@ -148,6 +150,7 @@ impl SettingsCallbacks {
                                 )),
                             )
                             .await;
+                            operation.fail(error.to_string()).await;
                             return;
                         }
                     };
@@ -163,6 +166,7 @@ impl SettingsCallbacks {
                         },
                     )
                     .await;
+                    operation.succeed().await;
 
                     let status_handle = start.status_handle.clone();
                     ctx.remember_key_rotation_ceremony(start.cancel_handle)
@@ -239,8 +243,15 @@ impl SettingsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 let handle = match ctx.start_device_removal(&device_id_clone).await {
                     Ok(handle) => handle,
-                    Err(_e) => {
-                        tracing::debug!(error = %_e, "dispatch error (surfaced via ERROR_SIGNAL)");
+                    Err(error) => {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error(
+                                "device-removal-failed",
+                                format!("Device removal failed: {error}"),
+                            )),
+                        )
+                        .await;
                         return;
                     }
                 };
@@ -275,16 +286,22 @@ impl SettingsCallbacks {
                 // Best-effort: monitor completion and toast success/failure.
                 let tx_monitor = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
+                    let policy = aura_app::ui::workflows::ceremonies::CeremonyPollPolicy {
+                        interval: Duration::from_millis(250),
+                        max_attempts: 160,
+                        rollback_on_failure: true,
+                        refresh_settings_on_complete: true,
+                    };
+                    match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
                         ctx.app_core_raw(),
                         &status_handle,
-                        Duration::from_millis(250),
+                        policy,
                         |_| {},
                         physical_sleep,
                     )
                     .await
                     {
-                        Ok(status) if status.is_complete => {
+                        Ok(lifecycle) if lifecycle.status.is_complete => {
                             send_ui_update_required(
                                 &tx_monitor,
                                 UiUpdate::ToastAdded(ToastMessage::success(
@@ -294,8 +311,9 @@ impl SettingsCallbacks {
                             )
                             .await;
                         }
-                        Ok(status) if status.has_failed => {
-                            let msg = status
+                        Ok(lifecycle) if lifecycle.status.has_failed => {
+                            let msg = lifecycle
+                                .status
                                 .error_message
                                 .unwrap_or_else(|| "Device removal failed".to_string());
                             send_ui_update_required(
@@ -307,7 +325,19 @@ impl SettingsCallbacks {
                             )
                             .await;
                         }
-                        Ok(_) => {}
+                        Ok(lifecycle) => {
+                            send_ui_update_required(
+                                &tx_monitor,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "device-removal-timeout",
+                                    format!(
+                                        "Device removal did not settle before timeout ({:?})",
+                                        lifecycle.state
+                                    ),
+                                )),
+                            )
+                            .await;
+                        }
                         Err(_e) => {
                             // monitor already emitted error via ERROR_SIGNAL on polling failures.
                         }
@@ -321,35 +351,42 @@ impl SettingsCallbacks {
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> ImportDeviceEnrollmentCallback {
-        Arc::new(move |code: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let should_complete_onboarding = !ctx.has_account();
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.import_device_enrollment_code(&code).await {
-                    Ok(()) => {
-                        if should_complete_onboarding {
-                            send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
+        Arc::new(
+            move |code: String, operation: LocalTerminalOperationOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let should_complete_onboarding = !ctx.has_account();
+                spawn_ctx(ctx.clone(), async move {
+                    match ctx.import_device_enrollment_code(&code).await {
+                        Ok(()) => {
+                            operation.succeed().await;
+                            if should_complete_onboarding {
+                                send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
+                            }
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::success(
+                                    "devices",
+                                    "Device enrollment invitation accepted",
+                                )),
+                            )
+                            .await;
                         }
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "devices",
-                                "Device enrollment invitation accepted",
-                            )),
-                        )
-                        .await;
+                        Err(e) => {
+                            operation.fail(e.to_string()).await;
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::operation_failed(
+                                    UiOperation::ImportDeviceEnrollmentCode,
+                                    e,
+                                ),
+                            )
+                            .await;
+                        }
                     }
-                    Err(e) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::operation_failed(UiOperation::ImportDeviceEnrollmentCode, e),
-                        )
-                        .await;
-                    }
-                }
-            });
-        })
+                });
+            },
+        )
     }
 }
 

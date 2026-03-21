@@ -21,6 +21,7 @@ enum LintMode {
     WorkflowNoFallbackDefaults,
     WorkflowNoViewDerivedReadiness,
     WorkflowNoViewDerivedRecipientResolution,
+    WorkflowUnboundedRuntimeAwaits,
     SemanticOwnerBoundedAwaits,
     BestEffortSideEffectBoundary,
     SemanticOwnerDetachedContinuation,
@@ -51,6 +52,7 @@ impl LintMode {
             "workflow-no-view-derived-recipient-resolution" => {
                 Ok(Self::WorkflowNoViewDerivedRecipientResolution)
             }
+            "workflow-unbounded-runtime-awaits" => Ok(Self::WorkflowUnboundedRuntimeAwaits),
             "semantic-owner-bounded-awaits" => Ok(Self::SemanticOwnerBoundedAwaits),
             "best-effort-side-effect-boundary" => Ok(Self::BestEffortSideEffectBoundary),
             "semantic-owner-detached-continuation" => Ok(Self::SemanticOwnerDetachedContinuation),
@@ -82,6 +84,7 @@ impl LintMode {
             Self::WorkflowNoViewDerivedRecipientResolution => {
                 "workflow-no-view-derived-recipient-resolution"
             }
+            Self::WorkflowUnboundedRuntimeAwaits => "workflow-unbounded-runtime-awaits",
             Self::SemanticOwnerBoundedAwaits => "semantic-owner-bounded-awaits",
             Self::BestEffortSideEffectBoundary => "best-effort-side-effect-boundary",
             Self::SemanticOwnerDetachedContinuation => "semantic-owner-detached-continuation",
@@ -184,6 +187,10 @@ fn run() -> Result<(), String> {
             }
             LintMode::WorkflowNoViewDerivedRecipientResolution => {
                 "recipient resolution still depends on projected state".to_string()
+            }
+            LintMode::WorkflowUnboundedRuntimeAwaits => {
+                "aura-app workflow/app code still contains direct runtime awaits outside explicit timeout wrappers"
+                    .to_string()
             }
             LintMode::SemanticOwnerBoundedAwaits => {
                 "semantic owner protocol violations remain in owner or handoff functions".to_string()
@@ -322,6 +329,7 @@ fn scan_file(
         | LintMode::WorkflowNoFallbackDefaults
         | LintMode::WorkflowNoViewDerivedReadiness
         | LintMode::WorkflowNoViewDerivedRecipientResolution
+        | LintMode::WorkflowUnboundedRuntimeAwaits
         | LintMode::SemanticOwnerBoundedAwaits
         | LintMode::BestEffortSideEffectBoundary
         | LintMode::SemanticOwnerDetachedContinuation
@@ -803,6 +811,18 @@ fn scan_function(
                 .contains("crates/aura-app/src/workflows/")
                 && !has_marker_attr(attrs, "observed_only")
         }
+        LintMode::WorkflowUnboundedRuntimeAwaits => {
+            let file_path = file.to_string_lossy();
+            let file_name = file.file_name().and_then(OsStr::to_str);
+            ((file_path.contains("crates/aura-app/src/workflows/")
+                && !matches!(file_name, Some("runtime.rs" | "time.rs")))
+                || file_path.ends_with("crates/aura-app/src/core/app.rs")
+                || (file_path.contains("crates/aura-terminal/src/tui/")
+                    && !matches!(file_name, Some("runtime.rs" | "iocraft_adapter.rs")))
+                || file_path.contains("crates/aura-web/src/")
+                || file_path.contains("crates/aura-ui/src/"))
+                && !has_marker_attr(attrs, "observed_only")
+        }
         LintMode::SemanticOwnerBoundedAwaits => {
             has_marker_attr(attrs, "semantic_owner") || contains_handoff
         }
@@ -849,6 +869,7 @@ fn scan_function(
         function_name: &function_name,
         violations: Vec::new(),
         has_handoff: contains_handoff,
+        bounded_runtime_wrapper_depth: 0,
         first_await_line: None,
         first_handoff_line: None,
         first_terminal_publication_line: None,
@@ -889,8 +910,17 @@ fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
                 .path()
                 .segments
                 .last()
-                .is_some_and(|segment| segment.ident == "test")
+            .is_some_and(|segment| segment.ident == "test")
     })
+}
+
+fn is_bounded_runtime_wrapper_call_name(call_name: &str) -> bool {
+    matches!(
+        call_name,
+        "execute_with_runtime_timeout_budget"
+            | "timeout_workflow_stage_with_deadline"
+            | "with_runtime_timeout"
+    )
 }
 
 fn ownership_tags_before_line(source: &str, line: usize) -> Vec<String> {
@@ -934,6 +964,7 @@ struct OwnershipVisitor<'a> {
     function_name: &'a str,
     violations: Vec<String>,
     has_handoff: bool,
+    bounded_runtime_wrapper_depth: usize,
     first_await_line: Option<usize>,
     first_handoff_line: Option<usize>,
     first_terminal_publication_line: Option<usize>,
@@ -980,6 +1011,7 @@ impl OwnershipVisitor<'_> {
             | LintMode::WorkflowNoViewDerivedRecipientResolution => {
                 tags.iter().any(|tag| tag == "deprecated-legacy-bridge")
             }
+            LintMode::WorkflowUnboundedRuntimeAwaits => false,
             _ => false,
         }
     }
@@ -1242,6 +1274,19 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             }
         }
 
+        if self.mode == LintMode::WorkflowUnboundedRuntimeAwaits
+            && is_bounded_runtime_wrapper_call_name(&method_name)
+        {
+            visit::visit_expr(&mut *self, &node.receiver);
+            self.bounded_runtime_wrapper_depth += 1;
+            for arg in &node.args {
+                visit::visit_expr(&mut *self, arg);
+            }
+            self.bounded_runtime_wrapper_depth =
+                self.bounded_runtime_wrapper_depth.saturating_sub(1);
+            return;
+        }
+
         visit::visit_expr_method_call(self, node);
     }
 
@@ -1331,6 +1376,7 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                         );
                     }
                 }
+                LintMode::WorkflowUnboundedRuntimeAwaits => {}
                 _ => {}
             }
             self.note_terminal_publication(node.span(), &call_name, &tokens);
@@ -1376,6 +1422,19 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                         self.function_name, tokens
                     ),
                 );
+            }
+
+            if self.mode == LintMode::WorkflowUnboundedRuntimeAwaits
+                && is_bounded_runtime_wrapper_call_name(&call_name)
+            {
+                visit::visit_expr(&mut *self, &node.func);
+                self.bounded_runtime_wrapper_depth += 1;
+                for arg in &node.args {
+                    visit::visit_expr(&mut *self, arg);
+                }
+                self.bounded_runtime_wrapper_depth =
+                    self.bounded_runtime_wrapper_depth.saturating_sub(1);
+                return;
             }
         }
 
@@ -1460,6 +1519,22 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                                 self.function_name, call_name
                             ),
                         );
+                    }
+                }
+            }
+            LintMode::WorkflowUnboundedRuntimeAwaits => {
+                if self.bounded_runtime_wrapper_depth == 0 {
+                    if let Some(method_call) = method_call_on_ident(&node.base, "runtime") {
+                        if method_call.method != "sleep_ms" {
+                            self.push_violation(
+                                node.span(),
+                                format!(
+                                    "workflow/app function `{}` awaits runtime directly without an explicit timeout wrapper: {}",
+                                    self.function_name,
+                                    method_call.to_token_stream()
+                                ),
+                            );
+                        }
                     }
                 }
             }

@@ -1005,7 +1005,15 @@ cfg_if! {
                     loop {
                         let runtime = { app_core.read().await.runtime().cloned() };
                         if let Some(runtime) = runtime {
-                            if let Err(error) = runtime.trigger_discovery().await {
+                            if let Err(error) = runtime_workflows::timeout_runtime_call(
+                                &runtime,
+                                "web_background_sync",
+                                "trigger_discovery",
+                                std::time::Duration::from_secs(3),
+                                || runtime.trigger_discovery(),
+                            )
+                            .await
+                            {
                                 log_web_error(
                                     "warn",
                                     &WebUiError::operation(
@@ -1015,7 +1023,15 @@ cfg_if! {
                                     ),
                                 );
                             }
-                            if let Err(error) = runtime.trigger_sync().await {
+                            if let Err(error) = runtime_workflows::timeout_runtime_call(
+                                &runtime,
+                                "web_background_sync",
+                                "trigger_sync",
+                                std::time::Duration::from_secs(3),
+                                || runtime.trigger_sync(),
+                            )
+                            .await
+                            {
                                 log_web_error(
                                     "warn",
                                     &WebUiError::operation(

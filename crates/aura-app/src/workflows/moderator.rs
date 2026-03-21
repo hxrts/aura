@@ -6,7 +6,7 @@
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
-    workflow_retry_policy,
+    timeout_runtime_call, workflow_retry_policy,
 };
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
@@ -20,9 +20,11 @@ use aura_core::{AuraError, RetryRunError};
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::moderation::facts::{HomeGrantModeratorFact, HomeRevokeModeratorFact};
 use std::sync::Arc;
+use std::time::Duration;
 
 const MODERATOR_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const MODERATOR_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
+const MODERATOR_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 async fn send_moderator_fact_with_retry(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
@@ -44,9 +46,14 @@ async fn send_moderator_fact_with_retry(
                     cooperative_yield().await;
                 }
             }
-            runtime
-                .send_chat_fact(peer, context_id, fact)
-                .await
+            timeout_runtime_call(
+                &runtime,
+                "send_moderator_fact_with_retry",
+                "send_chat_fact",
+                MODERATOR_RUNTIME_TIMEOUT,
+                || runtime.send_chat_fact(peer, context_id, fact),
+            )
+            .await?
                 .map_err(|error| {
                     AuraError::from(super::error::runtime_call("Send moderator fact", error))
                 })
@@ -103,9 +110,15 @@ async fn resolve_authoritative_channel_id(
     match crate::workflows::channel_ref::ChannelSelector::parse(channel)? {
         crate::workflows::channel_ref::ChannelSelector::Id(channel_id) => Ok(channel_id),
         crate::workflows::channel_ref::ChannelSelector::Name(channel_name) => {
-            let resolved = runtime
-                .resolve_authoritative_channel_ids_by_name(&channel_name)
-                .await
+            let resolved = timeout_runtime_call(
+                runtime,
+                "resolve_authoritative_channel_id",
+                "resolve_authoritative_channel_ids_by_name",
+                MODERATOR_RUNTIME_TIMEOUT,
+                || runtime.resolve_authoritative_channel_ids_by_name(&channel_name),
+            )
+            .await
+            .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?
                 .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?;
             match resolved.as_slice() {
                 [] => Err(AuraError::not_found(channel_name)),
@@ -152,9 +165,15 @@ async fn resolve_scope(
         if let Some(home) = homes.home_state(&channel_id) {
             (channel_id, home.clone())
         } else {
-            let context_id = runtime
-                .resolve_amp_channel_context(channel_id)
-                .await
+            let context_id = timeout_runtime_call(
+                &runtime,
+                "resolve_scope",
+                "resolve_amp_channel_context",
+                MODERATOR_RUNTIME_TIMEOUT,
+                || runtime.resolve_amp_channel_context(channel_id),
+            )
+            .await
+            .map_err(|e| super::error::runtime_call("resolve moderator scope context", e))?
                 .map_err(|e| super::error::runtime_call("resolve moderator scope context", e))?
                 .ok_or_else(|| AuraError::not_found(channel_id.to_string()))?;
             best_home_for_context(&homes, context_id)
@@ -172,9 +191,15 @@ async fn resolve_scope(
     let context_id = home_state
         .context_id
         .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-    let peers = runtime
-        .amp_list_channel_participants(context_id, home_id)
-        .await
+    let peers = timeout_runtime_call(
+        &runtime,
+        "resolve_scope",
+        "amp_list_channel_participants",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.amp_list_channel_participants(context_id, home_id),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?
         .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
 
     Ok(ModeratorScope {
@@ -196,9 +221,15 @@ async fn current_moderator_scope(
             let context_id = home_state
                 .context_id
                 .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-            let peers = runtime
-                .amp_list_channel_participants(context_id, active_home_id)
-                .await
+            let peers = timeout_runtime_call(
+                &runtime,
+                "current_moderator_scope",
+                "amp_list_channel_participants",
+                MODERATOR_RUNTIME_TIMEOUT,
+                || runtime.amp_list_channel_participants(context_id, active_home_id),
+            )
+            .await
+            .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?
                 .map_err(|e| super::error::runtime_call("list moderator scope participants", e))?;
             return Ok(ModeratorScope {
                 home_id: active_home_id,
@@ -272,17 +303,29 @@ pub async fn grant_moderator_resolved(
         scope.peers.push(target_id);
     }
 
-    let now_ms = runtime
-        .current_time_ms()
-        .await
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "grant_moderator_resolved",
+        "current_time_ms",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?
         .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?;
     let actor = runtime.authority_id();
     let fact =
         HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
 
-    runtime
-        .commit_relational_facts(std::slice::from_ref(&fact))
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "grant_moderator_resolved",
+        "commit_relational_facts",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?
         .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?;
 
     for peer in scope.peers {
@@ -374,17 +417,29 @@ pub async fn revoke_moderator_resolved(
         scope.peers.push(target_id);
     }
 
-    let now_ms = runtime
-        .current_time_ms()
-        .await
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "revoke_moderator_resolved",
+        "current_time_ms",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?
         .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
     let actor = runtime.authority_id();
     let fact =
         HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
 
-    runtime
-        .commit_relational_facts(std::slice::from_ref(&fact))
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "revoke_moderator_resolved",
+        "commit_relational_facts",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?
         .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?;
 
     for peer in scope.peers {

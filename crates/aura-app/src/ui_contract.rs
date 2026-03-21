@@ -66,6 +66,7 @@ pub enum ModalId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HarnessUiCommand {
+    Ping,
     NavigateScreen {
         screen: ScreenId,
     },

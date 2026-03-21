@@ -12,8 +12,9 @@ use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, Ceremony
 use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo, InvitationInfo,
-    LanPeerInfo, RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
+    AuthoritativeChannelBinding, AuthoritativeModerationStatus, BridgeAuthorityInfo,
+    BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus, RuntimeBridge,
+    SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
@@ -859,12 +860,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         if let Ok(invitation_service) = self.agent.invitations() {
             let local_authority = self.agent.authority_id();
-            for invitation in invitation_service
-                .list_cached_matching(|inv| {
-                    inv.status == aura_invitation::InvitationStatus::Accepted
-                })
-                .await
+            for invitation in invitation_service.list_with_storage().await
             {
+                if invitation.status != aura_invitation::InvitationStatus::Accepted {
+                    continue;
+                }
                 if invitation.sender_id != local_authority {
                     continue;
                 }
@@ -880,6 +880,62 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         Ok(participants.into_iter().collect())
+    }
+
+    async fn resend_channel_invitation_acceptance_notifications(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<(), IntentError> {
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|error| {
+                IntentError::internal_error(format!(
+                    "failed to access invitation service for channel acceptance resend: {error}"
+                ))
+            })?;
+        let effects = self.agent.runtime().effects();
+        let local_authority = self.agent.authority_id();
+        let handler = crate::handlers::invitation::InvitationHandler::new(
+            crate::core::AuthorityContext::new_with_device(
+                local_authority,
+                self.agent.runtime().device_id(),
+            ),
+        )
+        .map_err(|error| {
+            IntentError::internal_error(format!(
+                "failed to create invitation handler for acceptance resend: {error}"
+            ))
+        })?;
+
+        for invitation in invitation_service.list_with_storage().await {
+            if invitation.status != aura_invitation::InvitationStatus::Accepted {
+                continue;
+            }
+            if invitation.sender_id == local_authority || invitation.receiver_id != local_authority {
+                continue;
+            }
+            let aura_invitation::InvitationType::Channel { home_id, .. } =
+                invitation.invitation_type
+            else {
+                continue;
+            };
+            if invitation.context_id != context || home_id != channel {
+                continue;
+            }
+            let resend_result: Result<(), crate::core::AgentError> = handler
+                .notify_channel_invitation_acceptance(effects.as_ref(), &invitation.invitation_id)
+                .await;
+            resend_result.map_err(|error| {
+                IntentError::internal_error(format!(
+                    "failed to resend channel invitation acceptance for {}: {error}",
+                    invitation.invitation_id
+                ))
+            })?;
+        }
+
+        Ok(())
     }
 
     async fn moderation_status(
@@ -983,7 +1039,92 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ) -> Result<Vec<ChannelId>, IntentError> {
         let effects = self.agent.runtime().effects();
         let authority = self.agent.authority_id();
-        resolve_channel_ids_from_local_chat_facts(&effects, authority, channel_name).await
+        let mut resolved: BTreeSet<ChannelId> =
+            resolve_channel_ids_from_local_chat_facts(&effects, authority, channel_name)
+                .await?
+                .into_iter()
+                .collect();
+
+        if let Ok(invitation_service) = self.agent.invitations() {
+            let normalized = channel_name.trim().to_ascii_lowercase();
+            for invitation in invitation_service.list_with_storage().await {
+                let aura_invitation::InvitationType::Channel {
+                    home_id,
+                    nickname_suggestion,
+                    ..
+                } = invitation.invitation_type
+                else {
+                    continue;
+                };
+                if nickname_suggestion
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&normalized))
+                {
+                    resolved.insert(home_id);
+                }
+            }
+        }
+
+        Ok(resolved.into_iter().collect())
+    }
+
+    async fn resolve_authoritative_channel_bindings_by_name(
+        &self,
+        channel_name: &str,
+    ) -> Result<Vec<AuthoritativeChannelBinding>, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let authority = self.agent.authority_id();
+        let normalized = channel_name.trim().to_ascii_lowercase();
+        let mut bindings = Vec::new();
+
+        for channel_id in resolve_channel_ids_from_local_chat_facts(&effects, authority, channel_name)
+            .await?
+        {
+            if let Some(context_id) = resolve_channel_context_from_local_chat_facts(
+                &effects, authority, channel_id,
+            )
+            .await?
+            .or(self.resolve_amp_channel_context(channel_id).await?)
+            {
+                let binding = AuthoritativeChannelBinding {
+                    channel_id,
+                    context_id,
+                };
+                if !bindings.contains(&binding) {
+                    bindings.push(binding);
+                }
+            }
+        }
+
+        if let Ok(invitation_service) = self.agent.invitations() {
+            for invitation in invitation_service.list_with_storage().await {
+                let aura_invitation::InvitationType::Channel {
+                    home_id,
+                    nickname_suggestion,
+                    ..
+                } = invitation.invitation_type
+                else {
+                    continue;
+                };
+                if !nickname_suggestion
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|name| name.eq_ignore_ascii_case(&normalized))
+                {
+                    continue;
+                }
+                let binding = AuthoritativeChannelBinding {
+                    channel_id: home_id,
+                    context_id: invitation.context_id,
+                };
+                if !bindings.contains(&binding) {
+                    bindings.push(binding);
+                }
+            }
+        }
+
+        Ok(bindings)
     }
 
     async fn amp_repair_local_channel_membership(
@@ -4140,6 +4281,7 @@ mod tests {
     use crate::AgentBuilder;
     use aura_chat::ChatFact;
     use aura_core::context::EffectContext;
+    use aura_core::effects::TransportEffects;
     use aura_core::effects::ExecutionMode;
     use aura_core::hash::hash;
     use std::sync::{Mutex, OnceLock};
@@ -4317,6 +4459,270 @@ mod tests {
         assert!(
             participants.contains(&receiver),
             "accepted invitee should appear in authoritative participant set"
+        );
+    }
+
+    #[tokio::test]
+    async fn amp_list_channel_participants_includes_transported_channel_acceptance() {
+        let authority = AuthorityId::new_from_entropy([42u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([43u8; 32]);
+        let sender_build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([44u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let receiver_build_context = EffectContext::new(
+            receiver,
+            ContextId::new_from_entropy([45u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let shared_transport = crate::SharedTransport::new();
+        let sender_agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_simulation_async_with_shared_transport(
+                    1001,
+                    &sender_build_context,
+                    shared_transport.clone(),
+                )
+                .await
+                .expect("build sender simulation agent"),
+        );
+        let receiver_agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(receiver)
+                .build_simulation_async_with_shared_transport(
+                    1002,
+                    &receiver_build_context,
+                    shared_transport,
+                )
+                .await
+                .expect("build receiver simulation agent"),
+        );
+        let sender_effects = sender_agent.runtime().effects();
+        crate::handlers::invitation::InvitationHandler::new(
+            crate::core::AuthorityContext::new(authority),
+        )
+        .expect("sender invitation handler")
+        .cache_peer_descriptor_for_peer(
+            sender_effects.as_ref(),
+            receiver,
+            None,
+            Some("tcp://127.0.0.1:55012"),
+            1_700_000_000_000,
+        )
+        .await;
+        let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            authority,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        sender_effects.attach_rendezvous_manager(sender_manager.clone());
+        let sender_service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
+            .await
+            .expect("start sender rendezvous manager");
+
+        let receiver_effects = receiver_agent.runtime().effects();
+        crate::handlers::invitation::InvitationHandler::new(
+            crate::core::AuthorityContext::new(receiver),
+        )
+        .expect("receiver invitation handler")
+        .cache_peer_descriptor_for_peer(
+            receiver_effects.as_ref(),
+            authority,
+            None,
+            Some("tcp://127.0.0.1:55011"),
+            1_700_000_000_000,
+        )
+        .await;
+        let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            receiver,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
+        let receiver_service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(
+            &receiver_manager,
+            &receiver_service_context,
+        )
+        .await
+        .expect("start receiver rendezvous manager");
+
+        let sender_bridge = AgentRuntimeBridge::new(sender_agent.clone());
+        let context = ContextId::new_from_entropy([46u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"transported-channel-acceptance-visible"));
+
+        sender_bridge
+            .amp_create_channel(ChannelCreateParams {
+                context,
+                channel: Some(channel),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .expect("create channel");
+        sender_bridge
+            .amp_join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("join channel");
+
+        let sender_invitations = sender_agent.invitations().expect("sender invitation service");
+        let receiver_invitations = receiver_agent
+            .invitations()
+            .expect("receiver invitation service");
+        let invitation = sender_invitations
+            .invite_to_channel(
+                receiver,
+                channel.to_string(),
+                Some(context),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create channel invitation");
+        let imported = receiver_invitations
+            .import_and_cache(&crate::handlers::invitation_service::InvitationServiceApi::export_invitation(&invitation))
+            .await
+            .expect("import channel invitation");
+        receiver_invitations
+            .accept(&imported.invitation_id)
+            .await
+            .expect("accept channel invitation");
+        crate::handlers::invitation::InvitationHandler::new(
+            crate::core::AuthorityContext::new(receiver),
+        )
+        .expect("receiver invitation handler")
+        .notify_channel_invitation_acceptance(receiver_effects.as_ref(), &imported.invitation_id)
+        .await
+        .expect("resend channel invitation acceptance");
+        let acceptance_envelope = sender_effects
+            .receive_envelope()
+            .await
+            .expect("sender should receive transported channel acceptance envelope");
+        assert_eq!(
+            acceptance_envelope
+                .metadata
+                .get("content-type")
+                .map(String::as_str),
+            Some("application/aura-channel-invitation-acceptance"),
+        );
+        let acceptance: serde_json::Value = serde_json::from_slice(&acceptance_envelope.payload)
+            .expect("parse channel acceptance payload");
+        assert_eq!(
+            acceptance.get("invitation_id").and_then(serde_json::Value::as_str),
+            Some(invitation.invitation_id.as_str()),
+        );
+        sender_effects.requeue_envelope(acceptance_envelope);
+        let direct_processed = crate::handlers::invitation::InvitationHandler::new(
+            crate::core::AuthorityContext::new_with_device(
+                authority,
+                sender_agent.runtime().device_id(),
+            ),
+        )
+        .expect("sender invitation handler")
+        .process_contact_invitation_acceptances(sender_effects.clone())
+        .await
+        .expect("directly process transported acceptance");
+        assert!(
+            direct_processed >= 1,
+            "direct invitation handler should process transported channel acceptance"
+        );
+
+        for _ in 0..8 {
+            sender_bridge
+                .process_ceremony_messages()
+                .await
+                .expect("process transported channel acceptance");
+            let participants = sender_bridge
+                .amp_list_channel_participants(context, channel)
+                .await
+                .expect("list authoritative participants");
+            if participants.contains(&receiver) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        let participants = sender_bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect("list authoritative participants");
+        let invitations = sender_agent
+            .invitations()
+            .expect("sender invitation service")
+            .list_with_storage()
+            .await;
+        assert!(participants.contains(&authority));
+        assert!(
+            participants.contains(&receiver),
+            "transported accepted invitee should appear in authoritative participant set; participants={participants:?} invitations={invitations:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_authoritative_channel_ids_by_name_reads_imported_channel_invitations_from_storage(
+    ) {
+        let authority = AuthorityId::new_from_entropy([14u8; 32]);
+        let sender = AuthorityId::new_from_entropy([15u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([16u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent.clone());
+        let context = ContextId::new_from_entropy([17u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"resolve-channel-name-from-imported-invite"));
+        let invitations = agent.invitations().expect("invitation service");
+        let shareable = crate::handlers::invitation::ShareableInvitation {
+            version: crate::handlers::invitation::ShareableInvitation::CURRENT_VERSION,
+            invitation_id: aura_core::InvitationId::new("inv-imported-channel-runtime-bridge"),
+            sender_id: sender,
+            context_id: Some(context),
+            invitation_type: aura_invitation::InvitationType::Channel {
+                home_id: channel,
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Join shared-parity-lab".to_string()),
+        };
+        let code = shareable.to_code();
+
+        let imported = invitations
+            .import_and_cache(&code)
+            .await
+            .expect("import channel invitation");
+        assert_eq!(imported.invitation_id, shareable.invitation_id);
+
+        let resolved = bridge
+            .resolve_authoritative_channel_ids_by_name("shared-parity-lab")
+            .await
+            .expect("resolve imported channel name");
+
+        assert!(
+            resolved.contains(&channel),
+            "imported channel invitation should make canonical name resolvable"
         );
     }
 }

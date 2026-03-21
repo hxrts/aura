@@ -819,13 +819,13 @@ fn execute_semantic_step(
             } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
                 let authority_id = tool_api.prepare_device_enrollment_invitee_authority(&instance_id)?;
-                context.vars.insert(name.clone(), authority_id.to_string());
+                context.vars.insert(name.clone(), authority_id);
                 Ok(())
             }
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { name } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
                 let authority_id = tool_api.current_authority_id(&instance_id)?;
-                context.vars.insert(name.clone(), authority_id.to_string());
+                context.vars.insert(name.clone(), authority_id);
                 Ok(())
             }
             aura_app::scenario_contract::VariableAction::CaptureSelection { name, list } => {
@@ -1298,9 +1298,7 @@ fn execute_semantic_intent(
                     })
                     .unwrap_or_default();
                 bail!(
-                    "no removable device was present in the successful device snapshot (instance={} devices={})",
-                    instance_id,
-                    current_devices
+                    "no removable device was present in the successful device snapshot (instance={instance_id} devices={current_devices})"
                 );
             };
             let response = submit_shared_intent(

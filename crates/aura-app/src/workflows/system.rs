@@ -17,8 +17,10 @@ use crate::signal_defs::{
     NETWORK_STATUS_SIGNAL_NAME, SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL_NAME,
 };
+#[cfg(feature = "signals")]
+use crate::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use crate::workflows::observed_snapshot::observed_contacts_snapshot;
-use crate::workflows::runtime::workflow_best_effort;
+use crate::workflows::runtime::{timeout_runtime_call, workflow_best_effort};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::AppCore;
 use async_lock::RwLock;
@@ -27,6 +29,9 @@ use aura_core::{AuraError, OwnedTaskSpawner};
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+
+const SYSTEM_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 // ============================================================================
 // OTA Upgrade Parsing Types and Functions
@@ -237,17 +242,27 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     if let Some(runtime) = runtime {
         let _ = best_effort
             .capture(async {
-                runtime
-                    .trigger_discovery()
-                    .await
+                timeout_runtime_call(
+                    &runtime,
+                    "refresh_account",
+                    "trigger_discovery",
+                    SYSTEM_RUNTIME_TIMEOUT,
+                    || runtime.trigger_discovery(),
+                )
+                .await?
                     .map_err(|e| AuraError::agent(e.to_string()))
             })
             .await;
         let _ = best_effort
             .capture(async {
-                runtime
-                    .trigger_sync()
-                    .await
+                timeout_runtime_call(
+                    &runtime,
+                    "refresh_account",
+                    "trigger_sync",
+                    SYSTEM_RUNTIME_TIMEOUT,
+                    || runtime.trigger_sync(),
+                )
+                .await?
                     .map_err(|e| AuraError::agent(e.to_string()))
             })
             .await;
@@ -347,7 +362,15 @@ pub async fn refresh_connection_status_from_contacts(
     if let Some(runtime) = runtime {
         let mut online_contacts = 0usize;
         for contact in contacts_state.all_contacts_mut() {
-            contact.is_online = runtime.is_peer_online(contact.id).await;
+            contact.is_online = timeout_runtime_call(
+                &runtime,
+                "refresh_connection_status_from_contacts",
+                "is_peer_online",
+                SYSTEM_RUNTIME_TIMEOUT,
+                || runtime.is_peer_online(contact.id),
+            )
+            .await
+            .unwrap_or(false);
             if contact.is_online {
                 online_contacts += 1;
             }
@@ -566,6 +589,16 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
             spawn_runtime_refresh_task(&refresh_spawner, async move {
                 loop {
                     let _ = emit_chat_snapshot_signal(&refresh_app_core).await;
+                    #[cfg(feature = "signals")]
+                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+                    #[cfg(feature = "signals")]
+                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
 
                     if refresh_pending.swap(false, Ordering::SeqCst) {
                         continue;
@@ -656,9 +689,10 @@ pub async fn install_authoritative_readiness_hook(
     let chat_spawner = spawner.clone();
     let chat_in_flight = Arc::new(AtomicBool::new(false));
     let chat_pending = Arc::new(AtomicBool::new(false));
+    let chat_reactive = reactive.clone();
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = reactive.subscribe(&*CHAT_SIGNAL) else {
+        let Ok(mut stream) = chat_reactive.subscribe(&*CHAT_SIGNAL) else {
             return;
         };
         loop {
@@ -677,6 +711,99 @@ pub async fn install_authoritative_readiness_hook(
             spawn_runtime_refresh_task(&chat_spawner, async move {
                 loop {
                     let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
+
+    let homes_app_core = Arc::clone(app_core);
+    let homes_spawner = spawner.clone();
+    let homes_in_flight = Arc::new(AtomicBool::new(false));
+    let homes_pending = Arc::new(AtomicBool::new(false));
+    let homes_reactive = reactive.clone();
+
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let Ok(mut stream) = homes_reactive.subscribe(&*HOMES_SIGNAL) else {
+            return;
+        };
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
+
+            if homes_in_flight.swap(true, Ordering::SeqCst) {
+                homes_pending.store(true, Ordering::SeqCst);
+                continue;
+            }
+
+            let refresh_app_core = homes_app_core.clone();
+            let refresh_in_flight = homes_in_flight.clone();
+            let refresh_pending = homes_pending.clone();
+            spawn_runtime_refresh_task(&homes_spawner, async move {
+                loop {
+                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
+
+    let invitations_app_core = Arc::clone(app_core);
+    let invitations_spawner = spawner.clone();
+    let invitations_in_flight = Arc::new(AtomicBool::new(false));
+    let invitations_pending = Arc::new(AtomicBool::new(false));
+
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let Ok(mut stream) = reactive.subscribe(&*INVITATIONS_SIGNAL) else {
+            return;
+        };
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
+
+            if invitations_in_flight.swap(true, Ordering::SeqCst) {
+                invitations_pending.store(true, Ordering::SeqCst);
+                continue;
+            }
+
+            let refresh_app_core = invitations_app_core.clone();
+            let refresh_in_flight = invitations_in_flight.clone();
+            let refresh_pending = invitations_pending.clone();
+            spawn_runtime_refresh_task(&invitations_spawner, async move {
+                loop {
+                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
+                        &refresh_app_core,
+                    )
+                    .await;
+                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
                         &refresh_app_core,
                     )
                     .await;

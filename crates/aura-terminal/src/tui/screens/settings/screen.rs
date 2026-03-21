@@ -24,6 +24,7 @@ use aura_app::ui::signals::{
     TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::format_relative_time_from;
+use aura_app::ui::workflows::time as time_workflows;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 
@@ -72,7 +73,7 @@ pub struct SettingsScreenProps {
     pub on_update_mfa: Option<MfaCallback>,
     pub on_update_nickname_suggestion: Option<UpdateNicknameSuggestionCallback>,
     pub on_update_threshold: Option<UpdateThresholdCallback>,
-    pub on_add_device: Option<AddDeviceCallback>,
+    pub(crate) on_add_device: Option<AddDeviceCallback>,
     pub on_remove_device: Option<RemoveDeviceCallback>,
 }
 
@@ -240,7 +241,7 @@ pub fn SettingsScreen(
             loop {
                 let runtime = app_core.raw().read().await.runtime().cloned();
                 if let Some(runtime) = runtime {
-                    if let Ok(ts) = runtime.current_time_ms().await {
+                    if let Ok(ts) = time_workflows::current_time_ms(app_core.raw()).await {
                         reactive_now_ms.set(Some(ts));
                     }
                     runtime.sleep_ms(1000).await;

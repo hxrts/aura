@@ -40,7 +40,7 @@ use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
     ceremonies as ceremony_workflows, context as context_workflows, settings as settings_workflows,
-    system as system_workflows,
+    runtime as runtime_workflows, system as system_workflows,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
@@ -825,11 +825,11 @@ impl IoContext {
         }
 
         let app_core = self.app_core_raw();
-        let runtime_available = {
+        let runtime_ready_for_live_accept = {
             let core = app_core.read().await;
-            core.runtime().is_some()
+            core.runtime().is_some() && core.authority().is_some() && self.has_account()
         };
-        if !runtime_available {
+        if !runtime_ready_for_live_accept {
             let shareable = ShareableInvitation::from_code(code).map_err(|e| {
                 TerminalError::structured_operation(
                     OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
@@ -983,11 +983,17 @@ impl IoContext {
             .and_then(|core| core.runtime().cloned());
 
         if let Some(runtime) = runtime {
-            return runtime
-                .try_get_sync_status()
-                .await
-                .ok()
-                .and_then(|status| status.last_sync_ms);
+            return runtime_workflows::timeout_runtime_call(
+                &runtime,
+                "terminal_io_context",
+                "try_get_sync_status",
+                std::time::Duration::from_secs(2),
+                || runtime.try_get_sync_status(),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .and_then(|status| status.last_sync_ms);
         }
         None
     }
@@ -999,7 +1005,15 @@ impl IoContext {
         };
 
         if let Some(runtime) = runtime {
-            if let Ok(status) = runtime.try_get_sync_status().await {
+            if let Ok(Ok(status)) = runtime_workflows::timeout_runtime_call(
+                &runtime,
+                "terminal_io_context",
+                "try_get_sync_status",
+                std::time::Duration::from_secs(2),
+                || runtime.try_get_sync_status(),
+            )
+            .await
+            {
                 if status.connected_peers > 0 {
                     return status.connected_peers;
                 }
@@ -1041,7 +1055,15 @@ impl IoContext {
             return vec![];
         };
 
-        let Ok(lan_peers) = runtime.try_get_lan_peers().await else {
+        let Ok(Ok(lan_peers)) = runtime_workflows::timeout_runtime_call(
+            &runtime,
+            "terminal_io_context",
+            "try_get_lan_peers",
+            std::time::Duration::from_secs(2),
+            || runtime.try_get_lan_peers(),
+        )
+        .await
+        else {
             return vec![];
         };
         lan_peers

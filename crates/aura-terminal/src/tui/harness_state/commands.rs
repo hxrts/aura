@@ -162,6 +162,7 @@ pub(crate) fn apply_harness_command(
     semantic_inputs: TuiSemanticInputs<'_>,
 ) -> Result<Vec<TuiCommand>, String> {
     match command {
+        HarnessUiCommand::Ping => Ok(Vec::new()),
         HarnessUiCommand::NavigateScreen { screen } => {
             if let Some(screen) = screen_from_id(screen) {
                 state.router.go_to(screen);
@@ -341,7 +342,23 @@ pub(crate) fn apply_harness_command(
         )]),
         HarnessUiCommand::RemoveSelectedDevice { device_id } => {
             select_settings_section(state, SettingsSection::Devices);
-            let _ = semantic_inputs;
+            let device_id = device_id.or_else(|| {
+                semantic_inputs
+                    .settings_devices
+                    .iter()
+                    .find(|device| !device.is_current)
+                    .map(|device| device.id.clone())
+                    .or_else(|| {
+                        (semantic_inputs.settings_devices.len() > 1)
+                            .then(|| {
+                                semantic_inputs
+                                    .settings_devices
+                                    .last()
+                                    .map(|device| device.id.clone())
+                            })
+                            .flatten()
+                    })
+            });
             Ok(vec![TuiCommand::HarnessRemoveVisibleDevice { device_id }])
         }
         HarnessUiCommand::SwitchAuthority { authority_id } => {

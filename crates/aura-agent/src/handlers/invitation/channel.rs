@@ -2,6 +2,8 @@ use super::*;
 
 const INVITATION_CHANNEL_JOIN_TIMEOUT_MS: u64 = 2_000;
 const INVITATION_VIEW_UPDATE_TIMEOUT_MS: u64 = 500;
+const CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
+const CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS: u64 = 75;
 
 pub(super) struct InvitationChannelHandler<'a> {
     handler: &'a InvitationHandler,
@@ -17,10 +19,6 @@ impl<'a> InvitationChannelHandler<'a> {
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
     ) -> AgentResult<()> {
-        if effects.is_test_mode() {
-            return Ok(());
-        }
-
         let Some(invitation) = self
             .handler
             .load_invitation_for_choreography(effects, invitation_id)
@@ -37,6 +35,8 @@ impl<'a> InvitationChannelHandler<'a> {
         if invitation.sender_id == acceptor_id {
             return Ok(());
         }
+        self.ensure_sender_peer_channel(effects, invitation.sender_id, invitation.context_id)
+            .await?;
 
         let acceptance = ChannelInvitationAcceptance {
             invitation_id: invitation.invitation_id.clone(),
@@ -58,11 +58,36 @@ impl<'a> InvitationChannelHandler<'a> {
         );
         metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
         metadata.insert("channel-id".to_string(), home_id.to_string());
+        metadata.insert(
+            "acceptor-device-id".to_string(),
+            effects.device_id().to_string(),
+        );
+        let acceptor_hint = effects.lan_transport().and_then(|transport| {
+            transport
+                .websocket_addrs()
+                .first()
+                .map(|addr| {
+                    if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                        addr.clone()
+                    } else {
+                        format!("ws://{addr}")
+                    }
+                })
+                .or_else(|| {
+                    transport
+                        .advertised_addrs()
+                        .first()
+                        .map(|addr| format!("tcp://{addr}"))
+                })
+        });
+        if let Some(acceptor_hint) = acceptor_hint {
+            metadata.insert("acceptor-addr".to_string(), acceptor_hint);
+        }
 
         let envelope = TransportEnvelope {
             destination: invitation.sender_id,
             source: acceptor_id,
-            context: invitation.context_id,
+            context: default_context_id_for_authority(invitation.sender_id),
             payload,
             metadata,
             receipt: None,
@@ -75,6 +100,68 @@ impl<'a> InvitationChannelHandler<'a> {
         )
         .await
         .map_err(|error| AgentError::effects(error.to_string()))
+    }
+
+    async fn ensure_sender_peer_channel(
+        &self,
+        effects: &AuraEffectSystem,
+        sender_id: AuthorityId,
+        invitation_context: ContextId,
+    ) -> AgentResult<()> {
+        let Some(rendezvous_manager) = effects.rendezvous_manager() else {
+            return Err(AgentError::runtime(
+                "channel invitation acceptance requires rendezvous manager".to_string(),
+            ));
+        };
+
+        let authority = self.handler.context.authority.clone();
+        let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+            .map_err(|error| AgentError::internal(error.to_string()))?
+            .with_rendezvous_manager(rendezvous_manager.clone());
+        let fallback_context = default_context_id_for_authority(sender_id);
+        let mut contexts = vec![fallback_context];
+        if invitation_context != fallback_context {
+            contexts.push(invitation_context);
+        }
+
+        for context_id in contexts {
+            for attempt in 0..CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
+                if effects.is_channel_established(context_id, sender_id).await {
+                    return Ok(());
+                }
+
+                let result = handler
+                    .initiate_channel(effects, context_id, sender_id)
+                    .await
+                    .map_err(|error| AgentError::runtime(error.to_string()))?;
+                if result.success && effects.is_channel_established(context_id, sender_id).await {
+                    return Ok(());
+                }
+
+                let _ = rendezvous_manager.trigger_discovery().await;
+                let _ = effects.sleep_ms(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS).await;
+
+                if attempt + 1 == CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
+                    let detail = result.error.unwrap_or_else(|| {
+                        format!(
+                            "peer channel for sender {sender_id} in {context_id} did not establish"
+                        )
+                    });
+                    if context_id == fallback_context {
+                        return Err(AgentError::runtime(detail));
+                    }
+                }
+            }
+        }
+
+        Err(AgentError::runtime(
+            [
+                "peer channel for sender ",
+                &sender_id.to_string(),
+                " did not establish for channel acceptance",
+            ]
+            .concat(),
+        ))
     }
 
     async fn best_effort_await_view_update(

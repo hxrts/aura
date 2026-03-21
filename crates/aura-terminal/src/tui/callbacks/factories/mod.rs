@@ -369,7 +369,7 @@ fn command_outcome_message(
 #[derive(Clone)]
 pub struct AppCallbacks {
     pub(crate) on_create_account: CreateAccountCallback,
-    pub on_import_device_enrollment_during_onboarding: ImportDeviceEnrollmentCallback,
+    pub(crate) on_import_device_enrollment_during_onboarding: ImportDeviceEnrollmentCallback,
 }
 
 impl AppCallbacks {
@@ -438,32 +438,39 @@ impl AppCallbacks {
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> ImportDeviceEnrollmentCallback {
-        Arc::new(move |code: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            spawn_ctx(ctx.clone(), async move {
-                match ctx.import_device_enrollment_code(&code).await {
-                    Ok(()) => {
-                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::success(
-                                "devices",
-                                "Device enrollment invitation accepted",
-                            )),
-                        )
-                        .await;
+        Arc::new(
+            move |code: String, operation: LocalTerminalOperationOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                spawn_ctx(ctx.clone(), async move {
+                    match ctx.import_device_enrollment_code(&code).await {
+                        Ok(()) => {
+                            operation.succeed().await;
+                            send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::success(
+                                    "devices",
+                                    "Device enrollment invitation accepted",
+                                )),
+                            )
+                            .await;
+                        }
+                        Err(e) => {
+                            operation.fail(e.to_string()).await;
+                            send_ui_update_reliable(
+                                &tx,
+                                UiUpdate::operation_failed(
+                                    UiOperation::ImportDeviceEnrollmentCode,
+                                    e,
+                                ),
+                            )
+                            .await;
+                        }
                     }
-                    Err(e) => {
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::operation_failed(UiOperation::ImportDeviceEnrollmentCode, e),
-                        )
-                        .await;
-                    }
-                }
-            });
-        })
+                });
+            },
+        )
     }
 }
 

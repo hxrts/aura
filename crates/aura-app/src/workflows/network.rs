@@ -7,6 +7,7 @@
 //! peer state.
 
 use crate::workflows::observed_projection::update_neighborhood_projection_observed;
+use crate::workflows::runtime::timeout_runtime_call;
 use crate::workflows::signals::emit_signal;
 use crate::workflows::signals::read_signal_or_default;
 use crate::{
@@ -275,9 +276,14 @@ async fn emit_discovered_peers_signal(
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = if let Some(runtime) = app_core_guard.runtime() {
-        runtime
-            .try_get_invited_peer_ids()
-            .await
+        timeout_runtime_call(
+            runtime,
+            "emit_discovered_peers_signal",
+            "try_get_invited_peer_ids",
+            Duration::from_millis(5_000),
+            || runtime.try_get_invited_peer_ids(),
+        )
+        .await?
             .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
             .into_iter()
             .collect()

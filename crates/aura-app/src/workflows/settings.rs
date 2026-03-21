@@ -5,7 +5,7 @@
 
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::error::WorkflowError;
-use crate::workflows::runtime::require_runtime;
+use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
     signal_defs::{
@@ -20,6 +20,9 @@ use async_lock::RwLock;
 use aura_core::types::identifiers::ChannelId;
 use aura_core::AuraError;
 use std::sync::Arc;
+use std::time::Duration;
+
+const SETTINGS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 // OWNERSHIP: authoritative-source
 async fn refresh_settings_signal_from_runtime(
@@ -134,9 +137,14 @@ pub async fn update_mfa_policy(
         "SensitiveOnly"
     };
 
-    runtime
-        .set_mfa_policy(policy)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "update_mfa_policy",
+        "set_mfa_policy",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.set_mfa_policy(policy),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("update MFA policy", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
@@ -154,9 +162,14 @@ pub async fn update_nickname(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    runtime
-        .set_nickname_suggestion(&name)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "update_nickname",
+        "set_nickname_suggestion",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.set_nickname_suggestion(&name),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("update nickname", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
@@ -182,9 +195,14 @@ pub async fn set_channel_mode(
         match ChannelSelector::parse(&normalized_channel)? {
             ChannelSelector::Id(channel_id) => channel_id,
             ChannelSelector::Name(channel_name) => {
-                let resolved = runtime
-                    .resolve_authoritative_channel_ids_by_name(&channel_name)
-                    .await
+                let resolved = timeout_runtime_call(
+                    &runtime,
+                    "set_channel_mode",
+                    "resolve_authoritative_channel_ids_by_name",
+                    SETTINGS_RUNTIME_TIMEOUT,
+                    || runtime.resolve_authoritative_channel_ids_by_name(&channel_name),
+                )
+                .await?
                     .map_err(|e| {
                         super::error::runtime_call("resolve channel for mode update", e)
                     })?;
@@ -211,9 +229,14 @@ pub async fn set_channel_mode_resolved(
     flags: String,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let context_id = runtime
-        .resolve_amp_channel_context(resolved_channel)
-        .await
+    let context_id = timeout_runtime_call(
+        &runtime,
+        "set_channel_mode_resolved",
+        "resolve_amp_channel_context",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.resolve_amp_channel_context(resolved_channel),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("resolve channel context for mode update", e))?
         .ok_or_else(|| {
             AuraError::from(WorkflowError::MissingAuthoritativeContext {

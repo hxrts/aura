@@ -15,10 +15,6 @@ impl<'a> InvitationContactHandler<'a> {
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
     ) -> AgentResult<()> {
-        if effects.is_test_mode() {
-            return Ok(());
-        }
-
         let Some(invitation) = self
             .handler
             .load_invitation_for_choreography(effects, invitation_id)
@@ -231,6 +227,9 @@ impl<'a> InvitationContactHandler<'a> {
                 )
                 .await?;
                 self.handler
+                    .materialize_home_signal_for_channel_acceptance(effects.as_ref(), &updated)
+                    .await?;
+                self.handler
                     .invitation_cache
                     .cache_invitation(updated)
                     .await;
@@ -254,6 +253,24 @@ impl<'a> InvitationContactHandler<'a> {
 
                 if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
                     continue;
+                }
+
+                let acceptor_addr = envelope.metadata.get("acceptor-addr").map(String::as_str);
+                let acceptor_device_id = envelope
+                    .metadata
+                    .get("acceptor-device-id")
+                    .and_then(|value| value.parse().ok());
+                if acceptor_addr.is_some() || acceptor_device_id.is_some() {
+                    let now_ms = effects.current_timestamp().await.unwrap_or(0);
+                    self.handler
+                        .cache_peer_descriptor_for_peer(
+                            effects.as_ref(),
+                            acceptance.acceptor_id,
+                            acceptor_device_id,
+                            acceptor_addr,
+                            now_ms,
+                        )
+                        .await;
                 }
 
                 let Some(invitation) = InvitationHandler::load_created_invitation(
@@ -313,6 +330,9 @@ impl<'a> InvitationContactHandler<'a> {
                     &updated,
                 )
                 .await?;
+                self.handler
+                    .materialize_home_signal_for_channel_acceptance(effects.as_ref(), &updated)
+                    .await?;
                 self.handler
                     .invitation_cache
                     .cache_invitation(updated)

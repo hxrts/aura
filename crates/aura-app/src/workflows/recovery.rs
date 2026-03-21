@@ -12,7 +12,7 @@ use crate::workflows::observed_projection::{
 };
 use crate::workflows::observed_snapshot::observed_recovery_snapshot;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::require_runtime;
+use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::time::current_time_ms;
 use crate::{
     runtime_bridge::CeremonyStatus,
@@ -31,6 +31,8 @@ use aura_journal::ProtocolRelationalFact;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+
+const RECOVERY_RUNTIME_TIMEOUT: Duration = Duration::from_millis(30_000);
 
 /// Start a guardian recovery ceremony
 ///
@@ -86,9 +88,14 @@ pub async fn start_recovery(
             u16::MAX
         ))
     })?;
-    let ceremony_id = runtime
-        .initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
-        .await
+    let ceremony_id = timeout_runtime_call(
+        &runtime,
+        "start_recovery",
+        "initiate_guardian_ceremony",
+        RECOVERY_RUNTIME_TIMEOUT,
+        || runtime.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("start recovery", e))?;
 
     // Create recovery state with initial process
@@ -201,9 +208,14 @@ pub async fn toggle_guardian_contact(
     if !was_guardian {
         let runtime = require_runtime(app_core).await?;
         let subject = runtime.authority_id();
-        runtime
-            .create_guardian_invitation(contact, subject, None, None)
-            .await
+        timeout_runtime_call(
+            &runtime,
+            "toggle_guardian_contact",
+            "create_guardian_invitation",
+            RECOVERY_RUNTIME_TIMEOUT,
+            || runtime.create_guardian_invitation(contact, subject, None, None),
+        )
+        .await?
             .map_err(|e| super::error::runtime_call("create guardian invitation", e))?;
     }
 
@@ -278,9 +290,14 @@ pub async fn approve_recovery(
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
 
-    runtime
-        .respond_to_guardian_ceremony(ceremony_id, true, None)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "approve_recovery",
+        "respond_to_guardian_ceremony",
+        RECOVERY_RUNTIME_TIMEOUT,
+        || runtime.respond_to_guardian_ceremony(ceremony_id, true, None),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("approve recovery", e).into())
 }
 
@@ -299,9 +316,18 @@ pub async fn commit_guardian_binding(
         binding_hash,
     });
 
-    runtime
-        .commit_relational_facts(&[fact])
-        .await
+    let runtime_for_call = Arc::clone(&runtime);
+    timeout_runtime_call(
+        &runtime,
+        "commit_guardian_binding",
+        "commit_relational_facts",
+        RECOVERY_RUNTIME_TIMEOUT,
+        || {
+            let facts = vec![fact];
+            async move { runtime_for_call.commit_relational_facts(&facts).await }
+        },
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("commit guardian binding", e).into())
 }
 
@@ -317,9 +343,14 @@ pub async fn dispute_recovery(
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
 
-    runtime
-        .respond_to_guardian_ceremony(ceremony_id, false, Some(reason))
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "dispute_recovery",
+        "respond_to_guardian_ceremony",
+        RECOVERY_RUNTIME_TIMEOUT,
+        || runtime.respond_to_guardian_ceremony(ceremony_id, false, Some(reason)),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("dispute recovery", e).into())
 }
 
@@ -349,9 +380,14 @@ pub async fn get_ceremony_status(
 ) -> Result<CeremonyStatus, AuraError> {
     let runtime = { require_runtime(app_core).await? };
 
-    runtime
-        .get_ceremony_status(ceremony_id)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "get_ceremony_status",
+        "get_ceremony_status",
+        RECOVERY_RUNTIME_TIMEOUT,
+        || runtime.get_ceremony_status(ceremony_id),
+    )
+    .await?
         .map_err(|e| super::error::runtime_call("get ceremony status", e).into())
 }
 

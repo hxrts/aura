@@ -6,11 +6,13 @@
 //! This handler is a thin view layer that delegates to aura_app::workflows::network.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_app::ui::workflows::runtime as runtime_workflows;
 
 /// Handle network/peer commands
 ///
@@ -132,13 +134,34 @@ pub async fn handle_network(
                     nickname_suggestion: None,
                 };
 
-                match runtime.send_lan_invitation(&peer_info, &code).await {
-                    Ok(()) => {
+                match runtime_workflows::timeout_runtime_call(
+                    runtime,
+                    "terminal_invite_lan_peer",
+                    "send_lan_invitation",
+                    Duration::from_secs(5),
+                    || runtime.send_lan_invitation(&peer_info, &code),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {
                         tracing::info!("Sent LAN invitation to {}", address);
                         Some(Ok(OpResponse::LanInvitationStatus {
                             authority_id: authority_id.to_string(),
                             address: address.clone(),
                             message: format!("Invitation sent to {address} via LAN"),
+                        }))
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!("Failed to send LAN invitation: {}", e);
+                        // Fall back to showing the code for manual sharing
+                        Some(Ok(OpResponse::LanInvitationStatus {
+                            authority_id: authority_id.to_string(),
+                            address: address.clone(),
+                            message: format!(
+                                "LAN send failed ({}), share code manually: {}",
+                                e,
+                                &code[..50.min(code.len())]
+                            ),
                         }))
                     }
                     Err(e) => {

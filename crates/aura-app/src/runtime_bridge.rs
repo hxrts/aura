@@ -277,6 +277,15 @@ pub struct InvitationInfo {
     pub message: Option<String>,
 }
 
+/// Canonical runtime-owned channel binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthoritativeChannelBinding {
+    /// Canonical channel id.
+    pub channel_id: ChannelId,
+    /// Canonical context id bound to that channel.
+    pub context_id: ContextId,
+}
+
 /// Authoritative moderation status for an authority in a home-scoped context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AuthoritativeModerationStatus {
@@ -504,6 +513,20 @@ pub trait RuntimeBridge: Send + Sync {
         channel: ChannelId,
     ) -> Result<Vec<AuthorityId>, IntentError>;
 
+    /// Retry channel-invitation acceptance notifications for an already
+    /// accepted imported invitation once the receiver has established
+    /// connectivity on the shared channel.
+    async fn resend_channel_invitation_acceptance_notifications(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<(), IntentError> {
+        let _ = (context, channel);
+        Err(IntentError::no_agent(
+            "Channel invitation acceptance resend not available in offline mode",
+        ))
+    }
+
     /// Return authoritative moderation status for an authority within a
     /// home-scoped context.
     async fn moderation_status(
@@ -533,6 +556,23 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         channel_name: &str,
     ) -> Result<Vec<ChannelId>, IntentError>;
+
+    /// Resolve authoritative channel bindings by normalized display name.
+    async fn resolve_authoritative_channel_bindings_by_name(
+        &self,
+        channel_name: &str,
+    ) -> Result<Vec<AuthoritativeChannelBinding>, IntentError> {
+        let mut bindings = Vec::new();
+        for channel_id in self.resolve_authoritative_channel_ids_by_name(channel_name).await? {
+            if let Some(context_id) = self.resolve_amp_channel_context(channel_id).await? {
+                bindings.push(AuthoritativeChannelBinding {
+                    channel_id,
+                    context_id,
+                });
+            }
+        }
+        Ok(bindings)
+    }
 
     /// Repair local AMP membership after a checkpoint repair.
     ///

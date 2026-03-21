@@ -1,4 +1,8 @@
 use super::*;
+use crate::workflows::runtime::timeout_runtime_call;
+use std::time::Duration;
+
+const VALIDATION_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 pub(super) fn is_invitation_capability_missing(error: &AuraError) -> bool {
     error.to_string().contains("invitation:capability-missing")
@@ -20,9 +24,14 @@ pub(super) async fn authoritative_home_moderation_status(
         AuraError::permission_denied("authoritative moderation status requires runtime")
     })?;
 
-    runtime
-        .moderation_status(context_id, channel_id, authority_id, timestamp_ms)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "authoritative_home_moderation_status",
+        "moderation_status",
+        VALIDATION_RUNTIME_TIMEOUT,
+        || runtime.moderation_status(context_id, channel_id, authority_id, timestamp_ms),
+    )
+    .await?
         .map_err(|error| {
             crate::workflows::error::runtime_call("authoritative moderation status", error).into()
         })

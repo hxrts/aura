@@ -13,6 +13,7 @@
 //! ```
 
 use super::{Intent, IntentError, StateSnapshot};
+use crate::workflows::runtime::timeout_runtime_call as timeout_runtime_call_bounded;
 use crate::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
     SyncStatus as RuntimeSyncStatus,
@@ -32,7 +33,12 @@ use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
+
+const APP_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
+const APP_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
 
 /// Configuration for creating an AppCore instance
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +153,31 @@ pub struct AppCore {
 }
 
 impl AppCore {
+    async fn with_runtime_timeout<T, F, Fut>(
+        &self,
+        no_runtime_message: &'static str,
+        operation: &'static str,
+        stage: &'static str,
+        duration: Duration,
+        call: F,
+    ) -> Result<T, IntentError>
+    where
+        F: FnOnce(Arc<dyn RuntimeBridge>) -> Fut,
+        Fut: Future<Output = T>,
+    {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent(no_runtime_message))?;
+        let runtime = Arc::clone(runtime);
+        let runtime_for_call = Arc::clone(&runtime);
+        timeout_runtime_call_bounded(&runtime, operation, stage, duration, move || {
+            call(runtime_for_call)
+        })
+            .await
+            .map_err(|error| IntentError::internal_error(error.to_string()))
+    }
+
     /// Create a new AppCore instance with the given configuration
     pub fn new(config: AppConfig) -> Result<Self, IntentError> {
         // Derive a deterministic account ID from the local config to avoid collisions.
@@ -363,8 +394,27 @@ impl AppCore {
         // Ensure the runtime has an initial threshold configuration if available,
         // even if signals were already registered by a shared runtime handler.
         if let Some(runtime) = self.runtime.as_ref() {
-            if runtime.get_threshold_config().await.is_none() {
-                let _ = runtime.bootstrap_signing_keys().await.map_err(|e| {
+            if timeout_runtime_call_bounded(
+                runtime,
+                "init_signals",
+                "get_threshold_config",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.get_threshold_config(),
+            )
+            .await
+            .map_err(|error| IntentError::internal_error(error.to_string()))?
+            .is_none()
+            {
+                let _ = timeout_runtime_call_bounded(
+                    runtime,
+                    "init_signals",
+                    "bootstrap_signing_keys",
+                    APP_RUNTIME_OPERATION_TIMEOUT,
+                    || runtime.bootstrap_signing_keys(),
+                )
+                .await
+                .map_err(|error| IntentError::internal_error(error.to_string()))?
+                .map_err(|e| {
                     IntentError::internal_error(format!("Failed to bootstrap signing keys: {e}"))
                 })?;
             }
@@ -430,11 +480,14 @@ impl AppCore {
     /// // attested.signature contains the threshold signature
     /// ```
     pub async fn sign_tree_op(&self, op: &TreeOp) -> Result<AttestedOp, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::unauthorized("No runtime available - cannot sign tree operations")
-        })?;
-
-        runtime.sign_tree_op(op).await
+        self.with_runtime_timeout(
+            "No runtime available - cannot sign tree operations",
+            "sign_tree_op",
+            "sign_tree_op",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.sign_tree_op(op).await },
+        )
+        .await?
     }
 
     /// Bootstrap signing keys for the current authority
@@ -458,11 +511,14 @@ impl AppCore {
     /// // Store or share public_key for signature verification
     /// ```
     pub async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::unauthorized("No runtime available - cannot bootstrap signing keys")
-        })?;
-
-        runtime.bootstrap_signing_keys().await
+        self.with_runtime_timeout(
+            "No runtime available - cannot bootstrap signing keys",
+            "bootstrap_signing_keys",
+            "bootstrap_signing_keys",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.bootstrap_signing_keys().await },
+        )
+        .await?
     }
 
     /// Get the threshold signing configuration for the current authority
@@ -478,7 +534,16 @@ impl AppCore {
     /// ```
     pub async fn threshold_config(&self) -> Option<aura_core::threshold::ThresholdConfig> {
         let runtime = self.runtime.as_ref()?;
-        runtime.get_threshold_config().await
+        timeout_runtime_call_bounded(
+            runtime,
+            "threshold_config",
+            "get_threshold_config",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            || runtime.get_threshold_config(),
+        )
+        .await
+        .ok()
+        .flatten()
     }
 
     /// Check if this device has signing capability for the current authority
@@ -489,7 +554,15 @@ impl AppCore {
         let Some(runtime) = self.runtime.as_ref() else {
             return false;
         };
-        runtime.has_signing_capability().await
+        timeout_runtime_call_bounded(
+            runtime,
+            "has_signing_capability",
+            "has_signing_capability",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            || runtime.has_signing_capability(),
+        )
+        .await
+        .unwrap_or(false)
     }
 
     /// Get the public key package for the current authority's signing keys
@@ -499,7 +572,16 @@ impl AppCore {
     /// or to include in commitment tree leaf nodes.
     pub async fn threshold_signing_public_key(&self) -> Option<Vec<u8>> {
         let runtime = self.runtime.as_ref()?;
-        runtime.get_public_key_package().await
+        timeout_runtime_call_bounded(
+            runtime,
+            "threshold_signing_public_key",
+            "get_public_key_package",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            || runtime.get_public_key_package(),
+        )
+        .await
+        .ok()
+        .flatten()
     }
 
     // ==================== Intent Dispatch ====================
@@ -769,9 +851,16 @@ impl AppCore {
     /// Returns `true` if the runtime has an active sync service.
     pub async fn is_sync_running(&self) -> bool {
         if let Some(runtime) = &self.runtime {
-            return runtime
-                .try_get_sync_status()
+            return timeout_runtime_call_bounded(
+                runtime,
+                "is_sync_running",
+                "try_get_sync_status",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.try_get_sync_status(),
+            )
                 .await
+                .ok()
+                .and_then(Result::ok)
                 .map(|status| status.is_running)
                 .unwrap_or(false);
         }
@@ -781,7 +870,16 @@ impl AppCore {
     /// Get current sync status from the runtime (if available)
     pub async fn sync_status(&self) -> Result<Option<RuntimeSyncStatus>, IntentError> {
         if let Some(runtime) = &self.runtime {
-            return runtime.try_get_sync_status().await.map(Some);
+            return timeout_runtime_call_bounded(
+                runtime,
+                "sync_status",
+                "try_get_sync_status",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.try_get_sync_status(),
+            )
+            .await
+            .map_err(|error| IntentError::internal_error(error.to_string()))?
+            .map(Some);
         }
         Ok(None)
     }
@@ -800,9 +898,33 @@ impl AppCore {
         let Some(runtime) = self.runtime.as_ref() else {
             return Ok(None);
         };
-        let settings = runtime.try_get_settings().await?;
-        let devices = runtime.try_list_devices().await?;
-        let authorities = runtime.try_list_authorities().await?;
+        let settings = timeout_runtime_call_bounded(
+            runtime,
+            "settings_snapshot",
+            "try_get_settings",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            || runtime.try_get_settings(),
+        )
+        .await
+        .map_err(|error| IntentError::internal_error(error.to_string()))??;
+        let devices = timeout_runtime_call_bounded(
+            runtime,
+            "settings_snapshot",
+            "try_list_devices",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            || runtime.try_list_devices(),
+        )
+        .await
+        .map_err(|error| IntentError::internal_error(error.to_string()))??;
+        let authorities = timeout_runtime_call_bounded(
+            runtime,
+            "settings_snapshot",
+            "try_list_authorities",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            || runtime.try_list_authorities(),
+        )
+        .await
+        .map_err(|error| IntentError::internal_error(error.to_string()))??;
         Ok(Some((settings, devices, authorities)))
     }
 
@@ -810,24 +932,28 @@ impl AppCore {
     ///
     /// Returns device IDs of peers configured for sync.
     pub async fn sync_peers(&self) -> Result<Vec<aura_core::DeviceId>, IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("sync_peers requires a runtime"))?;
-
-        runtime.try_get_sync_peers().await
+        self.with_runtime_timeout(
+            "sync_peers requires a runtime",
+            "sync_peers",
+            "try_get_sync_peers",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            |runtime| async move { runtime.try_get_sync_peers().await },
+        )
+        .await?
     }
 
     /// Discover peers via rendezvous
     ///
     /// Returns a list of discovered peer authority IDs from the rendezvous cache.
     pub async fn discover_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("discover_peers requires a runtime"))?;
-
-        runtime.try_get_discovered_peers().await
+        self.with_runtime_timeout(
+            "discover_peers requires a runtime",
+            "discover_peers",
+            "try_get_discovered_peers",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            |runtime| async move { runtime.try_get_discovered_peers().await },
+        )
+        .await?
     }
 
     /// Get LAN-discovered peers
@@ -836,7 +962,15 @@ impl AppCore {
     /// network addresses.
     pub async fn get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
         if let Some(runtime) = &self.runtime {
-            return runtime.try_get_lan_peers().await;
+            return timeout_runtime_call_bounded(
+                runtime,
+                "get_lan_peers",
+                "try_get_lan_peers",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.try_get_lan_peers(),
+            )
+            .await
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
         } else {
             Err(IntentError::no_agent("get_lan_peers requires a runtime"))
         }
@@ -845,8 +979,26 @@ impl AppCore {
     /// Check if the runtime is online (has active sync or rendezvous services)
     pub async fn is_online(&self) -> bool {
         if let Some(runtime) = &self.runtime {
-            let sync = runtime.try_get_sync_status().await.ok();
-            let rendezvous = runtime.try_get_rendezvous_status().await.ok();
+            let sync = timeout_runtime_call_bounded(
+                runtime,
+                "is_online",
+                "try_get_sync_status",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.try_get_sync_status(),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok);
+            let rendezvous = timeout_runtime_call_bounded(
+                runtime,
+                "is_online",
+                "try_get_rendezvous_status",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.try_get_rendezvous_status(),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok);
             return sync.as_ref().is_some_and(|status| status.is_running)
                 || rendezvous.as_ref().is_some_and(|status| status.is_running);
         }
@@ -863,12 +1015,14 @@ impl AppCore {
     /// Returns `IntentError::NoAgent` if no runtime is configured or sync
     /// service is not available.
     pub async fn trigger_sync(&self) -> Result<(), IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("trigger_sync requires a runtime"))?;
-
-        runtime.trigger_sync().await
+        self.with_runtime_timeout(
+            "trigger_sync requires a runtime",
+            "trigger_sync",
+            "trigger_sync",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.trigger_sync().await },
+        )
+        .await?
     }
 
     /// Sync with a specific peer by ID
@@ -880,12 +1034,14 @@ impl AppCore {
     ///
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("sync_with_peer requires a runtime"))?;
-
-        runtime.sync_with_peer(peer_id).await
+        self.with_runtime_timeout(
+            "sync_with_peer requires a runtime",
+            "sync_with_peer",
+            "sync_with_peer",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.sync_with_peer(peer_id).await },
+        )
+        .await?
     }
 
     /// Export an invite code for sharing
@@ -897,12 +1053,14 @@ impl AppCore {
     ///
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("export_invitation requires a runtime"))?;
-
-        runtime.export_invitation(invitation_id).await
+        self.with_runtime_timeout(
+            "export_invitation requires a runtime",
+            "export_invitation",
+            "export_invitation",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.export_invitation(invitation_id).await },
+        )
+        .await?
     }
 
     // Note: Invitation, Recovery, and Authentication service operations
@@ -919,7 +1077,15 @@ impl AppCore {
     /// Check if the runtime is authenticated
     pub async fn is_authenticated(&self) -> bool {
         if let Some(runtime) = &self.runtime {
-            return runtime.is_authenticated().await;
+            return timeout_runtime_call_bounded(
+                runtime,
+                "is_authenticated",
+                "is_authenticated",
+                APP_RUNTIME_QUERY_TIMEOUT,
+                || runtime.is_authenticated(),
+            )
+            .await
+            .unwrap_or(false);
         }
         false
     }
@@ -950,14 +1116,18 @@ impl AppCore {
         total_n: u16,
         guardian_ids: &[AuthorityId],
     ) -> Result<(Epoch, Vec<Vec<u8>>, Vec<u8>), IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("rotate_guardian_keys requires a runtime"))?;
-
-        runtime
-            .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
-            .await
+        self.with_runtime_timeout(
+            "rotate_guardian_keys requires a runtime",
+            "rotate_guardian_keys",
+            "rotate_guardian_keys",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move {
+                runtime
+                    .rotate_guardian_keys(threshold_k, total_n, guardian_ids)
+                    .await
+            },
+        )
+        .await?
     }
 
     /// Commit a guardian key rotation after successful ceremony
@@ -971,11 +1141,14 @@ impl AppCore {
     /// # Errors
     /// Returns `IntentError::NoAgent` if no runtime is configured.
     pub async fn commit_guardian_key_rotation(&self, new_epoch: Epoch) -> Result<(), IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("commit_guardian_key_rotation requires a runtime")
-        })?;
-
-        runtime.commit_guardian_key_rotation(new_epoch).await
+        self.with_runtime_timeout(
+            "commit_guardian_key_rotation requires a runtime",
+            "commit_guardian_key_rotation",
+            "commit_guardian_key_rotation",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.commit_guardian_key_rotation(new_epoch).await },
+        )
+        .await?
     }
 
     /// Rollback a guardian key rotation after ceremony failure
@@ -992,11 +1165,14 @@ impl AppCore {
         &self,
         failed_epoch: Epoch,
     ) -> Result<(), IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("rollback_guardian_key_rotation requires a runtime")
-        })?;
-
-        runtime.rollback_guardian_key_rotation(failed_epoch).await
+        self.with_runtime_timeout(
+            "rollback_guardian_key_rotation requires a runtime",
+            "rollback_guardian_key_rotation",
+            "rollback_guardian_key_rotation",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.rollback_guardian_key_rotation(failed_epoch).await },
+        )
+        .await?
     }
 
     /// Initiate a guardian ceremony with full protocol fidelity
@@ -1026,13 +1202,18 @@ impl AppCore {
         total_n: u16,
         guardian_ids: &[AuthorityId],
     ) -> Result<CeremonyId, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("initiate_guardian_ceremony requires a runtime")
-        })?;
-
-        runtime
-            .initiate_guardian_ceremony(threshold_k, total_n, guardian_ids)
-            .await
+        self.with_runtime_timeout(
+            "initiate_guardian_ceremony requires a runtime",
+            "initiate_guardian_ceremony",
+            "initiate_guardian_ceremony",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move {
+                runtime
+                    .initiate_guardian_ceremony(threshold_k, total_n, guardian_ids)
+                    .await
+            },
+        )
+        .await?
     }
 
     /// Initiate a device threshold (multifactor) ceremony.
@@ -1092,13 +1273,18 @@ impl AppCore {
         total_n: u16,
         device_ids: &[String],
     ) -> Result<CeremonyId, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("initiate_device_threshold_ceremony requires a runtime")
-        })?;
-
-        runtime
-            .initiate_device_threshold_ceremony(threshold_k, total_n, device_ids)
-            .await
+        self.with_runtime_timeout(
+            "initiate_device_threshold_ceremony requires a runtime",
+            "initiate_device_threshold_ceremony",
+            "initiate_device_threshold_ceremony",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move {
+                runtime
+                    .initiate_device_threshold_ceremony(threshold_k, total_n, device_ids)
+                    .await
+            },
+        )
+        .await?
     }
 
     /// Initiate a device enrollment ("add device") ceremony.
@@ -1111,13 +1297,18 @@ impl AppCore {
         nickname_suggestion: String,
         invitee_authority_id: AuthorityId,
     ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("initiate_device_enrollment_ceremony requires a runtime")
-        })?;
-
-        runtime
-            .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
-            .await
+        self.with_runtime_timeout(
+            "initiate_device_enrollment_ceremony requires a runtime",
+            "initiate_device_enrollment_ceremony",
+            "initiate_device_enrollment_ceremony",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move {
+                runtime
+                    .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
+                    .await
+            },
+        )
+        .await?
     }
 
     /// Initiate a device removal ("remove device") ceremony.
@@ -1125,11 +1316,14 @@ impl AppCore {
         &self,
         device_id: String,
     ) -> Result<CeremonyId, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("initiate_device_removal_ceremony requires a runtime")
-        })?;
-
-        runtime.initiate_device_removal_ceremony(device_id).await
+        self.with_runtime_timeout(
+            "initiate_device_removal_ceremony requires a runtime",
+            "initiate_device_removal_ceremony",
+            "initiate_device_removal_ceremony",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.initiate_device_removal_ceremony(device_id).await },
+        )
+        .await?
     }
 
     /// Get status of a guardian ceremony
@@ -1151,12 +1345,14 @@ impl AppCore {
         &self,
         ceremony_id: &CeremonyId,
     ) -> Result<crate::runtime_bridge::CeremonyStatus, IntentError> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("get_ceremony_status requires a runtime"))?;
-
-        runtime.get_ceremony_status(ceremony_id).await
+        self.with_runtime_timeout(
+            "get_ceremony_status requires a runtime",
+            "get_ceremony_status",
+            "get_ceremony_status",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            |runtime| async move { runtime.get_ceremony_status(ceremony_id).await },
+        )
+        .await?
     }
 
     /// Get status of a key rotation ceremony (generic form)
@@ -1164,11 +1360,14 @@ impl AppCore {
         &self,
         ceremony_id: &CeremonyId,
     ) -> Result<crate::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("get_key_rotation_ceremony_status requires a runtime")
-        })?;
-
-        runtime.get_key_rotation_ceremony_status(ceremony_id).await
+        self.with_runtime_timeout(
+            "get_key_rotation_ceremony_status requires a runtime",
+            "get_key_rotation_ceremony_status",
+            "get_key_rotation_ceremony_status",
+            APP_RUNTIME_QUERY_TIMEOUT,
+            |runtime| async move { runtime.get_key_rotation_ceremony_status(ceremony_id).await },
+        )
+        .await?
     }
 
     /// Cancel an in-progress key rotation ceremony (best effort)
@@ -1176,11 +1375,14 @@ impl AppCore {
         &self,
         ceremony_id: &CeremonyId,
     ) -> Result<(), IntentError> {
-        let runtime = self.runtime.as_ref().ok_or_else(|| {
-            IntentError::no_agent("cancel_key_rotation_ceremony requires a runtime")
-        })?;
-
-        runtime.cancel_key_rotation_ceremony(ceremony_id).await
+        self.with_runtime_timeout(
+            "cancel_key_rotation_ceremony requires a runtime",
+            "cancel_key_rotation_ceremony",
+            "cancel_key_rotation_ceremony",
+            APP_RUNTIME_OPERATION_TIMEOUT,
+            |runtime| async move { runtime.cancel_key_rotation_ceremony(ceremony_id).await },
+        )
+        .await?
     }
 }
 

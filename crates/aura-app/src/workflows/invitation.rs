@@ -145,7 +145,8 @@ use crate::ui_contract::{
 };
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
-    execute_with_runtime_timeout_budget, require_runtime, workflow_retry_policy,
+    execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
+    warn_workflow_timeout, workflow_retry_policy,
     workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
@@ -178,7 +179,7 @@ type ChannelInvitationStageTracker = Arc<std::sync::Mutex<&'static str>>;
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
 const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
 const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
-const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 30_000;
+const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 120_000;
 const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
 const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
 const CONTACT_LINK_ATTEMPTS: usize = 32;
@@ -186,6 +187,8 @@ const CONTACT_LINK_BACKOFF_MS: u64 = 100;
 const CHANNEL_BOOTSTRAP_RETRY_ATTEMPTS: usize = 6;
 const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
+const INVITATION_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
+const INVITATION_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
 
 /// Move-owned invitation lifecycle handle.
 ///
@@ -259,6 +262,7 @@ async fn timeout_channel_invitation_stage_with_deadline<T>(
     let budget = match workflow_timeout_budget(runtime, requested).await {
         Ok(budget) => budget,
         Err(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+            warn_workflow_timeout("create_channel_invitation", stage, 0);
             return Err(AuraError::from(
                 crate::workflows::error::WorkflowError::TimedOut {
                     operation: "create_channel_invitation",
@@ -271,13 +275,14 @@ async fn timeout_channel_invitation_stage_with_deadline<T>(
     };
     match execute_with_runtime_timeout_budget(runtime, &budget, || future).await {
         Ok(value) => Ok(value),
-        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => Err(
-            AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
+        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+            warn_workflow_timeout("create_channel_invitation", stage, budget.timeout_ms());
+            Err(AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
                 operation: "create_channel_invitation",
                 stage,
                 timeout_ms: budget.timeout_ms(),
-            }),
-        ),
+            }))
+        }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
     }
@@ -908,10 +913,16 @@ async fn ensure_channel_invitation_context_and_bootstrap(
         "resolve_runtime_channel_context",
         deadline,
         async {
-            runtime
-                .resolve_amp_channel_context(channel_id)
-                .await
-                .map_err(|error| AuraError::internal(error.to_string()))
+            timeout_runtime_call(
+                runtime,
+                "ensure_channel_invitation_context_and_bootstrap",
+                "resolve_amp_channel_context",
+                INVITATION_RUNTIME_QUERY_TIMEOUT,
+                || runtime.resolve_amp_channel_context(channel_id),
+            )
+            .await
+            .map_err(|error| AuraError::internal(error.to_string()))?
+            .map_err(|error| AuraError::internal(error.to_string()))
         },
     )
     .await
@@ -1242,13 +1253,21 @@ async fn reconcile_accepted_channel_invitation_authoritative(
             stage_tracker,
             "reconcile_channel_invitation:amp_join_channel",
         );
-        if let Err(error) = runtime
-            .amp_join_channel(aura_core::effects::amp::ChannelJoinParams {
+        if let Err(error) = timeout_runtime_call(
+            runtime,
+            "reconcile_accepted_channel_invitation_authoritative",
+            "amp_join_channel",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || {
+                runtime.amp_join_channel(aura_core::effects::amp::ChannelJoinParams {
                 context: authoritative_context,
                 channel: local_channel_id,
                 participant: runtime.authority_id(),
-            })
-            .await
+                })
+            },
+        )
+        .await
+        .map_err(|error| super::error::runtime_call("accept channel invitation join", error))?
         {
             if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
                 return Err(
@@ -1318,9 +1337,15 @@ pub async fn create_contact_invitation(
         .await?;
     let runtime = require_runtime(app_core).await?;
 
-    let invitation = runtime
-        .create_contact_invitation(receiver, nickname, message, ttl_ms)
-        .await
+    let invitation = timeout_runtime_call(
+        &runtime,
+        "create_contact_invitation",
+        "create_contact_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.create_contact_invitation(receiver, nickname, message, ttl_ms),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?
         .map_err(|e| AuraError::from(super::error::runtime_call("create contact invitation", e)))?;
     owner
         .publish_success_with(issue_invitation_created_proof(
@@ -1352,9 +1377,15 @@ pub async fn create_guardian_invitation(
         .await?;
     let runtime = require_runtime(app_core).await?;
 
-    let invitation = runtime
-        .create_guardian_invitation(receiver, subject, message, ttl_ms)
-        .await
+    let invitation = timeout_runtime_call(
+        &runtime,
+        "create_guardian_invitation",
+        "create_guardian_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.create_guardian_invitation(receiver, subject, message, ttl_ms),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?
         .map_err(|e| {
             AuraError::from(super::error::runtime_call("create guardian invitation", e))
         })?;
@@ -1609,9 +1640,15 @@ pub async fn list_pending_invitations(
 ) -> Result<Vec<InvitationInfo>, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    runtime
-        .try_list_pending_invitations()
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "list_pending_invitations",
+        "try_list_pending_invitations",
+        INVITATION_RUNTIME_QUERY_TIMEOUT,
+        || runtime.try_list_pending_invitations(),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?
         .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))
 }
 
@@ -1626,9 +1663,15 @@ pub async fn import_invitation_details(
 ) -> Result<InvitationHandle, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    runtime
-        .import_invitation(code)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "import_invitation_details",
+        "import_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.import_invitation(code),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))?
         .map(InvitationHandle::new)
         .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }
@@ -1639,9 +1682,15 @@ async fn pending_invitation_info_by_id(
 ) -> Result<InvitationInfo, AuraError> {
     let invitation_id = InvitationId::new(invitation_id);
     let runtime = require_runtime(app_core).await?;
-    let invitations = runtime
-        .try_list_pending_invitations()
-        .await
+    let invitations = timeout_runtime_call(
+        &runtime,
+        "pending_invitation_info_by_id",
+        "try_list_pending_invitations",
+        INVITATION_RUNTIME_QUERY_TIMEOUT,
+        || runtime.try_list_pending_invitations(),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?
         .map_err(|e| AuraError::from(super::error::runtime_call("list pending invitations", e)))?;
     invitations
         .into_iter()
@@ -1667,9 +1716,15 @@ pub async fn export_invitation(
 ) -> Result<String, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    let code = runtime
-        .export_invitation(invitation_id.as_str())
-        .await
+    let code = timeout_runtime_call(
+        &runtime,
+        "export_invitation",
+        "export_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.export_invitation(invitation_id.as_str()),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?
         .map_err(|e| AuraError::from(super::error::runtime_call("export invitation", e)))?;
     SemanticWorkflowOwner::new(
         app_core,
@@ -2142,10 +2197,19 @@ pub async fn accept_device_enrollment_invitation(
     };
 
     let runtime = require_runtime(app_core).await?;
-    if let Err(error) = runtime
-        .accept_invitation(invitation.invitation_id.as_str())
-        .await
-    {
+    let accept_result = timeout_runtime_call(
+        &runtime,
+        "accept_device_enrollment_invitation",
+        "accept_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.accept_invitation(invitation.invitation_id.as_str()),
+    )
+    .await;
+    if let Err(error) = accept_result {
+        return fail_device_enrollment_accept(app_core, format!("accept invitation failed: {error}"))
+            .await;
+    }
+    if let Ok(Err(error)) = accept_result {
         return fail_device_enrollment_accept(
             app_core,
             format!("accept invitation failed: {error}"),
@@ -2163,7 +2227,16 @@ pub async fn accept_device_enrollment_invitation(
         async move {
             #[cfg(not(feature = "instrumented"))]
             let _ = (attempt, &invitation_id);
-            if let Err(_error) = runtime.process_ceremony_messages().await {
+            if let Err(_error) = timeout_runtime_call(
+                &runtime,
+                "accept_device_enrollment_invitation",
+                "process_ceremony_messages",
+                INVITATION_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.process_ceremony_messages(),
+            )
+            .await
+            .unwrap_or_else(|error| Err(crate::core::IntentError::internal_error(error.to_string())))
+            {
                 #[cfg(feature = "instrumented")]
                 tracing::info!(
                     invitation_id = %invitation_id,
@@ -2175,9 +2248,15 @@ pub async fn accept_device_enrollment_invitation(
             converge_runtime(&runtime).await;
             settings::refresh_settings_from_runtime(app_core).await?;
 
-            let runtime_device_count = runtime
-                .try_list_devices()
-                .await
+            let runtime_device_count = timeout_runtime_call(
+                &runtime,
+                "accept_device_enrollment_invitation",
+                "try_list_devices",
+                INVITATION_RUNTIME_QUERY_TIMEOUT,
+                || runtime.try_list_devices(),
+            )
+            .await
+            .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
                 .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
                 .len();
             let settings_device_count = settings::get_settings(app_core).await?.devices.len();
@@ -2259,9 +2338,15 @@ pub async fn decline_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    runtime
-        .decline_invitation(invitation.invitation_id().as_str())
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "decline_invitation",
+        "decline_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.decline_invitation(invitation.invitation_id().as_str()),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))?
         .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
 }
 
@@ -2285,9 +2370,15 @@ pub async fn cancel_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    runtime
-        .cancel_invitation(invitation.invitation_id().as_str())
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "cancel_invitation",
+        "cancel_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.cancel_invitation(invitation.invitation_id().as_str()),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))?
         .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
 }
 
@@ -2313,9 +2404,15 @@ pub async fn import_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    runtime
-        .import_invitation(code)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "import_invitation",
+        "import_invitation",
+        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.import_invitation(code),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))?
         .map(|_| ()) // Discard InvitationInfo, just return success
         .map_err(|e| AuraError::from(super::error::runtime_call("import invitation", e)))
 }

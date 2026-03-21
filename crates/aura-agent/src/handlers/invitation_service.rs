@@ -629,6 +629,11 @@ impl InvitationServiceApi {
         self.handler.list_cached_matching(predicate).await
     }
 
+    /// List invitations from cache plus persisted stores.
+    pub async fn list_with_storage(&self) -> Vec<Invitation> {
+        self.handler.list_with_storage(&self.effects).await
+    }
+
     /// Get an invitation by ID
     ///
     /// # Arguments

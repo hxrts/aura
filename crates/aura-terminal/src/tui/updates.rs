@@ -46,7 +46,7 @@
 
 use crate::error::TerminalError;
 use crate::tui::components::ToastMessage;
-use crate::tui::types::{Device, MfaPolicy};
+use crate::tui::types::{AuthorityInfo, Device, MfaPolicy};
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{
     OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus,
@@ -197,6 +197,12 @@ pub enum UiUpdate {
     DeviceRemoved {
         /// The device ID that was removed
         device_id: String,
+    },
+
+    /// Authorities list and current selection were updated from authoritative settings state.
+    AuthoritiesUpdated {
+        authorities: Vec<AuthorityInfo>,
+        current_index: usize,
     },
 
     /// Pending startup runtime bootstrap finished converging.

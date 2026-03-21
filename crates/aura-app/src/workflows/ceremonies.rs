@@ -14,6 +14,7 @@ use crate::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind, SemanticOperationPhase,
 };
+use crate::workflows::runtime::timeout_runtime_call;
 use crate::workflows::semantic_facts::{
     issue_device_enrollment_started_proof, SemanticWorkflowOwner,
 };
@@ -23,6 +24,8 @@ use aura_core::types::FrostThreshold;
 use aura_core::{AttemptBudget, AuraError};
 use std::future::Future;
 use std::time::Duration;
+
+const CEREMONY_RUNTIME_TIMEOUT: Duration = Duration::from_millis(30_000);
 
 /// Move-owned ceremony handle.
 ///
@@ -168,11 +171,23 @@ pub async fn start_device_enrollment_ceremony(
             .cloned()
             .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
     };
-    let start = match runtime
-        .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
-        .await
+    let start = match timeout_runtime_call(
+        &runtime,
+        "start_device_enrollment_ceremony",
+        "initiate_device_enrollment_ceremony",
+        CEREMONY_RUNTIME_TIMEOUT,
+        || runtime.initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id),
+    )
+    .await
     {
-        Ok(start) => start,
+        Ok(Ok(start)) => start,
+        Ok(Err(error)) => {
+            return fail_start_device_enrollment(
+                &owner,
+                ceremony_op("start device enrollment", error).to_string(),
+            )
+            .await;
+        }
         Err(error) => {
             return fail_start_device_enrollment(
                 &owner,
@@ -211,9 +226,14 @@ pub async fn start_device_removal_ceremony(
             .cloned()
             .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
     };
-    runtime
-        .initiate_device_removal_ceremony(device_id)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "start_device_removal_ceremony",
+        "initiate_device_removal_ceremony",
+        CEREMONY_RUNTIME_TIMEOUT,
+        || runtime.initiate_device_removal_ceremony(device_id),
+    )
+    .await?
         .map(|ceremony_id| {
             CeremonyHandle::new(
                 ceremony_id,

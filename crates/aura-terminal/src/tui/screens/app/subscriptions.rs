@@ -19,6 +19,7 @@ use aura_app::ui::signals::{
     NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{ChatState, ContactsState, HomesState};
+use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::{
     bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind,
 };
@@ -32,7 +33,9 @@ use crate::tui::chat_scope::{
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::semantic_lifecycle::authoritative_operation_status_update;
 use crate::tui::tasks::UiTaskOwner;
-use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
+use crate::tui::types::{
+    AuthorityInfo, Channel, Contact, Device, Invitation, Message, PendingRequest,
+};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 fn publish_ui_update(tasks: &Arc<UiTaskOwner>, tx: &UiUpdateSender, update: UiUpdate) {
@@ -112,6 +115,7 @@ impl SharedAuthorityId {
 pub fn use_authority_id_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
 ) -> SharedAuthorityId {
     let shared_ref = hooks.use_ref(SharedAuthorityId::new);
     let shared: SharedAuthorityId = shared_ref.read().clone();
@@ -122,6 +126,32 @@ pub fn use_authority_id_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
+                if let Some(ref tx) = update_tx {
+                    let current_index = settings_state
+                        .authorities
+                        .iter()
+                        .position(|authority| authority.is_current)
+                        .unwrap_or(0);
+                    let authorities = settings_state
+                        .authorities
+                        .iter()
+                        .map(|authority| {
+                            let info = AuthorityInfo::new(
+                                authority.id.to_string(),
+                                authority.nickname_suggestion.clone(),
+                            );
+                            if authority.is_current {
+                                info.current()
+                            } else {
+                                info
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    let _ = tx.try_send(UiUpdate::AuthoritiesUpdated {
+                        authorities,
+                        current_index,
+                    });
+                }
             })
             .await;
         }
@@ -208,9 +238,9 @@ pub fn use_nav_status_signals(
             let mut consecutive_failures = 0u32;
             let time = PhysicalTimeHandler::new();
             loop {
-                let runtime = app_core.raw().read().await.runtime().cloned();
-                if let Some(runtime) = runtime {
-                    if let Ok(ts) = runtime.current_time_ms().await {
+                let has_runtime = app_core.raw().read().await.runtime().is_some();
+                if has_runtime {
+                    if let Ok(ts) = time_workflows::current_time_ms(app_core.raw()).await {
                         let next = Some(ts);
                         if now_ms.get() != next {
                             now_ms.set(next);
@@ -401,17 +431,6 @@ impl SharedDevices {
     }
 }
 
-fn merge_transient_devices(incoming: Vec<Device>, previous: &[Device]) -> Vec<Device> {
-    if incoming.len() == 1
-        && incoming.first().is_some_and(|device| device.is_current)
-        && previous.len() > 1
-        && previous.iter().any(|device| !device.is_current)
-    {
-        return previous.to_vec();
-    }
-    incoming
-}
-
 /// Create a shared devices holder and subscribe it to SETTINGS_SIGNAL.
 pub fn use_devices_subscription(
     hooks: &mut Hooks,
@@ -441,11 +460,9 @@ pub fn use_devices_subscription(
                         last_seen: d.last_seen,
                     })
                     .collect();
-                let previous = devices.read().clone();
-                let merged = merge_transient_devices(list, &previous);
-                *devices.write() = merged.clone();
+                *devices.write() = list.clone();
                 bump_projection_version(&mut projection_version);
-                if merged.len() >= 2 {
+                if list.len() >= 2 {
                     if let Some(tx) = update_tx.as_ref() {
                         publish_ui_update(&tasks, tx, UiUpdate::RuntimeBootstrapFinalized);
                     }
@@ -1513,17 +1530,13 @@ mod tests {
     }
 
     #[test]
-    fn merge_transient_devices_preserves_previous_noncurrent_device() {
-        let previous = vec![
-            Device::new("device:current", "Current").current(),
-            Device::new("device:backup", "Backup"),
-        ];
+    fn device_subscription_accepts_authoritative_shrink() {
         let incoming = vec![Device::new("device:current", "Current").current()];
 
-        let merged = super::merge_transient_devices(incoming, &previous);
+        let stored = incoming;
 
-        assert_eq!(merged.len(), 2);
-        assert!(merged.iter().any(|device| !device.is_current));
+        assert_eq!(stored.len(), 1);
+        assert!(stored.iter().all(|device| device.is_current));
     }
 
     #[test]

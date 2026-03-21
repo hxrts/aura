@@ -5,6 +5,41 @@ pub(super) struct InvitationCacheHandler<'a> {
 }
 
 impl<'a> InvitationCacheHandler<'a> {
+    pub(super) fn invitation_status_rank(status: InvitationStatus) -> u8 {
+        match status {
+            InvitationStatus::Pending => 0,
+            InvitationStatus::Accepted
+            | InvitationStatus::Declined
+            | InvitationStatus::Expired
+            | InvitationStatus::Cancelled => 1,
+        }
+    }
+
+    pub(super) fn should_replace_invitation(existing: &Invitation, candidate: &Invitation) -> bool {
+        let existing_rank = Self::invitation_status_rank(existing.status.clone());
+        let candidate_rank = Self::invitation_status_rank(candidate.status.clone());
+        candidate_rank > existing_rank
+            || (candidate_rank == existing_rank
+                && candidate.created_at > existing.created_at
+                && candidate.status == existing.status)
+    }
+
+    pub(super) fn merge_invitation(
+        invitations: &mut HashMap<InvitationId, Invitation>,
+        candidate: Invitation,
+    ) {
+        match invitations.entry(candidate.invitation_id.clone()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(candidate);
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if Self::should_replace_invitation(entry.get(), &candidate) {
+                    entry.insert(candidate);
+                }
+            }
+        }
+    }
+
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
         Self { handler }
     }
@@ -38,6 +73,14 @@ impl<'a> InvitationCacheHandler<'a> {
             InvitationHandler::CREATED_INVITATION_STORAGE_PREFIX,
             authority_id.uuid(),
             invitation_id.as_str()
+        )
+    }
+
+    pub(super) fn created_invitation_prefix(authority_id: AuthorityId) -> String {
+        format!(
+            "{}/{}/",
+            InvitationHandler::CREATED_INVITATION_STORAGE_PREFIX,
+            authority_id.uuid()
         )
     }
 
@@ -107,27 +150,32 @@ impl<'a> InvitationCacheHandler<'a> {
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
     ) -> Option<Invitation> {
-        if let Some(inv) = self
+        let own_id = self.handler.context.authority.authority_id();
+        let mut best = self
             .handler
             .invitation_cache
             .get_invitation(invitation_id)
-            .await
-        {
-            return Some(inv);
-        }
-
-        let own_id = self.handler.context.authority.authority_id();
+            .await;
 
         if let Some(inv) = Self::load_created_invitation(effects, own_id, invitation_id).await {
-            return Some(inv);
+            match &best {
+                Some(existing) if !Self::should_replace_invitation(existing, &inv) => {}
+                _ => best = Some(inv),
+            }
         }
 
         if let Some(shareable) =
             Self::load_imported_invitation(effects, own_id, invitation_id).await
         {
-            return Some(Invitation {
+            let context_id = match &shareable.invitation_type {
+                InvitationType::Channel { .. } => shareable
+                    .context_id
+                    .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+                _ => self.handler.context.effect_context.context_id(),
+            };
+            let invitation = Invitation {
                 invitation_id: shareable.invitation_id,
-                context_id: self.handler.context.effect_context.context_id(),
+                context_id,
                 sender_id: shareable.sender_id,
                 receiver_id: own_id,
                 invitation_type: shareable.invitation_type,
@@ -135,9 +183,13 @@ impl<'a> InvitationCacheHandler<'a> {
                 created_at: 0,
                 expires_at: shareable.expires_at,
                 message: shareable.message,
-            });
+            };
+            match &best {
+                Some(existing) if !Self::should_replace_invitation(existing, &invitation) => {}
+                _ => best = Some(invitation),
+            }
         }
 
-        None
+        best
     }
 }

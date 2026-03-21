@@ -4,7 +4,7 @@
 
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
-    workflow_retry_policy,
+    timeout_runtime_call, workflow_retry_policy,
 };
 use crate::AppCore;
 use async_lock::RwLock;
@@ -14,9 +14,11 @@ use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::{AccessLevel, AccessLevelCapabilityConfig, SocialFact};
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 const ACCESS_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const ACCESS_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
+const ACCESS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 #[aura_macros::strong_reference(domain = "home_scope")]
 #[derive(Debug, Clone)]
@@ -51,9 +53,14 @@ async fn send_relational_fact_with_retry(
                     cooperative_yield().await;
                 }
             }
-            runtime
-                .send_chat_fact(peer, context_id, fact)
-                .await
+            timeout_runtime_call(
+                &runtime,
+                "send_relational_fact_with_retry",
+                "send_chat_fact",
+                ACCESS_RUNTIME_TIMEOUT,
+                || runtime.send_chat_fact(peer, context_id, fact),
+            )
+            .await?
                 .map_err(|error| {
                     AuraError::from(super::error::WorkflowError::DeliveryFailed {
                         peer: peer.to_string(),
@@ -151,10 +158,16 @@ pub async fn configure_home_capabilities_resolved(
     }
 
     let runtime = require_runtime(app_core).await?;
-    let now_ms = runtime
-        .current_time_ms()
-        .await
-        .map_err(|e| map_runtime_error("Capability config timestamp", e))?;
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "configure_home_capabilities_resolved",
+        "current_time_ms",
+        ACCESS_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| map_runtime_error("Capability config timestamp", e))?
+    .map_err(|e| map_runtime_error("Capability config timestamp", e))?;
     let actor = runtime.authority_id();
     let fact = SocialFact::access_level_capabilities_configured_ms(
         HomeId::from_bytes(*scope.home_id.as_bytes()),
@@ -166,10 +179,16 @@ pub async fn configure_home_capabilities_resolved(
     )
     .to_generic();
 
-    runtime
-        .commit_relational_facts(std::slice::from_ref(&fact))
-        .await
-        .map_err(|e| map_runtime_error("Commit capability config fact", e))?;
+    timeout_runtime_call(
+        &runtime,
+        "configure_home_capabilities_resolved",
+        "commit_relational_facts",
+        ACCESS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await
+    .map_err(|e| map_runtime_error("Commit capability config fact", e))?
+    .map_err(|e| map_runtime_error("Commit capability config fact", e))?;
 
     for peer in scope.peers {
         if peer == actor {
@@ -271,10 +290,16 @@ pub async fn set_access_override_resolved(
     }
 
     let runtime = require_runtime(app_core).await?;
-    let now_ms = runtime
-        .current_time_ms()
-        .await
-        .map_err(|e| map_runtime_error("Access override timestamp", e))?;
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "set_access_override_resolved",
+        "current_time_ms",
+        ACCESS_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| map_runtime_error("Access override timestamp", e))?
+    .map_err(|e| map_runtime_error("Access override timestamp", e))?;
     let actor = runtime.authority_id();
     let fact = SocialFact::access_override_set_ms(
         authority_id,
@@ -285,10 +310,16 @@ pub async fn set_access_override_resolved(
     )
     .to_generic();
 
-    runtime
-        .commit_relational_facts(std::slice::from_ref(&fact))
-        .await
-        .map_err(|e| map_runtime_error("Commit access override fact", e))?;
+    timeout_runtime_call(
+        &runtime,
+        "set_access_override_resolved",
+        "commit_relational_facts",
+        ACCESS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await
+    .map_err(|e| map_runtime_error("Commit access override fact", e))?
+    .map_err(|e| map_runtime_error("Commit access override fact", e))?;
 
     for peer in scope.peers.iter().copied() {
         if peer == actor {

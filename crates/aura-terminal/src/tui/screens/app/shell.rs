@@ -40,6 +40,7 @@ use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony, start_device_threshold_ceremony, start_guardian_ceremony,
 };
 use aura_app::ui::workflows::network as network_workflows;
+use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{
@@ -117,7 +118,7 @@ async fn authoritative_settings_devices_for_command(
 
     if from_signal
         .as_ref()
-        .is_none_or(|settings_state| settings_state.devices.is_empty())
+        .map_or(true, |settings_state| settings_state.devices.is_empty())
     {
         let _ = refresh_settings_from_runtime(app_ctx.app_core.raw()).await;
         from_signal = {
@@ -1310,10 +1311,38 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     };
 
                     if let Some(runtime) = runtime {
-                        let _ = runtime.trigger_discovery().await;
-                        let _ = runtime.process_ceremony_messages().await;
-                        let _ = runtime.trigger_sync().await;
-                        let _ = runtime.process_ceremony_messages().await;
+                        let _ = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "terminal_harness_runtime_maintenance",
+                            "trigger_discovery",
+                            std::time::Duration::from_secs(3),
+                            || runtime.trigger_discovery(),
+                        )
+                        .await;
+                        let _ = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "terminal_harness_runtime_maintenance",
+                            "process_ceremony_messages_before_sync",
+                            std::time::Duration::from_secs(3),
+                            || runtime.process_ceremony_messages(),
+                        )
+                        .await;
+                        let _ = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "terminal_harness_runtime_maintenance",
+                            "trigger_sync",
+                            std::time::Duration::from_secs(3),
+                            || runtime.trigger_sync(),
+                        )
+                        .await;
+                        let _ = runtime_workflows::timeout_runtime_call(
+                            &runtime,
+                            "terminal_harness_runtime_maintenance",
+                            "process_ceremony_messages_after_sync",
+                            std::time::Duration::from_secs(3),
+                            || runtime.process_ceremony_messages(),
+                        )
+                        .await;
                     }
 
                     let _ = system_workflows::refresh_account(&app_core).await;

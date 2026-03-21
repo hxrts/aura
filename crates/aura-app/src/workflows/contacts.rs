@@ -8,7 +8,7 @@ use crate::views::contacts::ReadReceiptPolicy;
 use crate::workflows::context::default_relational_context;
 use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::require_runtime;
+use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
@@ -17,6 +17,9 @@ use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use std::sync::Arc;
+use std::time::Duration;
+
+const CONTACTS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 /// Add a contact to the local contact list.
 ///
@@ -46,10 +49,16 @@ pub async fn add_contact(
         timestamp_ms,
     )
     .to_generic();
+    let facts = vec![fact];
 
-    runtime
-        .commit_relational_facts(&[fact])
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "add_contact",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
         .map_err(|e| runtime_call("add contact", e))?;
 
     Ok(())
@@ -93,9 +102,14 @@ pub async fn add_contacts_batch(
         facts.push(fact);
     }
 
-    runtime
-        .commit_relational_facts(&facts)
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "add_contacts_batch",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
         .map_err(|e| runtime_call("add contacts", e))?;
 
     Ok(())
@@ -132,10 +146,16 @@ pub async fn update_contact_nickname(
         timestamp_ms,
     )
     .to_generic();
+    let facts = vec![fact];
 
-    runtime
-        .commit_relational_facts(&[fact])
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "update_contact_nickname",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
         .map_err(|e| runtime_call("commit contact nickname", e))?;
 
     Ok(())
@@ -162,10 +182,16 @@ pub async fn remove_contact(
         timestamp_ms,
     )
     .to_generic();
+    let facts = vec![fact];
 
-    runtime
-        .commit_relational_facts(&[fact])
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "remove_contact",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
         .map_err(|e| runtime_call("remove contact", e))?;
 
     Ok(())
@@ -195,10 +221,16 @@ pub async fn set_read_receipt_policy(
         timestamp_ms,
     )
     .to_generic();
+    let facts = vec![fact];
 
-    runtime
-        .commit_relational_facts(&[fact])
-        .await
+    timeout_runtime_call(
+        &runtime,
+        "set_read_receipt_policy",
+        "commit_relational_facts",
+        CONTACTS_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(&facts),
+    )
+    .await?
         .map_err(|e| runtime_call("update read receipt policy", e))?;
 
     Ok(())
@@ -253,9 +285,14 @@ pub async fn emit_read_receipts(
     }
 
     if !facts.is_empty() {
-        runtime
-            .commit_relational_facts(&facts)
-            .await
+        timeout_runtime_call(
+            &runtime,
+            "emit_read_receipts",
+            "commit_relational_facts",
+            CONTACTS_RUNTIME_TIMEOUT,
+            || runtime.commit_relational_facts(&facts),
+        )
+        .await?
             .map_err(|e| runtime_call("emit read receipts", e))?;
     }
 

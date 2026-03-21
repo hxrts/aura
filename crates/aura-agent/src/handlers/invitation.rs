@@ -79,7 +79,7 @@ use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(test)]
 use std::str::FromStr;
 use uuid::Uuid;
@@ -304,10 +304,6 @@ impl InvitationHandler {
             service,
             invitation_cache: Arc::new(InvitationManager::new()),
         })
-    }
-
-    fn imported_invitation_prefix(authority_id: AuthorityId) -> String {
-        InvitationCacheHandler::imported_invitation_prefix(authority_id)
     }
 
     async fn persist_created_invitation(
@@ -1033,16 +1029,8 @@ impl InvitationHandler {
                         .await;
                 }
                 InvitationType::Channel { .. } => {
-                    if let Err(error) = self
-                        .notify_channel_invitation_acceptance(effects.as_ref(), invitation_id)
-                        .await
-                    {
-                        tracing::warn!(
-                            invitation_id = %invitation_id,
-                            error = %error,
-                            "Channel invitation acceptance envelope send failed; continuing with local convergence path"
-                        );
-                    }
+                    self.notify_channel_invitation_acceptance(effects.as_ref(), invitation_id)
+                        .await?;
                     tracing::debug!(
                         invitation_id = %invitation_id,
                         "Skipping synchronous invitation exchange receiver for accepted channel invitation"
@@ -1508,7 +1496,7 @@ impl InvitationHandler {
         Ok(invitation)
     }
 
-    pub(super) async fn cache_peer_descriptor_for_peer(
+    pub(crate) async fn cache_peer_descriptor_for_peer(
         &self,
         effects: &AuraEffectSystem,
         peer: AuthorityId,
@@ -1705,20 +1693,32 @@ impl InvitationHandler {
         self.invitation_cache.list_matching(predicate).await
     }
 
-    /// List pending invitations from cache plus persisted stores.
-    ///
-    /// This allows runtime components using separate handler instances to
-    /// converge on a shared pending invitation view.
-    pub async fn list_pending_with_storage(&self, effects: &AuraEffectSystem) -> Vec<Invitation> {
-        let mut pending = self.list_pending().await;
-        let mut seen: HashSet<InvitationId> = pending
-            .iter()
-            .map(|inv| inv.invitation_id.clone())
-            .collect();
+    /// List invitations from cache plus persisted stores.
+    pub async fn list_with_storage(&self, effects: &AuraEffectSystem) -> Vec<Invitation> {
+        let mut invitations: HashMap<InvitationId, Invitation> = HashMap::new();
+        for invitation in self.list_cached_matching(|_| true).await {
+            InvitationCacheHandler::merge_invitation(&mut invitations, invitation);
+        }
         let own_id = self.context.authority.authority_id();
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
 
-        let imported_prefix = Self::imported_invitation_prefix(own_id);
+        let created_prefix = InvitationCacheHandler::created_invitation_prefix(own_id);
+        if let Ok(keys) = effects.list_keys(Some(&created_prefix)).await {
+            for key in keys {
+                let Ok(Some(bytes)) = effects.retrieve(&key).await else {
+                    continue;
+                };
+                let Ok(invitation) = serde_json::from_slice::<Invitation>(&bytes) else {
+                    continue;
+                };
+                self.invitation_cache
+                    .cache_invitation(invitation.clone())
+                    .await;
+                InvitationCacheHandler::merge_invitation(&mut invitations, invitation);
+            }
+        }
+
+        let imported_prefix = InvitationCacheHandler::imported_invitation_prefix(own_id);
         if let Ok(keys) = effects.list_keys(Some(&imported_prefix)).await {
             for key in keys {
                 let Ok(Some(bytes)) = effects.retrieve(&key).await else {
@@ -1727,9 +1727,6 @@ impl InvitationHandler {
                 let Ok(shareable) = serde_json::from_slice::<ShareableInvitation>(&bytes) else {
                     continue;
                 };
-                if !seen.insert(shareable.invitation_id.clone()) {
-                    continue;
-                }
 
                 let context_id = match &shareable.invitation_type {
                     InvitationType::Channel { .. } => shareable
@@ -1753,11 +1750,23 @@ impl InvitationHandler {
                 self.invitation_cache
                     .cache_invitation(invitation.clone())
                     .await;
-                pending.push(invitation);
+                InvitationCacheHandler::merge_invitation(&mut invitations, invitation);
             }
         }
 
-        pending
+        invitations.into_values().collect()
+    }
+
+    /// List pending invitations from cache plus persisted stores.
+    ///
+    /// This allows runtime components using separate handler instances to
+    /// converge on a shared pending invitation view.
+    pub async fn list_pending_with_storage(&self, effects: &AuraEffectSystem) -> Vec<Invitation> {
+        self.list_with_storage(effects)
+            .await
+            .into_iter()
+            .filter(|inv| inv.status == InvitationStatus::Pending)
+            .collect()
     }
 
     async fn load_invitation_for_choreography(
@@ -1777,10 +1786,16 @@ impl InvitationHandler {
         if let Some(shareable) =
             Self::load_imported_invitation(effects, own_id, invitation_id).await
         {
+            let context_id = match &shareable.invitation_type {
+                InvitationType::Channel { .. } => shareable
+                    .context_id
+                    .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+                _ => self.context.effect_context.context_id(),
+            };
             let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
             return Some(Invitation {
                 invitation_id: shareable.invitation_id,
-                context_id: self.context.effect_context.context_id(),
+                context_id,
                 sender_id: shareable.sender_id,
                 receiver_id: own_id,
                 invitation_type: shareable.invitation_type,
@@ -3242,7 +3257,10 @@ mod tests {
             .process_contact_invitation_acceptances(sender_effects.clone())
             .await
             .unwrap();
-        assert_eq!(processed, 1);
+        assert!(
+            processed >= 1,
+            "expected at least one transported acceptance envelope to be processed"
+        );
 
         let committed = sender_effects
             .load_committed_facts(sender_id)
@@ -3514,7 +3532,7 @@ mod tests {
             .process_contact_invitation_acceptances(sender_effects.clone())
             .await
             .unwrap();
-        assert_eq!(processed, 1);
+        assert!(processed >= 1);
     }
 
     #[tokio::test]
@@ -3648,6 +3666,269 @@ mod tests {
         assert!(
             found,
             "expected committed non-chat relational fact from inbound envelope"
+        );
+    }
+
+    #[tokio::test]
+    async fn channel_acceptance_processing_marks_created_invitation_accepted_for_sender() {
+        let sender_id = AuthorityId::new_from_entropy([207u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([208u8; 32]);
+        let config = AgentConfig::default();
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
+        let sender_context = AuthorityContext::new(sender_id);
+        let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
+        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let sender_service = InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
+
+        let context_id = ContextId::new_from_entropy([209u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-sender-propagation"));
+        sender_effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
+        sender_effects
+            .join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: sender_id,
+            })
+            .await
+            .unwrap();
+
+        let invitation = sender_service
+            .invite_to_channel(
+                receiver_id,
+                channel_id.to_string(),
+                Some(context_id),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let code = InvitationServiceApi::export_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
+
+        receiver_handler
+            .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+        let acceptance = ChannelInvitationAcceptance {
+            invitation_id: imported.invitation_id.clone(),
+            acceptor_id: receiver_id,
+            context_id,
+            channel_id,
+        };
+        let payload = serde_json::to_vec(&acceptance).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
+        );
+        metadata.insert(
+            "invitation-id".to_string(),
+            imported.invitation_id.to_string(),
+        );
+        metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
+        metadata.insert("channel-id".to_string(), channel_id.to_string());
+        sender_effects
+            .send_envelope(TransportEnvelope {
+                destination: sender_id,
+                source: receiver_id,
+                context: default_context_id_for_authority(sender_id),
+                payload,
+                metadata,
+                receipt: None,
+            })
+            .await
+            .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert!(processed >= 1);
+
+        let stored = InvitationHandler::load_created_invitation(
+            sender_effects.as_ref(),
+            sender_id,
+            &invitation.invitation_id,
+        )
+        .await
+        .expect("created invitation should remain accessible");
+        assert_eq!(stored.status, InvitationStatus::Accepted);
+
+    }
+
+    #[tokio::test]
+    async fn channel_acceptance_notification_transports_and_updates_sender_state() {
+        let sender_id = AuthorityId::new_from_entropy([221u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([222u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let sender_context = AuthorityContext::new(sender_id);
+        let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
+        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        let sender_service = InvitationServiceApi::new(sender_effects.clone(), sender_context).unwrap();
+
+        let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            sender_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        sender_effects.attach_rendezvous_manager(sender_manager.clone());
+        let sender_service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
+            .await
+            .unwrap();
+
+        let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            receiver_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
+        let receiver_service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(
+            &receiver_manager,
+            &receiver_service_context,
+        )
+        .await
+        .unwrap();
+
+        let now_ms = 1_700_000_000_000;
+        sender_handler
+            .cache_peer_descriptor_for_peer(
+                sender_effects.as_ref(),
+                receiver_id,
+                None,
+                Some("tcp://127.0.0.1:55002"),
+                now_ms,
+            )
+            .await;
+        receiver_handler
+            .cache_peer_descriptor_for_peer(
+                receiver_effects.as_ref(),
+                sender_id,
+                None,
+                Some("tcp://127.0.0.1:55001"),
+                now_ms,
+            )
+            .await;
+
+        let context_id = ContextId::new_from_entropy([223u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-real-transport"));
+        sender_effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
+        sender_effects
+            .join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: sender_id,
+            })
+            .await
+            .unwrap();
+
+        let invitation = sender_service
+            .invite_to_channel(
+                receiver_id,
+                channel_id.to_string(),
+                Some(context_id),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let code = InvitationServiceApi::export_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
+        receiver_handler
+            .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+        receiver_handler
+            .notify_channel_invitation_acceptance(
+                receiver_effects.as_ref(),
+                &imported.invitation_id,
+            )
+            .await
+            .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert!(processed >= 1);
+
+        let stored = InvitationHandler::load_created_invitation(
+            sender_effects.as_ref(),
+            sender_id,
+            &invitation.invitation_id,
+        )
+        .await
+        .expect("created invitation should remain accessible");
+        assert_eq!(stored.status, InvitationStatus::Accepted);
+
+        use aura_effects::ReactiveEffects;
+        let homes: HomesState = sender_effects
+            .reactive_handler()
+            .read(&*HOMES_SIGNAL)
+            .await
+            .unwrap_or_default();
+        let home = homes
+            .home_state(&channel_id)
+            .expect("sender should materialize channel acceptance home state");
+        assert_eq!(home.context_id, Some(context_id));
+        assert!(
+            home.member(&receiver_id).is_some(),
+            "sender home state should include receiver after transported acceptance"
         );
     }
 
@@ -4153,6 +4434,51 @@ mod tests {
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn imported_channel_invitation_preserves_authoritative_context_for_choreography() {
+        let own_authority = AuthorityId::new_from_entropy([211u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([212u8; 32]);
+        let invitation_context = ContextId::new_from_entropy([213u8; 32]);
+        let channel_id = canonical_home_id(214);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
+        );
+
+        let authority_context = AuthorityContext::new(own_authority);
+        let handler = InvitationHandler::new(authority_context).unwrap();
+
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-demo-channel-context"),
+            sender_id,
+            context_id: Some(invitation_context),
+            invitation_type: InvitationType::Channel {
+                home_id: channel_id,
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Channel invitation".to_string()),
+        };
+        let code = shareable.to_code();
+
+        let imported = handler
+            .import_invitation_code(&effects, &code)
+            .await
+            .expect("channel import should succeed");
+
+        let choreography_invitation = handler
+            .load_invitation_for_choreography(effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect("imported invitation should be resolvable for choreography");
+
+        assert_eq!(
+            choreography_invitation.context_id, invitation_context,
+            "channel invitation choreography must preserve the authoritative invitation context"
+        );
     }
 
     #[tokio::test]

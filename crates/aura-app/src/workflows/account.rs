@@ -11,7 +11,10 @@
 use crate::views::PendingAccountBootstrap;
 use crate::workflows::{
     context,
-    runtime::{execute_with_runtime_retry_budget, require_runtime, workflow_retry_policy},
+    runtime::{
+        execute_with_runtime_retry_budget, require_runtime, timeout_runtime_call,
+        workflow_retry_policy,
+    },
     settings, system,
 };
 use crate::AppCore;
@@ -20,6 +23,9 @@ use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, RetryRunError};
 use std::sync::Arc;
 use std::time::Duration;
+
+const ACCOUNT_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
+const ACCOUNT_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
 
 /// Threshold configuration for account setup
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,10 +306,16 @@ pub async fn has_runtime_account_config(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<bool, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    runtime
-        .has_account_config()
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("check account config", e)))
+    timeout_runtime_call(
+        &runtime,
+        "has_runtime_account_config",
+        "has_account_config",
+        ACCOUNT_RUNTIME_QUERY_TIMEOUT,
+        || runtime.has_account_config(),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("check account config", e)))?
+    .map_err(|e| AuraError::from(super::error::runtime_call("check account config", e)))
 }
 
 /// Returns true when runtime bootstrap has produced an active home context.
@@ -322,10 +334,16 @@ pub async fn initialize_runtime_account(
 ) -> Result<(), AuraError> {
     let pending_bootstrap = prepare_pending_account_bootstrap(&nickname_suggestion)?;
     let runtime = require_runtime(app_core).await?;
-    runtime
-        .initialize_account(&pending_bootstrap.nickname_suggestion)
-        .await
-        .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?;
+    timeout_runtime_call(
+        &runtime,
+        "initialize_runtime_account",
+        "initialize_account",
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.initialize_account(&pending_bootstrap.nickname_suggestion),
+    )
+    .await
+    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?
+    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?;
     finalize_runtime_account_bootstrap(app_core, pending_bootstrap.nickname_suggestion).await
 }
 
@@ -393,7 +411,18 @@ pub async fn finalize_runtime_account_bootstrap(
                     core.runtime().cloned()
                 };
                 if let Some(runtime) = runtime {
-                    if runtime.bootstrap_signing_keys().await.is_ok() {
+                    if timeout_runtime_call(
+                        &runtime,
+                        "finalize_runtime_account_bootstrap",
+                        "bootstrap_signing_keys",
+                        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+                        || runtime.bootstrap_signing_keys(),
+                    )
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .is_some()
+                    {
                         return Ok(());
                     }
                 }
@@ -417,10 +446,16 @@ pub async fn finalize_runtime_account_bootstrap(
             let core = app_core.read().await;
             core.runtime().cloned()
         } {
-            runtime
-                .bootstrap_signing_keys()
-                .await
-                .map_err(|e| AuraError::agent(e.to_string()))?;
+            timeout_runtime_call(
+                &runtime,
+                "finalize_runtime_account_bootstrap",
+                "bootstrap_signing_keys",
+                ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.bootstrap_signing_keys(),
+            )
+            .await
+            .map_err(|e| AuraError::agent(e.to_string()))?
+            .map_err(|e| AuraError::agent(e.to_string()))?;
         }
     }
 

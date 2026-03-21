@@ -6,7 +6,7 @@ use async_lock::RwLock;
 
 use super::error::runtime_call;
 use super::harness_determinism;
-use crate::workflows::runtime::require_runtime;
+use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::AppCore;
 use aura_core::AuraError;
 use thiserror::Error;
@@ -41,12 +41,20 @@ pub async fn current_time_ms(app_core: &Arc<RwLock<AppCore>>) -> Result<u64, Tim
     let runtime = require_runtime(app_core)
         .await
         .map_err(|_| TimeUnavailable::RuntimeUnavailable)?;
-    runtime
-        .current_time_ms()
-        .await
-        .map_err(|e| TimeUnavailable::RuntimeQuery {
-            detail: runtime_call("get current time", e).to_string(),
-        })
+    let result = timeout_runtime_call(
+        &runtime,
+        "workflow_time",
+        "current_time_ms",
+        std::time::Duration::from_secs(2),
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|error| TimeUnavailable::RuntimeQuery {
+        detail: error.to_string(),
+    })?;
+    result.map_err(|error| TimeUnavailable::RuntimeQuery {
+        detail: runtime_call("get current time", error).to_string(),
+    })
 }
 
 /// Resolve a workflow timestamp using harness parity time when enabled and a

@@ -82,11 +82,13 @@ pub type ApprovalCallback = IdCallback;
 
 // --- Settings Screen ---
 pub type UpdateNicknameSuggestionCallback = IdCallback;
-/// Callback for adding a device: (nickname, invitee_authority_id)
-pub type AddDeviceCallback = Arc<dyn Fn(String, AuthorityId) + Send + Sync>;
+/// Callback for adding a device: (nickname, invitee_authority_id, operation)
+pub(crate) type AddDeviceCallback =
+    Arc<dyn Fn(String, AuthorityId, LocalTerminalOperationOwner) + Send + Sync>;
 pub type RemoveDeviceCallback = Arc<dyn Fn(DeviceId) + Send + Sync>;
 pub type UpdateThresholdCallback = ThresholdCallback;
-pub type ImportDeviceEnrollmentCallback = IdCallback;
+pub(crate) type ImportDeviceEnrollmentCallback =
+    Arc<dyn Fn(String, LocalTerminalOperationOwner) + Send + Sync>;
 
 // --- Invitations Screen ---
 pub type InvitationCallback = IdCallback;

@@ -135,6 +135,53 @@ where
     }
 }
 
+/// Emit a diagnostic warning whenever a workflow-owned timeout fires.
+pub fn warn_workflow_timeout(operation: &'static str, stage: &'static str, timeout_ms: u64) {
+    #[cfg(feature = "instrumented")]
+    tracing::warn!(
+        operation,
+        stage,
+        timeout_ms,
+        "workflow timeout triggered; treat this as a diagnostic for a deeper design or convergence flaw"
+    );
+
+    #[cfg(not(feature = "instrumented"))]
+    let _ = (operation, stage, timeout_ms);
+}
+
+/// Execute a runtime call under an explicit workflow-owned timeout and surface a
+/// typed workflow timeout on expiry.
+pub async fn timeout_runtime_call<T, F, Fut>(
+    runtime: &Arc<dyn RuntimeBridge>,
+    operation: &'static str,
+    stage: &'static str,
+    duration: Duration,
+    call: F,
+) -> Result<T, AuraError>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = T>,
+{
+    let budget = workflow_timeout_budget(runtime, duration).await.map_err(AuraError::from)?;
+    match execute_with_runtime_timeout_budget(runtime, &budget, || async {
+        Ok::<T, AuraError>(call().await)
+    })
+    .await
+    {
+        Ok(value) => Ok(value),
+        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+            warn_workflow_timeout(operation, stage, budget.timeout_ms());
+            Err(AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
+                operation,
+                stage,
+                timeout_ms: budget.timeout_ms(),
+            }))
+        }
+        Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
+        Err(TimeoutRunError::Operation(error)) => Err(error),
+    }
+}
+
 /// Build a runtime-backed retry policy scaled for the active workflow lane.
 /// Build a runtime-backed retry policy scaled for the active workflow lane.
 pub fn workflow_retry_policy(
@@ -308,6 +355,15 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
             .await;
         }
         run_step(runtime, step_timeout_ms, runtime.trigger_sync()).await;
+        // Sync can pull fresh acceptance/envelope traffic into the local inbox, so
+        // process ceremony messages again after sync before the caller observes
+        // any readiness derived from that traffic.
+        run_step(
+            runtime,
+            step_timeout_ms,
+            runtime.process_ceremony_messages(),
+        )
+        .await;
         cooperative_yield().await;
 
         if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {

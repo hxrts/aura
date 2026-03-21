@@ -10,7 +10,7 @@ use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
-    workflow_retry_policy,
+    timeout_runtime_call, workflow_retry_policy,
 };
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
@@ -31,9 +31,11 @@ use aura_social::moderation::facts::{
 };
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 const MODERATION_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const MODERATION_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
+const MODERATION_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 async fn send_moderation_fact_with_retry(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
@@ -55,9 +57,14 @@ async fn send_moderation_fact_with_retry(
                     cooperative_yield().await;
                 }
             }
-            runtime
-                .send_chat_fact(peer, context_id, fact)
-                .await
+            timeout_runtime_call(
+                &runtime,
+                "send_moderation_fact_with_retry",
+                "send_chat_fact",
+                MODERATION_RUNTIME_TIMEOUT,
+                || runtime.send_chat_fact(peer, context_id, fact),
+            )
+            .await?
                 .map_err(|error| {
                     AuraError::from(super::error::WorkflowError::DeliveryFailed {
                         peer: peer.to_string(),
@@ -132,9 +139,15 @@ async fn resolve_channel_id(
     match parsed {
         ChannelSelector::Id(channel_id) => Ok(channel_id),
         ChannelSelector::Name(name) => {
-            let resolved = runtime
-                .resolve_authoritative_channel_ids_by_name(&name)
-                .await
+            let resolved = timeout_runtime_call(
+                &runtime,
+                "resolve_channel_id",
+                "resolve_authoritative_channel_ids_by_name",
+                MODERATION_RUNTIME_TIMEOUT,
+                || runtime.resolve_authoritative_channel_ids_by_name(&name),
+            )
+            .await
+            .map_err(|e| super::error::runtime_call("resolve moderation channel", e))?
                 .map_err(|e| super::error::runtime_call("resolve moderation channel", e))?;
             match resolved.as_slice() {
                 [] => Err(AuraError::not_found(channel.to_string())),
@@ -180,9 +193,15 @@ async fn resolve_scope(
             } else {
                 Some((channel_id, home.clone()))
             }
-        } else if let Some(context_id) = runtime
-            .resolve_amp_channel_context(channel_id)
-            .await
+        } else if let Some(context_id) = timeout_runtime_call(
+            &runtime,
+            "resolve_scope",
+            "resolve_amp_channel_context",
+            MODERATION_RUNTIME_TIMEOUT,
+            || runtime.resolve_amp_channel_context(channel_id),
+        )
+        .await
+        .map_err(|e| super::error::runtime_call("resolve moderation scope context", e))?
             .map_err(|e| super::error::runtime_call("resolve moderation scope context", e))?
         {
             best_home_for_context(&homes, context_id)
@@ -195,30 +214,42 @@ async fn resolve_scope(
 
     let (context_id, home_id, can_moderate, peers) =
         if let Some((home_id, home_state)) = home_from_channel {
-            let peers = runtime
-                .amp_list_channel_participants(
-                    home_state
-                        .context_id
-                        .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
-                    home_id,
-                )
-                .await
+            let home_context_id = home_state
+                .context_id
+                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+            let peers = timeout_runtime_call(
+                &runtime,
+                "resolve_scope",
+                "amp_list_channel_participants",
+                MODERATION_RUNTIME_TIMEOUT,
+                || runtime.amp_list_channel_participants(home_context_id, home_id),
+            )
+            .await
+            .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?
                 .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
             (
-                home_state
-                    .context_id
-                    .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
+                home_context_id,
                 home_id,
                 home_state.can_moderate(),
                 peers,
             )
+        } else if hinted_channel.is_some() {
+            return Err(AuraError::permission_denied(
+                "Moderation requires an authoritative home scope for the requested channel",
+            ));
         } else if let Some(fallback) = homes.current_home() {
             let context_id = fallback
                 .context_id
                 .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-            let peers = runtime
-                .amp_list_channel_participants(context_id, fallback.id)
-                .await
+            let peers = timeout_runtime_call(
+                &runtime,
+                "resolve_scope",
+                "amp_list_channel_participants",
+                MODERATION_RUNTIME_TIMEOUT,
+                || runtime.amp_list_channel_participants(context_id, fallback.id),
+            )
+            .await
+            .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?
                 .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
             (context_id, fallback.id, fallback.can_moderate(), peers)
         } else {
@@ -245,9 +276,15 @@ async fn current_moderation_scope(
         let context_id = current_home
             .context_id
             .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
-        let peers = runtime
-            .amp_list_channel_participants(context_id, current_home.id)
-            .await
+        let peers = timeout_runtime_call(
+            &runtime,
+            "current_moderation_scope",
+            "amp_list_channel_participants",
+            MODERATION_RUNTIME_TIMEOUT,
+            || runtime.amp_list_channel_participants(context_id, current_home.id),
+        )
+        .await
+        .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?
             .map_err(|e| super::error::runtime_call("list moderation scope participants", e))?;
         return Ok(ModerationScope {
             context_id,
@@ -268,9 +305,15 @@ async fn commit_and_fanout(
     fact: RelationalFact,
     extra_peers: &[aura_core::types::identifiers::AuthorityId],
 ) -> Result<(), AuraError> {
-    runtime
-        .commit_relational_facts(std::slice::from_ref(&fact))
-        .await
+    timeout_runtime_call(
+        runtime,
+        "commit_and_fanout",
+        "commit_relational_facts",
+        MODERATION_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("commit moderation fact", e))?
         .map_err(|e| super::error::runtime_call("commit moderation fact", e))?;
 
     let actor = runtime.authority_id();
@@ -376,13 +419,19 @@ pub async fn kick_user_resolved(
     .to_generic();
 
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
-    runtime
-        .amp_leave_channel(ChannelLeaveParams {
+    timeout_runtime_call(
+        &runtime,
+        "kick_user_resolved",
+        "amp_leave_channel",
+        MODERATION_RUNTIME_TIMEOUT,
+        || runtime.amp_leave_channel(ChannelLeaveParams {
             context: scope.context_id,
             channel: channel_id,
             participant: target_id,
-        })
-        .await
+        }),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("enforce kick membership leave", e))?
         .map_err(|e| super::error::runtime_call("enforce kick membership leave", e))?;
 
     Ok(())
@@ -490,9 +539,15 @@ pub async fn unban_user_resolved(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let now_ms = runtime
-        .current_time_ms()
-        .await
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "unban_user_resolved",
+        "current_time_ms",
+        MODERATION_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("read timestamp for unban", e))?
         .map_err(|e| super::error::runtime_call("read timestamp for unban", e))?;
     let fact = HomeUnbanFact::new_ms(
         scope.context_id,
@@ -616,9 +671,15 @@ pub async fn unmute_user_resolved(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let now_ms = runtime
-        .current_time_ms()
-        .await
+    let now_ms = timeout_runtime_call(
+        &runtime,
+        "unmute_user_resolved",
+        "current_time_ms",
+        MODERATION_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("read timestamp for unmute", e))?
         .map_err(|e| super::error::runtime_call("read timestamp for unmute", e))?;
     let fact = HomeUnmuteFact::new_ms(
         scope.context_id,
@@ -662,9 +723,15 @@ pub async fn pin_message(
         scope.home_id,
         message_id.to_string(),
         runtime.authority_id(),
-        runtime
-            .current_time_ms()
-            .await
+        timeout_runtime_call(
+            &runtime,
+            "pin_message",
+            "current_time_ms",
+            MODERATION_RUNTIME_TIMEOUT,
+            || runtime.current_time_ms(),
+        )
+        .await
+        .map_err(|e| super::error::runtime_call("read timestamp for pin", e))?
             .map_err(|e| super::error::runtime_call("read timestamp for pin", e))?,
     )
     .to_generic();
@@ -691,9 +758,15 @@ pub async fn unpin_message(
         scope.home_id,
         message_id.to_string(),
         runtime.authority_id(),
-        runtime
-            .current_time_ms()
-            .await
+        timeout_runtime_call(
+            &runtime,
+            "unpin_message",
+            "current_time_ms",
+            MODERATION_RUNTIME_TIMEOUT,
+            || runtime.current_time_ms(),
+        )
+        .await
+        .map_err(|e| super::error::runtime_call("read timestamp for unpin", e))?
             .map_err(|e| super::error::runtime_call("read timestamp for unpin", e))?,
     )
     .to_generic();
@@ -787,7 +860,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_scope_uses_named_channel_context_before_fallback_home() {
+    async fn resolve_scope_uses_named_channel_context_without_falling_back() {
         let config = AppConfig::default();
         let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
             [8u8; 32],
@@ -841,6 +914,50 @@ mod tests {
             .expect("scope should resolve");
         assert_eq!(scope.context_id, channel_context);
         assert_eq!(scope.home_id, channel_home_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_rejects_unknown_named_channel_instead_of_falling_back() {
+        let config = AppConfig::default();
+        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
+            [10u8; 32],
+        )));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
+
+        let fallback_context = ContextId::new_from_entropy([23u8; 32]);
+        let owner = AuthorityId::new_from_entropy([3u8; 32]);
+        let fallback_home_id = ChannelId::from_bytes(hash(b"moderation-fallback-only-home"));
+
+        let mut homes = HomesState::default();
+        homes.add_home(HomeState::new(
+            fallback_home_id,
+            Some("fallback".to_string()),
+            owner,
+            0,
+            fallback_context,
+        ));
+        homes.select_home(Some(fallback_home_id));
+        emit_signal(&app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME)
+            .await
+            .unwrap();
+        {
+            let mut core = app_core.write().await;
+            core.set_active_home_selection(Some(fallback_home_id));
+        }
+
+        let error = resolve_scope(&app_core, Some("missing-home"))
+            .await
+            .expect_err("unknown named scope must not fall back to the current home");
+        assert!(
+            error.to_string().contains("resolve moderation channel"),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]
