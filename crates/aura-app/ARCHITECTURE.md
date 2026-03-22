@@ -137,6 +137,9 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - authoritative semantic-fact reads must fail explicitly when the authoritative
   signal is unavailable; owner code may not collapse that state to
   `Default::default()`
+- runtime-backed hook installation must fail explicitly when the required task
+  spawner is unavailable; Layer 6 may not report hook installation success and
+  then silently skip authoritative refresh ownership
 - each converted semantic domain should have one publication helper and one
   ownership label; context/home/neighborhood workflows must not drift into
   mirrored `views_mut().set_*` plus ad hoc signal emission paths
