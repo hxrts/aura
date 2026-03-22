@@ -946,6 +946,14 @@ impl UiModel {
         }
     }
 
+    #[must_use]
+    pub fn modal_text_value_or_empty(&self) -> String {
+        match self.modal_text_value() {
+            Some(value) => value,
+            None => String::new(),
+        }
+    }
+
     pub fn set_modal_text_value(&mut self, value: impl Into<String>) {
         let value = value.into();
         let Some(active_modal) = self.active_modal.as_mut() else {
@@ -1023,13 +1031,13 @@ impl UiModel {
     }
 
     pub fn append_modal_text_char(&mut self, ch: char) {
-        let mut value = self.modal_text_value().unwrap_or_default();
+        let mut value = self.modal_text_value_or_empty();
         value.push(ch);
         self.set_modal_text_value(value);
     }
 
     pub fn pop_modal_text_char(&mut self) {
-        let mut value = self.modal_text_value().unwrap_or_default();
+        let mut value = self.modal_text_value_or_empty();
         value.pop();
         self.set_modal_text_value(value);
     }
@@ -2318,7 +2326,7 @@ fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NeighborhoodMode, ScreenId, UiModel};
+    use super::{ActiveModal, NeighborhoodMode, ScreenId, TextModalState, UiModel};
     use aura_app::ui::contract::{OperationId, OperationState, RuntimeEventKind};
     use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
 
@@ -2416,5 +2424,17 @@ mod tests {
         };
 
         assert_eq!(event.kind(), RuntimeEventKind::InvitationAccepted);
+    }
+
+    #[test]
+    fn modal_text_value_or_empty_handles_missing_and_present_modal_text() {
+        let mut model = UiModel::new("authority-local".to_string());
+        assert_eq!(model.modal_text_value_or_empty(), "");
+
+        model.active_modal = Some(ActiveModal::AcceptInvitation(TextModalState {
+            value: "invite-code".to_string(),
+        }));
+
+        assert_eq!(model.modal_text_value_or_empty(), "invite-code");
     }
 }

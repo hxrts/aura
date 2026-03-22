@@ -346,14 +346,14 @@ fn apply_modal_overlay(
             if row_idx == 0 {
                 *center = model.modal_hint.clone();
             } else if row_idx == 1 {
-                *center = model.modal_text_value().unwrap_or_default();
+                *center = model.modal_text_value_or_empty();
             }
         }
         ModalState::CreateHome => {
             if row_idx == 0 {
                 *center = "Create New Home".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_text_value().unwrap_or_default();
+                *center = model.modal_text_value_or_empty();
             }
         }
         ModalState::CreateChannel => {
@@ -382,7 +382,7 @@ fn apply_modal_overlay(
             if row_idx == 0 {
                 *center = "Set Channel Topic".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_text_value().unwrap_or_default();
+                *center = model.modal_text_value_or_empty();
             }
         }
         ModalState::ChannelInfo => {
@@ -394,7 +394,7 @@ fn apply_modal_overlay(
             if row_idx == 0 {
                 *center = "Edit Nickname".to_string();
             } else if row_idx == 1 {
-                *center = model.modal_text_value().unwrap_or_default();
+                *center = model.modal_text_value_or_empty();
             }
         }
         ModalState::RemoveContact => {
@@ -467,7 +467,7 @@ fn apply_modal_overlay(
             }
         }
         ModalState::ImportDeviceEnrollmentCode => {
-            let code = model.modal_text_value().unwrap_or_default();
+            let code = model.modal_text_value_or_empty();
             if row_idx == 0 {
                 *center = "Import Device Enrollment Code".to_string();
             } else if row_idx == 1 {
