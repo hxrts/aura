@@ -138,7 +138,7 @@ pub fn prev_ttl_preset(current_hours: u64) -> u64 {
     INVITATION_TTL_PRESETS[prev_index]
 }
 use crate::signal_defs::INVITATIONS_SIGNAL;
-use crate::ui::signals::CONTACTS_SIGNAL;
+use crate::ui::signals::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
 use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::ui_contract::{
     OperationId, OperationInstanceId, SemanticOperationKind, SemanticOperationPhase,
@@ -159,7 +159,7 @@ use crate::workflows::semantic_facts::{
     SemanticWorkflowOwner,
 };
 use crate::workflows::settings;
-use crate::workflows::signals::read_signal_or_default;
+use crate::workflows::signals::{read_signal, read_signal_or_default};
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::{Mutex, RwLock};
 use aura_core::effects::amp::ChannelBootstrapPackage;
@@ -1136,7 +1136,7 @@ pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
 pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let contacts = read_signal_or_default(app_core, &*CONTACTS_SIGNAL).await;
+    let contacts = contacts_signal_snapshot(app_core).await?;
     let contact_count = contacts.contact_count() as u32;
     let replacements = contacts
         .all_contacts()
@@ -1156,6 +1156,13 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
         ),
     )
     .await
+}
+
+#[aura_macros::authoritative_source(kind = "signal")]
+async fn contacts_signal_snapshot(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<crate::views::contacts::ContactsState, AuraError> {
+    read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await
 }
 
 #[cfg(feature = "signals")]
@@ -1886,8 +1893,11 @@ async fn accept_invitation_id_owned(
             if let Err(error) = wait_for_contact_link(app_core, &runtime, contact_id).await {
                 return fail_invitation_accept(owner, error).await;
             }
-            let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
+            let contact_count = contacts_signal_snapshot(app_core)
                 .await
+                .map_err(|error| AcceptInvitationError::AcceptFailed {
+                    detail: error.to_string(),
+                })?
                 .contact_count() as u32;
             publish_contact_accept_success_for_owner(
                 owner,
@@ -2093,9 +2103,19 @@ async fn accept_imported_invitation_owned(
             {
                 return fail_invitation_accept(owner, error).await;
             }
-            let contact_count = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
-                .await
-                .contact_count() as u32;
+            let contacts = match contacts_signal_snapshot(app_core).await {
+                Ok(contacts) => contacts,
+                Err(error) => {
+                    return fail_invitation_accept(
+                        owner,
+                        AcceptInvitationError::AcceptFailed {
+                            detail: error.to_string(),
+                        },
+                    )
+                    .await;
+                }
+            };
+            let contact_count = contacts.contact_count() as u32;
             publish_contact_accept_success_for_owner(
                 owner,
                 issue_invitation_accepted_or_materialized_proof(invitation.invitation_id.clone()),
@@ -2476,8 +2496,11 @@ async fn wait_for_contact_link(
         detail: error.to_string(),
     })?;
     execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
-        let linked = read_signal_or_default(app_core, &*CONTACTS_SIGNAL)
+        let linked = contacts_signal_snapshot(app_core)
             .await
+            .map_err(|error| AcceptInvitationError::AcceptFailed {
+                detail: error.to_string(),
+            })?
             .all_contacts()
             .any(|contact| contact.id == contact_id);
         if linked {
@@ -3230,6 +3253,48 @@ mod tests {
                 contact_count
             } if *authority_id == contact_id.to_string() && *contact_count == 1
         )));
+    }
+
+    #[tokio::test]
+    async fn refresh_authoritative_contact_link_readiness_requires_contacts_signal() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+
+        let error = refresh_authoritative_contact_link_readiness(&app_core)
+            .await
+            .expect_err("contact-link readiness should require the contacts signal");
+        assert!(
+            error.to_string().contains("Signal not found")
+                || error.to_string().to_ascii_lowercase().contains("contacts"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_contact_link_fails_explicitly_when_contacts_signal_is_unavailable() {
+        let authority = AuthorityId::new_from_entropy([70u8; 32]);
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> =
+            Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+
+        let error = wait_for_contact_link(
+            &app_core,
+            &runtime,
+            AuthorityId::new_from_entropy([71u8; 32]),
+        )
+        .await
+        .expect_err("contact-link wait should fail when the contacts signal is unavailable");
+        match error {
+            AcceptInvitationError::AcceptFailed { detail } => {
+                assert!(
+                    detail.contains("Signal not found")
+                        || detail.to_ascii_lowercase().contains("contacts"),
+                    "unexpected error detail: {detail}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[cfg(feature = "signals")]

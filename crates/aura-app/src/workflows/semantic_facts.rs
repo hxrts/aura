@@ -11,7 +11,8 @@ use aura_core::{
 };
 
 use crate::signal_defs::{
-    AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
+    AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME, HOMES_SIGNAL,
+    HOMES_SIGNAL_NAME,
 };
 use crate::ui_contract::{
     AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, OperationId, OperationInstanceId,
@@ -549,11 +550,7 @@ pub(in crate::workflows) async fn prove_home_created(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: ChannelId,
 ) -> Result<HomeCreatedProof, AuraError> {
-    let homes = crate::workflows::signals::read_signal_or_default(
-        app_core,
-        &*crate::signal_defs::HOMES_SIGNAL,
-    )
-    .await;
+    let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await?;
     if homes.has_home(&home_id) {
         Ok(issue_home_created_proof(home_id))
     } else {
@@ -1241,6 +1238,22 @@ mod tests {
             })
         );
         assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn prove_home_created_requires_registered_homes_signal() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        let home_id = ChannelId::new(aura_core::Hash32([7; 32]));
+
+        let error = prove_home_created(&app_core, home_id)
+            .await
+            .expect_err("home_created proof should require the homes signal");
+        assert!(
+            error.to_string().contains("Signal not found") || error.to_string().contains("homes"),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]
