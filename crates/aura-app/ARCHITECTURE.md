@@ -143,6 +143,10 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - converted ceremony-processing convergence in invitation/device-enrollment
   workflows must fail immediately on runtime processing errors; owner code may
   not log those errors and continue into later polling/count-based success tests
+- channel-membership readiness facts are owner-published and runtime-revalidated;
+  refresh helpers may reconcile or prune existing authoritative facts, but they
+  may not mine `observed_chat_snapshot` or renderer-local chat projection state
+  to seed new authoritative readiness truth
 - accepting a pending home/channel invitation requires the current
   runtime-authoritative pending invitation witness; owner code may not spin a
   local retry window waiting for that invitation to appear after dispatch
