@@ -250,7 +250,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
                     || runtime.trigger_discovery(),
                 )
                 .await?
-                    .map_err(|e| AuraError::agent(e.to_string()))
+                .map_err(|e| AuraError::agent(e.to_string()))
             })
             .await;
         let _ = best_effort
@@ -263,7 +263,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
                     || runtime.trigger_sync(),
                 )
                 .await?
-                    .map_err(|e| AuraError::agent(e.to_string()))
+                .map_err(|e| AuraError::agent(e.to_string()))
             })
             .await;
     }
@@ -482,7 +482,9 @@ pub async fn install_contacts_refresh_hook(
     let Some(spawner) = spawner else {
         #[cfg(feature = "instrumented")]
         tracing::warn!("contacts refresh hook not installed: no task spawner available");
-        return Ok(());
+        return Err(AuraError::from(super::error::WorkflowError::Precondition(
+            "contacts refresh hook requires a runtime task spawner",
+        )));
     };
 
     // Mark installed only after we confirmed a spawner exists.
@@ -554,7 +556,9 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
     let Some(spawner) = spawner else {
         #[cfg(feature = "instrumented")]
         tracing::warn!("chat refresh hook not installed: no task spawner available");
-        return Ok(());
+        return Err(AuraError::from(super::error::WorkflowError::Precondition(
+            "chat refresh hook requires a runtime task spawner",
+        )));
     };
 
     {
@@ -634,7 +638,9 @@ pub async fn install_authoritative_readiness_hook(
     let Some(spawner) = spawner else {
         #[cfg(feature = "instrumented")]
         tracing::warn!("authoritative readiness hook not installed: no task spawner available");
-        return Ok(());
+        return Err(AuraError::from(super::error::WorkflowError::Precondition(
+            "authoritative readiness hook requires a runtime task spawner",
+        )));
     };
 
     {
@@ -980,5 +986,45 @@ mod tests {
         // all stages rather than short-circuiting, and returns the first error.
         // The important contract: it does NOT panic and does NOT hang.
         let _result = refresh_account(&app_core).await;
+    }
+
+    #[tokio::test]
+    async fn install_contacts_refresh_hook_requires_runtime_task_spawner() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = install_contacts_refresh_hook(&app_core)
+            .await
+            .expect_err("missing task spawner should fail hook installation");
+        assert!(error
+            .to_string()
+            .contains("contacts refresh hook requires a runtime task spawner"));
+    }
+
+    #[tokio::test]
+    async fn install_chat_refresh_hook_requires_runtime_task_spawner() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = install_chat_refresh_hook(&app_core)
+            .await
+            .expect_err("missing task spawner should fail hook installation");
+        assert!(error
+            .to_string()
+            .contains("chat refresh hook requires a runtime task spawner"));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn install_authoritative_readiness_hook_requires_runtime_task_spawner() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = install_authoritative_readiness_hook(&app_core)
+            .await
+            .expect_err("missing task spawner should fail readiness hook installation");
+        assert!(error
+            .to_string()
+            .contains("authoritative readiness hook requires a runtime task spawner"));
     }
 }
