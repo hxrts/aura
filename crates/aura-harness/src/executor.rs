@@ -3375,12 +3375,50 @@ fn wait_for_semantic_state_snapshot(
 ) -> Result<UiSnapshot> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let supports_ui_snapshot = tool_api.supports_ui_snapshot(instance_id).unwrap_or(false);
-    let required_newer_than = context
+    let mut required_newer_than = context
         .pending_projection_baseline
         .get(instance_id)
         .copied();
-    let mut last_snapshot = fetch_ui_snapshot(tool_api, instance_id)?;
-    let mut snapshot_version = Some(last_snapshot.revision.semantic_seq);
+    let restart_handling = semantic_wait_restart_handling(step);
+    let mut snapshot_version = None;
+    let mut last_snapshot = loop {
+        match fetch_ui_snapshot(tool_api, instance_id) {
+            Ok(snapshot) => break snapshot,
+            Err(error)
+                if matches!(
+                    classify_browser_ui_snapshot_issue(&error),
+                    Some(BrowserUiSnapshotIssue::TransientTimeout)
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    return Err(error);
+                }
+                blocking_sleep(Duration::from_millis(100));
+            }
+            Err(error)
+                if matches!(
+                    classify_browser_ui_snapshot_issue(&error),
+                    Some(BrowserUiSnapshotIssue::BrowserRestarted)
+                ) =>
+            {
+                if restart_handling == SemanticWaitRestartHandling::FailClosed {
+                    return Err(error);
+                }
+                reset_semantic_wait_after_restart(
+                    context,
+                    instance_id,
+                    &mut required_newer_than,
+                    &mut snapshot_version,
+                );
+                if Instant::now() >= deadline {
+                    return Err(error);
+                }
+                blocking_sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    snapshot_version = Some(last_snapshot.revision.semantic_seq);
     match classify_projection_freshness(required_newer_than, &last_snapshot) {
         ProjectionFreshness::Satisfied => {
             if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
@@ -3389,13 +3427,24 @@ fn wait_for_semantic_state_snapshot(
             }
         }
         ProjectionFreshness::Restarted { baseline, observed } => {
-            bail!(
-                "step {} semantic wait observed projection restart on instance {} before freshness was satisfied (baseline={:?} observed={:?})",
-                step.id,
+            if restart_handling == SemanticWaitRestartHandling::FailClosed {
+                bail!(
+                    "step {} semantic wait observed projection restart on instance {} before freshness was satisfied (baseline={:?} observed={:?})",
+                    step.id,
+                    instance_id,
+                    baseline,
+                    observed
+                );
+            }
+            reset_semantic_wait_after_restart(
+                context,
                 instance_id,
-                baseline,
-                observed
+                &mut required_newer_than,
+                &mut snapshot_version,
             );
+            if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
+                return Ok(last_snapshot);
+            }
         }
         ProjectionFreshness::Pending => {}
     }
@@ -3430,6 +3479,20 @@ fn wait_for_semantic_state_snapshot(
                             | Some(BrowserUiSnapshotIssue::BrowserRestarted)
                     ) =>
                 {
+                    if matches!(
+                        classify_browser_ui_snapshot_issue(&error),
+                        Some(BrowserUiSnapshotIssue::BrowserRestarted)
+                    ) {
+                        if restart_handling == SemanticWaitRestartHandling::FailClosed {
+                            return Err(error);
+                        }
+                        reset_semantic_wait_after_restart(
+                            context,
+                            instance_id,
+                            &mut required_newer_than,
+                            &mut snapshot_version,
+                        );
+                    }
                     match fetch_ui_snapshot(tool_api, instance_id) {
                         Ok(snapshot) => snapshot,
                         Err(fetch_error)
@@ -3462,13 +3525,24 @@ fn wait_for_semantic_state_snapshot(
                 }
             }
             ProjectionFreshness::Restarted { baseline, observed } => {
-                bail!(
-                    "step {} semantic wait observed projection restart on instance {} before freshness was satisfied (baseline={:?} observed={:?})",
-                    step.id,
+                if restart_handling == SemanticWaitRestartHandling::FailClosed {
+                    bail!(
+                        "step {} semantic wait observed projection restart on instance {} before freshness was satisfied (baseline={:?} observed={:?})",
+                        step.id,
+                        instance_id,
+                        baseline,
+                        observed
+                    );
+                }
+                reset_semantic_wait_after_restart(
+                    context,
                     instance_id,
-                    baseline,
-                    observed
+                    &mut required_newer_than,
+                    &mut snapshot_version,
                 );
+                if semantic_wait_matches_for_instance(step, &snapshot, context, instance_id) {
+                    return Ok(snapshot);
+                }
             }
             ProjectionFreshness::Pending => {}
         }
@@ -3497,6 +3571,37 @@ enum ProjectionFreshness {
         baseline: ProjectionRevision,
         observed: ProjectionRevision,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticWaitRestartHandling {
+    FailClosed,
+    ResumeAfterRestart,
+}
+
+fn semantic_wait_restart_handling(step: &CompatibilityStep) -> SemanticWaitRestartHandling {
+    if step.runtime_event_kind.is_some()
+        || (step.operation_id.is_some() && step.operation_state.is_some())
+        || (step.contains.is_some()
+            && step.runtime_event_kind.is_none()
+            && !matches!(step.action, CompatibilityAction::MessageContains))
+        || step.level.is_some()
+    {
+        SemanticWaitRestartHandling::FailClosed
+    } else {
+        SemanticWaitRestartHandling::ResumeAfterRestart
+    }
+}
+
+fn reset_semantic_wait_after_restart(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    required_newer_than: &mut Option<ProjectionRevision>,
+    snapshot_version: &mut Option<u64>,
+) {
+    context.pending_projection_baseline.remove(instance_id);
+    *required_newer_than = None;
+    *snapshot_version = None;
 }
 
 fn classify_projection_freshness(
@@ -5368,6 +5473,72 @@ mod tests {
             classify_projection_freshness(Some(baseline), &snapshot),
             ProjectionFreshness::Satisfied
         ));
+    }
+
+    #[test]
+    fn semantic_wait_restart_handling_resumes_projection_based_waits() {
+        let step = crate::config::CompatibilityStep {
+            id: "screen-ready".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            screen_id: Some(ScreenId::Neighborhood),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            semantic_wait_restart_handling(&step),
+            SemanticWaitRestartHandling::ResumeAfterRestart
+        );
+    }
+
+    #[test]
+    fn semantic_wait_restart_handling_fails_closed_for_runtime_events_and_operation_waits() {
+        let runtime_event_step = crate::config::CompatibilityStep {
+            id: "wait-contact-link".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            runtime_event_kind: Some(RuntimeEventKind::ContactLinkReady),
+            ..Default::default()
+        };
+        let operation_step = crate::config::CompatibilityStep {
+            id: "wait-op".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            operation_id: Some(OperationId::create_channel()),
+            operation_state: Some(OperationState::Succeeded),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            semantic_wait_restart_handling(&runtime_event_step),
+            SemanticWaitRestartHandling::FailClosed
+        );
+        assert_eq!(
+            semantic_wait_restart_handling(&operation_step),
+            SemanticWaitRestartHandling::FailClosed
+        );
+    }
+
+    #[test]
+    fn semantic_wait_restart_reset_clears_stale_projection_and_event_versions() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let mut context = ScenarioContext::default();
+        context
+            .pending_projection_baseline
+            .insert("alice".to_string(), baseline);
+        let mut required_newer_than = Some(baseline);
+        let mut snapshot_version = Some(19);
+
+        reset_semantic_wait_after_restart(
+            &mut context,
+            "alice",
+            &mut required_newer_than,
+            &mut snapshot_version,
+        );
+
+        assert!(required_newer_than.is_none());
+        assert!(snapshot_version.is_none());
+        assert!(!context.pending_projection_baseline.contains_key("alice"));
     }
 
     #[test]
