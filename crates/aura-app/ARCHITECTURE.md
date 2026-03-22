@@ -148,6 +148,9 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership
+- app-owned system refresh hooks may coalesce repeated events, but they must
+  not silently drop refresh/publication failures inside a pass; hook-owned
+  diagnostics must retain the first failure explicitly
 - converted ceremony-processing convergence in invitation/device-enrollment
   workflows must fail immediately on runtime processing errors; owner code may
   not log those errors and continue into later polling/count-based success tests

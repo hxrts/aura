@@ -1677,7 +1677,6 @@ fn consistency_for_resolved(command: &ResolvedCommand) -> ConsistencyRequirement
         .unwrap_or(ConsistencyRequirement::Accepted)
 }
 
-#[cfg(feature = "signals")]
 const fn consistency_witness_label(value: ConsistencyWitness) -> &'static str {
     match value {
         ConsistencyWitness::Accepted => "accepted",
