@@ -622,12 +622,14 @@ async fn test_retry_message() {
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
         let message_count = chat_state.message_count();
         println!("  Messages in current view: {message_count}");
-        for msg in chat_state.all_messages() {
-            if msg.content.contains("Retried") {
-                println!(
-                    "    Found retried message: {content}",
-                    content = msg.content
-                );
+        for channel in chat_state.all_channels() {
+            for msg in chat_state.messages_for_channel(&channel.id) {
+                if msg.content.contains("Retried") {
+                    println!(
+                        "    Found retried message: {content}",
+                        content = msg.content
+                    );
+                }
             }
         }
     }

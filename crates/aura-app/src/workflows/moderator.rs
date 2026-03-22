@@ -302,7 +302,10 @@ pub async fn grant_moderator_resolved(
     // Observed UI mirror.
     let mut homes = homes_signal_snapshot(app_core).await?;
     if !homes.has_home(&scope.home_id) {
-        homes.add_home_with_auto_select(scope.home_state.clone());
+        let result = homes.add_home(scope.home_state.clone());
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
     }
     let home_state = homes
         .home_mut(&scope.home_id)
@@ -424,7 +427,10 @@ pub async fn revoke_moderator_resolved(
 
     let mut homes = homes_signal_snapshot(app_core).await?;
     if !homes.has_home(&scope.home_id) {
-        homes.add_home_with_auto_select(scope.home_state.clone());
+        let result = homes.add_home(scope.home_state.clone());
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
     }
     let home_state = homes
         .home_mut(&scope.home_id)

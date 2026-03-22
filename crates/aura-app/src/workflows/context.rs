@@ -773,13 +773,16 @@ mod tests {
         {
             let mut core = app_core.write().await;
             let mut homes = core.views().get_homes();
-            homes.add_home_with_auto_select(HomeState::new(
+            let result = homes.add_home(HomeState::new(
                 selected_home,
                 Some("Selected".to_string()),
                 authority,
                 1,
                 selected_ctx,
             ));
+            if result.was_first {
+                homes.select_home(Some(result.home_id));
+            }
             core.views_mut().set_homes(homes);
         }
 
@@ -894,13 +897,16 @@ mod tests {
         {
             let mut core = app_core.write().await;
             let mut homes = core.views().get_homes();
-            homes.add_home_with_auto_select(HomeState::new(
+            let result = homes.add_home(HomeState::new(
                 home_id,
                 Some("Chat Home".to_string()),
                 authority,
                 1,
                 home_ctx,
             ));
+            if result.was_first {
+                homes.select_home(Some(result.home_id));
+            }
             core.views_mut().set_homes(homes);
         }
 
@@ -938,13 +944,16 @@ mod tests {
         {
             let mut core = app_core.write().await;
             let mut homes = core.views().get_homes();
-            homes.add_home_with_auto_select(HomeState::new(
+            let result = homes.add_home(HomeState::new(
                 home_a,
                 Some("Alpha".to_string()),
                 authority,
                 1,
                 ctx_a,
             ));
+            if result.was_first {
+                homes.select_home(Some(result.home_id));
+            }
             homes.add_home(HomeState::new(
                 home_b,
                 Some("Beta".to_string()),

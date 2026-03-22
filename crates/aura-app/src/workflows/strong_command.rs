@@ -2633,13 +2633,16 @@ mod tests {
         let creator = AuthorityId::new_from_entropy([54u8; 32]);
 
         let mut homes = HomesState::new();
-        homes.add_home_with_auto_select(crate::views::home::HomeState::new(
+        let result = homes.add_home(crate::views::home::HomeState::new(
             current_home_id,
             Some("current-home".to_string()),
             creator,
             0,
             current_context_id,
         ));
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
 
         let snapshot = StateSnapshot {
             homes,

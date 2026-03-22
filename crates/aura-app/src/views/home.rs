@@ -579,40 +579,12 @@ impl HomesState {
     pub fn select_home(&mut self, id: Option<ChannelId>) {
         self.current_home_id = id;
     }
-
-    /// Select the first available home (helper for common fallback pattern).
-    pub fn select_first_available(&mut self) {
-        self.current_home_id = self.first_home_id();
-    }
-
-    /// Helper: Add a home and auto-select if it's the first one.
-    ///
-    /// This is a convenience method that preserves the previous behavior
-    /// for callers that want auto-selection.
-    pub fn add_home_with_auto_select(&mut self, home_state: HomeState) {
-        let result = self.add_home(home_state);
-        if result.was_first {
-            self.select_home(Some(result.home_id));
-        }
-    }
-
-    /// Helper: Remove a home and auto-select fallback if needed.
-    ///
-    /// This is a convenience method that preserves the previous behavior
-    /// for callers that want auto-reassignment.
-    pub fn remove_home_with_fallback(&mut self, id: &ChannelId) -> Option<HomeState> {
-        let result = self.remove_home(id);
-        if result.was_selected {
-            self.select_first_available();
-        }
-        result.removed
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{HomeMember, HomeRole};
-    use aura_core::types::identifiers::AuthorityId;
+    use super::{HomeMember, HomeRole, HomeState, HomesState};
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use proptest::prelude::*;
 
     fn role_strategy() -> impl Strategy<Value = HomeRole> {
@@ -643,6 +615,52 @@ mod tests {
                 })
                 .collect()
         })
+    }
+
+    #[test]
+    fn add_home_does_not_implicitly_select() {
+        let mut homes = HomesState::new();
+        let result = homes.add_home(HomeState::new(
+            ChannelId::from_bytes([1u8; 32]),
+            Some("Home".to_string()),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            0,
+            ContextId::new_from_entropy([3u8; 32]),
+        ));
+
+        assert!(result.was_first);
+        assert_eq!(homes.current_home_id(), None);
+    }
+
+    #[test]
+    fn remove_home_clears_selection_without_fallback() {
+        let first_home_id = ChannelId::from_bytes([4u8; 32]);
+        let second_home_id = ChannelId::from_bytes([5u8; 32]);
+        let authority = AuthorityId::new_from_entropy([6u8; 32]);
+        let context = ContextId::new_from_entropy([7u8; 32]);
+
+        let mut homes = HomesState::new();
+        homes.add_home(HomeState::new(
+            first_home_id,
+            Some("First".to_string()),
+            authority,
+            0,
+            context,
+        ));
+        homes.add_home(HomeState::new(
+            second_home_id,
+            Some("Second".to_string()),
+            authority,
+            0,
+            context,
+        ));
+        homes.select_home(Some(first_home_id));
+
+        let result = homes.remove_home(&first_home_id);
+
+        assert!(result.was_selected);
+        assert_eq!(homes.current_home_id(), None);
+        assert!(homes.has_home(&second_home_id));
     }
 
     proptest! {

@@ -2,8 +2,6 @@
 //!
 //! This module contains the aggregate view state that holds all view states.
 
-#[cfg(feature = "signals")]
-use super::HomeState;
 use super::{
     ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
@@ -188,16 +186,6 @@ cfg_if! {
             /// the homes signal for UI updates.
             pub fn select_home(&self, home_id: Option<ChannelId>) {
                 self.homes.lock_mut().select_home(home_id);
-            }
-
-            /// Add a home (with auto-select if first)
-            pub fn add_home(&self, home: HomeState) {
-                self.homes.lock_mut().add_home_with_auto_select(home);
-            }
-
-            /// Remove a home from the homes state (with auto-select fallback)
-            pub fn remove_home(&self, home_id: &ChannelId) -> Option<HomeState> {
-                self.homes.lock_mut().remove_home_with_fallback(home_id)
             }
         }
     }
