@@ -2,6 +2,7 @@
 //!
 //! This module owns runtime-backed writes for per-home capability configuration.
 
+use crate::workflows::observed_projection::update_homes_projection_observed;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
     timeout_runtime_call, workflow_retry_policy,
@@ -199,18 +200,16 @@ pub async fn configure_home_capabilities_resolved(
             .map_err(|e| map_runtime_error("Send capability config fact", e))?;
     }
 
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
-    if let Some(home) = homes.home_mut(&scope.home_id) {
-        home.set_access_level_capabilities(AccessLevelCapabilityConfig {
-            full: fact_full_caps(&fact),
-            partial: fact_partial_caps(&fact),
-            limited: fact_limited_caps(&fact),
-        });
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes);
-    }
-    drop(core);
+    update_homes_projection_observed(app_core, |homes| {
+        if let Some(home) = homes.home_mut(&scope.home_id) {
+            home.set_access_level_capabilities(AccessLevelCapabilityConfig {
+                full: fact_full_caps(&fact),
+                partial: fact_partial_caps(&fact),
+                limited: fact_limited_caps(&fact),
+            });
+        }
+    })
+    .await?;
 
     let _ = crate::workflows::system::refresh_account(app_core).await;
     Ok(())
@@ -330,14 +329,12 @@ pub async fn set_access_override_resolved(
             .map_err(|e| map_runtime_error("Send access override fact", e))?;
     }
 
-    let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes();
-    if let Some(home) = homes.home_mut(&scope.home_id) {
-        home.set_access_override(authority_id, access_level);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes);
-    }
-    drop(core);
+    update_homes_projection_observed(app_core, |homes| {
+        if let Some(home) = homes.home_mut(&scope.home_id) {
+            home.set_access_override(authority_id, access_level);
+        }
+    })
+    .await?;
 
     let _ = crate::workflows::system::refresh_account(app_core).await;
     Ok(())

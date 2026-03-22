@@ -78,6 +78,7 @@ pub mod context;
 pub mod demo_config;
 pub mod error;
 pub mod harness_determinism;
+pub(crate) mod home_scope;
 pub mod ids;
 pub mod invitation;
 pub(crate) mod journal;
