@@ -335,8 +335,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
             .await?;
 
-        // Store threshold metadata for epoch 0 (bootstrap case: 1-of-1 single signer)
-        self.store_threshold_metadata(
+        // Store threshold config metadata for epoch 0 (bootstrap case: 1-of-1 single signer)
+        self.store_threshold_config_metadata(
             authority,
             0,   // epoch 0
             1,   // threshold
@@ -438,12 +438,12 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Get current epoch for this authority
         let current_epoch = self.get_current_epoch(authority).await;
 
-        // Retrieve stored threshold metadata for this epoch
-        self.get_threshold_metadata(authority, current_epoch)
+        // Retrieve stored threshold config metadata for this epoch
+        self.get_threshold_config_metadata(authority, current_epoch)
             .await
             .map(|metadata| aura_core::threshold::ThresholdConfig {
-                threshold: metadata.threshold,
-                total_participants: metadata.total_participants,
+                threshold: metadata.threshold_k,
+                total_participants: metadata.total_n,
             })
     }
 
@@ -454,13 +454,13 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Get current epoch for this authority
         let current_epoch = self.get_current_epoch(authority).await;
 
-        // Retrieve stored threshold metadata for this epoch
-        self.get_threshold_metadata(authority, current_epoch)
+        // Retrieve stored threshold config metadata for this epoch
+        self.get_threshold_config_metadata(authority, current_epoch)
             .await
             .map(|metadata| aura_core::threshold::ThresholdState {
-                epoch: metadata.epoch,
-                threshold: metadata.threshold,
-                total_participants: metadata.total_participants,
+                epoch: current_epoch,
+                threshold: metadata.threshold_k,
+                total_participants: metadata.total_n,
                 participants: metadata.resolved_participants(),
                 agreement_mode: metadata.agreement_mode,
             })
@@ -572,8 +572,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .secure_store(&pub_location, &key_result.public_key_package, &caps)
             .await?;
 
-        // Store threshold metadata for the new epoch
-        self.store_threshold_metadata(
+        // Store threshold config metadata for the new epoch
+        self.store_threshold_config_metadata(
             authority,
             new_epoch,
             new_threshold,

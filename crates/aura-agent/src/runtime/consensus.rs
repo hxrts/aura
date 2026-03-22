@@ -207,7 +207,7 @@ mod tests {
     use aura_core::effects::ThresholdSigningEffects;
 
     #[tokio::test]
-    async fn load_threshold_state_requires_threshold_config_metadata() {
+    async fn load_threshold_state_uses_threshold_config_metadata_written_by_effects() {
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::simulation_for_test(&config)
             .expect("simulation effect system should build");
@@ -223,10 +223,16 @@ mod tests {
             .await
             .expect("effect-layer commit should update epoch state");
 
-        let error = load_threshold_state_from_storage(&effects, authority)
+        let state = load_threshold_state_from_storage(&effects, authority)
             .await
-            .expect_err("consensus must require threshold_config metadata");
+            .expect("consensus should read the shared threshold_config record");
 
-        assert!(error.to_string().contains("threshold configuration"));
+        assert_eq!(state.epoch, new_epoch);
+        assert_eq!(state.threshold, 1);
+        assert_eq!(state.total_participants, 1);
+        assert_eq!(
+            state.agreement_mode,
+            aura_core::threshold::AgreementMode::CoordinatorSoftSafe
+        );
     }
 }

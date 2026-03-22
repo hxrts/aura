@@ -27,6 +27,7 @@ use async_trait::async_trait;
 use aura_app::ReactiveHandler;
 use aura_authorization::BiscuitAuthorizationBridge;
 use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
+use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::*;
 use aura_core::hash::hash as aura_hash;
@@ -1598,6 +1599,7 @@ impl AuraEffectSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::ThresholdSigningEffects;
     use aura_core::types::identifiers::ContextId;
     use aura_guards::GuardContextProvider;
     use aura_protocol::amp::AmpJournalEffects;
@@ -1717,6 +1719,35 @@ mod tests {
         let digest = effect_system.get_oplog_digest().await.unwrap();
         assert_eq!(digest.cids.len(), 0, "empty tree has no operations");
     }
+
+    #[tokio::test]
+    async fn test_threshold_queries_use_threshold_config_metadata() {
+        let config = AgentConfig::default();
+        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let authority = AuthorityId::new_from_entropy([33u8; 32]);
+
+        effect_system
+            .bootstrap_authority(&authority)
+            .await
+            .expect("bootstrap should persist threshold config metadata");
+
+        let threshold_config = effect_system
+            .threshold_config(&authority)
+            .await
+            .expect("threshold config should be readable");
+        assert_eq!(threshold_config.threshold, 1);
+        assert_eq!(threshold_config.total_participants, 1);
+
+        let threshold_state = effect_system
+            .threshold_state(&authority)
+            .await
+            .expect("threshold state should be readable");
+        assert_eq!(threshold_state.epoch, 0);
+        assert_eq!(
+            threshold_state.agreement_mode,
+            aura_core::threshold::AgreementMode::Provisional
+        );
+    }
 }
 
 // Note: RelationshipFormationEffects is a composite trait that is automatically implemented
@@ -1798,9 +1829,9 @@ impl AuraEffectSystem {
             .secure_delete(&pubkey_location, &delete_caps)
             .await;
 
-        // Delete threshold metadata for this epoch
+        // Delete threshold config metadata for this epoch
         let metadata_location = SecureStorageLocation::with_sub_key(
-            "threshold_metadata",
+            "threshold_config",
             format!("{}", authority),
             format!("{}", epoch),
         );
@@ -1819,7 +1850,7 @@ impl AuraEffectSystem {
     /// This stores the threshold, total participants, and guardian IDs alongside
     /// the actual cryptographic keys. This metadata is used by the recovery system
     /// to understand the current guardian configuration.
-    async fn store_threshold_metadata(
+    async fn store_threshold_config_metadata(
         &self,
         authority: &AuthorityId,
         epoch: u64,
@@ -1828,16 +1859,20 @@ impl AuraEffectSystem {
         participants: &[aura_core::threshold::ParticipantIdentity],
         agreement_mode: aura_core::threshold::AgreementMode,
     ) -> Result<(), AuraError> {
-        let metadata = ThresholdMetadata {
-            epoch,
-            threshold,
-            total_participants,
+        let metadata = ThresholdConfigMetadata {
+            threshold_k: threshold,
+            total_n: total_participants,
             participants: participants.to_vec(),
+            mode: if threshold >= 2 {
+                SigningMode::Threshold
+            } else {
+                SigningMode::SingleSigner
+            },
             agreement_mode,
         };
 
         let location = SecureStorageLocation::with_sub_key(
-            "threshold_metadata",
+            "threshold_config",
             format!("{}", authority),
             format!("{}", epoch),
         );
@@ -1847,14 +1882,14 @@ impl AuraEffectSystem {
         ];
 
         let data = serde_json::to_vec(&metadata).map_err(|e| {
-            AuraError::storage(format!("Failed to serialize threshold metadata: {}", e))
+            AuraError::storage(format!("Failed to serialize threshold config: {}", e))
         })?;
         self.crypto
             .secure_storage()
             .secure_store(&location, &data, &caps)
             .await
             .map_err(|e| {
-                AuraError::storage(format!("Failed to store threshold metadata: {}", e))
+                AuraError::storage(format!("Failed to store threshold config: {}", e))
             })?;
 
         tracing::debug!(
@@ -1863,7 +1898,7 @@ impl AuraEffectSystem {
             threshold,
             total_participants,
             num_participants = participants.len(),
-            "Stored threshold metadata"
+            "Stored threshold config metadata"
         );
         Ok(())
     }
@@ -1871,13 +1906,13 @@ impl AuraEffectSystem {
     /// Retrieve threshold configuration metadata for an epoch
     ///
     /// Returns None if no metadata exists for the epoch.
-    async fn get_threshold_metadata(
+    async fn get_threshold_config_metadata(
         &self,
         authority: &AuthorityId,
         epoch: u64,
-    ) -> Option<ThresholdMetadata> {
+    ) -> Option<ThresholdConfigMetadata> {
         let location = SecureStorageLocation::with_sub_key(
-            "threshold_metadata",
+            "threshold_config",
             format!("{}", authority),
             format!("{}", epoch),
         );
@@ -1896,7 +1931,7 @@ impl AuraEffectSystem {
                         ?authority,
                         epoch,
                         error = %e,
-                        "Failed to deserialize threshold metadata"
+                        "Failed to deserialize threshold config"
                     );
                     None
                 }
@@ -1911,22 +1946,22 @@ impl AuraEffectSystem {
 /// This structure captures the full threshold configuration for an epoch,
 /// including the guardian IDs which are needed for recovery operations.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct ThresholdMetadata {
-    /// The epoch this configuration applies to
-    epoch: u64,
+struct ThresholdConfigMetadata {
     /// Minimum signers required (k in k-of-n)
-    threshold: u16,
+    threshold_k: u16,
     /// Total number of participants (n in k-of-n)
-    total_participants: u16,
+    total_n: u16,
     /// Participants (in protocol participant order)
     #[serde(default)]
     participants: Vec<aura_core::threshold::ParticipantIdentity>,
+    /// Signing mode for the stored epoch.
+    mode: SigningMode,
     /// Agreement mode (A1/A2/A3) for the stored epoch
     #[serde(default)]
     agreement_mode: aura_core::threshold::AgreementMode,
 }
 
-impl ThresholdMetadata {
+impl ThresholdConfigMetadata {
     fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
         self.participants.clone()
     }

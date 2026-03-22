@@ -1486,7 +1486,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn commit_key_rotation_requires_threshold_config_metadata() {
+    async fn commit_key_rotation_uses_threshold_config_metadata_written_by_effects() {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
         let service = ThresholdSigningService::new(effects.clone());
@@ -1496,13 +1496,19 @@ mod tests {
         let (new_epoch, _, _) = effects
             .rotate_keys(&authority, 1, 1, &participants)
             .await
-            .expect("effect-layer rotate_keys should still write its own legacy metadata");
+            .expect("effect-layer rotate_keys should write shared threshold config metadata");
 
-        let error = service
+        service
             .commit_key_rotation(&authority, new_epoch)
             .await
-            .expect_err("commit must require runtime-owned threshold_config metadata");
+            .expect("commit should accept the shared threshold_config record");
 
-        assert!(error.to_string().contains("threshold config"));
+        let state = service
+            .threshold_state(&authority)
+            .await
+            .expect("committed threshold state should be available");
+        assert_eq!(state.epoch, new_epoch);
+        assert_eq!(state.threshold, 1);
+        assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
     }
 }
