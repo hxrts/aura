@@ -380,7 +380,9 @@ async fn refresh_chat_projection_and_readiness(
     #[cfg(feature = "signals")]
     {
         let _ = best_effort
-            .capture(super::messaging::refresh_authoritative_channel_membership_readiness(app_core))
+            .capture(super::messaging::refresh_authoritative_channel_membership_readiness(
+                app_core,
+            ))
             .await;
         let _ = best_effort
             .capture(
@@ -404,10 +406,14 @@ async fn refresh_authoritative_channel_and_recipient_readiness_hook(
 ) -> Result<(), AuraError> {
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
-        .capture(super::messaging::refresh_authoritative_channel_membership_readiness(app_core))
+        .capture(super::messaging::refresh_authoritative_channel_membership_readiness(
+            app_core,
+        ))
         .await;
     let _ = best_effort
-        .capture(super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core))
+        .capture(super::messaging::refresh_authoritative_recipient_resolution_readiness(
+            app_core,
+        ))
         .await;
     best_effort.finish()
 }
@@ -719,9 +725,9 @@ pub async fn install_authoritative_readiness_hook(
         Arc::clone(app_core),
         "authoritative_contact_link_readiness_hook",
         Arc::new(|app_core| {
-            Box::pin(
-                async move { refresh_authoritative_contact_link_readiness_hook(&app_core).await },
-            )
+            Box::pin(async move {
+                refresh_authoritative_contact_link_readiness_hook(&app_core).await
+            })
         }),
     );
     spawn_coalesced_signal_refresh(
