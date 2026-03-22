@@ -703,6 +703,7 @@ artifacts/harness/<run>/network_backend_preflight.json
 
 Patchbay is the authoritative NAT-realism backend for holepunch validation.
 Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+`patchbay-vm` relies on the explicit harness work/artifact directories and `QEMU_VM_WORK_DIR`; the removed `.qemu-vm` redirect path is no longer part of the supported workflow.
 
 Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
 

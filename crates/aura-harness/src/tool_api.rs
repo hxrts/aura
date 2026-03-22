@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
-use crate::backend::{SemanticCommandRequest, SemanticCommandResponse};
+use crate::backend::{SemanticCommandRequest, SemanticCommandResponse, UiSnapshotEvent};
 use crate::config::{RunConfig, RuntimeSubstrate, ScreenSource};
-use crate::coordinator::HarnessCoordinator;
+use crate::coordinator::{DiagnosticObservationWait, HarnessCoordinator};
 use crate::introspection::{
     extract_channels, extract_contacts, extract_current_selection, extract_toast, ChannelSnapshot,
     ContactSnapshot, SelectionSnapshot, ToastSnapshot,
@@ -408,10 +408,9 @@ impl ToolApi {
         instance_id: &str,
         timeout: Duration,
         after_version: Option<u64>,
-    ) -> anyhow::Result<Option<(UiSnapshot, u64)>> {
+    ) -> anyhow::Result<Option<UiSnapshotEvent>> {
         self.coordinator
             .wait_for_ui_snapshot_event(instance_id, timeout, after_version)
-            .map(|event| event.map(|event| (event.snapshot, event.version)))
     }
 
     pub fn apply_fault_delay(&mut self, actor: &str, delay_ms: u64) -> anyhow::Result<()> {
@@ -554,25 +553,26 @@ impl ToolApi {
                 timeout_ms,
                 screen_source,
                 selector,
-            } => {
-                let result = if let Some(selector) = selector.as_deref() {
-                    self.coordinator
-                        .wait_for_diagnostic_target(&instance_id, selector, timeout_ms)
-                } else {
-                    self.coordinator.wait_for_diagnostic_screen_with_source(
-                        &instance_id,
-                        &pattern,
-                        timeout_ms,
-                        screen_source,
-                    )
-                };
-                result.map(|screen| {
+            } => self
+                .coordinator
+                .wait_for_diagnostic_observation(
+                    &instance_id,
+                    if let Some(selector) = selector.as_deref() {
+                        DiagnosticObservationWait::Target { selector }
+                    } else {
+                        DiagnosticObservationWait::Pattern {
+                            pattern: &pattern,
+                            source: screen_source,
+                        }
+                    },
+                    timeout_ms,
+                )
+                .map(|screen| {
                     ToolPayload::DiagnosticScreenCapture(DiagnosticScreenCapture::matched(
                         screen,
                         screen_source,
                     ))
-                })
-            }
+                }),
             ToolRequest::TailLog { instance_id, lines } => self
                 .coordinator
                 .tail_log(
@@ -727,8 +727,9 @@ mod tests {
     fn tool_api_uses_explicit_diagnostic_observation_methods() {
         let source = include_str!("tool_api.rs");
         assert!(source.contains(".diagnostic_screen_with_source("));
-        assert!(source.contains(".wait_for_diagnostic_screen_with_source("));
-        assert!(source.contains(".wait_for_diagnostic_target("));
+        assert!(source.contains(".wait_for_diagnostic_observation("));
+        assert!(source.contains("DiagnosticObservationWait::Target"));
+        assert!(source.contains("DiagnosticObservationWait::Pattern"));
         assert!(source.contains(".ui_snapshot(&instance_id)"));
         assert!(source.contains(".wait_for_ui_snapshot_event(instance_id, timeout, after_version)"));
     }
