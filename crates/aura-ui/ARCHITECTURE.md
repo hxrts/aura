@@ -12,6 +12,7 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 | Deterministic keyboard routing for harness-driven scenarios | Desktop/mobile shell integration code |
 | Canonical snapshot text rendering for harness introspection | Runtime/effect handler implementation ownership |
 | Platform-neutral harness bridge primitives and clipboard adapter boundary | Parity-critical semantic lifecycle authorship |
+| Shared frontend-facing operation labels reused by Layer 7 shells | Shell-specific runtime/bootstrap orchestration ownership |
 | Shared frontend task-owner implementation reused by Layer 7 shells | Browser shell bridge ownership and publication policy |
 | Shared semantic UI contract materialization from `aura-app` | Callback-owned readiness synthesis |
 
@@ -36,6 +37,7 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 - Boundary-time name input may identify a channel for local keyboard/demo helpers, but converted shared UI submission paths must switch to the canonical channel id returned by `aura-app` before storing selection or publishing runtime facts.
 - Shared screen and modal structure remains stable enough for semantic harness execution and render-convergence checks.
 - Parity-critical IDs, focus semantics, and action shapes are consumed from `aura-app::ui_contract`; they are not locally reinvented here.
+- Layer 7 shells may reuse `aura-ui`'s shared frontend operation-label taxonomy for user-facing error reporting instead of maintaining parallel label enums.
 - Parity-relevant ceremony progress in shared modals must consume upstream-owned lifecycle helpers from `aura-app::ui::workflows`; `aura-ui` must not keep bespoke poll/sleep loops for those paths.
 - Device-enrollment import and accept flows must rely on the upstream
   invitation workflow's bounded convergence contract rather than adding a

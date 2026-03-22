@@ -54,6 +54,7 @@ use aura_app::ui_contract::{
     OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus,
 };
 use aura_core::types::Epoch;
+pub use aura_ui::FrontendUiOperation as UiOperation;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
@@ -190,37 +191,6 @@ impl HarnessCommandReceiptHandle {
 pub struct HarnessCommandSubmission {
     pub command: HarnessUiCommand,
     pub receipt: HarnessCommandReceiptHandle,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UiOperation {
-    CreateAccount,
-    UpdateThreshold,
-    ImportDeviceEnrollmentCode,
-    StartGuardianCeremony,
-    StartMultifactorCeremony,
-    CancelGuardianCeremony,
-    CancelKeyRotationCeremony,
-}
-
-impl UiOperation {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::CreateAccount => "Create account",
-            Self::UpdateThreshold => "Update threshold",
-            Self::ImportDeviceEnrollmentCode => "Import device enrollment code",
-            Self::StartGuardianCeremony => "Start guardian ceremony",
-            Self::StartMultifactorCeremony => "Start multifactor ceremony",
-            Self::CancelGuardianCeremony => "Cancel guardian ceremony",
-            Self::CancelKeyRotationCeremony => "Cancel key rotation ceremony",
-        }
-    }
-
-    #[must_use]
-    pub const fn routes_to_account_setup_modal(self) -> bool {
-        matches!(self, Self::CreateAccount)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
