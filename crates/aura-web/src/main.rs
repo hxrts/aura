@@ -39,6 +39,7 @@ cfg_if! {
         use dioxus::prelude::*;
         use error::{log_web_error, WebUiError, WebUiOperation};
         use std::cell::Cell;
+        use std::future::Future;
         use std::rc::Rc;
         use std::sync::Arc;
         use task_owner::shared_web_task_owner;
@@ -372,7 +373,6 @@ cfg_if! {
             if !harness_mode_enabled() {
                 return;
             }
-            let initial_snapshot = controller.ui_snapshot();
             controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
                 harness_bridge::publish_ui_snapshot(&snapshot);
             }));
@@ -388,7 +388,7 @@ cfg_if! {
                     ),
                 );
             }
-            harness_bridge::publish_ui_snapshot(&initial_snapshot);
+            let _ = harness_bridge::publish_semantic_controller_snapshot(controller.as_ref());
         }
 
         fn load_pending_device_enrollment_code(
@@ -729,7 +729,8 @@ cfg_if! {
                     BootstrapSurface::Web,
                     BootstrapEventKind::RuntimeBootstrapFinalized,
                 );
-                let final_snapshot = controller.semantic_model_snapshot();
+                let final_snapshot =
+                    harness_bridge::publish_semantic_controller_snapshot(controller.as_ref());
                 web_sys::console::log_1(
                     &format!(
                         "[web-bootstrap] final_snapshot screen={:?};readiness={:?};revision={:?}",
@@ -737,7 +738,6 @@ cfg_if! {
                     )
                     .into(),
                 );
-                harness_bridge::publish_ui_snapshot(&final_snapshot);
                 controller.push_log(&finalized_event.to_string());
                 if let Some(instance_id) = harness_instance {
                     controller.push_log(&format!(
@@ -1414,77 +1414,106 @@ cfg_if! {
             }
         }
 
+        fn spawn_browser_maintenance_loop<F, Fut>(
+            controller: Arc<UiController>,
+            app_core: Arc<RwLock<AppCore>>,
+            interval_ms: u64,
+            pause_message: &'static str,
+            sleep_operation: WebUiOperation,
+            sleep_error_code: &'static str,
+            mut tick: F,
+        ) where
+            F: FnMut() -> Fut + 'static,
+            Fut: Future<Output = ()> + 'static,
+        {
+            shared_web_task_owner().spawn_local_cancellable(async move {
+                loop {
+                    if let Err(error) = time_workflows::sleep_ms(&app_core, interval_ms).await {
+                        log_web_error(
+                            "warn",
+                            &WebUiError::operation(
+                                sleep_operation,
+                                sleep_error_code,
+                                error.to_string(),
+                            ),
+                        );
+                        controller.runtime_error_toast(pause_message);
+                        break;
+                    }
+                    tick().await;
+                }
+            });
+        }
+
         fn spawn_background_sync_loop(
             controller: Arc<UiController>,
             app_core: Arc<RwLock<AppCore>>,
         ) {
-            shared_web_task_owner().spawn_local_cancellable(async move {
-                loop {
-                    let runtime = { app_core.read().await.runtime().cloned() };
-                    if let Some(runtime) = runtime {
-                        if let Err(error) = runtime_workflows::timeout_runtime_call(
-                            &runtime,
-                            "web_background_sync",
-                            "trigger_discovery",
-                            std::time::Duration::from_secs(3),
-                            || runtime.trigger_discovery(),
-                        )
-                        .await
+            let tick_app_core = app_core.clone();
+            spawn_browser_maintenance_loop(
+                controller,
+                app_core,
+                1_500,
+                "Background sync paused; refresh to resume",
+                WebUiOperation::BackgroundSync,
+                "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
+                move || {
+                    let tick_app_core = tick_app_core.clone();
+                    async move {
+                        let runtime = { tick_app_core.read().await.runtime().cloned() };
+                        if let Some(runtime) = runtime {
+                            if let Err(error) = runtime_workflows::timeout_runtime_call(
+                                &runtime,
+                                "web_background_sync",
+                                "trigger_discovery",
+                                std::time::Duration::from_secs(3),
+                                || runtime.trigger_discovery(),
+                            )
+                            .await
+                            {
+                                log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::BackgroundSync,
+                                        "WEB_DISCOVERY_TRIGGER_FAILED",
+                                        error.to_string(),
+                                    ),
+                                );
+                            }
+                            if let Err(error) = runtime_workflows::timeout_runtime_call(
+                                &runtime,
+                                "web_background_sync",
+                                "trigger_sync",
+                                std::time::Duration::from_secs(3),
+                                || runtime.trigger_sync(),
+                            )
+                            .await
+                            {
+                                log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::BackgroundSync,
+                                        "WEB_SYNC_TRIGGER_FAILED",
+                                        error.to_string(),
+                                    ),
+                                );
+                            }
+                        }
+                        if let Err(error) =
+                            network_workflows::refresh_discovered_peers(&tick_app_core).await
                         {
                             log_web_error(
                                 "warn",
                                 &WebUiError::operation(
                                     WebUiOperation::BackgroundSync,
-                                    "WEB_DISCOVERY_TRIGGER_FAILED",
-                                    error.to_string(),
-                                ),
-                            );
-                        }
-                        if let Err(error) = runtime_workflows::timeout_runtime_call(
-                            &runtime,
-                            "web_background_sync",
-                            "trigger_sync",
-                            std::time::Duration::from_secs(3),
-                            || runtime.trigger_sync(),
-                        )
-                        .await
-                        {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::BackgroundSync,
-                                    "WEB_SYNC_TRIGGER_FAILED",
+                                    "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
                                     error.to_string(),
                                 ),
                             );
                         }
                     }
-                    if let Err(error) = network_workflows::refresh_discovered_peers(&app_core).await
-                    {
-                        log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::BackgroundSync,
-                                "WEB_DISCOVERED_PEERS_REFRESH_FAILED",
-                                error.to_string(),
-                            ),
-                        );
-                    }
-                    if let Err(error) = time_workflows::sleep_ms(&app_core, 1_500).await {
-                        log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::BackgroundSync,
-                                "WEB_BACKGROUND_SYNC_SLEEP_FAILED",
-                                error.to_string(),
-                            ),
-                        );
-                        controller
-                            .runtime_error_toast("Background sync paused; refresh to resume");
-                        break;
-                    }
-                }
-            });
+                },
+            );
         }
 
         fn spawn_ceremony_acceptance_loop(
@@ -1492,33 +1521,29 @@ cfg_if! {
             app_core: Arc<RwLock<AppCore>>,
             agent: Arc<aura_agent::Agent>,
         ) {
-            shared_web_task_owner().spawn_local_cancellable(async move {
-                loop {
-                    if let Err(error) = time_workflows::sleep_ms(&app_core, 500).await {
-                        log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::ProcessCeremonyAcceptances,
-                                "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
-                                error.to_string(),
-                            ),
-                        );
-                        controller
-                            .runtime_error_toast("Ceremony acceptance paused; refresh to resume");
-                        break;
+            spawn_browser_maintenance_loop(
+                controller,
+                app_core,
+                500,
+                "Ceremony acceptance paused; refresh to resume",
+                WebUiOperation::ProcessCeremonyAcceptances,
+                "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
+                move || {
+                    let agent = agent.clone();
+                    async move {
+                        if let Err(error) = agent.process_ceremony_acceptances().await {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::ProcessCeremonyAcceptances,
+                                    "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
+                        }
                     }
-                    if let Err(error) = agent.process_ceremony_acceptances().await {
-                        log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::ProcessCeremonyAcceptances,
-                                "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                                error.to_string(),
-                            ),
-                        );
-                    }
-                }
-            });
+                },
+            );
         }
 
         async fn complete_bootstrap_handoff(
@@ -1621,18 +1646,20 @@ mod tests {
         let source = std::fs::read_to_string(&main_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
 
+        assert!(source.contains("fn spawn_browser_maintenance_loop<"));
+        assert!(source.contains("controller.runtime_error_toast(pause_message);"));
+
         let helper_start = source
             .find("fn spawn_background_sync_loop")
             .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
         let helper_end = source[helper_start..]
-            .find("} else {")
+            .find("fn spawn_ceremony_acceptance_loop")
             .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+            .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
         let helper = &source[helper_start..helper_end];
 
-        assert!(
-            helper.contains("runtime_error_toast(\"Background sync paused; refresh to resume\")")
-        );
+        assert!(helper.contains("spawn_browser_maintenance_loop("));
+        assert!(helper.contains("\"Background sync paused; refresh to resume\""));
         assert!(helper.contains("\"WEB_BACKGROUND_SYNC_SLEEP_FAILED\""));
     }
 
@@ -1647,14 +1674,36 @@ mod tests {
             .find("fn spawn_ceremony_acceptance_loop")
             .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
         let helper_end = source[helper_start..]
-            .find("} else {")
+            .find("async fn complete_bootstrap_handoff")
             .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
+            .unwrap_or_else(|| panic!("missing complete_bootstrap_handoff"));
         let helper = &source[helper_start..helper_end];
 
-        assert!(helper
-            .contains("runtime_error_toast(\"Ceremony acceptance paused; refresh to resume\")"));
+        assert!(helper.contains("spawn_browser_maintenance_loop("));
+        assert!(helper.contains("\"Ceremony acceptance paused; refresh to resume\""));
         assert!(helper.contains("\"WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_semantic_snapshot_publication_is_centralized() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+        let main_source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+        let bridge_source = std::fs::read_to_string(&bridge_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", bridge_path.display()));
+        let production_main = main_source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or_else(|| panic!("missing production main section"));
+
+        assert!(bridge_source.contains("pub(crate) fn publish_semantic_controller_snapshot"));
+        assert!(bridge_source.contains("controller.publish_ui_snapshot(snapshot.clone())"));
+        assert!(production_main
+            .contains("harness_bridge::publish_semantic_controller_snapshot(controller.as_ref())"));
+        assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&final_snapshot)"));
+        assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&initial_snapshot)"));
     }
 
     #[test]
