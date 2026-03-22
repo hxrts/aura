@@ -6,6 +6,8 @@
 //! - [`SimpleTestEnv`]: Lightweight setup with AppCore only (no agent)
 //! - [`FullTestEnv`]: Complete setup with AuraAgent for simulation tests
 
+#![allow(dead_code)]
+
 use async_lock::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;

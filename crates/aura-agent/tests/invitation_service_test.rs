@@ -17,6 +17,8 @@ use aura_agent::{
     AgentBuilder, AuraAgent, AuthorityId, EffectContext, ExecutionMode, InvitationStatus,
     InvitationType,
 };
+use aura_core::effects::amp::ChannelCreateParams;
+use aura_core::effects::AmpChannelEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
@@ -128,16 +130,26 @@ async fn test_invite_as_guardian_via_agent() -> TestResult {
 async fn test_invite_to_channel_via_agent() -> TestResult {
     // Entropy range: 230-239
     let agent = create_test_agent(230).await?;
+    let context_id = ContextId::new_from_entropy([233u8; 32]);
 
     let invitations = agent.invitations()?;
 
     let receiver_id = AuthorityId::new_from_entropy([231u8; 32]);
-    let home_id = ChannelId::from_bytes([232u8; 32]).to_string();
+    let home_id = ChannelId::from_bytes([232u8; 32]);
+    agent.runtime()
+        .effects()
+        .create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(home_id),
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
     let invitation = invitations
         .invite_to_channel(
             receiver_id,
-            home_id.clone(),
-            None,
+            home_id.to_string(),
+            Some(context_id),
             Some("shared-parity-lab".to_string()),
             None,
             None,

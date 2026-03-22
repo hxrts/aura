@@ -1360,6 +1360,31 @@ async fn ensure_channel_visible_after_join(
             ))
         })?;
 
+    let placeholder_channel = {
+        let chat = observed_chat_snapshot(app_core).await;
+        let channel = chat
+            .all_channels()
+            .find(|channel| {
+                channel.id != channel_id
+                    && channel
+                        .name
+                        .eq_ignore_ascii_case(normalized_name.as_str())
+            })
+            .cloned();
+        channel
+    };
+    if let Some(placeholder_channel) = placeholder_channel {
+        let canonical_name = normalized_name.clone();
+        update_chat_projection_observed(app_core, |chat| {
+            let mut canonical = placeholder_channel.clone();
+            canonical.id = channel_id;
+            canonical.context_id = Some(context_id);
+            canonical.name = canonical_name.clone();
+            chat.rebind_channel_identity(&placeholder_channel.id, canonical);
+        })
+        .await?;
+    }
+
     let updated_at_ms = next_observed_projection_timestamp_ms(app_core).await;
     reduce_chat_fact_observed(
         app_core,
@@ -1619,7 +1644,7 @@ pub(in crate::workflows) async fn runtime_channel_state_exists(
 }
 
 pub(in crate::workflows) async fn wait_for_runtime_channel_state(
-    app_core: &Arc<RwLock<AppCore>>,
+    _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
 ) -> Result<(), AuraError> {
@@ -1630,7 +1655,6 @@ pub(in crate::workflows) async fn wait_for_runtime_channel_state(
     )?;
     execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         if runtime_channel_state_exists(runtime, channel).await? {
-            refresh_authoritative_channel_membership_readiness(app_core).await?;
             return Ok(());
         }
         converge_runtime(runtime).await;
@@ -2438,25 +2462,25 @@ async fn join_channel_by_name_owned(
 
     // Local-only frontends still need "/join" to create/select channels.
     if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
-        let channel_id =
-            resolve_local_chat_channel_id_from_observed_state_or_input(app_core, channel_name)
-                .await?;
+        let normalized_channel_name = normalize_channel_name(channel_name);
         let existing_local_channel = {
             let chat = observed_chat_snapshot(app_core).await;
-            chat.channel(&channel_id).cloned().or_else(|| {
-                chat.all_channels()
-                    .find(|channel| channel.name.eq_ignore_ascii_case(channel_name))
-                    .cloned()
-            })
+            let channel = chat
+                .all_channels()
+                .find(|channel| {
+                    channel
+                        .name
+                        .eq_ignore_ascii_case(normalized_channel_name.as_str())
+                })
+                .cloned();
+            channel
         };
         let known_members: Vec<String> = observed_contacts_snapshot(app_core)
             .await
             .contact_ids()
             .map(ToString::to_string)
             .collect();
-        if existing_local_channel.is_none() {
-            create_channel(app_core, channel_name, None, &known_members, 0, 0).await?;
-        } else if let Some(channel) = existing_local_channel {
+        let channel_id = if let Some(channel) = existing_local_channel {
             publish_authoritative_channel_membership_ready(
                 app_core,
                 channel.id,
@@ -2466,7 +2490,18 @@ async fn join_channel_by_name_owned(
                     .max(channel.member_ids.len() as u32 + 1),
             )
             .await?;
-        }
+            channel.id
+        } else {
+            create_channel(
+                app_core,
+                normalized_channel_name.as_str(),
+                None,
+                &known_members,
+                0,
+                0,
+            )
+            .await?
+        };
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
             .await?;
@@ -3444,6 +3479,13 @@ pub async fn start_direct_chat_with_authority(
             AuthoritativeChannelRef::new(channel_id, context_id),
         )
         .await?;
+        publish_authoritative_channel_membership_ready(
+            app_core,
+            channel_id,
+            Some(channel_name.as_str()),
+            2,
+        )
+        .await?;
         refresh_authoritative_channel_membership_readiness(app_core).await?;
         refresh_authoritative_recipient_resolution_readiness(app_core).await?;
         refresh_authoritative_delivery_readiness_for_channel(
@@ -3875,16 +3917,14 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
 mod tests {
     use super::*;
     use crate::runtime_bridge::InvitationBridgeStatus;
-    use crate::signal_defs::{
-        AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME,
-    };
+    use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use crate::ui_contract::{SemanticOperationStatus, WorkflowTerminalStatus};
     use crate::views::contacts::{Contact, ContactsState};
     use crate::views::home::{BanRecord, HomeRole, HomeState, HomesState, MuteRecord};
     use crate::workflows::semantic_facts::{
         assert_succeeded_with_postcondition, assert_terminal_failure_or_cancelled,
     };
-    use crate::workflows::signals::{emit_signal, read_signal_or_default};
+    use crate::workflows::signals::read_signal_or_default;
     use crate::AppConfig;
 
     async fn register_signals_only(app_core: &Arc<RwLock<AppCore>>) {
@@ -4120,7 +4160,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authoritative_context_falls_back_to_pending_channel_invitation_context() {
+    async fn authoritative_context_id_for_channel_does_not_fallback_to_pending_channel_invitation() {
         let config = AppConfig::default();
         let owner = AuthorityId::new_from_entropy([94u8; 32]);
         let sender = AuthorityId::new_from_entropy([95u8; 32]);
@@ -4149,7 +4189,7 @@ mod tests {
 
         assert_eq!(
             resolve_authoritative_context_id_for_channel(&app_core, channel_id).await,
-            Some(invitation_context)
+            None
         );
     }
 
@@ -5097,7 +5137,13 @@ mod tests {
                 .await
                 .expect_err("raw id input without canonical metadata must fail");
 
-        assert!(matches!(error, AuraError::NotFound { .. }));
+        assert!(matches!(error, AuraError::Internal { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("requires canonical channel metadata"),
+            "expected explicit raw-id rejection, got: {error}"
+        );
     }
 
     #[tokio::test]
@@ -5771,14 +5817,11 @@ mod tests {
             read_receipt_policy: Default::default(),
         };
 
-        emit_signal(
-            &app_core,
-            &*CONTACTS_SIGNAL,
-            ContactsState::from_contacts(vec![bob_contact]),
-            CONTACTS_SIGNAL_NAME,
-        )
-        .await
-        .unwrap();
+        {
+            let mut core = app_core.write().await;
+            core.views_mut()
+                .set_contacts(ContactsState::from_contacts(vec![bob_contact]));
+        }
 
         let by_name = resolve_target_authority_for_invite(&app_core, "bob")
             .await
@@ -5804,7 +5847,7 @@ mod tests {
             .expect_err("readiness should fail when authoritative facts are unavailable");
         assert!(matches!(
             error,
-            SendMessageError::ReadinessFactsUnavailable { .. }
+            SendMessageError::RecipientResolutionNotReady { .. }
         ));
     }
 }

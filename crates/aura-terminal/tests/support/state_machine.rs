@@ -25,6 +25,8 @@
 //! }
 //! ```
 
+#![allow(dead_code)]
+
 use aura_core::effects::terminal::{events, TerminalEvent};
 use aura_terminal::tui::screens::Screen;
 use aura_terminal::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};

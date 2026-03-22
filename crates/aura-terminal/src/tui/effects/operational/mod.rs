@@ -387,6 +387,21 @@ mod tests {
         let app_core = test_app_core().await;
         let handler = test_handler(app_core);
 
+        // LocalOnly messaging still requires a real local channel; it no longer
+        // synthesizes a send target via fallback resolution.
+        let result = handler
+            .execute(&EffectCommand::CreateChannel {
+                name: "general".to_string(),
+                topic: None,
+                members: Vec::new(),
+                threshold_k: 1,
+            })
+            .await;
+        assert!(
+            matches!(result, Some(Ok(OpResponse::ChannelCreated { .. }))),
+            "CreateChannel should succeed in LocalOnly mode, got: {result:?}"
+        );
+
         // Messaging commands now work in LocalOnly mode without RuntimeBridge
         let result = handler
             .execute(&EffectCommand::SendMessage {
@@ -399,7 +414,7 @@ mod tests {
             "SendMessage should succeed in LocalOnly mode, got: {result:?}"
         );
 
-        // CreateChannel should also succeed in LocalOnly mode
+        // Additional channel creation should also succeed in LocalOnly mode
         let result = handler
             .execute(&EffectCommand::CreateChannel {
                 name: "Guardians".to_string(),

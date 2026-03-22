@@ -3101,10 +3101,21 @@ mod tests {
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
+        let context_id = ContextId::new_from_entropy([98u8; 32]);
         let home_id = canonical_home_id(11);
 
+        effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(home_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
+
         let invitation = handler
-            .create_invitation(
+            .create_invitation_with_context(
                 effects.clone(),
                 receiver_id,
                 InvitationType::Channel {
@@ -3112,6 +3123,7 @@ mod tests {
                     nickname_suggestion: None,
                     bootstrap: None,
                 },
+                Some(context_id),
                 None,
                 None,
             )

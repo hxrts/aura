@@ -8,7 +8,7 @@ note: the function `wait_for_runtime_channel_state` is defined here
  --> src/workflows/messaging.rs
   |
   | / pub(in crate::workflows) async fn wait_for_runtime_channel_state(
-  | |     app_core: &Arc<RwLock<AppCore>>,
+  | |     _app_core: &Arc<RwLock<AppCore>>,
   | |     runtime: &Arc<dyn RuntimeBridge>,
   | |     channel: AuthoritativeChannelRef,
   | | ) -> Result<(), AuraError> {

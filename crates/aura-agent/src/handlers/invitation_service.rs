@@ -772,7 +772,9 @@ mod tests {
     use crate::runtime::services::ceremony_runner::CeremonyRunner;
     use crate::runtime::services::CeremonyTracker;
     use crate::runtime::TaskSupervisor;
+    use aura_core::effects::amp::ChannelCreateParams;
     use aura_core::effects::time::PhysicalTimeEffects;
+    use aura_effects::AmpChannelEffects;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -904,15 +906,25 @@ mod tests {
     async fn test_invite_to_channel() {
         let authority_context = create_test_authority(115);
         let effects = effects_for(&authority_context);
-        let service = service_for(authority_context, effects);
+        let service = service_for(authority_context, effects.clone());
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
-        let home_id = ChannelId::from_bytes([116u8; 32]).to_string();
+        let context_id = ContextId::new_from_entropy([117u8; 32]);
+        let home_id = ChannelId::from_bytes([116u8; 32]);
+        effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(home_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
         let invitation = service
             .invite_to_channel(
                 receiver_id,
-                home_id,
-                None,
+                home_id.to_string(),
+                Some(context_id),
                 Some("shared-parity-lab".to_string()),
                 None,
                 None,

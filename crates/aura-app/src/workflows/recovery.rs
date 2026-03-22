@@ -470,7 +470,6 @@ mod tests {
     use crate::views::recovery::{
         Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus,
     };
-    use crate::AppConfig;
     use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]

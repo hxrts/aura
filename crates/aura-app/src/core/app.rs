@@ -420,7 +420,7 @@ impl AppCore {
             .map_err(|error| IntentError::internal_error(error.to_string()))?
             .is_none()
             {
-                let _ = timeout_runtime_call_bounded(
+                let bootstrap = timeout_runtime_call_bounded(
                     runtime,
                     "init_signals",
                     "bootstrap_signing_keys",
@@ -428,10 +428,19 @@ impl AppCore {
                     || runtime.bootstrap_signing_keys(),
                 )
                 .await
-                .map_err(|error| IntentError::internal_error(error.to_string()))?
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to bootstrap signing keys: {e}"))
-                })?;
+                .map_err(|error| IntentError::internal_error(error.to_string()))?;
+                match bootstrap {
+                    Ok(_public_key) => {}
+                    Err(IntentError::NoAgent { .. }) => {
+                        // Offline/test runtimes may expose runtime-backed hooks without an
+                        // attached agent. Signal registration must still succeed there.
+                    }
+                    Err(error) => {
+                        return Err(IntentError::internal_error(format!(
+                            "Failed to bootstrap signing keys: {error}"
+                        )));
+                    }
+                }
             }
         }
 

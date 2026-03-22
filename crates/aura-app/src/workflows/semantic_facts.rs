@@ -299,19 +299,14 @@ impl SemanticWorkflowOwner {
                         self.kind,
                     )
                 }),
-                _ => {
-                    let Some(context) = state.as_mut() else {
-                        return Err(AuraError::invalid(
-                            "semantic workflow owner has already published terminal lifecycle",
-                        ));
-                    };
-                    Some(ExactOperationLifecyclePublication::phase_from_context(
+                _ => state.as_mut().map(|context| {
+                    ExactOperationLifecyclePublication::phase_from_context(
                         semantic_lifecycle_publication_capability(),
                         context,
                         self.kind,
                         phase,
-                    ))
-                }
+                    )
+                }),
             }
         };
         let terminal_status = matches!(

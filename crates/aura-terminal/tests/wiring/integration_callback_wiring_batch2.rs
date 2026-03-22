@@ -29,22 +29,55 @@
 //! ```
 
 use aura_app::signal_defs::{
-    CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL,
+    AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
+    SYNC_STATUS_SIGNAL,
 };
+use aura_app::ui_contract::AuthoritativeSemanticFact;
 use aura_app::views::chat::ChannelType;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::types::identifiers::AuthorityId;
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::tui::effects::EffectCommand;
 
 #[path = "../support/mod.rs"]
 mod support;
 
-use support::{generate_demo_invite_code, wait_for_chat, MockRuntimeTestEnv};
+use support::{generate_demo_invite_code, wait_for_chat, wait_for_signal, MockRuntimeTestEnv};
 
 const TEST_PREFIX: &str = "aura-callback-test2";
 
 fn peer_authority_id(seed: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([seed; 32])
+}
+
+async fn wait_for_dm_send_readiness(
+    app_core: &std::sync::Arc<async_lock::RwLock<aura_app::AppCore>>,
+    channel_id: ChannelId,
+) {
+    let channel_id = channel_id.to_string();
+    let _ = wait_for_signal(
+        app_core,
+        &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+        |facts: &Vec<AuthoritativeSemanticFact>| {
+            let recipient_ready = facts.iter().any(|fact| {
+                matches!(
+                    fact,
+                    AuthoritativeSemanticFact::RecipientPeersResolved { channel, .. }
+                        if channel.id.as_deref() == Some(channel_id.as_str())
+                )
+            });
+            let delivery_ready = facts.iter().any(|fact| {
+                matches!(
+                    fact,
+                    AuthoritativeSemanticFact::MessageDeliveryReady { channel, .. }
+                        if channel.id.as_deref() == Some(channel_id.as_str())
+                )
+            });
+            recipient_ready && delivery_ready
+        },
+        support::DEFAULT_TIMEOUT,
+        "dm semantic readiness",
+    )
+    .await;
 }
 
 // ============================================================================
@@ -275,8 +308,26 @@ async fn test_send_direct_message_adds_message() {
         (channel_count, message_count)
     };
 
-    // Phase 2: Send a direct message
-    println!("\nPhase 2: Send direct message");
+    // Phase 2: Establish the DM channel first so recipient readiness can
+    // converge before the first send.
+    println!("\nPhase 2: Start direct chat");
+    let result = ctx
+        .dispatch(EffectCommand::StartDirectChat {
+            contact_id: target.clone(),
+        })
+        .await;
+    assert!(result.is_ok(), "StartDirectChat should succeed: {result:?}");
+
+    let chat = wait_for_chat(&app_core, |chat| chat.all_channels().any(|c| c.is_dm)).await;
+    let dm_channel_id = chat
+        .all_channels()
+        .find(|channel| channel.is_dm)
+        .map(|channel| channel.id)
+        .expect("DM channel should exist after StartDirectChat");
+    wait_for_dm_send_readiness(&app_core, dm_channel_id).await;
+
+    // Phase 3: Send a direct message
+    println!("\nPhase 3: Send direct message");
     let content = "Hello Alice, this is a test DM!";
     let result = ctx
         .dispatch(EffectCommand::SendDirectMessage {
@@ -290,8 +341,8 @@ async fn test_send_direct_message_adds_message() {
     );
     println!("  SendDirectMessage dispatched successfully");
 
-    // Phase 3: Verify DM channel was created
-    println!("\nPhase 3: Verify DM channel was created");
+    // Phase 4: Verify DM channel was created
+    println!("\nPhase 4: Verify DM channel was created");
     let chat = wait_for_chat(&app_core, |chat| {
         chat.all_channels()
             .any(|c| c.is_dm && !chat.messages_for_channel(&c.id).is_empty())
@@ -315,8 +366,8 @@ async fn test_send_direct_message_adds_message() {
         "Should have more channels after DM send"
     );
 
-    // Phase 4: Verify message was added
-    println!("\nPhase 4: Verify message was added");
+    // Phase 5: Verify message was added
+    println!("\nPhase 5: Verify message was added");
     let channel_messages = chat.messages_for_channel(&channel.id);
     assert!(
         chat.message_count() > initial_message_count,
@@ -871,6 +922,14 @@ async fn test_complete_dm_flow() {
     .await
     .expect("StartDirectChat should succeed");
     println!("  DM chat started");
+
+    let chat = wait_for_chat(&app_core, |chat| chat.all_channels().any(|c| c.is_dm)).await;
+    let dm_channel_id = chat
+        .all_channels()
+        .find(|channel| channel.is_dm)
+        .map(|channel| channel.id)
+        .expect("DM channel should exist after StartDirectChat");
+    wait_for_dm_send_readiness(&app_core, dm_channel_id).await;
 
     // Phase 2: Send first message
     println!("\nPhase 2: Send first message");

@@ -1286,23 +1286,46 @@ async fn reconcile_accepted_channel_invitation_authoritative(
         stage_tracker,
         "reconcile_channel_invitation:wait_for_runtime_channel_state",
     );
-    crate::workflows::messaging::wait_for_runtime_channel_state(
+    if !crate::workflows::messaging::runtime_channel_state_exists(runtime, authoritative_channel)
+        .await?
+    {
+        crate::workflows::messaging::wait_for_runtime_channel_state(
+            app_core,
+            runtime,
+            authoritative_channel,
+        )
+        .await?;
+    }
+    crate::workflows::messaging::publish_authoritative_channel_membership_ready(
         app_core,
-        runtime,
-        authoritative_channel,
+        local_channel_id,
+        channel_name_hint,
+        1,
     )
     .await?;
-    update_accept_reconcile_stage(
-        stage_tracker,
-        "reconcile_channel_invitation:refresh_channel_membership_readiness",
-    );
-    crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(app_core)
-        .await?;
-    update_accept_reconcile_stage(
-        stage_tracker,
-        "reconcile_channel_invitation:converge_runtime",
-    );
-    converge_runtime(runtime).await;
+    if let Ok(Some(resolved_context)) = timeout_runtime_call(
+        runtime,
+        "reconcile_accepted_channel_invitation_authoritative",
+        "resolve_amp_channel_context",
+        INVITATION_RUNTIME_QUERY_TIMEOUT,
+        || runtime.resolve_amp_channel_context(local_channel_id),
+    )
+    .await
+    .map_err(|error| super::error::runtime_call("resolve channel context", error))
+    .map(|result| result.map_err(|error| super::error::runtime_call("resolve channel context", error)))
+    .unwrap_or_else(|_| Ok(None))
+    {
+        if resolved_context == authoritative_context {
+            update_accept_reconcile_stage(
+                stage_tracker,
+                "reconcile_channel_invitation:refresh_channel_membership_readiness",
+            );
+            crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
+                app_core,
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
@@ -2880,10 +2903,12 @@ mod tests {
     #[cfg(feature = "signals")]
     use crate::workflows::messaging::apply_authoritative_membership_projection;
     use crate::workflows::semantic_facts::{
+        assert_succeeded_with_postcondition, assert_terminal_failure_or_cancelled,
         assert_terminal_failure_status,
     };
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+    use aura_core::{CeremonyId, DeviceId, Epoch};
 
     // === Invitation Role Parsing Tests ===
 
@@ -3191,7 +3216,11 @@ mod tests {
         let error = refresh_authoritative_invitation_readiness(&app_core)
             .await
             .expect_err("authoritative invitation readiness requires runtime");
-        assert!(matches!(error, AuraError::PermissionDenied { .. }));
+        assert!(matches!(error, AuraError::Internal { .. }));
+        assert!(
+            error.to_string().contains("Runtime bridge not available"),
+            "expected explicit missing-runtime failure, got: {error}"
+        );
     }
 
     #[tokio::test]
@@ -3439,6 +3468,11 @@ mod tests {
         let channel_id = ChannelId::from_bytes([89u8; 32]);
         let context_id = ContextId::new_from_entropy([90u8; 32]);
         runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
+        runtime.set_amp_channel_participants_without_resolution(
+            context_id,
+            channel_id,
+            vec![our_authority],
+        );
 
         reconcile_channel_invitation_acceptance(
             &app_core,

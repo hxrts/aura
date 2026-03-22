@@ -12,6 +12,8 @@
 
 use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvitation};
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
+use aura_core::effects::amp::ChannelCreateParams;
+use aura_core::effects::AmpChannelEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
@@ -397,7 +399,17 @@ async fn test_guardian_invitation() -> TestResult {
 async fn test_channel_invitation() -> TestResult {
     let agent = create_test_agent(60).await?;
     let invitee = AuthorityId::new_from_entropy([61u8; 32]);
-    let home_id = ChannelId::from_bytes([61u8; 32]).to_string();
+    let context_id = ContextId::new_from_entropy([62u8; 32]);
+    let home_id = ChannelId::from_bytes([61u8; 32]);
+    agent.runtime()
+        .effects()
+        .create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(home_id),
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
 
     let invitations = agent.invitations()?;
 
@@ -405,8 +417,8 @@ async fn test_channel_invitation() -> TestResult {
     let invitation = invitations
         .invite_to_channel(
             invitee,
-            home_id.clone(),
-            None,                                  // context_id
+            home_id.to_string(),
+            Some(context_id),
             Some("shared-parity-lab".to_string()), // nickname_suggestion
             None,                                  // bootstrap
             Some("Join our discussion channel".to_string()),
