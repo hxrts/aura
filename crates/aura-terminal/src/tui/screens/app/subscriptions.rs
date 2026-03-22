@@ -18,7 +18,7 @@ use aura_app::ui::signals::{
     DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
-use aura_app::ui::types::{ChatState, ContactsState, HomesState};
+use aura_app::ui::types::ChatState;
 use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::{
     bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind,
@@ -634,93 +634,195 @@ fn merge_transient_channels(
     merged
 }
 
-#[cfg(test)]
-fn scoped_channel_snapshot(
-    chat_state: &ChatState,
-    active_scope: Option<&str>,
-) -> (Vec<Channel>, usize) {
-    let scoped = scoped_channels(chat_state, active_scope);
-    let message_count = scoped
-        .iter()
-        .map(|channel| chat_state.messages_for_channel(&channel.id).len())
-        .sum();
-    let channels = scoped.into_iter().map(Channel::from).collect();
-    (channels, message_count)
+#[derive(Clone, Debug)]
+struct ScopedChannelProjection {
+    channels: Vec<Channel>,
+    message_count: usize,
+    channel_signature: String,
 }
 
-fn publish_scoped_channels(
-    channels: &SharedChannels,
+fn smooth_scoped_channels_for_render(
+    mut channels: Vec<Channel>,
     selected_channel_id: Option<&str>,
-    tasks: &Arc<UiTaskOwner>,
-    update_tx: &Option<UiUpdateSender>,
-    last_channel_count: &Arc<AtomicUsize>,
-    last_message_count: &Arc<AtomicUsize>,
-    last_channel_signature: &Arc<RwLock<Option<String>>>,
-    _transport_peer_count: usize,
-    _discovered_peer_ids: &[AuthorityId],
-    _self_authority: Option<AuthorityId>,
-    _homes_state: &HomesState,
-    _contacts_state: &ContactsState,
+    previous_rendered_channels: &[Channel],
+) -> Vec<Channel> {
+    let Some(selected_channel_id) = selected_channel_id else {
+        return channels;
+    };
+
+    let already_present = channels
+        .iter()
+        .any(|channel| channel.id == selected_channel_id);
+    if already_present {
+        return channels;
+    }
+
+    let preserved = previous_rendered_channels
+        .iter()
+        .find(|channel| channel.id == selected_channel_id && is_dm_like_shared_channel(channel))
+        .cloned();
+    if let Some(channel) = preserved {
+        channels.push(channel);
+        channels.sort_by(|left, right| left.name.cmp(&right.name));
+    }
+
+    channels
+}
+
+fn compute_scoped_channel_projection(
     chat_state: &ChatState,
     active_scope: Option<&str>,
-) {
+    selected_channel_id: Option<&str>,
+    previous_rendered_channels: &[Channel],
+) -> ScopedChannelProjection {
     let effective_scope = effective_home_scope_id(chat_state, active_scope, selected_channel_id);
     let scoped = scoped_channels(chat_state, effective_scope.as_deref());
     let message_count = scoped
         .iter()
         .map(|channel| chat_state.messages_for_channel(&channel.id).len())
         .sum();
-    let mut channel_list: Vec<Channel> = scoped.iter().copied().map(Channel::from).collect();
-    if let Some(selected_channel_id) = selected_channel_id {
-        let already_present = channel_list
-            .iter()
-            .any(|channel| channel.id == selected_channel_id);
-        if !already_present {
-            let preserved = channels
-                .read()
-                .iter()
-                .find(|channel| {
-                    channel.id == selected_channel_id && is_dm_like_shared_channel(channel)
-                })
-                .cloned();
-            if let Some(channel) = preserved {
-                channel_list.push(channel);
-                channel_list.sort_by(|left, right| left.name.cmp(&right.name));
-            }
-        }
-    }
-    let channel_count = channel_list.len();
+    let channel_list = smooth_scoped_channels_for_render(
+        scoped.iter().copied().map(Channel::from).collect(),
+        selected_channel_id,
+        previous_rendered_channels,
+    );
     let channel_signature = channel_list
         .iter()
         .map(|channel| channel.id.as_str())
         .collect::<Vec<_>>()
         .join("|");
-    *channels.write() = channel_list;
 
-    if let Some(tx) = update_tx {
-        let channel_signature_changed = {
-            let mut guard = last_channel_signature.write();
-            let changed = guard.as_deref() != Some(channel_signature.as_str());
-            *guard = Some(channel_signature);
-            changed
-        };
-        let channel_changed =
-            last_channel_count.swap(channel_count, Ordering::Relaxed) != channel_count;
-        let message_changed =
-            last_message_count.swap(message_count, Ordering::Relaxed) != message_count;
-        if !(channel_changed || message_changed || channel_signature_changed) {
-            return;
-        }
-        spawn_ui_update(
-            tasks,
-            tx,
-            UiUpdate::ChatStateUpdated {
-                channel_count,
-                message_count,
-                selected_index: None,
-            },
-            UiUpdatePublication::RequiredUnordered,
+    ScopedChannelProjection {
+        channels: channel_list,
+        message_count,
+        channel_signature,
+    }
+}
+
+#[cfg(test)]
+fn scoped_channel_snapshot(
+    chat_state: &ChatState,
+    active_scope: Option<&str>,
+) -> (Vec<Channel>, usize) {
+    let projection = compute_scoped_channel_projection(chat_state, active_scope, None, &[]);
+    (projection.channels, projection.message_count)
+}
+
+#[derive(Clone)]
+struct ChannelProjectionCoordinator {
+    channels: SharedChannels,
+    selected_channel_id: Arc<RwLock<Option<String>>>,
+    active_scope: Arc<RwLock<Option<String>>>,
+    latest_chat_state: Arc<RwLock<ChatState>>,
+    shared_authority_id: SharedAuthorityId,
+    tasks: Arc<UiTaskOwner>,
+    update_tx: Option<UiUpdateSender>,
+    last_channel_count: Arc<AtomicUsize>,
+    last_message_count: Arc<AtomicUsize>,
+    last_channel_signature: Arc<RwLock<Option<String>>>,
+    projection_version: State<usize>,
+}
+
+impl ChannelProjectionCoordinator {
+    fn publish_current_projection(&self) {
+        let chat_state = self.latest_chat_state.read().clone();
+        let scope = self.active_scope.read().clone();
+        let selected_channel = self.selected_channel_id.read().clone();
+        let previous_rendered_channels = self.channels.read().clone();
+        let projection = compute_scoped_channel_projection(
+            &chat_state,
+            scope.as_deref(),
+            selected_channel.as_deref(),
+            &previous_rendered_channels,
         );
+        let channel_count = projection.channels.len();
+        let message_count = projection.message_count;
+
+        *self.channels.write() = projection.channels;
+
+        if let Some(tx) = self.update_tx.as_ref() {
+            let channel_signature_changed = {
+                let mut guard = self.last_channel_signature.write();
+                let changed = guard.as_deref() != Some(projection.channel_signature.as_str());
+                *guard = Some(projection.channel_signature);
+                changed
+            };
+            let channel_changed = self
+                .last_channel_count
+                .swap(channel_count, Ordering::Relaxed)
+                != channel_count;
+            let message_changed = self
+                .last_message_count
+                .swap(message_count, Ordering::Relaxed)
+                != message_count;
+
+            if channel_changed || message_changed || channel_signature_changed {
+                spawn_ui_update(
+                    &self.tasks,
+                    tx,
+                    UiUpdate::ChatStateUpdated {
+                        channel_count,
+                        message_count,
+                        selected_index: None,
+                    },
+                    UiUpdatePublication::RequiredUnordered,
+                );
+            }
+        }
+
+        let mut projection_version = self.projection_version.clone();
+        bump_projection_version(&mut projection_version);
+    }
+
+    fn update_chat_state(&self, chat_state: ChatState) {
+        let mut stabilized = {
+            let previous = self.latest_chat_state.read();
+            let selected_channel = self.selected_channel_id.read().clone();
+            merge_transient_channels(&chat_state, &previous, selected_channel.as_deref())
+        };
+        if let Some(authority_id) = *self.shared_authority_id.read() {
+            stabilized.ensure_note_to_self_channel(authority_id);
+        }
+        tracing::debug!(
+            "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
+            chat_state.channel_count(),
+            stabilized.channel_count()
+        );
+        let channel_summary = stabilized
+            .all_channels()
+            .map(|channel| {
+                format!(
+                    "{}|is_dm={}|name={}|topic={}",
+                    channel.id,
+                    channel.is_dm,
+                    channel.name,
+                    channel.topic.clone().unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        tracing::debug!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
+
+        *self.latest_chat_state.write() = stabilized;
+        self.publish_current_projection();
+    }
+
+    fn update_authority_id(&self, authority_id: Option<AuthorityId>) {
+        *self.shared_authority_id.write() = authority_id;
+
+        let Some(authority_id) = authority_id else {
+            return;
+        };
+
+        let mut chat_state = self.latest_chat_state.read().clone();
+        chat_state.ensure_note_to_self_channel(authority_id);
+        *self.latest_chat_state.write() = chat_state;
+        self.publish_current_projection();
+    }
+
+    fn update_active_scope(&self, scope: Option<String>) {
+        *self.active_scope.write() = scope;
+        self.publish_current_projection();
     }
 }
 
@@ -746,90 +848,26 @@ pub fn use_channels_subscription(
     let last_message_count = last_message_count_ref.read().clone();
     let last_channel_signature_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
     let last_channel_signature = last_channel_signature_ref.read().clone();
-    let latest_transport_peer_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(0)));
-    let latest_transport_peer_count = latest_transport_peer_count_ref.read().clone();
-    let latest_contacts_state_ref =
-        hooks.use_ref(|| Arc::new(RwLock::new(ContactsState::default())));
-    let latest_contacts_state = latest_contacts_state_ref.read().clone();
-    let latest_homes_state_ref = hooks.use_ref(|| Arc::new(RwLock::new(HomesState::default())));
-    let latest_homes_state = latest_homes_state_ref.read().clone();
-    let latest_discovered_peers_ref =
-        hooks.use_ref(|| Arc::new(RwLock::new(Vec::<AuthorityId>::new())));
-    let latest_discovered_peers = latest_discovered_peers_ref.read().clone();
+    let coordinator = ChannelProjectionCoordinator {
+        channels: shared_channels.clone(),
+        selected_channel_id: selected_channel_id.clone(),
+        active_scope: active_scope.clone(),
+        latest_chat_state: latest_chat_state.clone(),
+        shared_authority_id: shared_authority_id.clone(),
+        tasks: tasks.clone(),
+        update_tx: update_tx.clone(),
+        last_channel_count: last_channel_count.clone(),
+        last_message_count: last_message_count.clone(),
+        last_channel_signature: last_channel_signature.clone(),
+        projection_version: projection_version.clone(),
+    };
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let active_scope = active_scope.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let shared_authority_id = shared_authority_id.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
-        let last_channel_signature = last_channel_signature.clone();
-        let latest_transport_peer_count = latest_transport_peer_count.clone();
-        let latest_contacts_state = latest_contacts_state.clone();
-        let latest_homes_state = latest_homes_state.clone();
-        let latest_discovered_peers = latest_discovered_peers.clone();
-        let selected_channel_id = selected_channel_id.clone();
-        let tasks = tasks.clone();
-        let mut projection_version = projection_version.clone();
+        let coordinator = coordinator.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let mut stabilized = {
-                    let previous = latest_chat_state.read();
-                    let selected_channel = selected_channel_id.read().clone();
-                    merge_transient_channels(&chat_state, &previous, selected_channel.as_deref())
-                };
-                if let Some(authority_id) = *shared_authority_id.read() {
-                    stabilized.ensure_note_to_self_channel(authority_id);
-                }
-                tracing::debug!(
-                    "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
-                    chat_state.channel_count(),
-                    stabilized.channel_count()
-                );
-                let channel_summary = stabilized
-                    .all_channels()
-                    .map(|channel| {
-                        format!(
-                            "{}|is_dm={}|name={}|topic={}",
-                            channel.id,
-                            channel.is_dm,
-                            channel.name,
-                            channel.topic.clone().unwrap_or_default()
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ; ");
-                tracing::debug!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
-
-                *latest_chat_state.write() = stabilized.clone();
-
-                let scope = active_scope.read().clone();
-                let authority_id = *shared_authority_id.read();
-                let contacts_state = latest_contacts_state.read().clone();
-                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers.read().clone();
-                let homes_state = latest_homes_state.read().clone();
-                let selected_channel = selected_channel_id.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count,
-                    &last_message_count,
-                    &last_channel_signature,
-                    transport_peer_count,
-                    &discovered_peer_ids,
-                    authority_id,
-                    &homes_state,
-                    &contacts_state,
-                    &stabilized,
-                    scope.as_deref(),
-                );
-                bump_projection_version(&mut projection_version);
+                coordinator.update_chat_state(chat_state);
             })
             .await;
         }
@@ -837,56 +875,11 @@ pub fn use_channels_subscription(
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let active_scope = active_scope.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
-        let last_channel_signature = last_channel_signature.clone();
-        let latest_transport_peer_count = latest_transport_peer_count.clone();
-        let latest_contacts_state = latest_contacts_state.clone();
-        let latest_homes_state = latest_homes_state.clone();
-        let latest_discovered_peers = latest_discovered_peers.clone();
-        let shared_authority_id = shared_authority_id.clone();
-        let selected_channel_id = selected_channel_id.clone();
-        let tasks = tasks.clone();
-        let mut projection_version = projection_version.clone();
+        let coordinator = coordinator.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                let authority_id = settings_state.authority_id.parse::<AuthorityId>().ok();
-                *shared_authority_id.write() = authority_id;
-
-                let Some(authority_id) = authority_id else {
-                    return;
-                };
-
-                let mut chat_state = latest_chat_state.read().clone();
-                chat_state.ensure_note_to_self_channel(authority_id);
-                *latest_chat_state.write() = chat_state.clone();
-                let scope = active_scope.read().clone();
-                let contacts_state = latest_contacts_state.read().clone();
-                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers.read().clone();
-                let homes_state = latest_homes_state.read().clone();
-                let selected_channel = selected_channel_id.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count,
-                    &last_message_count,
-                    &last_channel_signature,
-                    transport_peer_count,
-                    &discovered_peer_ids,
-                    Some(authority_id),
-                    &homes_state,
-                    &contacts_state,
-                    &chat_state,
-                    scope.as_deref(),
-                );
-                bump_projection_version(&mut projection_version);
+                coordinator
+                    .update_authority_id(settings_state.authority_id.parse::<AuthorityId>().ok());
             })
             .await;
         }
@@ -894,240 +887,10 @@ pub fn use_channels_subscription(
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let active_scope = active_scope.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
-        let last_channel_signature = last_channel_signature.clone();
-        let latest_transport_peer_count = latest_transport_peer_count.clone();
-        let latest_contacts_state = latest_contacts_state.clone();
-        let latest_homes_state = latest_homes_state.clone();
-        let latest_discovered_peers = latest_discovered_peers.clone();
-        let shared_authority_id = shared_authority_id.clone();
-        let selected_channel_id = selected_channel_id.clone();
-        let tasks = tasks.clone();
-        let mut projection_version = projection_version.clone();
+        let coordinator = coordinator.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
-                let scope = active_home_scope_id(&neighborhood);
-                *active_scope.write() = Some(scope.clone());
-
-                let chat_state = latest_chat_state.read().clone();
-                let authority_id = *shared_authority_id.read();
-                let contacts_state = latest_contacts_state.read().clone();
-                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers.read().clone();
-                let homes_state = latest_homes_state.read().clone();
-                let selected_channel = selected_channel_id.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count,
-                    &last_message_count,
-                    &last_channel_signature,
-                    transport_peer_count,
-                    &discovered_peer_ids,
-                    authority_id,
-                    &homes_state,
-                    &contacts_state,
-                    &chat_state,
-                    Some(scope.as_str()),
-                );
-                bump_projection_version(&mut projection_version);
-            })
-            .await;
-        }
-    });
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let active_scope = active_scope.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
-        let last_channel_signature = last_channel_signature.clone();
-        let latest_transport_peer_count = latest_transport_peer_count.clone();
-        let latest_contacts_state = latest_contacts_state.clone();
-        let latest_homes_state = latest_homes_state.clone();
-        let latest_discovered_peers = latest_discovered_peers.clone();
-        let shared_authority_id = shared_authority_id.clone();
-        let selected_channel_id = selected_channel_id.clone();
-        let tasks = tasks.clone();
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
-                *latest_contacts_state.write() = contacts_state.clone();
-                let chat_state = latest_chat_state.read().clone();
-                let scope = active_scope.read().clone();
-                let authority_id = *shared_authority_id.read();
-                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers.read().clone();
-                let homes_state = latest_homes_state.read().clone();
-                let selected_channel = selected_channel_id.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count,
-                    &last_message_count,
-                    &last_channel_signature,
-                    transport_peer_count,
-                    &discovered_peer_ids,
-                    authority_id,
-                    &homes_state,
-                    &contacts_state,
-                    &chat_state,
-                    scope.as_deref(),
-                );
-                bump_projection_version(&mut projection_version);
-            })
-            .await;
-        }
-    });
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let latest_chat_state_handle = latest_chat_state.clone();
-        let active_scope_handle = active_scope.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count_handle = last_channel_count.clone();
-        let last_message_count_handle = last_message_count.clone();
-        let last_channel_signature_handle = last_channel_signature.clone();
-        let latest_transport_peer_count_handle = latest_transport_peer_count.clone();
-        let latest_contacts_state_handle = latest_contacts_state.clone();
-        let latest_homes_state_handle = latest_homes_state.clone();
-        let latest_discovered_peers_handle = latest_discovered_peers.clone();
-        let shared_authority_id_handle = shared_authority_id.clone();
-        let selected_channel_id_handle = selected_channel_id.clone();
-        let tasks = tasks.clone();
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
-                *latest_homes_state_handle.write() = homes_state.clone();
-                let chat_state = latest_chat_state_handle.read().clone();
-                let scope = active_scope_handle.read().clone();
-                let authority_id = *shared_authority_id_handle.read();
-                let transport_peer_count =
-                    latest_transport_peer_count_handle.load(Ordering::Relaxed);
-                let discovered_peer_ids = latest_discovered_peers_handle.read().clone();
-                let contacts_state = latest_contacts_state_handle.read().clone();
-                let selected_channel = selected_channel_id_handle.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count_handle,
-                    &last_message_count_handle,
-                    &last_channel_signature_handle,
-                    transport_peer_count,
-                    &discovered_peer_ids,
-                    authority_id,
-                    &homes_state,
-                    &contacts_state,
-                    &chat_state,
-                    scope.as_deref(),
-                );
-                bump_projection_version(&mut projection_version);
-            })
-            .await;
-        }
-    });
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let active_scope = active_scope.clone();
-        let update_tx = update_tx.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
-        let last_channel_signature = last_channel_signature.clone();
-        let latest_transport_peer_count = latest_transport_peer_count.clone();
-        let latest_contacts_state = latest_contacts_state.clone();
-        let latest_homes_state = latest_homes_state.clone();
-        let latest_discovered_peers = latest_discovered_peers.clone();
-        let shared_authority_id = shared_authority_id.clone();
-        let selected_channel_id = selected_channel_id.clone();
-        let tasks = tasks.clone();
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
-                latest_transport_peer_count.store(count, Ordering::Relaxed);
-                let chat_state = latest_chat_state.read().clone();
-                let scope = active_scope.read().clone();
-                let authority_id = *shared_authority_id.read();
-                let contacts_state = latest_contacts_state.read().clone();
-                let homes_state = latest_homes_state.read().clone();
-                let discovered_peer_ids = latest_discovered_peers.read().clone();
-                let selected_channel = selected_channel_id.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count,
-                    &last_message_count,
-                    &last_channel_signature,
-                    count,
-                    &discovered_peer_ids,
-                    authority_id,
-                    &homes_state,
-                    &contacts_state,
-                    &chat_state,
-                    scope.as_deref(),
-                );
-                bump_projection_version(&mut projection_version);
-            })
-            .await;
-        }
-    });
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let channels = shared_channels.clone();
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
-                let discovered_peer_ids = peers_state
-                    .peers
-                    .iter()
-                    .map(|peer| peer.authority_id)
-                    .collect::<Vec<_>>();
-                *latest_discovered_peers.write() = discovered_peer_ids.clone();
-
-                let chat_state = latest_chat_state.read().clone();
-                let scope = active_scope.read().clone();
-                let authority_id = *shared_authority_id.read();
-                let contacts_state = latest_contacts_state.read().clone();
-                let homes_state = latest_homes_state.read().clone();
-                let transport_peer_count = latest_transport_peer_count.load(Ordering::Relaxed);
-                let selected_channel = selected_channel_id.read().clone();
-                publish_scoped_channels(
-                    &channels,
-                    selected_channel.as_deref(),
-                    &tasks,
-                    &update_tx,
-                    &last_channel_count,
-                    &last_message_count,
-                    &last_channel_signature,
-                    transport_peer_count,
-                    &discovered_peer_ids,
-                    authority_id,
-                    &homes_state,
-                    &contacts_state,
-                    &chat_state,
-                    scope.as_deref(),
-                );
-                bump_projection_version(&mut projection_version);
+                coordinator.update_active_scope(Some(active_home_scope_id(&neighborhood)));
             })
             .await;
         }
@@ -1436,12 +1199,13 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 
 #[cfg(test)]
 mod tests {
+    use super::compute_scoped_channel_projection;
     use super::report_subscription_degradation;
     use super::scoped_channel_snapshot;
     use super::DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES;
     use super::DISPLAY_CLOCK_POLL_INTERVAL;
     use crate::tui::tasks::UiTaskOwner;
-    use crate::tui::types::Device;
+    use crate::tui::types::{Channel as UiChannel, Device};
     use crate::tui::updates::UiUpdate;
     use aura_app::ui::types::{
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
@@ -1597,6 +1361,57 @@ mod tests {
     }
 
     #[test]
+    fn scoped_channel_projection_orders_smoothed_channels_deterministically() {
+        let alpha = test_channel_id("alpha");
+        let zulu = test_channel_id("zulu");
+        let dm_like = test_channel_id("dm-like-contact");
+        let state =
+            ChatState::from_channels([test_channel(zulu, "Zulu"), test_channel(alpha, "Alpha")]);
+        let previous_dm_like = test_dm_like_channel(dm_like, "DM: Contact");
+        let previous_rendered = vec![UiChannel::from(&previous_dm_like)];
+        let selected = dm_like.to_string();
+
+        let projection = compute_scoped_channel_projection(
+            &state,
+            None,
+            Some(selected.as_str()),
+            &previous_rendered,
+        );
+
+        assert_eq!(
+            projection
+                .channels
+                .iter()
+                .map(|channel| channel.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Alpha", "DM: Contact", "Zulu"]
+        );
+    }
+
+    #[test]
+    fn render_smoothing_cannot_fabricate_missing_shared_channel_metadata() {
+        let home = test_channel_id("home");
+        let missing_shared = test_channel_id("missing-shared");
+        let state = ChatState::from_channels([test_channel(home, "Home")]);
+        let previous_shared = test_channel(missing_shared, "Shared");
+        let previous_rendered = vec![UiChannel::from(&previous_shared)];
+        let selected = missing_shared.to_string();
+
+        let projection = compute_scoped_channel_projection(
+            &state,
+            None,
+            Some(selected.as_str()),
+            &previous_rendered,
+        );
+
+        assert_eq!(projection.channels.len(), 1);
+        assert!(projection
+            .channels
+            .iter()
+            .all(|channel| channel.id != selected));
+    }
+
+    #[test]
     fn merge_transient_channels_does_not_preserve_selected_shared_channel() {
         let previous_channel = test_channel(test_channel_id("shared"), "Shared");
         let previous = ChatState::from_channels([previous_channel.clone()]);
@@ -1747,5 +1562,32 @@ mod tests {
     fn display_clock_constants_remain_stable_for_nonsemantic_ui_refresh() {
         assert_eq!(DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES, 200);
         assert_eq!(DISPLAY_CLOCK_POLL_INTERVAL, Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn channel_projection_subscription_uses_single_projection_coordinator() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let subscriptions_path =
+            repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
+        let source = std::fs::read_to_string(&subscriptions_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", subscriptions_path.display())
+        });
+        let start = source
+            .find("pub fn use_channels_subscription(")
+            .unwrap_or_else(|| panic!("missing use_channels_subscription"));
+        let end = source[start..]
+            .find("/// Shared invitations state")
+            .map(|offset| start + offset)
+            .unwrap_or_else(|| panic!("missing use_channels_subscription terminator"));
+        let section = &source[start..end];
+
+        assert!(section.contains("let coordinator = ChannelProjectionCoordinator"));
+        assert!(section.contains("&*CHAT_SIGNAL"));
+        assert!(section.contains("&*SETTINGS_SIGNAL"));
+        assert!(section.contains("&*NEIGHBORHOOD_SIGNAL"));
+        assert!(!section.contains("&*CONTACTS_SIGNAL"));
+        assert!(!section.contains("&*HOMES_SIGNAL"));
+        assert!(!section.contains("&*TRANSPORT_PEERS_SIGNAL"));
+        assert!(!section.contains("&*DISCOVERED_PEERS_SIGNAL"));
     }
 }

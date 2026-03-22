@@ -37,6 +37,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Snapshot contention must be surfaced explicitly on parity-relevant paths; the shell may not treat lock contention as an empty authoritative state.
 - Long-lived subscription exhaustion must become structural degraded state, not a log-only event.
 - Selected-channel bindings may only reflect the current authoritative channel projection; the shell must not preserve a missing `context_id` from prior UI state.
+- Shared channel projection must be recomputed by one owned coordinator from authoritative `CHAT`, `SETTINGS`, and neighborhood-scope inputs. Any smoothing that keeps a selected DM-like channel visible during convergence must stay in a pure render-only adapter and must not fabricate canonical channel metadata.
 - Converted ceremony-monitoring paths must consume typed upstream lifecycle terminality and surface timeout or rollback-incomplete outcomes explicitly; the TUI may not silently discard those terminal states.
 - Relative-time display clocks are local observed-only maintenance for formatting. They may refresh labels such as "2m ago", but they must not gate, infer, or repair parity-critical ceremony or readiness state.
 - Slash-command outcome metadata must consume the upstream typed strong-command failure classification from `aura-app`; `aura-terminal` may format that metadata for users, but it must not infer semantic reason codes from local error-string matching.
