@@ -5,7 +5,6 @@
 
 pub use crate::workflows::time::current_time_ms;
 use crate::{
-    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     ui_contract::{
         OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
         SemanticOperationKind, SemanticOperationPhase,
@@ -16,10 +15,10 @@ use crate::{
     },
     workflows::channel_ref::HomeSelector,
     workflows::observed_projection::{
-        update_homes_projection_observed, update_neighborhood_projection_observed,
+        homes_signal_snapshot, replace_homes_projection_observed, update_homes_projection_observed,
+        update_neighborhood_projection_observed,
     },
     workflows::semantic_facts::{prove_home_created, SemanticWorkflowOwner},
-    workflows::signals::read_signal,
     AppCore,
 };
 use async_lock::RwLock;
@@ -73,14 +72,6 @@ async fn authoritative_active_home_selection(app_core: &Arc<RwLock<AppCore>>) ->
     core.active_home_selection()
 }
 
-#[aura_macros::authoritative_source(kind = "signal")]
-// OWNERSHIP: authoritative-source
-async fn homes_state_signal_snapshot(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<HomesState, AuraError> {
-    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
-}
-
 /// Set active context for navigation and command targeting
 ///
 /// **What it does**: Sets the active context ID
@@ -129,7 +120,7 @@ pub async fn move_position(
         _ => 1, // Default to partial
     };
 
-    let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut homes = homes_signal_snapshot(app_core).await?;
     let mut publish_homes = false;
     let neighborhood = {
         let mut core = app_core.write().await;
@@ -627,7 +618,7 @@ pub const fn missing_active_home_message() -> &'static str {
 pub async fn resolve_active_home(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<ActiveHomeResolution, AuraError> {
-    let homes = homes_state_signal_snapshot(app_core).await?;
+    let homes = homes_signal_snapshot(app_core).await?;
 
     if let Some(home_id) = authoritative_active_home_selection(app_core).await {
         if let Some(home_state) = homes.home_state(&home_id) {
@@ -687,9 +678,7 @@ pub async fn initialize_test_home(
     authority_id: aura_core::types::identifiers::AuthorityId,
     timestamp_ms: u64,
 ) -> Result<ChannelId, AuraError> {
-    use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
     use crate::views::home::HomeState;
-    use crate::workflows::signals::emit_signal;
     use aura_core::crypto::hash::hash;
 
     // Create a deterministic home ID from the name
@@ -715,8 +704,7 @@ pub async fn initialize_test_home(
         homes
     };
 
-    // Emit to ReactiveEffects subscribers
-    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await?;
+    replace_homes_projection_observed(app_core, homes).await?;
 
     Ok(home_id)
 }
@@ -724,6 +712,7 @@ pub async fn initialize_test_home(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
     use crate::views::home::HomeState;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;

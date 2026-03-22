@@ -6,18 +6,17 @@
 //! These operations delegate to the RuntimeBridge to commit moderation facts.
 //! UI state is updated by reactive views driven from the journal.
 
-use crate::workflows::channel_ref::ChannelSelector;
-use crate::workflows::parse::parse_authority_id;
+#[cfg(test)]
+use crate::workflows::home_scope::best_home_for_context_by;
+use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_target_authority};
+use crate::workflows::observed_projection::{
+    homes_signal_snapshot, replace_homes_projection_observed,
+};
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
     timeout_runtime_call, workflow_retry_policy,
 };
-use crate::workflows::signals::{emit_signal, read_signal};
-use crate::{
-    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
-    views::home::HomesState,
-    AppCore,
-};
+use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
     effects::amp::ChannelLeaveParams,
@@ -90,87 +89,18 @@ struct ModerationScope {
     peers: Vec<aura_core::types::identifiers::AuthorityId>,
 }
 
-fn parse_channel_hint(channel: &str) -> Result<ChannelSelector, AuraError> {
-    ChannelSelector::parse(channel)
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Copy)]
-struct MaterializedChannelHint {
-    channel_id: ChannelId,
-    context_id: Option<ContextId>,
-}
-
-async fn homes_state_signal_snapshot(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<HomesState, AuraError> {
-    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
-}
-
-async fn emit_homes_state_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    homes: HomesState,
-) -> Result<(), AuraError> {
-    {
-        let mut core = app_core.write().await;
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes.clone());
-    }
-    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
-}
-
 #[cfg(test)]
 fn best_home_for_context(
     homes: &crate::views::home::HomesState,
     context_id: ContextId,
 ) -> Option<(ChannelId, crate::views::home::HomeState)> {
-    homes
-        .iter()
-        .filter(|(_, home)| home.context_id == Some(context_id))
-        .map(|(home_id, home)| (*home_id, home.clone()))
-        .max_by_key(|(_, home)| {
-            (
-                u8::from(home.can_moderate()),
-                u8::from(!home.members.is_empty()),
-                home.member_count,
-            )
-        })
-}
-
-async fn identify_materialized_channel_hint(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel: &str,
-) -> Result<MaterializedChannelHint, AuraError> {
-    let runtime = require_runtime(app_core).await?;
-    let parsed = parse_channel_hint(channel)?;
-    match parsed {
-        ChannelSelector::Id(channel_id) => Ok(MaterializedChannelHint {
-            channel_id,
-            context_id: None,
-        }),
-        ChannelSelector::Name(name) => {
-            let resolved = timeout_runtime_call(
-                &runtime,
-                "identify_materialized_channel_hint",
-                "identify_materialized_channel_bindings_by_name",
-                MODERATION_RUNTIME_TIMEOUT,
-                || runtime.identify_materialized_channel_bindings_by_name(&name),
-            )
-            .await
-            .map_err(|e| super::error::runtime_call("resolve moderation channel", e))?
-            .map_err(|e| super::error::runtime_call("resolve moderation channel", e))?;
-            match resolved.as_slice() {
-                [] => Err(AuraError::not_found(channel.to_string())),
-                [binding] => Ok(MaterializedChannelHint {
-                    channel_id: binding.channel_id,
-                    context_id: Some(binding.context_id),
-                }),
-                _ => Err(AuraError::invalid(format!(
-                    "Ambiguous moderation channel hint: {name}"
-                ))),
-            }
-        }
-    }
+    best_home_for_context_by(homes, context_id, |home| {
+        (
+            u8::from(home.can_moderate()),
+            u8::from(!home.members.is_empty()),
+            home.member_count as usize,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -179,10 +109,19 @@ async fn resolve_scope(
     channel_hint: Option<&str>,
 ) -> Result<ModerationScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let homes = homes_state_signal_snapshot(app_core).await?;
+    let homes = homes_signal_snapshot(app_core).await?;
 
     let hinted_channel = if let Some(hint) = channel_hint {
-        Some(identify_materialized_channel_hint(app_core, hint).await?)
+        Some(
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderation channel",
+                MODERATION_RUNTIME_TIMEOUT,
+            )
+            .await?,
+        )
     } else {
         None
     };
@@ -281,7 +220,7 @@ async fn current_moderation_scope(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<ModerationScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let homes = homes_state_signal_snapshot(app_core).await?;
+    let homes = homes_signal_snapshot(app_core).await?;
 
     if let Some(current_home) = homes.current_home() {
         let context_id = current_home
@@ -357,7 +296,7 @@ async fn apply_local_home_projection<F>(
 where
     F: FnOnce(&mut crate::views::home::HomeState),
 {
-    let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut homes = homes_signal_snapshot(app_core).await?;
     if homes.home_state(&scope.home_id).is_none() {
         homes.add_home(crate::views::home::HomeState::new(
             scope.home_id,
@@ -372,17 +311,7 @@ where
         return Err(AuraError::not_found(scope.home_id.to_string()));
     };
     update(home);
-    emit_homes_state_observed(app_core, homes).await
-}
-
-async fn resolve_target_authority(
-    app_core: &Arc<RwLock<AppCore>>,
-    target: &str,
-) -> Result<aura_core::types::identifiers::AuthorityId, AuraError> {
-    if let Ok(contact) = crate::workflows::query::resolve_contact(app_core, target).await {
-        return Ok(contact.id);
-    }
-    parse_authority_id(target)
+    replace_homes_projection_observed(app_core, homes).await
 }
 
 /// Kick a user from the current home.
@@ -393,9 +322,15 @@ pub async fn kick_user(
     reason: Option<&str>,
     kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = identify_materialized_channel_hint(app_core, channel)
-        .await?
-        .channel_id;
+    let channel_id = identify_materialized_channel_hint(
+        app_core,
+        channel,
+        "identify_materialized_channel_hint",
+        "resolve moderation channel",
+        MODERATION_RUNTIME_TIMEOUT,
+    )
+    .await?
+    .channel_id;
     let target_id = resolve_target_authority(app_core, target).await?;
     kick_user_resolved(app_core, channel_id, target_id, reason, kicked_at_ms).await
 }
@@ -463,9 +398,15 @@ pub async fn ban_user(
     let target_id = resolve_target_authority(app_core, target).await?;
     let channel_id = match channel_hint {
         Some(hint) => Some(
-            identify_materialized_channel_hint(app_core, hint)
-                .await?
-                .channel_id,
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderation channel",
+                MODERATION_RUNTIME_TIMEOUT,
+            )
+            .await?
+            .channel_id,
         ),
         None => None,
     };
@@ -533,9 +474,15 @@ pub async fn unban_user(
     let target_id = resolve_target_authority(app_core, target).await?;
     let channel_id = match channel_hint {
         Some(hint) => Some(
-            identify_materialized_channel_hint(app_core, hint)
-                .await?
-                .channel_id,
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderation channel",
+                MODERATION_RUNTIME_TIMEOUT,
+            )
+            .await?
+            .channel_id,
         ),
         None => None,
     };
@@ -600,9 +547,15 @@ pub async fn mute_user(
     let target_id = resolve_target_authority(app_core, target).await?;
     let channel_id = match channel_hint {
         Some(hint) => Some(
-            identify_materialized_channel_hint(app_core, hint)
-                .await?
-                .channel_id,
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderation channel",
+                MODERATION_RUNTIME_TIMEOUT,
+            )
+            .await?
+            .channel_id,
         ),
         None => None,
     };
@@ -673,9 +626,15 @@ pub async fn unmute_user(
     let target_id = resolve_target_authority(app_core, target).await?;
     let channel_id = match channel_hint {
         Some(hint) => Some(
-            identify_materialized_channel_hint(app_core, hint)
-                .await?
-                .channel_id,
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderation channel",
+                MODERATION_RUNTIME_TIMEOUT,
+            )
+            .await?
+            .channel_id,
         ),
         None => None,
     };

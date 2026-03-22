@@ -5,16 +5,18 @@
 
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::error::WorkflowError;
+use crate::workflows::observed_projection::{
+    homes_signal_snapshot, replace_homes_projection_observed, replace_recovery_projection_observed,
+};
 use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
     runtime_bridge::AuthoritativeChannelBinding,
     signal_defs::{
-        AuthorityInfo, DeviceInfo, SettingsState, HOMES_SIGNAL, HOMES_SIGNAL_NAME, RECOVERY_SIGNAL,
-        RECOVERY_SIGNAL_NAME, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
+        AuthorityInfo, DeviceInfo, SettingsState, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
+        SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
     },
     thresholds::normalize_recovery_threshold,
-    views::{HomesState, RecoveryState},
     AppCore,
 };
 use async_lock::RwLock;
@@ -89,36 +91,6 @@ pub async fn refresh_settings_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     refresh_settings_signal_from_runtime(app_core).await
-}
-
-async fn homes_state_signal_snapshot(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<HomesState, AuraError> {
-    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
-}
-
-async fn emit_homes_state_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    homes: HomesState,
-) -> Result<(), AuraError> {
-    {
-        let mut core = app_core.write().await;
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes.clone());
-    }
-    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
-}
-
-async fn emit_recovery_state_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    recovery: RecoveryState,
-) -> Result<(), AuraError> {
-    {
-        let mut core = app_core.write().await;
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_recovery(recovery.clone());
-    }
-    emit_signal(app_core, &*RECOVERY_SIGNAL, recovery, RECOVERY_SIGNAL_NAME).await
 }
 
 /// Update MFA policy
@@ -241,7 +213,7 @@ pub async fn set_channel_mode_resolved(
             channel: resolved_channel.to_string(),
         })
     })?;
-    let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut homes = homes_signal_snapshot(app_core).await?;
 
     let target_home_id = if homes.has_home(&resolved_channel) {
         Some(resolved_channel)
@@ -270,7 +242,7 @@ pub async fn set_channel_mode_resolved(
     })?;
     home.mode_flags = Some(flags);
 
-    emit_homes_state_observed(app_core, homes).await
+    replace_homes_projection_observed(app_core, homes).await
 }
 
 async fn set_channel_mode_bound(
@@ -278,7 +250,7 @@ async fn set_channel_mode_bound(
     binding: AuthoritativeChannelBinding,
     flags: String,
 ) -> Result<(), AuraError> {
-    let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut homes = homes_signal_snapshot(app_core).await?;
 
     let target_home_id = if homes.has_home(&binding.channel_id) {
         Some(binding.channel_id)
@@ -304,7 +276,7 @@ async fn set_channel_mode_bound(
     home.context_id = Some(binding.context_id);
     home.mode_flags = Some(flags);
 
-    emit_homes_state_observed(app_core, homes).await
+    replace_homes_projection_observed(app_core, homes).await
 }
 
 /// Update guardian recovery threshold configuration.
@@ -339,7 +311,7 @@ pub async fn update_threshold(
     let normalized_k = normalize_recovery_threshold(threshold_k, threshold_n);
 
     recovery.set_threshold(normalized_k as u32);
-    emit_recovery_state_observed(app_core, recovery).await?;
+    replace_recovery_projection_observed(app_core, recovery).await?;
 
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
     state.threshold_k = normalized_k;
@@ -365,7 +337,7 @@ mod tests {
     use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::signal_defs::register_app_signals;
     use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
-    use crate::views::home::HomeState;
+    use crate::views::home::{HomeState, HomesState};
     use crate::workflows::signals::{emit_signal, read_signal};
     use crate::AppConfig;
     use aura_core::{crypto::hash::hash, AuthorityId, ChannelId, ContextId};

@@ -2802,8 +2802,8 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
             match authoritative_pending_home_or_channel_invitation(&runtime).await {
                 Ok(invitation) => invitation,
                 Err(error) => {
-                    return fail_pending_invitation_accept_if_owned(
-                        Some(&owner),
+                    return fail_pending_invitation_accept_owned(
+                        &owner,
                         AcceptInvitationError::AcceptFailed {
                             detail: error.to_string(),
                         },
@@ -2812,8 +2812,8 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
                 }
             };
         let Some(pending_invitation) = pending_invitation else {
-            return fail_pending_invitation_accept_if_owned(
-                Some(&owner),
+            return fail_pending_invitation_accept_owned(
+                &owner,
                 AcceptInvitationError::AcceptFailed {
                     detail: "No pending home invitation found".to_string(),
                 },
@@ -2825,8 +2825,8 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
             pending_invitation.invitation_type,
             crate::runtime_bridge::InvitationBridgeType::Channel { .. }
         ) {
-            return fail_pending_invitation_accept_if_owned(
-                Some(&owner),
+            return fail_pending_invitation_accept_owned(
+                &owner,
                 AcceptInvitationError::AcceptFailed {
                     detail: "pending invitation is not a channel invitation".to_string(),
                 },

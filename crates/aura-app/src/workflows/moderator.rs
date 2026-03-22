@@ -3,17 +3,17 @@
 //! This module contains moderator role management operations that are portable across all frontends.
 //! Moderators (Admins) have elevated permissions within a home.
 
-use crate::workflows::parse::parse_authority_id;
+#[cfg(test)]
+use crate::workflows::home_scope::best_home_for_context_by;
+use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_target_authority};
+use crate::workflows::observed_projection::{
+    homes_signal_snapshot, replace_homes_projection_observed,
+};
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
     timeout_runtime_call, workflow_retry_policy,
 };
-use crate::workflows::signals::{emit_signal, read_signal};
-use crate::{
-    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
-    views::home::{HomeRole, HomesState},
-    AppCore,
-};
+use crate::{views::home::HomeRole, AppCore};
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::{AuraError, RetryRunError};
@@ -66,16 +66,6 @@ async fn send_moderator_fact_with_retry(
     })
 }
 
-async fn resolve_target_authority(
-    app_core: &Arc<RwLock<AppCore>>,
-    target: &str,
-) -> Result<AuthorityId, AuraError> {
-    if let Ok(contact) = crate::workflows::query::resolve_contact(app_core, target).await {
-        return Ok(contact.id);
-    }
-    parse_authority_id(target)
-}
-
 #[aura_macros::strong_reference(domain = "home_scope")]
 #[derive(Debug, Clone)]
 struct ModeratorScope {
@@ -85,83 +75,18 @@ struct ModeratorScope {
     peers: Vec<AuthorityId>,
 }
 
-async fn homes_state_signal_snapshot(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<HomesState, AuraError> {
-    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
-}
-
-async fn emit_homes_state_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    homes: HomesState,
-) -> Result<(), AuraError> {
-    {
-        let mut core = app_core.write().await;
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(homes.clone());
-    }
-    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Copy)]
-struct MaterializedChannelHint {
-    channel_id: ChannelId,
-    context_id: Option<ContextId>,
-}
-
-async fn identify_materialized_channel_hint(
-    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    channel: &str,
-) -> Result<MaterializedChannelHint, AuraError> {
-    match crate::workflows::channel_ref::ChannelSelector::parse(channel)? {
-        crate::workflows::channel_ref::ChannelSelector::Id(channel_id) => {
-            Ok(MaterializedChannelHint {
-                channel_id,
-                context_id: None,
-            })
-        }
-        crate::workflows::channel_ref::ChannelSelector::Name(channel_name) => {
-            let resolved = timeout_runtime_call(
-                runtime,
-                "identify_materialized_channel_hint",
-                "identify_materialized_channel_bindings_by_name",
-                MODERATOR_RUNTIME_TIMEOUT,
-                || runtime.identify_materialized_channel_bindings_by_name(&channel_name),
-            )
-            .await
-            .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?
-            .map_err(|e| super::error::runtime_call("resolve moderator channel", e))?;
-            match resolved.as_slice() {
-                [] => Err(AuraError::not_found(channel_name)),
-                [binding] => Ok(MaterializedChannelHint {
-                    channel_id: binding.channel_id,
-                    context_id: Some(binding.context_id),
-                }),
-                _ => Err(AuraError::invalid(format!(
-                    "Ambiguous moderator channel hint: {channel_name}"
-                ))),
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 fn best_home_for_context(
     homes: &crate::views::home::HomesState,
     context_id: ContextId,
 ) -> Option<(ChannelId, crate::views::home::HomeState)> {
-    homes
-        .iter()
-        .filter(|(_, home)| home.context_id == Some(context_id))
-        .map(|(home_id, home)| (*home_id, home.clone()))
-        .max_by_key(|(_, home)| {
-            (
-                u8::from(home.is_admin()),
-                u8::from(!home.members.is_empty()),
-                home.member_count,
-            )
-        })
+    best_home_for_context_by(homes, context_id, |home| {
+        (
+            u8::from(home.is_admin()),
+            u8::from(!home.members.is_empty()),
+            home.member_count as usize,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -170,9 +95,18 @@ async fn resolve_scope(
     channel_hint: Option<&str>,
 ) -> Result<ModeratorScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let homes = homes_state_signal_snapshot(app_core).await?;
+    let homes = homes_signal_snapshot(app_core).await?;
     let hinted_channel = match channel_hint {
-        Some(hint) => Some(identify_materialized_channel_hint(&runtime, hint).await?),
+        Some(hint) => Some(
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderator channel",
+                MODERATOR_RUNTIME_TIMEOUT,
+            )
+            .await?,
+        ),
         None => None,
     };
 
@@ -233,7 +167,7 @@ async fn current_moderator_scope(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<ModeratorScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    let homes = homes_state_signal_snapshot(app_core).await?;
+    let homes = homes_signal_snapshot(app_core).await?;
 
     if let Ok(active_home_id) = crate::workflows::context::current_home_id(app_core).await {
         if let Some(home_state) = homes.home_state(&active_home_id) {
@@ -273,12 +207,17 @@ pub async fn grant_moderator(
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let runtime = require_runtime(app_core).await?;
     let channel_id = match channel_hint {
         Some(hint) => Some(
-            identify_materialized_channel_hint(&runtime, hint)
-                .await?
-                .channel_id,
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderator channel",
+                MODERATOR_RUNTIME_TIMEOUT,
+            )
+            .await?
+            .channel_id,
         ),
         None => None,
     };
@@ -361,7 +300,7 @@ pub async fn grant_moderator_resolved(
     }
 
     // Observed UI mirror.
-    let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut homes = homes_signal_snapshot(app_core).await?;
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
     }
@@ -389,7 +328,7 @@ pub async fn grant_moderator_resolved(
         home_state.my_role = HomeRole::Moderator;
     }
 
-    emit_homes_state_observed(app_core, homes).await
+    replace_homes_projection_observed(app_core, homes).await
 }
 
 /// Revoke moderator designation from a home member.
@@ -399,12 +338,17 @@ pub async fn revoke_moderator(
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let runtime = require_runtime(app_core).await?;
     let channel_id = match channel_hint {
         Some(hint) => Some(
-            identify_materialized_channel_hint(&runtime, hint)
-                .await?
-                .channel_id,
+            identify_materialized_channel_hint(
+                app_core,
+                hint,
+                "identify_materialized_channel_hint",
+                "resolve moderator channel",
+                MODERATOR_RUNTIME_TIMEOUT,
+            )
+            .await?
+            .channel_id,
         ),
         None => None,
     };
@@ -478,7 +422,7 @@ pub async fn revoke_moderator_resolved(
             .map_err(|e| super::error::runtime_call("Send moderator revoke fact", e))?;
     }
 
-    let mut homes = homes_state_signal_snapshot(app_core).await?;
+    let mut homes = homes_signal_snapshot(app_core).await?;
     if !homes.has_home(&scope.home_id) {
         homes.add_home_with_auto_select(scope.home_state.clone());
     }
@@ -499,12 +443,12 @@ pub async fn revoke_moderator_resolved(
         home_state.my_role = HomeRole::Member;
     }
 
-    emit_homes_state_observed(app_core, homes).await
+    replace_homes_projection_observed(app_core, homes).await
 }
 
 /// Check if current user is admin in current home.
 pub async fn is_admin(app_core: &Arc<RwLock<AppCore>>) -> bool {
-    let Ok(homes) = homes_state_signal_snapshot(app_core).await else {
+    let Ok(homes) = homes_signal_snapshot(app_core).await else {
         return false;
     };
 

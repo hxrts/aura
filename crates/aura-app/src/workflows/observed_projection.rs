@@ -28,9 +28,44 @@ use crate::views::{
 use crate::workflows::parse::{
     parse_authority_id as parse_workflow_authority_id, parse_context_id,
 };
-use crate::workflows::signals::emit_signal;
+use crate::workflows::signals::{emit_signal, read_signal};
 use crate::AppCore;
 use aura_core::AuraError;
+
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn homes_signal_snapshot(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<HomesState, AuraError> {
+    read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
+}
+
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn replace_recovery_projection_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: RecoveryState,
+) -> Result<(), AuraError> {
+    {
+        let mut core = app_core.write().await;
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_recovery(state.clone());
+    }
+
+    emit_signal(app_core, &*RECOVERY_SIGNAL, state, RECOVERY_SIGNAL_NAME).await
+}
+
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn replace_homes_projection_observed(
+    app_core: &Arc<RwLock<AppCore>>,
+    state: HomesState,
+) -> Result<(), AuraError> {
+    {
+        let mut core = app_core.write().await;
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_homes(state.clone());
+    }
+
+    emit_signal(app_core, &*HOMES_SIGNAL, state, HOMES_SIGNAL_NAME).await
+}
 
 /// Observed-only projection update helper for chat state.
 ///
@@ -318,9 +353,16 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal_defs::{
+        HOMES_SIGNAL, HOMES_SIGNAL_NAME, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
+    };
     use crate::views::chat::{Channel, ChannelType};
+    use crate::views::recovery::{Guardian, GuardianStatus, RecoveryState};
+    use crate::workflows::signals::read_signal;
+    use crate::AppConfig;
     use aura_core::hash::hash;
     use aura_core::types::identifiers::ContextId;
+    use std::path::Path;
 
     #[test]
     fn channel_added_replaces_canonical_fields_without_preserving_stale_context() {
@@ -426,6 +468,118 @@ mod tests {
         assert!(state.channel(&canonical_id).is_some());
         assert_eq!(state.channel_count(), 2);
     }
+
+    async fn init_signals_for_test(app_core: &Arc<RwLock<AppCore>>) {
+        let mut core = app_core.write().await;
+        core.init_signals().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn replace_homes_projection_observed_updates_view_and_signal_through_one_helper() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        init_signals_for_test(&app_core).await;
+
+        let home_id = ChannelId::from_bytes(hash(b"observed-projection-homes-shared-helper"));
+        let homes = HomesState::from_parts(
+            std::collections::HashMap::from([(
+                home_id,
+                crate::views::home::HomeState::new(
+                    home_id,
+                    Some("shared-home".to_string()),
+                    AuthorityId::new_from_entropy([11u8; 32]),
+                    1,
+                    ContextId::new_from_entropy([12u8; 32]),
+                ),
+            )]),
+            Some(home_id),
+        );
+
+        replace_homes_projection_observed(&app_core, homes.clone())
+            .await
+            .expect("replace homes projection");
+
+        let signal_state = read_signal(&app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
+            .await
+            .expect("read homes signal");
+        let view_state = {
+            let core = app_core.read().await;
+            core.snapshot().homes
+        };
+
+        assert_eq!(signal_state.current_home_id(), homes.current_home_id());
+        assert_eq!(signal_state.count(), homes.count());
+        assert!(signal_state.home_state(&home_id).is_some());
+        assert_eq!(view_state.current_home_id(), homes.current_home_id());
+        assert_eq!(view_state.count(), homes.count());
+        assert!(view_state.home_state(&home_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn replace_recovery_projection_observed_updates_view_and_signal_through_one_helper() {
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        init_signals_for_test(&app_core).await;
+
+        let recovery = RecoveryState::from_parts(
+            [Guardian {
+                id: AuthorityId::new_from_entropy([13u8; 32]),
+                name: "guardian".to_string(),
+                status: GuardianStatus::Active,
+                added_at: 1,
+                last_seen: Some(2),
+            }],
+            1,
+            None,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        replace_recovery_projection_observed(&app_core, recovery.clone())
+            .await
+            .expect("replace recovery projection");
+
+        let signal_state = read_signal(&app_core, &*RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME)
+            .await
+            .expect("read recovery signal");
+        let view_state = {
+            let core = app_core.read().await;
+            core.snapshot().recovery
+        };
+
+        assert_eq!(signal_state.guardian_count(), recovery.guardian_count());
+        assert_eq!(signal_state.threshold(), recovery.threshold());
+        assert_eq!(view_state.guardian_count(), recovery.guardian_count());
+        assert_eq!(view_state.threshold(), recovery.threshold());
+    }
+
+    #[test]
+    fn homes_and_recovery_publication_helpers_are_shared_across_workflows() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for relative_path in [
+            "crates/aura-app/src/workflows/settings.rs",
+            "crates/aura-app/src/workflows/moderator.rs",
+            "crates/aura-app/src/workflows/moderation.rs",
+            "crates/aura-app/src/workflows/access.rs",
+        ] {
+            let source = std::fs::read_to_string(repo_root.join(relative_path))
+                .unwrap_or_else(|error| panic!("failed to read {relative_path}: {error}"));
+            assert!(!source.contains("async fn emit_homes_state_observed("));
+            assert!(!source.contains("core.views_mut().set_homes("));
+        }
+
+        let context_source =
+            std::fs::read_to_string(repo_root.join("crates/aura-app/src/workflows/context.rs"))
+                .unwrap_or_else(|error| panic!("failed to read context.rs: {error}"));
+        assert!(!context_source.contains("async fn homes_state_signal_snapshot("));
+        assert!(context_source.contains("homes_signal_snapshot"));
+
+        let settings_source =
+            std::fs::read_to_string(repo_root.join("crates/aura-app/src/workflows/settings.rs"))
+                .unwrap_or_else(|error| panic!("failed to read settings.rs: {error}"));
+        assert!(!settings_source.contains("async fn emit_recovery_state_observed("));
+        assert!(!settings_source.contains("core.views_mut().set_recovery("));
+        assert!(settings_source.contains("replace_homes_projection_observed"));
+        assert!(settings_source.contains("replace_recovery_projection_observed"));
+    }
 }
 
 /// Observed-only projection update helper for recovery state.
@@ -441,16 +595,13 @@ pub async fn update_recovery_projection_observed<T>(
     update: impl FnOnce(&mut RecoveryState) -> T,
 ) -> Result<T, AuraError> {
     let (output, state) = {
-        let mut core = app_core.write().await;
+        let core = app_core.read().await;
         let mut state = core.snapshot().recovery;
         let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_recovery(state.clone());
         (output, state)
     };
 
-    // Also emit to RECOVERY_SIGNAL for ReactiveEffects subscribers
-    emit_signal(app_core, &*RECOVERY_SIGNAL, state, RECOVERY_SIGNAL_NAME).await?;
+    replace_recovery_projection_observed(app_core, state).await?;
 
     Ok(output)
 }
@@ -494,15 +645,13 @@ pub async fn update_homes_projection_observed<T>(
     update: impl FnOnce(&mut HomesState) -> T,
 ) -> Result<T, AuraError> {
     let (output, state) = {
-        let mut core = app_core.write().await;
+        let core = app_core.read().await;
         let mut state = core.snapshot().homes;
         let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_homes(state.clone());
         (output, state)
     };
 
-    emit_signal(app_core, &*HOMES_SIGNAL, state, HOMES_SIGNAL_NAME).await?;
+    replace_homes_projection_observed(app_core, state).await?;
 
     Ok(output)
 }
