@@ -51,7 +51,8 @@ use crate::tui::types::{AuthorityInfo, Device, MfaPolicy};
 use async_lock::Mutex as AsyncMutex;
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{
-    OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact, SemanticOperationStatus,
+    ChannelBindingWitness, OperationId, OperationInstanceId, RuntimeEventKind, RuntimeFact,
+    SemanticOperationStatus,
 };
 use aura_core::types::Epoch;
 pub use aura_ui::FrontendUiOperation as UiOperation;
@@ -84,7 +85,7 @@ pub async fn publish_ui_update(
 ) -> bool {
     match publication {
         UiUpdatePublication::OrderedRequired | UiUpdatePublication::RequiredUnordered => {
-            if tx.try_send(update.clone()).is_err() && tx.send(update).await.is_err() {
+            if tx.send(update).await.is_err() {
                 tracing::debug!("UI update channel closed during shutdown");
                 return false;
             }
@@ -134,12 +135,13 @@ pub fn spawn_ordered_ui_updates(
 }
 
 /// Send a UI update, trying non-blocking first and falling back to async.
-///
-/// Prefers `try_send` to avoid blocking the caller. Falls back to `send().await`
-/// if the channel buffer is full. If both fail (channel closed), the update is
-/// silently dropped — the UI is shutting down.
 pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
     let _ = publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await;
+}
+
+/// Send a required UI update from a synchronous callback context.
+pub fn send_ui_update_required_blocking(tx: &UiUpdateSender, update: UiUpdate) -> bool {
+    tx.blocking_send(update).is_ok()
 }
 
 /// Send a UI update without blocking. Returns `true` if sent.
@@ -298,8 +300,8 @@ pub enum UiUpdate {
         message_id: String,
     },
 
-    /// A channel was selected
-    ChannelSelected(String),
+    /// A channel was selected via an authoritative workflow/signal witness.
+    ChannelSelected(ChannelBindingWitness),
 
     /// A new channel was created
     ChannelCreated {
@@ -574,6 +576,8 @@ impl UiUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use tokio::time::{sleep, Duration};
 
     #[test]
     fn test_ui_update_channel() {
@@ -634,5 +638,66 @@ mod tests {
             }
             _ => panic!("Expected OperationFailed"),
         }
+    }
+
+    #[tokio::test]
+    async fn required_publication_waits_for_backpressure() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tx.send(UiUpdate::SyncStarted).await.unwrap();
+
+        let publish = tokio::spawn({
+            let tx = tx.clone();
+            async move {
+                publish_ui_update(
+                    &tx,
+                    UiUpdate::SyncCompleted,
+                    UiUpdatePublication::RequiredUnordered,
+                )
+                .await
+            }
+        });
+
+        sleep(Duration::from_millis(25)).await;
+        assert!(!publish.is_finished());
+
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncStarted)));
+        assert!(publish.await.unwrap());
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncCompleted)));
+    }
+
+    #[tokio::test]
+    async fn ordered_publication_preserves_sequence_under_backpressure() {
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let ordered_gate = Arc::new(AsyncMutex::new(()));
+
+        spawn_ordered_ui_updates(
+            &tasks,
+            &tx,
+            &ordered_gate,
+            vec![UiUpdate::SyncStarted, UiUpdate::SyncCompleted],
+        );
+
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncStarted)));
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncCompleted)));
+        tasks.shutdown();
+    }
+
+    #[tokio::test]
+    async fn lossy_observed_publication_drops_on_backpressure() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tx.send(UiUpdate::SyncStarted).await.unwrap();
+
+        assert!(
+            !publish_ui_update(
+                &tx,
+                UiUpdate::SyncCompleted,
+                UiUpdatePublication::LossyObserved,
+            )
+            .await
+        );
+
+        assert!(matches!(rx.recv().await, Some(UiUpdate::SyncStarted)));
+        assert!(rx.try_recv().is_err());
     }
 }

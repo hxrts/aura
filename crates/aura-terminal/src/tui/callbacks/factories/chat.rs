@@ -51,7 +51,7 @@ impl ChatCallbacks {
         Arc::new(move |operation| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            spawn_handoff_workflow_callback(
+            spawn_handoff_workflow_callback_with_success(
                 ctx,
                 tx,
                 operation,
@@ -62,11 +62,14 @@ impl ChatCallbacks {
                 "Accept pending invitation failed",
                 "accept_pending_channel_invitation callback",
                 |app_core, operation_instance_id| async move {
-                    aura_app::ui::workflows::invitation::accept_pending_home_invitation_with_terminal_status(
+                    aura_app::ui::workflows::invitation::accept_pending_channel_invitation_with_binding_terminal_status(
                         &app_core,
                         operation_instance_id,
                     )
                     .await
+                },
+                |tx, accepted| async move {
+                    send_ui_update_required(&tx, UiUpdate::ChannelSelected(accepted.binding)).await;
                 },
             );
         })
@@ -111,13 +114,6 @@ impl ChatCallbacks {
                         .unwrap_or("/command")
                         .trim_start_matches('/')
                         .to_string();
-                    let joined_channel_name = match &parsed {
-                        aura_app::ui::workflows::strong_command::ParsedCommand::Join {
-                            channel,
-                        } => Some(channel.trim_start_matches('#').to_string()),
-                        _ => None,
-                    };
-
                     match parsed {
                         aura_app::ui::workflows::strong_command::ParsedCommand::Help {
                             command,
@@ -226,30 +222,6 @@ impl ChatCallbacks {
                             .await
                             {
                                 Ok(result) => {
-                                    if let Some(channel_name) = joined_channel_name.as_deref() {
-                                        if let Ok(chat) =
-                                            aura_app::ui::workflows::messaging::get_chat_state(
-                                                ctx.app_core_raw(),
-                                            )
-                                            .await
-                                        {
-                                            if let Some(channel) =
-                                                chat.all_channels().find(|candidate| {
-                                                    candidate
-                                                        .name
-                                                        .eq_ignore_ascii_case(channel_name)
-                                                })
-                                            {
-                                                send_ui_update_required(
-                                                    &tx,
-                                                    UiUpdate::ChannelSelected(
-                                                        channel.id.to_string(),
-                                                    ),
-                                                )
-                                                .await;
-                                            }
-                                        }
-                                    }
                                     let state_label = match result.consistency_state {
                                         aura_app::ui::workflows::strong_command::ConsistencyState::Accepted => "accepted",
                                         aura_app::ui::workflows::strong_command::ConsistencyState::Replicated => "replicated",
@@ -459,7 +431,7 @@ impl ChatCallbacks {
             move |channel_name: String, operation: WorkflowHandoffOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
-                spawn_handoff_workflow_callback(
+                spawn_handoff_workflow_callback_with_success(
                     ctx,
                     tx,
                     operation,
@@ -472,13 +444,16 @@ impl ChatCallbacks {
                     move |app_core, operation_instance_id| {
                         let channel_name = channel_name.clone();
                         async move {
-                            aura_app::ui::workflows::messaging::join_channel_by_name_with_terminal_status(
+                            aura_app::ui::workflows::messaging::join_channel_by_name_with_binding_terminal_status(
                                 &app_core,
                                 &channel_name,
                                 operation_instance_id,
                             )
                             .await
                         }
+                    },
+                    |tx, binding| async move {
+                        send_ui_update_required(&tx, UiUpdate::ChannelSelected(binding)).await;
                     },
                 );
             },

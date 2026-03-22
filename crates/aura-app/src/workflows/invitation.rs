@@ -2733,6 +2733,133 @@ pub async fn accept_pending_home_invitation_with_terminal_status(
     }
 }
 
+async fn pending_channel_binding_witness(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation: &InvitationInfo,
+) -> Result<crate::ui_contract::ChannelBindingWitness, AuraError> {
+    let crate::runtime_bridge::InvitationBridgeType::Channel {
+        home_id,
+        context_id,
+        ..
+    } = &invitation.invitation_type
+    else {
+        return Err(AuraError::invalid(
+            "pending invitation does not materialize a channel binding",
+        ));
+    };
+
+    let channel_id = home_id.parse::<ChannelId>().map_err(|error| {
+        AuraError::invalid(format!(
+            "pending channel invitation {} resolved to invalid canonical channel id {home_id}: {error}",
+            invitation.invitation_id
+        ))
+    })?;
+    let authoritative_context = match context_id {
+        Some(context_id) => Some(*context_id),
+        None => {
+            #[cfg(feature = "signals")]
+            {
+                crate::workflows::messaging::resolve_authoritative_context_id_for_channel(
+                    app_core, channel_id,
+                )
+                .await
+            }
+            #[cfg(not(feature = "signals"))]
+            {
+                let _ = app_core;
+                None
+            }
+        }
+    };
+
+    Ok(crate::ui_contract::ChannelBindingWitness::new(
+        channel_id.to_string(),
+        authoritative_context.map(|context_id| context_id.to_string()),
+    ))
+}
+
+/// Accept the current pending channel invitation and return the settled
+/// invitation id plus the authoritative channel selection/binding witness.
+pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<crate::ui_contract::AcceptedPendingChannelBinding>
+{
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_accept(),
+        instance_id.clone(),
+        SemanticOperationKind::AcceptPendingChannelInvitation,
+    );
+    let result = async {
+        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+
+        let runtime = require_runtime(app_core).await?;
+        let pending_invitation =
+            match authoritative_pending_home_or_channel_invitation(&runtime).await {
+                Ok(invitation) => invitation,
+                Err(error) => {
+                    return fail_pending_invitation_accept_if_owned(
+                        Some(&owner),
+                        AcceptInvitationError::AcceptFailed {
+                            detail: error.to_string(),
+                        },
+                    )
+                    .await;
+                }
+            };
+        let Some(pending_invitation) = pending_invitation else {
+            return fail_pending_invitation_accept_if_owned(
+                Some(&owner),
+                AcceptInvitationError::AcceptFailed {
+                    detail: "No pending home invitation found".to_string(),
+                },
+            )
+            .await;
+        };
+
+        if !matches!(
+            pending_invitation.invitation_type,
+            crate::runtime_bridge::InvitationBridgeType::Channel { .. }
+        ) {
+            return fail_pending_invitation_accept_if_owned(
+                Some(&owner),
+                AcceptInvitationError::AcceptFailed {
+                    detail: "pending invitation is not a channel invitation".to_string(),
+                },
+            )
+            .await;
+        }
+
+        let invitation_id = pending_invitation.invitation_id.clone();
+        accept_imported_invitation_owned(app_core, &pending_invitation, &owner, None).await?;
+        let binding = match pending_channel_binding_witness(app_core, &pending_invitation).await {
+            Ok(binding) => binding,
+            Err(error) => {
+                return fail_invitation_accept(
+                    &owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: error.to_string(),
+                    },
+                )
+                .await;
+            }
+        };
+
+        Ok(crate::ui_contract::AcceptedPendingChannelBinding {
+            invitation_id: invitation_id.to_string(),
+            binding,
+        })
+    }
+    .await;
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3319,6 +3446,64 @@ mod tests {
             terminal,
             SemanticOperationKind::AcceptPendingChannelInvitation,
         );
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_pending_channel_invitation_with_binding_terminal_status_returns_binding_witness(
+    ) {
+        let our_authority = AuthorityId::new_from_entropy([112u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+            our_authority,
+        ));
+        runtime.set_accept_invitation_result(Ok(()));
+        let channel_id = ChannelId::from_bytes([113u8; 32]);
+        let context_id = ContextId::new_from_entropy([114u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([115u8; 32]);
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("pending-channel-binding"),
+            sender_id,
+            receiver_id: our_authority,
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: channel_id.to_string(),
+                context_id: Some(context_id),
+                nickname_suggestion: Some("shared-room".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_participants(
+            context_id,
+            channel_id,
+            vec![our_authority, sender_id],
+        );
+        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let outcome = accept_pending_channel_invitation_with_binding_terminal_status(
+            &app_core,
+            Some(OperationInstanceId("accept-pending-binding-1".to_string())),
+        )
+        .await;
+
+        let accepted = outcome
+            .result
+            .expect("accepted channel invitation should return a binding witness");
+        assert_eq!(accepted.invitation_id, "pending-channel-binding");
+        assert_eq!(accepted.binding.channel_id, channel_id.to_string());
+        assert_eq!(accepted.binding.context_id, Some(context_id.to_string()));
     }
 
     #[cfg(feature = "signals")]

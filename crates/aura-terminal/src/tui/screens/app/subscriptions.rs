@@ -27,6 +27,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::AuthorityId;
 use aura_effects::time::PhysicalTimeHandler;
 
+use crate::tui::channel_selection::{CommittedChannelSelection, SharedCommittedChannelSelection};
 use crate::tui::chat_scope::{
     active_home_scope_id, effective_home_scope_id, is_dm_like_channel, scoped_channels,
 };
@@ -554,7 +555,7 @@ pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 pub fn use_messages_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
-    selected_channel_id: Arc<RwLock<Option<String>>>,
+    selected_channel_id: SharedCommittedChannelSelection,
     projection_version: State<usize>,
 ) -> SharedMessages {
     // Create the shared messages holder - use_ref ensures it persists across renders.
@@ -567,7 +568,10 @@ pub fn use_messages_subscription(
         let mut projection_version = projection_version.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let channel_id = selected_channel_id.read().clone();
+                let channel_id = selected_channel_id
+                    .read()
+                    .clone()
+                    .map(|selection| selection.channel_id().to_string());
 
                 // Get messages for that channel (or empty if none selected)
                 let message_list: Vec<Message> = if let Some(channel_id) = channel_id {
@@ -711,7 +715,7 @@ fn scoped_channel_snapshot(
 #[derive(Clone)]
 struct ChannelProjectionCoordinator {
     channels: SharedChannels,
-    selected_channel_id: Arc<RwLock<Option<String>>>,
+    selected_channel_id: SharedCommittedChannelSelection,
     active_scope: Arc<RwLock<Option<String>>>,
     latest_chat_state: Arc<RwLock<ChatState>>,
     shared_authority_id: SharedAuthorityId,
@@ -732,7 +736,9 @@ impl ChannelProjectionCoordinator {
         let projection = compute_scoped_channel_projection(
             &chat_state,
             scope.as_deref(),
-            selected_channel.as_deref(),
+            selected_channel
+                .as_ref()
+                .map(CommittedChannelSelection::channel_id),
             &previous_rendered_channels,
         );
         let channel_count = projection.channels.len();
@@ -778,7 +784,13 @@ impl ChannelProjectionCoordinator {
         let mut stabilized = {
             let previous = self.latest_chat_state.read();
             let selected_channel = self.selected_channel_id.read().clone();
-            merge_transient_channels(&chat_state, &previous, selected_channel.as_deref())
+            merge_transient_channels(
+                &chat_state,
+                &previous,
+                selected_channel
+                    .as_ref()
+                    .map(CommittedChannelSelection::channel_id),
+            )
         };
         if let Some(authority_id) = *self.shared_authority_id.read() {
             stabilized.ensure_note_to_self_channel(authority_id);
@@ -831,7 +843,7 @@ pub fn use_channels_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     shared_authority_id: SharedAuthorityId,
-    selected_channel_id: Arc<RwLock<Option<String>>>,
+    selected_channel_id: SharedCommittedChannelSelection,
     update_tx: Option<UiUpdateSender>,
     projection_version: State<usize>,
 ) -> SharedChannels {
@@ -1314,9 +1326,11 @@ mod tests {
         let source = std::fs::read_to_string(&source_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", source_path.display()));
 
-        assert!(source.contains("selected_channel_id: Arc<RwLock<Option<String>>>"));
+        assert!(source.contains("selected_channel_id: SharedCommittedChannelSelection"));
         assert!(source.contains("let selected_channel = selected_channel_id.read().clone();"));
-        assert!(source.contains("selected_channel.as_deref()"));
+        assert!(
+            source.contains("selected_channel.as_ref().map(CommittedChannelSelection::channel_id)")
+        );
     }
 
     #[tokio::test]

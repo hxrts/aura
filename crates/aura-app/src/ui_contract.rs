@@ -172,6 +172,42 @@ pub enum HarnessUiCommandReceipt {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelBindingWitness {
+    pub channel_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<String>,
+}
+
+impl ChannelBindingWitness {
+    #[must_use]
+    pub fn new(channel_id: impl Into<String>, context_id: Option<String>) -> Self {
+        Self {
+            channel_id: channel_id.into(),
+            context_id,
+        }
+    }
+
+    #[must_use]
+    pub fn semantic_value(&self) -> SemanticCommandValue {
+        match &self.context_id {
+            Some(context_id) => SemanticCommandValue::AuthoritativeChannelBinding {
+                channel_id: self.channel_id.clone(),
+                context_id: context_id.clone(),
+            },
+            None => SemanticCommandValue::ChannelSelection {
+                channel_id: self.channel_id.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcceptedPendingChannelBinding {
+    pub invitation_id: String,
+    pub binding: ChannelBindingWitness,
+}
+
 impl ModalId {
     #[must_use]
     pub const fn web_dom_id(self) -> &'static str {

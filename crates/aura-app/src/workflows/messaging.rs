@@ -2279,6 +2279,51 @@ pub async fn join_channel_by_name_with_terminal_status(
     }
 }
 
+async fn join_channel_binding_witness(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: &str,
+) -> Result<crate::ui_contract::ChannelBindingWitness, AuraError> {
+    let channel_id = channel_id.parse::<ChannelId>().map_err(|error| {
+        AuraError::invalid(format!(
+            "join workflow returned invalid canonical channel id '{channel_id}': {error}"
+        ))
+    })?;
+    let context_id = resolve_authoritative_context_id_for_channel(app_core, channel_id)
+        .await
+        .map(|context_id| context_id.to_string());
+    Ok(crate::ui_contract::ChannelBindingWitness::new(
+        channel_id.to_string(),
+        context_id,
+    ))
+}
+
+/// Join an existing channel by name and return the channel selection/binding
+/// witness settled by the workflow.
+pub async fn join_channel_by_name_with_binding_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<crate::ui_contract::ChannelBindingWitness> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::join_channel(),
+        instance_id,
+        SemanticOperationKind::JoinChannel,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let channel_id = join_channel_by_name_owned(app_core, channel_name, &owner, None).await?;
+        join_channel_binding_witness(app_core, &channel_id).await
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 #[aura_macros::semantic_owner(
     owner = "join_channel_by_name_with_instance",
     terminal = "publish_success_with",
@@ -4427,6 +4472,36 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn test_join_channel_by_name_with_binding_terminal_status_returns_binding_witness() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let outcome = join_channel_by_name_with_binding_terminal_status(
+            &app_core,
+            "porch",
+            Some(OperationInstanceId(
+                "join-channel-direct-binding".to_string(),
+            )),
+        )
+        .await;
+
+        let binding = outcome
+            .result
+            .expect("joined channel should return a binding witness");
+        assert!(!binding.channel_id.is_empty());
+        match binding.semantic_value() {
+            crate::scenario_contract::SemanticCommandValue::ChannelSelection { channel_id }
+            | crate::scenario_contract::SemanticCommandValue::AuthoritativeChannelBinding {
+                channel_id,
+                ..
+            } => assert_eq!(channel_id, binding.channel_id),
+            other => panic!("unexpected semantic value for channel binding: {other:?}"),
+        }
     }
 
     #[tokio::test]
