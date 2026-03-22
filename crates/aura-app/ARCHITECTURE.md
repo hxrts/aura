@@ -95,6 +95,7 @@ If `aura-app` coordinates a parity-critical operation across async boundaries, o
 |------|----------|---------------------|------------|--------------|
 | Semantic command request/receipt types | `Pure` | `aura-app::ui_contract`, `aura-app::scenario_contract` | contract modules | `aura-terminal`, `aura-web`, `aura-harness` |
 | Parity-critical semantic operation lifecycle | `MoveOwned` | workflow-local semantic coordinator per operation | `aura-app::workflows::*`, semantic-fact publishers | frontends, harness |
+| Authoritative semantic-fact storage | `MoveOwned` | `AppCore` semantic-fact store with workflow-owned mutation helpers | `aura-app::workflows::semantic_facts`, sanctioned owner helpers | signals, frontends, harness |
 | Invitation/channel/delivery readiness derivation rules | `Pure` + coordinator-consumed `ActorOwned` inputs | readiness coordinators in `aura-app::workflows::*` | workflow/coordinator modules only | frontends, harness |
 | Opaque handles / owner-token / handoff surfaces | `MoveOwned` | current token/record holder through sanctioned APIs | contract/workflow transfer APIs | render/projection layers, harness diagnostics |
 
@@ -137,6 +138,9 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - authoritative semantic-fact reads must fail explicitly when the authoritative
   signal is unavailable; owner code may not collapse that state to
   `Default::default()`
+- authoritative semantic facts now live in one `AppCore`-owned store; signal
+  emission mirrors that store for observers but is not the source of truth for
+  parity-critical workflow reads or updates
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership
