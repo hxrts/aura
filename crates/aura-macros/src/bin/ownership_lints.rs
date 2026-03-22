@@ -36,6 +36,7 @@ enum LintMode {
     HarnessMoveOwnershipBoundary,
     HarnessReadinessOwnership,
     HarnessRecoveryOwnership,
+    OptionalOwnerBoundary,
     TimeoutPolicyBoundary,
     TimeDomainUsage,
     AuthoritativeRefNoReresolution,
@@ -67,6 +68,7 @@ impl LintMode {
             "harness-move-ownership-boundary" => Ok(Self::HarnessMoveOwnershipBoundary),
             "harness-readiness-ownership" => Ok(Self::HarnessReadinessOwnership),
             "harness-recovery-ownership" => Ok(Self::HarnessRecoveryOwnership),
+            "optional-owner-boundary" => Ok(Self::OptionalOwnerBoundary),
             "timeout-policy-boundary" => Ok(Self::TimeoutPolicyBoundary),
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
             "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
@@ -99,6 +101,7 @@ impl LintMode {
             Self::HarnessMoveOwnershipBoundary => "harness-move-ownership-boundary",
             Self::HarnessReadinessOwnership => "harness-readiness-ownership",
             Self::HarnessRecoveryOwnership => "harness-recovery-ownership",
+            Self::OptionalOwnerBoundary => "optional-owner-boundary",
             Self::TimeoutPolicyBoundary => "timeout-policy-boundary",
             Self::TimeDomainUsage => "time-domain-usage",
             Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
@@ -243,6 +246,10 @@ fn run() -> Result<(), String> {
                 "parity-critical observation code may not introduce sleeps, retries, or recovery helpers outside approved owner modules"
                     .to_string()
             }
+            LintMode::OptionalOwnerBoundary => {
+                "parity-critical boundaries still expose optional owner or spawner shapes"
+                    .to_string()
+            }
             LintMode::TimeoutPolicyBoundary => {
                 "timeout policy boundary still exposes raw time primitives".to_string()
             }
@@ -317,6 +324,9 @@ fn scan_file(
         }
         LintMode::HarnessRecoveryOwnership => {
             return scan_harness_recovery_ownership(file, source);
+        }
+        LintMode::OptionalOwnerBoundary => {
+            return scan_optional_owner_boundary(file, source);
         }
         LintMode::TimeoutPolicyBoundary => return scan_timeout_policy_boundary(file, syntax),
         LintMode::TimeDomainUsage => return scan_time_domain_usage(file, syntax),
@@ -855,6 +865,7 @@ fn scan_function(
         | LintMode::HarnessMoveOwnershipBoundary
         | LintMode::HarnessReadinessOwnership
         | LintMode::HarnessRecoveryOwnership
+        | LintMode::OptionalOwnerBoundary
         | LintMode::TimeoutPolicyBoundary
         | LintMode::TimeDomainUsage => false,
     };
@@ -1554,6 +1565,7 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::HarnessMoveOwnershipBoundary
             | LintMode::HarnessReadinessOwnership
             | LintMode::HarnessRecoveryOwnership
+            | LintMode::OptionalOwnerBoundary
             | LintMode::TimeoutPolicyBoundary
             | LintMode::TimeDomainUsage
             | LintMode::AuthoritativeRefNoReresolution
@@ -2146,6 +2158,21 @@ fn scan_harness_recovery_ownership(file: &Path, source: &str) -> Vec<String> {
             "run_registered_recovery",
             "retry",
             "fallback",
+        ],
+        &[],
+    )
+}
+
+fn scan_optional_owner_boundary(file: &Path, source: &str) -> Vec<String> {
+    source_line_violations(
+        file,
+        source,
+        &[
+            "RefCell<Option<FrontendTaskOwner>>",
+            "RefCell<Option<WebTaskOwner>>",
+            "-> Option<OwnedTaskSpawner>",
+            "-> Option<OwnedShutdownToken>",
+            "Option<&SemanticWorkflowOwner>",
         ],
         &[],
     )

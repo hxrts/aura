@@ -1,0 +1,14 @@
+error[E0308]: mismatched types
+ --> tests/ui/runtime_bridge_cancellation_token_optional.rs:6:41
+  |
+6 |     let _: Option<OwnedShutdownToken> = bridge.cancellation_token();
+  |            --------------------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Option<OwnedShutdownToken>`, found `OwnedShutdownToken`
+  |            |
+  |            expected due to this
+  |
+  = note: expected enum `Option<OwnedShutdownToken>`
+           found struct `OwnedShutdownToken`
+help: try wrapping the expression in `Some`
+  |
+6 |     let _: Option<OwnedShutdownToken> = Some(bridge.cancellation_token());
+  |                                         +++++                           +
