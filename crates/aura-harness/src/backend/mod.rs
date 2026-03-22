@@ -89,25 +89,11 @@ pub trait InstanceBackend {
     fn inject_message(&mut self, _message: &str) -> Result<()> {
         Ok(())
     }
-    fn authority_id(&mut self) -> Result<Option<String>> {
-        Ok(None)
-    }
+    fn authority_id(&mut self) -> Result<Option<String>>;
     fn health_check(&self) -> Result<bool> {
         Ok(self.is_healthy())
     }
-    fn wait_until_ready(&self, _timeout: Duration) -> Result<()> {
-        Ok(())
-    }
-    fn stage_runtime_identity(&mut self, _authority_id: &str, _device_id: &str) -> Result<()> {
-        bail!(
-            "runtime identity staging is not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn restart(&mut self) -> Result<()> {
-        self.stop()?;
-        self.start()
-    }
+    fn wait_until_ready(&self, timeout: Duration) -> Result<()>;
     fn is_healthy(&self) -> bool;
 }
 
@@ -414,58 +400,286 @@ impl BackendHandle {
         }
     }
 
-    pub fn as_lifecycle_mut(&mut self) -> &mut dyn InstanceBackend {
+    pub fn id(&self) -> &str {
         match self {
-            Self::Local(backend) => backend,
-            Self::Browser(backend) => backend.as_mut(),
-            Self::Ssh(backend) => backend,
+            Self::Local(backend) => backend.id(),
+            Self::Browser(backend) => backend.id(),
+            Self::Ssh(backend) => backend.id(),
         }
     }
 
-    pub fn as_lifecycle(&self) -> &dyn InstanceBackend {
+    pub fn backend_kind(&self) -> &'static str {
         match self {
-            Self::Local(backend) => backend,
-            Self::Browser(backend) => backend.as_ref(),
-            Self::Ssh(backend) => backend,
+            Self::Local(backend) => backend.backend_kind(),
+            Self::Browser(backend) => backend.backend_kind(),
+            Self::Ssh(backend) => backend.backend_kind(),
         }
     }
 
-    pub fn as_diagnostic(&self) -> &dyn DiagnosticBackend {
+    pub fn start(&mut self) -> Result<()> {
         match self {
-            Self::Local(backend) => backend,
-            Self::Browser(backend) => backend.as_ref(),
-            Self::Ssh(backend) => backend,
+            Self::Local(backend) => backend.start(),
+            Self::Browser(backend) => backend.start(),
+            Self::Ssh(backend) => backend.start(),
         }
     }
 
-    pub fn as_observation(&self) -> Result<&dyn ObservationBackend> {
+    pub fn stop(&mut self) -> Result<()> {
         match self {
-            Self::Local(backend) => Ok(backend),
-            Self::Browser(backend) => Ok(backend.as_ref()),
+            Self::Local(backend) => backend.stop(),
+            Self::Browser(backend) => backend.stop(),
+            Self::Ssh(backend) => backend.stop(),
+        }
+    }
+
+    pub fn restart(&mut self) -> Result<()> {
+        self.stop()?;
+        self.start()
+    }
+
+    pub fn authority_id(&mut self) -> Result<Option<String>> {
+        match self {
+            Self::Local(backend) => backend.authority_id(),
+            Self::Browser(backend) => backend.authority_id(),
+            Self::Ssh(backend) => backend.authority_id(),
+        }
+    }
+
+    pub fn health_check(&self) -> Result<bool> {
+        match self {
+            Self::Local(backend) => backend.health_check(),
+            Self::Browser(backend) => backend.health_check(),
+            Self::Ssh(backend) => backend.health_check(),
+        }
+    }
+
+    pub fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.wait_until_ready(timeout),
+            Self::Browser(backend) => backend.wait_until_ready(timeout),
+            Self::Ssh(backend) => backend.wait_until_ready(timeout),
+        }
+    }
+
+    pub fn stage_runtime_identity(&mut self, authority_id: &str, device_id: &str) -> Result<()> {
+        match self {
+            Self::Browser(backend) => backend.stage_runtime_identity(authority_id, device_id),
+            Self::Local(backend) => bail!(
+                "backend {} does not support runtime identity staging",
+                backend.backend_kind()
+            ),
             Self::Ssh(backend) => bail!(
-                "backend {} does not implement the structured observation contract",
+                "backend {} does not support runtime identity staging",
                 backend.backend_kind()
             ),
         }
     }
 
-    pub fn as_raw_ui_mut(&mut self) -> Result<&mut dyn RawUiBackend> {
+    pub fn diagnostic_screen_snapshot(&self) -> Result<String> {
         match self {
-            Self::Local(backend) => Ok(backend),
-            Self::Browser(backend) => Ok(backend.as_mut()),
+            Self::Local(backend) => backend.diagnostic_screen_snapshot(),
+            Self::Browser(backend) => backend.diagnostic_screen_snapshot(),
+            Self::Ssh(backend) => backend.diagnostic_screen_snapshot(),
+        }
+    }
+
+    pub fn diagnostic_dom_snapshot(&self) -> Result<String> {
+        match self {
+            Self::Local(backend) => backend.diagnostic_dom_snapshot(),
+            Self::Browser(backend) => backend.diagnostic_dom_snapshot(),
+            Self::Ssh(backend) => backend.diagnostic_dom_snapshot(),
+        }
+    }
+
+    pub fn wait_for_diagnostic_dom_patterns(
+        &self,
+        patterns: &[String],
+        timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        match self {
+            Self::Local(backend) => backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms),
+            Self::Browser(backend) => {
+                backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms)
+            }
+            Self::Ssh(backend) => backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms),
+        }
+    }
+
+    pub fn wait_for_diagnostic_target(
+        &self,
+        selector: &str,
+        timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        match self {
+            Self::Local(backend) => backend.wait_for_diagnostic_target(selector, timeout_ms),
+            Self::Browser(backend) => backend.wait_for_diagnostic_target(selector, timeout_ms),
+            Self::Ssh(backend) => backend.wait_for_diagnostic_target(selector, timeout_ms),
+        }
+    }
+
+    pub fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
+        match self {
+            Self::Local(backend) => backend.tail_log(lines),
+            Self::Browser(backend) => backend.tail_log(lines),
+            Self::Ssh(backend) => backend.tail_log(lines),
+        }
+    }
+
+    pub fn read_clipboard(&self) -> Result<String> {
+        match self {
+            Self::Local(backend) => backend.read_clipboard(),
+            Self::Browser(backend) => backend.read_clipboard(),
+            Self::Ssh(backend) => backend.read_clipboard(),
+        }
+    }
+
+    pub fn supports_ui_snapshot(&self) -> bool {
+        matches!(self, Self::Local(_) | Self::Browser(_))
+    }
+
+    pub fn ui_snapshot(&self) -> Result<UiSnapshot> {
+        match self {
+            Self::Local(backend) => backend.ui_snapshot(),
+            Self::Browser(backend) => backend.ui_snapshot(),
             Self::Ssh(backend) => bail!(
-                "backend {} does not implement the raw UI interaction contract",
+                "backend {} does not support structured ui snapshots",
                 backend.backend_kind()
             ),
         }
     }
 
-    pub fn as_shared_semantic_mut(&mut self) -> Result<&mut dyn SharedSemanticBackend> {
+    pub fn wait_for_ui_snapshot_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Result<Option<UiSnapshotEvent>> {
         match self {
-            Self::Local(backend) => Ok(backend),
-            Self::Browser(backend) => Ok(backend.as_mut()),
+            Self::Local(backend) => backend
+                .wait_for_ui_snapshot_event(timeout, after_version)
+                .transpose(),
+            Self::Browser(backend) => backend
+                .wait_for_ui_snapshot_event(timeout, after_version)
+                .transpose(),
             Self::Ssh(backend) => bail!(
-                "backend {} does not implement the shared semantic adapter contract",
+                "backend {} does not support structured ui snapshot events",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn send_keys(&mut self, keys: &str) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.send_keys(keys),
+            Self::Browser(backend) => backend.send_keys(keys),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui key input",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.send_key(key, repeat),
+            Self::Browser(backend) => backend.send_key(key, repeat),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui key input",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn click_button(&mut self, label: &str) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.click_button(label),
+            Self::Browser(backend) => backend.click_button(label),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui button clicks",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn activate_control(&mut self, control_id: ControlId) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.activate_control(control_id),
+            Self::Browser(backend) => backend.activate_control(control_id),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui control activation",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn click_target(&mut self, selector: &str) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.click_target(selector),
+            Self::Browser(backend) => backend.click_target(selector),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui target clicks",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn fill_input(&mut self, selector: &str, value: &str) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.fill_input(selector, value),
+            Self::Browser(backend) => backend.fill_input(selector, value),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui selector input",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn fill_field(&mut self, field_id: FieldId, value: &str) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.fill_field(field_id, value),
+            Self::Browser(backend) => backend.fill_field(field_id, value),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui field input",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn activate_list_item(&mut self, list_id: ListId, item_id: &str) -> Result<()> {
+        match self {
+            Self::Local(backend) => backend.activate_list_item(list_id, item_id),
+            Self::Browser(backend) => backend.activate_list_item(list_id, item_id),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support raw ui list activation",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn submit_create_contact_invitation(
+        &mut self,
+        receiver_authority_id: &str,
+    ) -> Result<SubmittedAction<ContactInvitationCode>> {
+        match self {
+            Self::Local(backend) => backend.submit_create_contact_invitation(receiver_authority_id),
+            Self::Browser(backend) => {
+                backend.submit_create_contact_invitation(receiver_authority_id)
+            }
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support shared semantic contact invitation submission",
+                backend.backend_kind()
+            ),
+        }
+    }
+
+    pub fn submit_semantic_command(
+        &mut self,
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResponse> {
+        match self {
+            Self::Local(backend) => backend.submit_semantic_command(request),
+            Self::Browser(backend) => backend.submit_semantic_command(request),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support shared semantic command submission",
                 backend.backend_kind()
             ),
         }
@@ -488,6 +702,7 @@ mod tests {
     use aura_app::ui_contract::{ProjectionRevision, QuiescenceSnapshot};
     use std::cell::Cell;
     use std::cell::RefCell;
+    use std::fs;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -571,6 +786,14 @@ mod tests {
         }
 
         fn stop(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn authority_id(&mut self) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        fn wait_until_ready(&self, _timeout: Duration) -> Result<()> {
             Ok(())
         }
 
@@ -664,6 +887,35 @@ mod tests {
         assert_eq!(diagnostic.read_clipboard()?, "clipboard");
         assert_eq!(backend.mutation_calls.get(), 0);
         Ok(())
+    }
+
+    #[test]
+    fn backend_handle_does_not_reintroduce_broad_capability_wrappers() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/backend/mod.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read backend source: {error}"));
+
+        let forbidden = [
+            ["pub fn ", "as_", "lifecycle_mut("].concat(),
+            ["pub fn ", "as_", "lifecycle("].concat(),
+            ["pub fn ", "as_", "diagnostic("].concat(),
+            ["pub fn ", "as_", "observation("].concat(),
+            ["pub fn ", "as_", "raw_ui_mut("].concat(),
+            ["pub fn ", "as_", "shared_semantic_mut("].concat(),
+            [
+                "runtime identity ",
+                "staging is not supported by backend",
+            ]
+            .concat(),
+        ];
+
+        for forbidden in forbidden {
+            assert!(
+                !source.contains(&forbidden),
+                "backend wrapper cleanup regressed: found {forbidden:?}"
+            );
+        }
     }
 
     struct RecordingSemanticBackend {

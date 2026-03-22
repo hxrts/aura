@@ -147,8 +147,16 @@ impl InstanceBackend for SshTunnelBackend {
         Ok(())
     }
 
+    fn authority_id(&mut self) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     fn health_check(&self) -> Result<bool> {
         Ok(self.state == BackendState::Running && self.last_probe_ok)
+    }
+
+    fn wait_until_ready(&self, _timeout: std::time::Duration) -> Result<()> {
+        Ok(())
     }
 
     fn is_healthy(&self) -> bool {

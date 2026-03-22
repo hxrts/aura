@@ -48,6 +48,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
 - Shared scenario inventory discipline: `scenarios/harness_inventory.toml` is semantic-only for shared flows. The remaining compatibility-step IR is justified only by `tests/phases/phase3_state_machine.rs` plus executor-internal metadata/wait shaping, and must not expand back into authoritative scenario coverage.
 - Explicit lane capability contract: shared-semantic, raw-UI, and diagnostic-observation access are declared separately at preflight time; SSH is diagnostic-only until it implements the shared semantic contract.
+- Backend enum routing must expose exact lifecycle, diagnostic, observation, raw-UI, and semantic operations. Do not reintroduce broad `as_*` capability-casting wrappers or generic unsupported-capability bailouts.
 - The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.
 - Shared semantic execution must not keep a duplicate lifecycle graph, phase cache, or heuristic identifier repair path for accounts, contacts, channels, or messaging state.
 - Executor sequencing carries typed submission evidence into contract-declared `before_next_intent` waits; it must not rebuild a pending convergence graph or discharge post-operation progress locally.
@@ -167,6 +168,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - Treat `SharedSemanticBackend` plus `UiSnapshot` / `UiSnapshotEvent` as the primary shared-semantic contract. If you need raw screen or DOM data, the API and variable names must say `diagnostic`.
 - When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
 - If a convenience helper still needs exported data after submission, the follow-on wait must bind to an authoritative runtime event or projection contract, not a modal/screen side effect.
+- Keep unsupported capability failures attached to the exact unsupported operation. Do not add back generic backend-cast helpers that hide which contract was actually requested.
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 - Do not add new inventory-backed or shared-flow dependents to `compatibility_step.rs`. If you touch that IR, keep the retention surface limited to `tests/phases/phase3_state_machine.rs` and executor-internal metadata/wait shaping, or delete it instead.
 

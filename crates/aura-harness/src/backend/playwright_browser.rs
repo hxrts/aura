@@ -371,6 +371,29 @@ impl PlaywrightBrowserBackend {
         self.state = BackendState::Stopped;
         Ok(())
     }
+
+    pub fn stage_runtime_identity(&mut self, authority_id: &str, device_id: &str) -> Result<()> {
+        let authority_id = authority_id
+            .parse::<AuthorityId>()
+            .with_context(|| format!("invalid authority id for runtime staging: {authority_id}"))?;
+        let device_id = device_id
+            .parse::<DeviceId>()
+            .with_context(|| format!("invalid device id for runtime staging: {device_id}"))?;
+        let runtime_identity_json =
+            serde_json::to_string(&BootstrapRuntimeIdentity::new(authority_id, device_id))
+                .context("failed to encode staged runtime identity")?;
+        self.with_session(|session| {
+            session.rpc_call(
+                "stage_runtime_identity",
+                json!({
+                    "instance_id": self.config.id,
+                    "runtime_identity_json": runtime_identity_json,
+                }),
+            )?;
+            Ok(())
+        })
+    }
+
     fn submit_semantic_command(
         &mut self,
         request: SemanticCommandRequest,
@@ -587,28 +610,6 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             let authority_id = payload.authority_id.trim().to_string();
             let authority_id = (!authority_id.is_empty()).then_some(authority_id);
             Ok(authority_id)
-        })
-    }
-
-    fn stage_runtime_identity(&mut self, authority_id: &str, device_id: &str) -> Result<()> {
-        let authority_id = authority_id
-            .parse::<AuthorityId>()
-            .with_context(|| format!("invalid authority id for runtime staging: {authority_id}"))?;
-        let device_id = device_id
-            .parse::<DeviceId>()
-            .with_context(|| format!("invalid device id for runtime staging: {device_id}"))?;
-        let runtime_identity_json =
-            serde_json::to_string(&BootstrapRuntimeIdentity::new(authority_id, device_id))
-                .context("failed to encode staged runtime identity")?;
-        self.with_session(|session| {
-            session.rpc_call(
-                "stage_runtime_identity",
-                json!({
-                    "instance_id": self.config.id,
-                    "runtime_identity_json": runtime_identity_json,
-                }),
-            )?;
-            Ok(())
         })
     }
 
