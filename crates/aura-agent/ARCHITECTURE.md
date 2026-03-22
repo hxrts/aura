@@ -285,6 +285,10 @@ Runtime bridge lookup follows the same strong-ref rule:
 - effect-backed threshold config/state queries must persist and read the same
   `threshold_config` record; they may not keep a second legacy storage schema
   alive behind the runtime-owned path
+- imported channel invitations and channel-acceptance notification must require
+  the authoritative invitation context end to end; they may not default to the
+  sender's home context when importing, loading, or establishing the sender
+  peer channel
 - runtime-owned relational-fact pull must fail explicitly when rendezvous is
   unavailable or no websocket-capable descriptor exists for the target peer; it
   may not downgrade missing transport reachability into a zero-fact success
