@@ -321,6 +321,7 @@ impl ScenarioExecutor {
         tool_api: &mut ToolApi,
         budgets: ExecutionBudgets,
     ) -> Result<ScenarioReport> {
+        let semantic_lane = semantic_execution_lane(scenario);
         let machine = SequentialStateMachine::from_steps(semantic_steps);
         let mut current = machine
             .start_state
@@ -387,6 +388,7 @@ impl ScenarioExecutor {
             }
             let step_result = execute_semantic_step(
                 &state.step,
+                semantic_lane,
                 tool_api,
                 step_budget,
                 &mut scenario_rng,
@@ -532,6 +534,7 @@ fn execute_compatibility_step(
                 resolve_required_field(step, "command", step.command.as_deref(), context)?;
             execute_chat_command(
                 tool_api,
+                ExecutionLane::FrontendConformance,
                 context,
                 step,
                 &instance_id,
@@ -695,6 +698,7 @@ fn execute_compatibility_step(
 
 fn execute_semantic_step(
     step: &SemanticStep,
+    semantic_lane: ExecutionLane,
     tool_api: &mut ToolApi,
     step_budget_ms: u64,
     scenario_rng: &mut DeterministicRng,
@@ -796,7 +800,7 @@ fn execute_semantic_step(
                 let instance_id = resolve_required_semantic_instance(step)?;
                 let snapshot = fetch_ui_snapshot_in_lane(
                     tool_api,
-                    ExecutionLane::SharedSemantic,
+                    semantic_lane,
                     &instance_id,
                 )?;
                 let selection = snapshot
@@ -823,7 +827,7 @@ fn execute_semantic_step(
                 let regex_pattern = resolve_template(regex, context)?;
                 let payload = dispatch_payload_in_lane(
                     tool_api,
-                    ExecutionLane::SharedSemantic,
+                    semantic_lane,
                     ToolRequest::Screen {
                         instance_id,
                         screen_source: ScreenSource::Default,
@@ -856,16 +860,18 @@ fn execute_semantic_step(
         },
         SemanticAction::Ui(UiAction::Navigate(screen_id)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
-            dispatch(
+            dispatch_in_lane(
                 tool_api,
+                semantic_lane,
                 plan_activate_control_request(&instance_id, nav_control_id_for_screen(*screen_id)),
             )?;
             Ok(())
         }
         SemanticAction::Ui(UiAction::Activate(control_id)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
-            dispatch(
+            dispatch_in_lane(
                 tool_api,
+                semantic_lane,
                 plan_activate_control_request(&instance_id, *control_id),
             )?;
             Ok(())
@@ -873,8 +879,9 @@ fn execute_semantic_step(
         SemanticAction::Ui(UiAction::ActivateListItem { list, item_id }) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let item_id = resolve_template(item_id, context)?;
-            dispatch(
+            dispatch_in_lane(
                 tool_api,
+                semantic_lane,
                 ToolRequest::ActivateListItem {
                     instance_id,
                     list_id: *list,
@@ -886,8 +893,9 @@ fn execute_semantic_step(
         SemanticAction::Ui(UiAction::Fill(field_id, value)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let value = resolve_template(value, context)?;
-            dispatch(
+            dispatch_in_lane(
                 tool_api,
+                semantic_lane,
                 plan_fill_field_request(&instance_id, *field_id, value),
             )?;
             Ok(())
@@ -895,13 +903,14 @@ fn execute_semantic_step(
         SemanticAction::Ui(UiAction::InputText(value)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
             let keys = resolve_template(value, context)?;
-            dispatch_send_keys(tool_api, &instance_id, &keys)?;
+            dispatch_send_keys_in_lane(tool_api, semantic_lane, &instance_id, &keys)?;
             Ok(())
         }
         SemanticAction::Ui(UiAction::PressKey(key, repeat)) => {
             let instance_id = resolve_required_semantic_instance(step)?;
-            dispatch(
+            dispatch_in_lane(
                 tool_api,
+                semantic_lane,
                 ToolRequest::SendKey {
                     instance_id,
                     key: input_key_to_tool_key(*key),
@@ -914,6 +923,7 @@ fn execute_semantic_step(
             let instance_id = resolve_required_semantic_instance(step)?;
             execute_chat_command(
                 tool_api,
+                semantic_lane,
                 context,
                 &semantic_metadata_step(step),
                 &instance_id,
@@ -930,6 +940,7 @@ fn execute_semantic_step(
             execute_semantic_send_clipboard(
                 step,
                 tool_api,
+                semantic_lane,
                 &target_instance_id,
                 &source_instance_id,
                 step_budget_ms,
@@ -937,8 +948,9 @@ fn execute_semantic_step(
         }
         SemanticAction::Ui(UiAction::ReadClipboard { name }) => {
             let instance_id = resolve_required_semantic_instance(step)?;
-            let text = read_clipboard_value(
+            let text = read_clipboard_value_in_lane(
                 tool_api,
+                semantic_lane,
                 &instance_id,
                 &step.id,
                 step.timeout_ms.unwrap_or(step_budget_ms),
@@ -948,7 +960,11 @@ fn execute_semantic_step(
         }
         SemanticAction::Ui(UiAction::DismissTransient) => {
             let instance_id = resolve_required_semantic_instance(step)?;
-            dispatch(tool_api, plan_dismiss_transient_request(&instance_id))?;
+            dispatch_in_lane(
+                tool_api,
+                semantic_lane,
+                plan_dismiss_transient_request(&instance_id),
+            )?;
             Ok(())
         }
         SemanticAction::Expect(expectation) => {
@@ -2178,12 +2194,40 @@ fn plan_dismiss_transient_request(instance_id: &str) -> ToolRequest {
     }
 }
 
-fn dispatch_send_keys(tool_api: &mut ToolApi, instance_id: &str, keys: &str) -> Result<()> {
+fn semantic_execution_lane(scenario: &ScenarioConfig) -> ExecutionLane {
+    if scenario.is_frontend_conformance_semantic() {
+        ExecutionLane::FrontendConformance
+    } else {
+        ExecutionLane::SharedSemantic
+    }
+}
+
+fn require_frontend_conformance_lane(
+    lane: ExecutionLane,
+    context_label: &str,
+    action: &'static str,
+) -> Result<()> {
+    if matches!(lane, ExecutionLane::SharedSemantic) {
+        bail!(
+            "{context_label} shared semantic lane may not execute frontend-local ui action {action}; use a semantic intent or classify this scenario as frontend_conformance"
+        );
+    }
+    Ok(())
+}
+
+fn dispatch_send_keys_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    instance_id: &str,
+    keys: &str,
+) -> Result<()> {
+    require_frontend_conformance_lane(lane, instance_id, "send_keys")?;
     if should_escape_insert_before_send_keys(keys)
         && diagnostic_screen_contains(tool_api, instance_id, "mode: insert").unwrap_or(false)
     {
-        let _ = dispatch(
+        let _ = dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::SendKey {
                 instance_id: instance_id.to_string(),
                 key: ToolKey::Esc,
@@ -2191,14 +2235,23 @@ fn dispatch_send_keys(tool_api: &mut ToolApi, instance_id: &str, keys: &str) -> 
             },
         );
     }
-    dispatch(
+    dispatch_in_lane(
         tool_api,
+        lane,
         ToolRequest::SendKeys {
             instance_id: instance_id.to_string(),
             keys: keys.to_string(),
         },
-    )?;
-    Ok(())
+    )
+}
+
+fn dispatch_send_keys(tool_api: &mut ToolApi, instance_id: &str, keys: &str) -> Result<()> {
+    dispatch_send_keys_in_lane(
+        tool_api,
+        ExecutionLane::FrontendConformance,
+        instance_id,
+        keys,
+    )
 }
 
 fn input_key_to_tool_key(key: InputKey) -> ToolKey {
@@ -2222,12 +2275,14 @@ fn input_key_to_tool_key(key: InputKey) -> ToolKey {
 
 fn execute_chat_command(
     tool_api: &mut ToolApi,
+    lane: ExecutionLane,
     context: &mut ScenarioContext,
     step: &CompatibilityStep,
     instance_id: &str,
     command: String,
     step_budget_ms: u64,
 ) -> Result<()> {
+    require_frontend_conformance_lane(lane, &step.id, "send_chat_command")?;
     let command = if command.starts_with('/') {
         command
     } else {
@@ -2238,8 +2293,9 @@ fn execute_chat_command(
     let backend_kind = tool_api.backend_kind(instance_id).unwrap_or("unknown");
 
     if backend_kind != "playwright_browser" {
-        let _ = dispatch(
+        let _ = dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::SendKey {
                 instance_id: instance_id.to_string(),
                 key: ToolKey::Esc,
@@ -2256,16 +2312,18 @@ fn execute_chat_command(
         step_budget_ms,
     )?;
     if backend_kind == "playwright_browser" {
-        dispatch(
+        dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::FillField {
                 instance_id: instance_id.to_string(),
                 field_id: FieldId::ChatInput,
                 value: format!("/{command_body}"),
             },
         )?;
-        dispatch(
+        dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::SendKey {
                 instance_id: instance_id.to_string(),
                 key: ToolKey::Enter,
@@ -2274,42 +2332,46 @@ fn execute_chat_command(
         )?;
         return Ok(());
     }
-    dispatch(
+    dispatch_in_lane(
         tool_api,
+        lane,
         ToolRequest::SendKey {
             instance_id: instance_id.to_string(),
             key: ToolKey::Esc,
             repeat: 1,
         },
     )?;
-    dispatch(
+    dispatch_in_lane(
         tool_api,
+        lane,
         ToolRequest::SendKeys {
             instance_id: instance_id.to_string(),
             keys: "i".to_string(),
         },
     )?;
     blocking_sleep(Duration::from_millis(180));
-    dispatch(
+    dispatch_in_lane(
         tool_api,
+        lane,
         ToolRequest::SendKeys {
             instance_id: instance_id.to_string(),
             keys: format!("/{command_body}\n"),
         },
     )?;
-    let snapshot = fetch_ui_snapshot(tool_api, instance_id).ok();
+    let snapshot = fetch_ui_snapshot_in_lane(tool_api, lane, instance_id).ok();
     if snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.focused_control)
         .or_else(|| {
-            fetch_ui_snapshot(tool_api, instance_id)
+            fetch_ui_snapshot_in_lane(tool_api, lane, instance_id)
                 .ok()
                 .and_then(|snapshot| snapshot.focused_control)
         })
         == Some(ControlId::Field(FieldId::ChatInput))
     {
-        let _ = dispatch(
+        let _ = dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::SendKey {
                 instance_id: instance_id.to_string(),
                 key: ToolKey::Esc,
@@ -2323,13 +2385,14 @@ fn execute_chat_command(
         .filter(|value| !value.is_empty())
     {
         if instance_id.eq_ignore_ascii_case("alice")
-            && fetch_ui_snapshot(tool_api, "alice")
+            && fetch_ui_snapshot_in_lane(tool_api, lane, "alice")
                 .ok()
                 .and_then(|snapshot| snapshot.focused_control)
                 != Some(ControlId::Field(FieldId::ChatInput))
         {
-            let _ = dispatch(
+            let _ = dispatch_in_lane(
                 tool_api,
+                lane,
                 ToolRequest::SendKeys {
                     instance_id: "bob".to_string(),
                     keys: format!("\u{1b}i{action_text}\n"),
@@ -2343,15 +2406,18 @@ fn execute_chat_command(
 fn execute_semantic_send_clipboard(
     step: &SemanticStep,
     tool_api: &mut ToolApi,
+    lane: ExecutionLane,
     target_instance_id: &str,
     source_instance_id: &str,
     step_budget_ms: u64,
 ) -> Result<()> {
+    require_frontend_conformance_lane(lane, &step.id, "paste_clipboard")?;
     let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let clipboard_text = loop {
-        let attempt_error = match dispatch_payload(
+        let attempt_error = match dispatch_payload_in_lane(
             tool_api,
+            lane,
             ToolRequest::ReadClipboard {
                 instance_id: source_instance_id.to_string(),
             },
@@ -2382,7 +2448,7 @@ fn execute_semantic_send_clipboard(
         }
         blocking_sleep(Duration::from_millis(100));
     };
-    dispatch_clipboard_text(tool_api, target_instance_id, &clipboard_text)?;
+    dispatch_clipboard_text_in_lane(tool_api, lane, target_instance_id, &clipboard_text)?;
     Ok(())
 }
 
@@ -2656,10 +2722,27 @@ fn read_clipboard_value(
     step_id: &str,
     timeout_ms: u64,
 ) -> Result<String> {
+    read_clipboard_value_in_lane(
+        tool_api,
+        ExecutionLane::FrontendConformance,
+        instance_id,
+        step_id,
+        timeout_ms,
+    )
+}
+
+fn read_clipboard_value_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    instance_id: &str,
+    step_id: &str,
+    timeout_ms: u64,
+) -> Result<String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        let attempt = dispatch_payload(
+        let attempt = dispatch_payload_in_lane(
             tool_api,
+            lane,
             ToolRequest::ReadClipboard {
                 instance_id: instance_id.to_string(),
             },
@@ -3675,10 +3758,17 @@ fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serd
     dispatch_payload_in_lane(tool_api, ExecutionLane::FrontendConformance, request)
 }
 
-fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str) -> Result<()> {
+fn dispatch_clipboard_text_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    instance_id: &str,
+    text: &str,
+) -> Result<()> {
+    require_frontend_conformance_lane(lane, instance_id, "paste_clipboard")?;
     if text.chars().count() <= CLIPBOARD_PASTE_CHUNK_CHARS {
-        return dispatch(
+        return dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::SendKeys {
                 instance_id: instance_id.to_string(),
                 keys: text.to_string(),
@@ -3692,8 +3782,9 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
         chunk.push(ch);
         chunk_len += 1;
         if chunk_len >= CLIPBOARD_PASTE_CHUNK_CHARS {
-            dispatch(
+            dispatch_in_lane(
                 tool_api,
+                lane,
                 ToolRequest::SendKeys {
                     instance_id: instance_id.to_string(),
                     keys: chunk.clone(),
@@ -3706,8 +3797,9 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
     }
 
     if !chunk.is_empty() {
-        dispatch(
+        dispatch_in_lane(
             tool_api,
+            lane,
             ToolRequest::SendKeys {
                 instance_id: instance_id.to_string(),
                 keys: chunk,
@@ -3715,6 +3807,15 @@ fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str
         )?;
     }
     Ok(())
+}
+
+fn dispatch_clipboard_text(tool_api: &mut ToolApi, instance_id: &str, text: &str) -> Result<()> {
+    dispatch_clipboard_text_in_lane(
+        tool_api,
+        ExecutionLane::FrontendConformance,
+        instance_id,
+        text,
+    )
 }
 
 #[cfg(test)]
@@ -3776,6 +3877,7 @@ mod tests {
             schema_version: 1,
             id: id.to_string(),
             goal: goal.to_string(),
+            classification: None,
             execution_mode: Some("compatibility".to_string()),
             required_capabilities: vec![],
             compatibility_steps,

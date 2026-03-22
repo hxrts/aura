@@ -726,5 +726,7 @@ mod tests {
         assert!(source.contains(".diagnostic_screen_with_source("));
         assert!(source.contains(".wait_for_diagnostic_screen_with_source("));
         assert!(source.contains(".wait_for_diagnostic_target("));
+        assert!(source.contains(".ui_snapshot(&instance_id)"));
+        assert!(source.contains(".wait_for_ui_snapshot_event(instance_id, timeout, after_version)"));
     }
 }

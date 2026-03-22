@@ -17,7 +17,7 @@ fn screen_normalization_removes_volatile_tokens() {
 }
 
 #[test]
-fn lint_rejects_unknown_instance_references() {
+fn lint_rejects_unclassified_frontend_ui_mechanics() {
     let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir failed: {error}"));
     let config_path = temp.path().join("run.toml");
     let scenario_path = temp.path().join("scenario.toml");
@@ -70,7 +70,7 @@ timeout_ms = 10
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("scenario lint failed"));
+    assert!(stderr.contains("classify it as frontend_conformance"));
 }
 
 #[test]

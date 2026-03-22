@@ -103,6 +103,7 @@ mod tests {
             schema_version: 1,
             id: id.to_string(),
             goal: goal.to_string(),
+            classification: None,
             execution_mode: None,
             required_capabilities: vec![],
             compatibility_steps: Vec::new(),

@@ -6,20 +6,15 @@ use std::fs;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use aura_harness::api_version::TOOL_API_VERSIONS;
-use aura_harness::artifact_sync::RemoteArtifactSyncReport;
 use aura_harness::config::{
     InstanceConfig, InstanceMode, RunConfig, RunSection, RuntimeSubstrate, ScreenSource,
     TunnelConfig,
 };
 use aura_harness::coordinator::HarnessCoordinator;
-use aura_harness::determinism::{build_seed_bundle, SeedBundle};
-use aura_harness::replay::ReplayBundle;
-use aura_harness::resource_guards::ResourceGuardReport;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 
 #[test]
-fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
+fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
     let temp = match tempfile::tempdir() {
         Ok(temp) => temp,
         Err(error) => panic!("tempdir failed: {error}"),
@@ -103,70 +98,21 @@ fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
     }
 
     let binary = env!("CARGO_BIN_EXE_aura-harness");
-    let status = match Command::new(binary)
+    let output = match Command::new(binary)
         .arg("run")
         .arg("--config")
         .arg(config_path.as_os_str())
         .arg("--artifacts-dir")
         .arg(artifacts_dir.as_os_str())
-        .status()
+        .output()
     {
-        Ok(status) => status,
+        Ok(output) => output,
         Err(error) => panic!("failed running harness binary: {error}"),
     };
-    assert!(status.success());
-
-    let run_dir = artifacts_dir.join("harness").join("phase5-regression");
-
-    let seed_bundle: SeedBundle = read_json(&run_dir.join("seed_bundle.json"));
-    let replay_bundle: ReplayBundle = read_json(&run_dir.join("replay_bundle.json"));
-    let resource_report: ResourceGuardReport = read_json(&run_dir.join("resource_report.json"));
-    let remote_sync_report: RemoteArtifactSyncReport =
-        read_json(&run_dir.join("remote_artifact_sync.json"));
-
-    let run_config = match aura_harness::load_and_validate_run_config(&config_path) {
-        Ok(config) => config,
-        Err(error) => panic!("failed to reload run config: {error}"),
-    };
-    let expected_seed_bundle = build_seed_bundle(&run_config);
-
-    assert_eq!(seed_bundle.run_seed, expected_seed_bundle.run_seed);
-    assert_eq!(
-        seed_bundle.scenario_seed,
-        expected_seed_bundle.scenario_seed
-    );
-    assert_eq!(seed_bundle.fault_seed, expected_seed_bundle.fault_seed);
-    assert_eq!(
-        seed_bundle.instance_seeds,
-        expected_seed_bundle.instance_seeds
-    );
-
-    assert_eq!(replay_bundle.seed_bundle.run_seed, seed_bundle.run_seed);
-    assert!(TOOL_API_VERSIONS
-        .iter()
-        .any(|supported| *supported == replay_bundle.tool_api_version));
-
-    assert!(resource_report
-        .samples
-        .iter()
-        .any(|sample| sample.stage == "run_start"));
-    assert!(resource_report
-        .samples
-        .iter()
-        .any(|sample| sample.stage == "run_stop"));
-    assert!(resource_report.samples.iter().any(|sample| {
-        sample
-            .violations
-            .iter()
-            .any(|violation| violation.contains("memory usage"))
-    }));
-
-    assert!(remote_sync_report.required);
-    assert!(remote_sync_report.complete);
-    assert_eq!(remote_sync_report.records.len(), 1);
-    assert_eq!(remote_sync_report.records[0].instance_id, "bob");
-    assert_eq!(remote_sync_report.records[0].status, "simulated");
-    assert!(!remote_sync_report.records[0].checksum_sha256.is_empty());
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("diagnostic-only"));
+    assert!(stderr.contains("shared semantic scenarios require explicit shared-semantic backends"));
 }
 
 #[allow(clippy::disallowed_methods)]
@@ -240,18 +186,4 @@ args = ["-lc", "yes churn"]
         "wait_for exceeded wall-clock budget: elapsed_ms={}",
         elapsed.as_millis()
     );
-}
-
-fn read_json<T>(path: &std::path::Path) -> T
-where
-    T: serde::de::DeserializeOwned,
-{
-    let body = match fs::read_to_string(path) {
-        Ok(body) => body,
-        Err(error) => panic!("failed to read {}: {error}", path.display()),
-    };
-    match serde_json::from_str(&body) {
-        Ok(value) => value,
-        Err(error) => panic!("failed to parse {}: {error}", path.display()),
-    }
 }

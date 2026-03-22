@@ -194,6 +194,7 @@ fn sample_compatibility_scenario() -> aura_harness::config::ScenarioConfig {
         id: "mixed-topology-smoke".to_string(),
         goal: "Exercise local plus ssh-dry-run topology with compatibility execution.".to_string(),
         execution_mode: Some("compatibility".to_string()),
+        classification: None,
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         compatibility_steps: vec![
             CompatibilityStep {
@@ -238,6 +239,7 @@ fn sample_agent_scenario() -> aura_harness::config::ScenarioConfig {
         id: "mixed-topology-agent".to_string(),
         goal: "Run the same compatibility path using agent mode.".to_string(),
         execution_mode: Some("agent".to_string()),
+        classification: None,
         required_capabilities: vec!["local".to_string(), "ssh".to_string()],
         compatibility_steps: vec![
             CompatibilityStep {
