@@ -33,7 +33,7 @@ async fn test_auth_service_via_agent() -> Result<(), Box<dyn std::error::Error>>
 }
 
 #[tokio::test]
-async fn test_is_authenticated_via_agent() -> Result<(), Box<dyn std::error::Error>> {
+async fn test_authentication_status_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([61u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
@@ -43,8 +43,9 @@ async fn test_is_authenticated_via_agent() -> Result<(), Box<dyn std::error::Err
 
     let auth = agent.auth()?;
 
-    // In test mode, is_authenticated should return true
-    assert!(auth.is_authenticated().await);
+    let status = auth.authentication_status().await?;
+    assert_eq!(status.authority_id, authority_id);
+    assert_eq!(status.device_id, auth.device_id());
     Ok(())
 }
 

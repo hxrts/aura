@@ -27,7 +27,7 @@ pub struct CeremonyInitRequest {
     pub new_epoch: u64,
     pub enrollment_device_id: Option<DeviceId>,
     pub enrollment_nickname_suggestion: Option<String>,
-    pub prestate_hash: Option<Hash32>,
+    pub prestate_hash: Hash32,
 }
 
 /// Optional metadata for a ceremony commit.
@@ -51,7 +51,7 @@ impl CeremonyRunner {
     /// Register a new ceremony with prestate binding.
     pub async fn start(&self, request: CeremonyInitRequest) -> Result<(), IntentError> {
         self.tracker
-            .register_with_prestate(
+            .register(
                 request.ceremony_id,
                 request.kind,
                 request.initiator_id,
@@ -99,7 +99,7 @@ impl CeremonyRunner {
     pub async fn check_supersession_candidates(
         &self,
         kind: CeremonyKind,
-        prestate_hash: Option<&Hash32>,
+        prestate_hash: &Hash32,
     ) -> Vec<CeremonyId> {
         self.tracker
             .check_supersession_candidates(kind, prestate_hash)

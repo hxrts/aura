@@ -62,9 +62,11 @@ type AmpChannelParticipants = Arc<Mutex<HashMap<(ContextId, ChannelId), Vec<Auth
 type ModerationStatuses =
     Arc<Mutex<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>;
 #[cfg(test)]
-type OfflineAcceptInvitationResult = Arc<Mutex<Option<Result<(), IntentError>>>>;
+type OfflineAcceptInvitationResult =
+    Arc<Mutex<Option<Result<InvitationMutationOutcome, IntentError>>>>;
 #[cfg(test)]
-type OfflineProcessCeremonyResult = Arc<Mutex<Option<Result<(), IntentError>>>>;
+type OfflineProcessCeremonyResult =
+    Arc<Mutex<Option<Result<CeremonyProcessingOutcome, IntentError>>>>;
 
 /// Status of the runtime's sync service
 #[derive(Debug, Clone, Default)]
@@ -90,6 +92,73 @@ pub struct RendezvousStatus {
     pub cached_peers: usize,
 }
 
+/// Result of explicitly triggering peer discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveryTriggerOutcome {
+    /// Discovery work was newly started by this request.
+    Started,
+    /// Discovery was already active; nothing new was started.
+    AlreadyRunning,
+}
+
+/// Reachability refresh result after processing ceremony/contact traffic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReachabilityRefreshOutcome {
+    /// Refresh completed successfully after processing progress.
+    Refreshed,
+    /// Refresh could not converge; callers must treat this as degraded state.
+    Degraded {
+        /// Human-readable degradation reason from the runtime-owned refresh path.
+        reason: String,
+    },
+}
+
+/// Counts for one ceremony/contact processing pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CeremonyProcessingCounts {
+    /// Processed ceremony acceptances.
+    pub acceptances: usize,
+    /// Processed ceremony completions.
+    pub completions: usize,
+    /// Processed contact/channel invitation envelopes.
+    pub contact_messages: usize,
+    /// Processed rendezvous handshake envelopes.
+    pub handshakes: usize,
+}
+
+impl CeremonyProcessingCounts {
+    /// Total number of processed items across all categories.
+    pub fn total(self) -> usize {
+        self.acceptances
+            .saturating_add(self.completions)
+            .saturating_add(self.contact_messages)
+            .saturating_add(self.handshakes)
+    }
+}
+
+/// Outcome of one explicit ceremony/contact processing pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CeremonyProcessingOutcome {
+    /// Nothing was available to process in this pass.
+    NoProgress,
+    /// Work was processed and any follow-up reachability refresh status is explicit.
+    Processed {
+        /// Counts by processed category.
+        counts: CeremonyProcessingCounts,
+        /// Reachability refresh result after processing progress.
+        reachability_refresh: ReachabilityRefreshOutcome,
+    },
+}
+
+/// Result of mutating invitation state through the runtime bridge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitationMutationOutcome {
+    /// Invitation that was mutated.
+    pub invitation_id: InvitationId,
+    /// The new canonical invitation status.
+    pub new_status: InvitationBridgeStatus,
+}
+
 /// Overall runtime status
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeStatus {
@@ -97,8 +166,23 @@ pub struct RuntimeStatus {
     pub sync: SyncStatus,
     /// Rendezvous service status
     pub rendezvous: RendezvousStatus,
-    /// Whether the runtime is authenticated
-    pub is_authenticated: bool,
+    /// Explicit authentication status.
+    pub authentication: AuthenticationStatus,
+}
+
+/// Explicit runtime authentication status.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AuthenticationStatus {
+    /// No authenticated runtime authority/device is available.
+    #[default]
+    Unauthenticated,
+    /// The runtime is authenticated for one concrete authority/device pair.
+    Authenticated {
+        /// Authenticated authority.
+        authority_id: AuthorityId,
+        /// Authenticated device.
+        device_id: DeviceId,
+    },
 }
 
 /// High-level ceremony kind exposed across the runtime bridge boundary.
@@ -707,7 +791,7 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// This is required for flows like device enrollment where the invitee must
     /// ingest ceremony commit messages before signal-backed state can converge.
-    async fn process_ceremony_messages(&self) -> Result<(), IntentError>;
+    async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError>;
 
     /// Sync with a specific peer by ID
     ///
@@ -759,7 +843,7 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// This initiates an immediate discovery cycle rather than waiting
     /// for the next scheduled discovery interval.
-    async fn trigger_discovery(&self) -> Result<(), IntentError>;
+    async fn trigger_discovery(&self) -> Result<DiscoveryTriggerOutcome, IntentError>;
 
     // =========================================================================
     // LAN Discovery
@@ -1009,13 +1093,22 @@ pub trait RuntimeBridge: Send + Sync {
     ) -> Result<InvitationInfo, IntentError>;
 
     /// Accept a received invitation
-    async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
+    async fn accept_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError>;
 
     /// Decline a received invitation
-    async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
+    async fn decline_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError>;
 
     /// Cancel a sent invitation
-    async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError>;
+    async fn cancel_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError>;
 
     /// List pending invitations, distinguishing runtime unavailability from a
     /// real empty pending set.
@@ -1084,8 +1177,8 @@ pub trait RuntimeBridge: Send + Sync {
     // Authentication
     // =========================================================================
 
-    /// Check if the runtime is authenticated
-    async fn is_authenticated(&self) -> bool;
+    /// Query the explicit runtime authentication status.
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError>;
 
     // =========================================================================
     // Authorization / Capabilities
@@ -1140,7 +1233,7 @@ pub trait RuntimeBridge: Send + Sync {
         Ok(RuntimeStatus {
             sync: self.try_get_sync_status().await?,
             rendezvous: self.try_get_rendezvous_status().await?,
-            is_authenticated: self.is_authenticated().await,
+            authentication: self.authentication_status().await?,
         })
     }
 }
@@ -1293,7 +1386,10 @@ impl OfflineRuntimeBridge {
 
     #[cfg(test)]
     /// Configure the result returned by `accept_invitation`.
-    pub fn set_accept_invitation_result(&self, result: Result<(), IntentError>) {
+    pub fn set_accept_invitation_result(
+        &self,
+        result: Result<InvitationMutationOutcome, IntentError>,
+    ) {
         let mut guard = self
             .accept_invitation_result
             .try_lock()
@@ -1303,7 +1399,10 @@ impl OfflineRuntimeBridge {
 
     #[cfg(test)]
     /// Configure the result returned by `process_ceremony_messages`.
-    pub fn set_process_ceremony_result(&self, result: Result<(), IntentError>) {
+    pub fn set_process_ceremony_result(
+        &self,
+        result: Result<CeremonyProcessingOutcome, IntentError>,
+    ) {
         let mut guard = self
             .process_ceremony_result
             .try_lock()
@@ -1626,7 +1725,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Err(IntentError::no_agent("Sync not available in offline mode"))
     }
 
-    async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
+    async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError> {
         #[cfg(test)]
         if let Some(result) = self.process_ceremony_result.lock().await.clone() {
             return result;
@@ -1664,7 +1763,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn trigger_discovery(&self) -> Result<(), IntentError> {
+    async fn trigger_discovery(&self) -> Result<DiscoveryTriggerOutcome, IntentError> {
         Err(IntentError::no_agent(
             "Discovery not available in offline mode",
         ))
@@ -1858,7 +1957,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn accept_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+    async fn accept_invitation(
+        &self,
+        _invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         #[cfg(test)]
         if let Some(result) = self.accept_invitation_result.lock().await.clone() {
             return result;
@@ -1868,13 +1970,19 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn decline_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+    async fn decline_invitation(
+        &self,
+        _invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         Err(IntentError::no_agent(
             "Invitation decline not available in offline mode",
         ))
     }
 
-    async fn cancel_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+    async fn cancel_invitation(
+        &self,
+        _invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         Err(IntentError::no_agent(
             "Invitation cancellation not available in offline mode",
         ))
@@ -1958,8 +2066,8 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn is_authenticated(&self) -> bool {
-        false
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+        Ok(AuthenticationStatus::Unauthenticated)
     }
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {
@@ -2004,7 +2112,10 @@ mod tests {
         let bridge = OfflineRuntimeBridge::new(authority);
 
         assert_eq!(bridge.authority_id(), authority);
-        assert!(!bridge.is_authenticated().await);
+        assert_eq!(
+            bridge.authentication_status().await.unwrap(),
+            AuthenticationStatus::Unauthenticated
+        );
         assert!(!bridge.has_signing_capability().await);
         assert!(
             !bridge

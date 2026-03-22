@@ -657,6 +657,7 @@ ci-ownership-policy:
     just ci-workflow-no-view-derived-readiness
     just ci-workflow-no-view-derived-recipient-resolution
     just ci-workflow-unbounded-runtime-awaits
+    just ci-runtime-typed-lifecycle-bridge
     just ci-weak-to-strong-identifier-upgrade
     just ci-workflow-ownership-tag-ratchet
     just ci-parity-critical-ignored-results
@@ -724,6 +725,9 @@ ci-workflow-no-view-derived-recipient-resolution:
 
 ci-workflow-unbounded-runtime-awaits:
     just _ownership-lint workflow-unbounded-runtime-awaits crates/aura-app/src crates/aura-terminal/src/tui crates/aura-web/src crates/aura-ui/src
+
+ci-runtime-typed-lifecycle-bridge:
+    bash scripts/check/runtime-typed-lifecycle-bridge.sh
 
 ci-weak-to-strong-identifier-upgrade:
     just _ownership-lint weak-to-strong-identifier-upgrade crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src

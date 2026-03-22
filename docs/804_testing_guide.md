@@ -110,6 +110,10 @@ For parity-critical waits and assertions:
 
 - waits must bind to declared readiness, event, or quiescence conditions
 - waits may also bind to typed operation handles or strictly newer authoritative projections when the shared contract defines them
+- when a runtime bridge surface exposes typed lifecycle such as
+  `DiscoveryTriggerOutcome`, `CeremonyProcessingOutcome`, or an explicit
+  mutation outcome, tests should assert those variants directly instead of
+  treating `Ok(())` as sufficient proof of progress
 - executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers; do not keep a second harness-local convergence graph
 - projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation; runtime-event, toast, and exact operation-state waits still fail closed across restarts
 - semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or `Submitting`

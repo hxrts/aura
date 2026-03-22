@@ -89,6 +89,15 @@ pub struct AuthResult {
     pub authenticated_at: u64,
 }
 
+/// Explicit authentication status for the local runtime authority/device pair.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthenticationStatus {
+    /// Authenticated authority.
+    pub authority_id: AuthorityId,
+    /// Authenticated device.
+    pub device_id: DeviceId,
+}
+
 /// Fact recorded when authentication succeeds
 #[derive(Debug, Serialize)]
 struct AuthenticatedFact {
@@ -432,8 +441,11 @@ impl AuthHandler {
         })
     }
 
-    /// Handle authentication request (legacy API for backwards compatibility)
-    pub async fn authenticate(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+    /// Report the current runtime-owned authentication status.
+    pub async fn authentication_status(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<AuthenticationStatus> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Enforce guard chain
@@ -454,15 +466,10 @@ impl AuthHandler {
             ));
         }
 
-        HandlerUtilities::append_relational_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            AUTH_AUTHENTICATED_FACT_TYPE_ID,
-            &serde_json::json!({ "authority": self.context.authority.authority_id() }),
-        )
-        .await?;
-        Ok(())
+        Ok(AuthenticationStatus {
+            authority_id: self.context.authority.authority_id(),
+            device_id: self.device_id(),
+        })
     }
 }
 
@@ -475,7 +482,7 @@ mod tests {
     use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
-    async fn auth_fact_is_journaled() {
+    async fn auth_status_requires_authorized_context() {
         let authority_id = AuthorityId::new_from_entropy([90u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
 
@@ -483,7 +490,9 @@ mod tests {
         let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
         let handler = AuthHandler::new(authority_context.clone()).unwrap();
 
-        handler.authenticate(&effects).await.unwrap();
+        let status = handler.authentication_status(&effects).await.unwrap();
+        assert_eq!(status.authority_id, authority_id);
+        assert_eq!(status.device_id, handler.device_id());
     }
 
     #[tokio::test]

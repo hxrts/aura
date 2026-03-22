@@ -4,12 +4,16 @@
 
 use crate::core::{default_context_id_for_authority, AgentResult, AuthorityContext};
 use crate::runtime::{AuraEffectSystem, EffectContext};
+use aura_core::types::facts::FactEnvelope;
 use aura_core::types::facts::FactTypeId;
-use aura_core::types::identifiers::ContextId;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
+use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::FactJournal;
 use serde::Serialize;
 use serde_json;
+use std::collections::HashMap;
+use std::fmt::Display;
 
 /// Handler context combining authority context with runtime utilities
 #[derive(Clone)]
@@ -89,6 +93,69 @@ impl HandlerUtilities {
         }
         Ok(())
     }
+}
+
+pub fn map_handler_effect_error(label: &'static str, error: impl Display) -> crate::core::AgentError {
+    crate::core::AgentError::effects(format!("{label}: {error}"))
+}
+
+pub fn map_handler_time_read_error(error: impl Display) -> crate::core::AgentError {
+    map_handler_effect_error("Failed to read time", error)
+}
+
+pub fn map_handler_tree_read_error(error: impl Display) -> crate::core::AgentError {
+    map_handler_effect_error("Failed to read tree state", error)
+}
+
+pub fn resolve_charge_peer<T>(
+    commands: &[T],
+    fallback: AuthorityId,
+    resolver: impl Fn(&T) -> Option<AuthorityId>,
+) -> AuthorityId {
+    commands.iter().find_map(resolver).unwrap_or(fallback)
+}
+
+pub fn build_string_metadata(
+    entries: impl IntoIterator<Item = (&'static str, String)>,
+) -> HashMap<String, String> {
+    let mut metadata = HashMap::new();
+    for (key, value) in entries {
+        metadata.insert(key.to_string(), value);
+    }
+    metadata
+}
+
+pub fn build_transport_metadata(
+    content_type: &'static str,
+    entries: impl IntoIterator<Item = (&'static str, String)>,
+) -> HashMap<String, String> {
+    let mut metadata = build_string_metadata(entries);
+    metadata.insert("content-type".to_string(), content_type.to_string());
+    metadata
+}
+
+pub async fn load_relational_fact_envelopes_by_type(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    type_id: &str,
+) -> AgentResult<Vec<FactEnvelope>> {
+    let facts = effects
+        .load_committed_facts(authority)
+        .await
+        .map_err(|error| crate::core::AgentError::effects(error.to_string()))?;
+
+    Ok(facts
+        .into_iter()
+        .rev()
+        .filter_map(|fact| match fact.content {
+            FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                if envelope.type_id.as_str() == type_id =>
+            {
+                Some(envelope)
+            }
+            _ => None,
+        })
+        .collect())
 }
 
 /// Compute the commitment for the relational context journal.

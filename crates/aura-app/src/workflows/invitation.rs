@@ -160,8 +160,13 @@ use crate::workflows::semantic_facts::{
 };
 use crate::workflows::settings;
 use crate::workflows::signals::{read_signal, read_signal_or_default};
+use crate::workflows::stage_tracker::{
+    new_workflow_stage_tracker, update_workflow_stage, WorkflowStageTracker,
+};
+#[cfg(feature = "signals")]
+use crate::workflows::stage_tracker::update_workflow_stage_direct;
 use crate::{views::invitations::InvitationsState, AppCore};
-use async_lock::{Mutex, RwLock};
+use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::{
@@ -171,8 +176,6 @@ use aura_core::{
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-
-type ChannelInvitationStageTracker = Arc<Mutex<&'static str>>;
 
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
 const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
@@ -220,25 +223,15 @@ impl InvitationHandle {
 }
 
 fn update_channel_invitation_stage(
-    tracker: &Option<ChannelInvitationStageTracker>,
+    tracker: &Option<WorkflowStageTracker>,
     stage: &'static str,
 ) {
-    if let Some(tracker) = tracker {
-        if let Some(mut guard) = tracker.try_lock() {
-            *guard = stage;
-        }
-    }
-}
-
-fn new_channel_invitation_stage_tracker(stage: &'static str) -> ChannelInvitationStageTracker {
-    Arc::new(Mutex::new(stage))
+    update_workflow_stage(tracker, stage);
 }
 
 #[cfg(feature = "signals")]
-fn update_accept_reconcile_stage(tracker: &ChannelInvitationStageTracker, stage: &'static str) {
-    if let Some(mut guard) = tracker.try_lock() {
-        *guard = stage;
-    }
+fn update_accept_reconcile_stage(tracker: &WorkflowStageTracker, stage: &'static str) {
+    update_workflow_stage_direct(tracker, stage);
 }
 
 async fn timeout_channel_invitation_stage_with_deadline<T>(
@@ -710,7 +703,7 @@ async fn reconcile_channel_invitation_acceptance(
         context_hint,
         channel_name_hint: channel_name_hint.map(ToOwned::to_owned),
     };
-    let stage_tracker = new_channel_invitation_stage_tracker("reconcile_channel_invitation:start");
+    let stage_tracker = new_workflow_stage_tracker("reconcile_channel_invitation:start");
     let reconcile_budget = match workflow_timeout_budget(
         runtime,
         Duration::from_millis(invitation_accept_reconcile_timeout_ms(
@@ -877,7 +870,7 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     channel_id: ChannelId,
     context_id: Option<ContextId>,
     bootstrap: Option<ChannelBootstrapPackage>,
-    stage_tracker: &Option<ChannelInvitationStageTracker>,
+    stage_tracker: &Option<WorkflowStageTracker>,
     deadline: Option<TimeoutBudget>,
 ) -> Result<(ContextId, ChannelBootstrapPackage), ChannelInvitationBootstrapError> {
     let requested_context = context_id;
@@ -1170,7 +1163,7 @@ async fn reconcile_accepted_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     accepted_channel: &AcceptedChannelInvitationTarget,
-    stage_tracker: &ChannelInvitationStageTracker,
+    stage_tracker: &WorkflowStageTracker,
 ) -> Result<(), AuraError> {
     const CHANNEL_CONTEXT_ATTEMPTS: usize = 60;
     const CHANNEL_CONTEXT_BACKOFF_MS: u64 = 100;
@@ -1235,7 +1228,7 @@ async fn reconcile_accepted_channel_invitation_authoritative(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     authoritative_channel: crate::workflows::messaging::AuthoritativeChannelRef,
     channel_name_hint: Option<&str>,
-    stage_tracker: &ChannelInvitationStageTracker,
+    stage_tracker: &WorkflowStageTracker,
 ) -> Result<(), AuraError> {
     update_accept_reconcile_stage(
         stage_tracker,
@@ -1318,7 +1311,7 @@ async fn reconcile_accepted_channel_invitation(
     _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     _accepted_channel: &AcceptedChannelInvitationTarget,
-    _stage_tracker: &ChannelInvitationStageTracker,
+    _stage_tracker: &WorkflowStageTracker,
 ) -> Result<(), AuraError> {
     converge_runtime(runtime).await;
     Ok(())
@@ -1422,7 +1415,7 @@ pub async fn create_channel_invitation(
     bootstrap: Option<ChannelBootstrapPackage>,
     operation_instance_id: Option<OperationInstanceId>,
     deadline: Option<TimeoutBudget>,
-    external_stage_tracker: Option<ChannelInvitationStageTracker>,
+    external_stage_tracker: Option<WorkflowStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationHandle, AuraError> {
@@ -1459,13 +1452,13 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
     bootstrap: Option<ChannelBootstrapPackage>,
     owner: &SemanticWorkflowOwner,
     deadline: Option<TimeoutBudget>,
-    external_stage_tracker: Option<ChannelInvitationStageTracker>,
+    external_stage_tracker: Option<WorkflowStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
     publish_terminal: bool,
 ) -> Result<InvitationInfo, AuraError> {
     let stage_tracker = external_stage_tracker
-        .or_else(|| Some(new_channel_invitation_stage_tracker("require_runtime")));
+        .or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
     let fallback_channel_id = home_id.parse::<ChannelId>().ok();
     let runtime = require_runtime(app_core).await.map_err(|error| {
         ChannelInvitationBootstrapError::BootstrapTransport {
@@ -2403,7 +2396,7 @@ pub async fn decline_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    timeout_runtime_call(
+    let _ = timeout_runtime_call(
         &runtime,
         "decline_invitation",
         "decline_invitation",
@@ -2412,7 +2405,8 @@ pub async fn decline_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))?;
+    Ok(())
 }
 
 /// Decline an invitation by string ID for callers that only carry string keys.
@@ -2435,7 +2429,7 @@ pub async fn cancel_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    timeout_runtime_call(
+    let _ = timeout_runtime_call(
         &runtime,
         "cancel_invitation",
         "cancel_invitation",
@@ -2444,7 +2438,8 @@ pub async fn cancel_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))?;
+    Ok(())
 }
 
 /// Cancel an invitation by string ID for callers that only carry string keys.
@@ -3523,7 +3518,12 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
-        runtime.set_accept_invitation_result(Ok(()));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("pending-channel-binding"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
         let channel_id = ChannelId::from_bytes([113u8; 32]);
         let context_id = ContextId::new_from_entropy([114u8; 32]);
         let sender_id = AuthorityId::new_from_entropy([115u8; 32]);
@@ -3578,7 +3578,12 @@ mod tests {
     async fn accept_device_enrollment_invitation_fails_closed_on_ceremony_processing_error() {
         let authority = AuthorityId::new_from_entropy([121u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
-        runtime.set_accept_invitation_result(Ok(()));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("device-enrollment-fail-closed"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
         runtime.set_process_ceremony_result(Err(crate::core::IntentError::service_error(
             "ceremony inbox unavailable",
         )));

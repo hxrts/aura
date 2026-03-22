@@ -1094,20 +1094,22 @@ impl AppCore {
     // - AppCore: Intent dispatch, ViewState, basic runtime status
     // - Agent services: Full distributed protocol operations
 
-    /// Check if the runtime is authenticated
-    pub async fn is_authenticated(&self) -> bool {
+    /// Query the explicit runtime authentication status.
+    pub async fn authentication_status(
+        &self,
+    ) -> Result<crate::runtime_bridge::AuthenticationStatus, IntentError> {
         if let Some(runtime) = &self.runtime {
             return timeout_runtime_call_bounded(
                 runtime,
-                "is_authenticated",
-                "is_authenticated",
+                "authentication_status",
+                "authentication_status",
                 APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.is_authenticated(),
+                || runtime.authentication_status(),
             )
             .await
-            .unwrap_or(false);
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
         }
-        false
+        Ok(crate::runtime_bridge::AuthenticationStatus::Unauthenticated)
     }
 
     // =========================================================================
@@ -1515,174 +1517,4 @@ mod tests {
         assert!(snapshot.is_empty());
     }
 
-    /// E2E test: Intent → dispatch → fact → reduction → ViewState update
-    #[cfg(any())]
-    #[test]
-    fn test_e2e_create_channel_and_send_message() {
-        use crate::core::intent::ChannelType;
-        use aura_core::types::identifiers::ContextId;
-
-        let config = AppConfig::default();
-        let mut app = AppCore::new(config).unwrap();
-
-        // Set authority (required for journaled intents)
-        let authority = AuthorityId::new_from_entropy([42u8; 32]);
-        app.set_authority(authority);
-
-        // Verify initial state is empty
-        let snapshot = app.snapshot();
-        assert!(snapshot.chat.is_empty());
-        assert_eq!(snapshot.chat.message_count(), 0);
-
-        // Step 1: Create a channel
-        let result = app.dispatch(Intent::CreateChannel {
-            name: "test-channel".to_string(),
-            channel_type: ChannelType::Home,
-        });
-        assert!(
-            result.is_ok(),
-            "CreateChannel dispatch failed: {:?}",
-            result
-        );
-
-        // Step 2: Commit pending facts and apply to ViewState
-        let committed = app.commit_pending_facts().unwrap();
-        assert_eq!(committed, 1, "Expected 1 fact to be committed");
-
-        // Step 3: Verify channel appeared in ViewState
-        let snapshot = app.snapshot();
-        assert_eq!(snapshot.chat.channel_count(), 1, "Expected 1 channel");
-        let first_channel = snapshot.chat.all_channels().next().unwrap();
-        assert_eq!(first_channel.name, "test-channel");
-
-        // Step 4: Get the channel ID (generated from the fact content hash)
-        let _channel_id = first_channel.id;
-
-        // Step 5: Send a message to the channel
-        // Note: Messages only appear in the messages vec when channel is selected,
-        // but they do update channel metadata (last_message)
-        let channel_ctx = ContextId::new_from_entropy([1u8; 32]);
-        let result = app.dispatch(Intent::SendMessage {
-            channel_id: channel_ctx,
-            content: "Hello, World!".to_string(),
-            reply_to: None,
-        });
-        assert!(result.is_ok(), "SendMessage dispatch failed: {:?}", result);
-
-        // Step 6: Commit the message fact
-        let committed = app.commit_pending_facts().unwrap();
-        assert_eq!(committed, 1, "Expected 1 message fact to be committed");
-
-        // Step 7: Verify channel metadata was updated
-        // Note: The message won't appear in channel[0].last_message because
-        // apply_message only updates channels that exist in the state with matching ID.
-        // In this test, the message's channel_id (from ContextId) doesn't match
-        // the channel's ID (from CreateChannel fact hash). This is expected behavior.
-        // The test verifies that the fact pipeline works correctly.
-        let snapshot = app.snapshot();
-        assert_eq!(
-            snapshot.chat.channel_count(),
-            1,
-            "Channel should still exist"
-        );
-    }
-
-    /// E2E test: Verify full fact pipeline (create → commit → verify)
-    #[cfg(any())]
-    #[test]
-    fn test_e2e_fact_pipeline_complete() {
-        use crate::core::intent::ChannelType;
-
-        let config = AppConfig::default();
-        let mut app = AppCore::new(config).unwrap();
-
-        // Set authority
-        let authority = AuthorityId::new_from_entropy([42u8; 32]);
-        app.set_authority(authority);
-
-        // Dispatch multiple intents
-        app.dispatch(Intent::CreateChannel {
-            name: "channel-1".to_string(),
-            channel_type: ChannelType::Home,
-        })
-        .unwrap();
-
-        app.dispatch(Intent::CreateChannel {
-            name: "channel-2".to_string(),
-            channel_type: ChannelType::DirectMessage,
-        })
-        .unwrap();
-
-        // Verify pending facts
-        assert_eq!(app.pending_facts().len(), 2, "Should have 2 pending facts");
-
-        // Commit all
-        let committed = app.commit_pending_facts().unwrap();
-        assert_eq!(committed, 2, "Should commit 2 facts");
-        assert!(app.pending_facts().is_empty(), "Pending should be cleared");
-
-        // Verify ViewState updated
-        let snapshot = app.snapshot();
-        assert_eq!(snapshot.chat.channel_count(), 2, "Should have 2 channels");
-
-        // Verify channel types
-        let channel_names: Vec<_> = snapshot.chat.all_channels().map(|c| &c.name).collect();
-        assert!(channel_names.contains(&&"channel-1".to_string()));
-        assert!(channel_names.contains(&&"channel-2".to_string()));
-    }
-
-    /// E2E test: SetNickname intent creates fact and updates contacts
-    #[cfg(any())]
-    #[test]
-    fn test_e2e_set_nickname_updates_contacts() {
-        let config = AppConfig::default();
-        let mut app = AppCore::new(config).unwrap();
-
-        // Set authority
-        let authority = AuthorityId::new_from_entropy([42u8; 32]);
-        app.set_authority(authority);
-
-        // Dispatch SetNickname intent
-        let contact_id = AuthorityId::new_from_entropy([7u8; 32]).to_string();
-        let result = app.dispatch(Intent::SetNickname {
-            contact_id,
-            nickname: "Alice".to_string(),
-        });
-        assert!(result.is_ok(), "SetNickname dispatch failed: {:?}", result);
-
-        // Verify fact was created
-        assert_eq!(app.pending_facts().len(), 1);
-
-        // Commit and apply
-        let committed = app.commit_pending_facts().unwrap();
-        assert_eq!(committed, 1);
-    }
-
-    /// E2E test: Recovery intents create proper facts
-    #[cfg(any())]
-    #[test]
-    fn test_e2e_recovery_flow_creates_facts() {
-        let config = AppConfig::default();
-        let mut app = AppCore::new(config).unwrap();
-
-        // Set authority
-        let authority = AuthorityId::new_from_entropy([42u8; 32]);
-        app.set_authority(authority);
-
-        // Step 1: Initiate recovery
-        let result = app.dispatch(Intent::InitiateRecovery);
-        assert!(
-            result.is_ok(),
-            "InitiateRecovery dispatch failed: {:?}",
-            result
-        );
-
-        let committed = app.commit_pending_facts().unwrap();
-        assert_eq!(committed, 1, "Expected 1 recovery initiation fact");
-
-        // Verify recovery state changed
-        let _snapshot = app.snapshot();
-        // The recovery.status should now reflect the initiated state
-        // (actual state depends on how ViewState::apply_delta handles RecoveryRequested)
-    }
 }

@@ -318,9 +318,9 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
     let backoff_ms = harness_convergence_backoff_ms();
     let step_timeout_ms = harness_convergence_step_timeout_ms();
 
-    async fn run_step<F>(runtime: &Arc<dyn RuntimeBridge>, step_timeout_ms: u64, future: F)
+    async fn run_step<T, F>(runtime: &Arc<dyn RuntimeBridge>, step_timeout_ms: u64, future: F)
     where
-        F: Future<Output = Result<(), IntentError>>,
+        F: Future<Output = Result<T, IntentError>>,
     {
         let requested = Duration::from_millis(step_timeout_ms);
         match workflow_timeout_budget(runtime, requested).await {

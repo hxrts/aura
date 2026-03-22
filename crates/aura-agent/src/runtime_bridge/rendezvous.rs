@@ -1,5 +1,5 @@
 use super::{service_unavailable, AgentRuntimeBridge};
-use aura_app::runtime_bridge::{LanPeerInfo, RendezvousStatus};
+use aura_app::runtime_bridge::{DiscoveryTriggerOutcome, LanPeerInfo, RendezvousStatus};
 use aura_app::IntentError;
 use aura_core::types::identifiers::AuthorityId;
 
@@ -26,7 +26,9 @@ pub(super) async fn get_rendezvous_status(
     }
 }
 
-pub(super) async fn trigger_discovery(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
+pub(super) async fn trigger_discovery(
+    bridge: &AgentRuntimeBridge,
+) -> Result<DiscoveryTriggerOutcome, IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
         rendezvous
             .trigger_discovery()

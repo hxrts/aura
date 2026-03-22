@@ -40,7 +40,28 @@ use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_social::{is_user_banned, is_user_muted};
+use std::fmt::Display;
 use uuid::Uuid;
+
+fn map_chat_service_error(label: &'static str, error: impl Display) -> AgentError {
+    AgentError::effects(format!("{label}: {error}"))
+}
+
+fn map_amp_state_error(error: impl Display) -> AgentError {
+    map_chat_service_error("AMP state lookup failed", error)
+}
+
+fn map_amp_prestate_error(error: impl Display) -> AgentError {
+    map_chat_service_error("Invalid AMP prestate", error)
+}
+
+fn map_amp_proposal_error(error: impl Display) -> AgentError {
+    map_chat_service_error("AMP proposal failed", error)
+}
+
+fn map_amp_finalize_error(error: impl Display) -> AgentError {
+    map_chat_service_error("AMP finalize failed", error)
+}
 
 /// Chat service API for the agent layer.
 ///
@@ -178,7 +199,7 @@ impl ChatServiceApi {
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         )
-        .map_err(|e| AgentError::effects(format!("Invalid AMP prestate: {e}")))
+        .map_err(map_amp_prestate_error)
     }
 
     async fn propose_and_finalize_amp_bump(
@@ -190,7 +211,7 @@ impl ChatServiceApi {
     ) -> AgentResult<()> {
         let state = get_channel_state(self.effects.as_ref(), context_id, channel_id)
             .await
-            .map_err(|e| AgentError::effects(format!("AMP state lookup failed: {e}")))?;
+            .map_err(map_amp_state_error)?;
         let bump_nonce = self.effects.random_uuid().await.as_bytes().to_vec();
         let bump_id = Hash32(hash(&bump_nonce));
         let proposal = ProposedChannelEpochBump {
@@ -204,7 +225,7 @@ impl ChatServiceApi {
 
         emit_proposed_bump(self.effects.as_ref(), proposal.clone())
             .await
-            .map_err(|e| AgentError::effects(format!("AMP proposal failed: {e}")))?;
+            .map_err(map_amp_proposal_error)?;
 
         let policy = policy_for(CeremonyFlow::AmpEpochBump);
         if policy.allows_mode(AgreementMode::ConsensusFinalized) && !self.effects.is_testing() {
@@ -235,7 +256,7 @@ impl ChatServiceApi {
                 transcript_ref,
             )
             .await
-            .map_err(|e| AgentError::effects(format!("AMP finalize failed: {e}")))?;
+            .map_err(map_amp_finalize_error)?;
         }
 
         Ok(())
@@ -767,7 +788,7 @@ impl ChatServiceApi {
         // Get AMP channel state for epoch tracking (for consensus finalization)
         let channel_state = get_channel_state(self.effects.as_ref(), context_id, channel_id)
             .await
-            .map_err(|e| AgentError::effects(format!("AMP state lookup failed: {e}")))?;
+            .map_err(map_amp_state_error)?;
         let epoch_hint = Some(channel_state.chan_epoch as u32);
 
         // Validate the AMP channel exists (created in create_group)

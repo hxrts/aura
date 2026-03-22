@@ -8,6 +8,7 @@ use super::recovery::{
     RecoveryState,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::handlers::shared::{build_transport_metadata, map_handler_tree_read_error};
 use crate::runtime::open_owned_manifest_vm_session_admitted;
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
@@ -142,16 +143,16 @@ impl RecoveryServiceApi {
             .effects
             .get_current_state()
             .await
-            .map_err(|e| AgentError::effects(format!("Failed to read tree state: {e}")))?;
+            .map_err(map_handler_tree_read_error)?;
 
         let now_ms = self.effects.current_timestamp_ms().await;
-        let prestate_hash = Some(aura_core::Hash32(tree_state.root_commitment));
+        let prestate_hash = aura_core::Hash32(tree_state.root_commitment);
 
         for old_id in self
             .ceremony_runner
             .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::Recovery,
-                prestate_hash.as_ref(),
+                &prestate_hash,
             )
             .await
         {
@@ -870,13 +871,13 @@ impl RecoveryServiceApi {
             .map_err(|e| AgentError::internal(format!("Failed to serialize proposal: {}", e)))?;
 
         // Create transport envelope
-        let mut metadata = std::collections::HashMap::new();
-        metadata.insert(
-            "content-type".to_string(),
-            "application/aura-guardian-proposal".to_string(),
+        let metadata = build_transport_metadata(
+            "application/aura-guardian-proposal",
+            [
+                ("protocol-version", "1".to_string()),
+                ("ceremony-id", ceremony_id.to_string()),
+            ],
         );
-        metadata.insert("protocol-version".to_string(), "1".to_string());
-        metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
 
         let envelope = aura_core::effects::TransportEnvelope {
             destination: guardian_authority,

@@ -1,7 +1,8 @@
 use aura_core::BoundedActorIngress;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::traits::{ServiceError, ServiceErrorKind};
+use crate::runtime::TaskGroup;
 
 #[allow(dead_code)] // `New` and some helpers are staged for later actor conversions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +59,78 @@ pub(crate) struct ServiceActorHandle<Domain, C> {
 pub(crate) struct ServiceActorMailbox<Domain, C> {
     ingress: BoundedActorIngress<Domain, C>,
     cmd_rx: mpsc::Receiver<C>,
+}
+
+pub(crate) struct ActorOwnedServiceRoot<Domain, C, State> {
+    lifecycle_state: Mutex<State>,
+    tasks: Mutex<Option<TaskGroup>>,
+    commands: Mutex<Option<ServiceActorHandle<Domain, C>>>,
+    lifecycle: Mutex<()>,
+}
+
+impl<Domain, C, State> ActorOwnedServiceRoot<Domain, C, State> {
+    pub(crate) fn new(initial_state: State) -> Self {
+        Self {
+            lifecycle_state: Mutex::new(initial_state),
+            tasks: Mutex::new(None),
+            commands: Mutex::new(None),
+            lifecycle: Mutex::new(()),
+        }
+    }
+
+    pub(crate) fn lifecycle(&self) -> &Mutex<()> {
+        &self.lifecycle
+    }
+
+    pub(crate) async fn install_commands(&self, commands: ServiceActorHandle<Domain, C>) {
+        *self.commands.lock().await = Some(commands);
+    }
+
+    pub(crate) async fn command_handle(
+        &self,
+        service: &'static str,
+        unavailable_message: &'static str,
+    ) -> Result<ServiceActorHandle<Domain, C>, ServiceError> {
+        self.commands.lock().await.clone().ok_or_else(|| {
+            ServiceError::unavailable(service, unavailable_message)
+        })
+    }
+
+    pub(crate) async fn take_commands(&self) -> Option<ServiceActorHandle<Domain, C>> {
+        self.commands.lock().await.take()
+    }
+
+    pub(crate) async fn has_commands(&self) -> bool {
+        self.commands.lock().await.is_some()
+    }
+
+    pub(crate) async fn install_tasks(&self, tasks: TaskGroup) {
+        *self.tasks.lock().await = Some(tasks);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn task_group(&self) -> Option<TaskGroup> {
+        self.tasks.lock().await.clone()
+    }
+
+    pub(crate) async fn take_tasks(&self) -> Option<TaskGroup> {
+        self.tasks.lock().await.take()
+    }
+
+    pub(crate) async fn has_tasks(&self) -> bool {
+        self.tasks.lock().await.is_some()
+    }
+
+    pub(crate) async fn state(&self) -> State
+    where
+        State: Copy,
+    {
+        *self.lifecycle_state.lock().await
+    }
+
+    pub(crate) async fn set_state(&self, state: State) {
+        *self.lifecycle_state.lock().await = state;
+    }
 }
 
 impl<Domain, C> Clone for ServiceActorHandle<Domain, C> {

@@ -144,7 +144,9 @@ pub use handlers::{SessionHandle, SessionServiceApi, SessionStats};
 
 // Authentication types
 #[cfg(feature = "choreo-backend-telltale-vm")]
-pub use handlers::{AuthChallenge, AuthMethod, AuthResponse, AuthResult, AuthServiceApi};
+pub use handlers::{
+    AuthChallenge, AuthMethod, AuthResponse, AuthResult, AuthServiceApi, AuthenticationStatus,
+};
 
 // Invitation types
 #[cfg(feature = "choreo-backend-telltale-vm")]

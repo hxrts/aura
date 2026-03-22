@@ -213,6 +213,9 @@ Rules:
 - Runtime bridge query APIs fail explicitly when a required runtime service is
   absent; they do not return empty authoritative-looking peer/discovery results
   as a fallback.
+- Runtime bridge lifecycle APIs that can distinguish `no progress`,
+  `already running`, `processed`, or `degraded` must return typed outcomes
+  rather than flattening those states into `Result<(), _>`.
 
 The current owner may be hosted by an actor, but ownership itself remains a single-owner move boundary, not a shared mutable actor coordination pattern.
 
@@ -285,6 +288,16 @@ Runtime bridge lookup follows the same strong-ref rule:
 - effect-backed threshold config/state queries must persist and read the same
   `threshold_config` record; they may not keep a second legacy storage schema
   alive behind the runtime-owned path
+- runtime authentication queries must return one explicit status contract;
+  they may not mutate journal state through a legacy `authenticate()` wrapper
+  and then collapse the answer to a bare boolean
+- device-threshold key-package envelopes must carry
+  `metadata["target-authority-id"]`; the handler may not repair malformed
+  envelopes by treating `TransportEnvelope.destination` as semantic target
+- ceremony registration and supersession tracking must carry explicit
+  `prestate_hash` bindings end to end; the tracker/runner may not admit
+  optional prestate or compatibility wrappers that weaken supersession
+  semantics
 - imported channel invitations and channel-acceptance notification must require
   the authoritative invitation context end to end; they may not default to the
   sender's home context when importing, loading, or establishing the sender
@@ -381,6 +394,10 @@ Rules:
 - Public service APIs must take shared runtime-owned `TaskSupervisor` /
   `CeremonyRunner` roots from the runtime graph; they must not construct
   private owner trees internally.
+- Actor-owned runtime services that expose command ingress plus owned background
+  task groups must use one shared service-root abstraction for lifecycle state,
+  supervised tasks, and command handles rather than re-implementing that owner
+  shape per service.
 - Service health must degrade structurally when maintenance obligations fail;
   loop-local logging is not a substitute for degraded lifecycle state.
 - Inbound moderation and membership gating must fail closed when home state is
