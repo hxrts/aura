@@ -60,6 +60,7 @@ pub(crate) mod chat_scope;
 pub mod commands;
 pub mod effects;
 pub mod flow_budget;
+pub(crate) mod key_rotation;
 pub mod keymap;
 pub mod local_store;
 pub mod navigation;
