@@ -252,6 +252,16 @@ fn service_unavailable_with_detail(
     service_error_to_intent(ServiceError::unavailable(service, format!("{detail}")))
 }
 
+fn device_key_package_delivery_error(
+    package_kind: &'static str,
+    device_id: impl std::fmt::Display,
+    error: impl std::fmt::Display,
+) -> IntentError {
+    IntentError::network_error(format!(
+        "Failed to send device {package_kind} key package to {device_id}: {error}"
+    ))
+}
+
 fn harness_mode_enabled() -> bool {
     std::env::var_os("AURA_HARNESS_MODE").is_some()
 }
@@ -2602,25 +2612,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 receipt: None,
             };
 
-            effects.send_envelope(envelope).await.map_err(|e| {
-                let error_msg = e.to_string();
-
-                // Provide clearer error messages for common failure cases
-                if error_msg.contains("not connected")
-                    || error_msg.contains("unreachable")
-                    || error_msg.contains("no route")
-                    || error_msg.contains("offline mode") {
-                    IntentError::network_error(format!(
-                        "Device {} is not reachable. Ensure the device is online and connected to the network before starting the multifactor ceremony.",
-                        device_id
-                    ))
-                } else {
-                    IntentError::internal_error(format!(
-                        "Failed to send device threshold key package to {}: {e}",
-                        device_id
-                    ))
-                }
-            })?;
+            effects
+                .send_envelope(envelope)
+                .await
+                .map_err(|e| device_key_package_delivery_error("threshold", device_id, e))?;
         }
 
         Ok(ceremony_id)
@@ -2956,12 +2951,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     receipt: None,
                 };
 
-                effects.send_envelope(envelope).await.map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to send device enrollment key package to {}: {e}",
-                        device_id
-                    ))
-                })?;
+                effects
+                    .send_envelope(envelope)
+                    .await
+                    .map_err(|e| device_key_package_delivery_error("enrollment", device_id, e))?;
             }
         }
 
@@ -3374,12 +3367,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 receipt: None,
             };
 
-            effects.send_envelope(envelope).await.map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to send device removal key package to {}: {e}",
-                    device_id
-                ))
-            })?;
+            effects
+                .send_envelope(envelope)
+                .await
+                .map_err(|e| device_key_package_delivery_error("removal", device_id, e))?;
         }
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
@@ -4189,6 +4180,22 @@ mod tests {
         std::env::remove_var("AURA_HARNESS_MODE");
         std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
         std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
+    }
+
+    #[test]
+    fn device_key_package_delivery_error_uses_transport_class_without_string_matching() {
+        let device_id = DeviceId::new_from_entropy([73u8; 32]);
+        let error =
+            device_key_package_delivery_error("threshold", device_id, "offline mode transport");
+        let message = error.to_string();
+        assert!(
+            message.contains("Failed to send device threshold key package"),
+            "expected normalized delivery error message, got: {message}"
+        );
+        assert!(
+            !message.contains("is not reachable"),
+            "delivery error should not synthesize reachability text from transport strings: {message}"
+        );
     }
 
     #[tokio::test]

@@ -279,6 +279,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - post-ceremony reachability refresh must fail explicitly when no sync service
   or no seeded sync peers are available; it may not report a successful refresh
   without any reachable peer evidence
+- runtime ceremony transport delivery failures must use the transport/network
+  error class directly; they may not string-match transport error text to
+  synthesize semantic reachability narratives
 
 ## Canonical Host/VM Boundary
 
