@@ -55,8 +55,9 @@ pub fn note_to_self_channel(authority_id: AuthorityId) -> Channel {
 // Serde Helper for HashMap<ChannelId, Channel>
 // =============================================================================
 
-/// Serialize HashMap as Vec for backward compatibility, deserialize from Vec.
-mod channel_map_serde {
+/// Serialize channel maps with explicit string keys so JSON consumers use the
+/// canonical keyed form instead of the removed legacy Vec encoding.
+mod channel_id_keyed_map_serde {
     use super::{Channel, ChannelId, HashMap};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -64,16 +65,27 @@ mod channel_map_serde {
     where
         S: Serializer,
     {
-        let vec: Vec<&Channel> = map.values().collect();
-        vec.serialize(serializer)
+        let keyed: HashMap<String, &Channel> = map
+            .iter()
+            .map(|(channel_id, channel)| (channel_id.to_string(), channel))
+            .collect();
+        keyed.serialize(serializer)
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<ChannelId, Channel>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let vec: Vec<Channel> = Vec::deserialize(deserializer)?;
-        Ok(vec.into_iter().map(|c| (c.id, c)).collect())
+        let keyed = HashMap::<String, Channel>::deserialize(deserializer)?;
+        keyed
+            .into_iter()
+            .map(|(channel_id, channel)| {
+                let parsed = channel_id
+                    .parse::<ChannelId>()
+                    .map_err(serde::de::Error::custom)?;
+                Ok((parsed, channel))
+            })
+            .collect()
     }
 }
 
@@ -277,7 +289,7 @@ pub struct Message {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChatState {
     /// All available channels (keyed by ChannelId for O(1) lookup)
-    #[serde(with = "channel_map_serde", default)]
+    #[serde(with = "channel_id_keyed_map_serde", default)]
     channels: HashMap<ChannelId, Channel>,
     /// Per-channel message storage
     #[serde(default)]
@@ -369,13 +381,6 @@ impl ChatState {
             .get(channel_id)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
-    }
-
-    /// Get all messages across all channels (primarily for test backwards compatibility).
-    /// Returns messages in arbitrary order - use `messages_for_channel()` for production code.
-    #[must_use]
-    pub fn all_messages(&self) -> Vec<&Message> {
-        self.channel_messages.values().flatten().collect()
     }
 
     /// Get total message count across all channels.
@@ -728,6 +733,7 @@ fn merge_channel_projection(canonical: &mut Channel, previous: Channel) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn test_delivery_status_indicators() {
@@ -846,6 +852,26 @@ mod tests {
             last_activity: 0,
             last_finalized_epoch: 0,
         }
+    }
+
+    #[test]
+    fn test_chat_state_serializes_channels_as_canonical_map() {
+        let channel_id = ChannelId::from_bytes([9u8; 32]);
+        let state = ChatState::from_channels([make_test_channel(channel_id)]);
+
+        let encoded = serde_json::to_value(&state).expect("chat state should serialize");
+        let channels = encoded
+            .get("channels")
+            .expect("chat state should include channels");
+
+        assert!(
+            matches!(channels, Value::Object(_)),
+            "channels should serialize as the canonical map form"
+        );
+        assert!(
+            channels.get(channel_id.to_string()).is_some(),
+            "serialized channels should be keyed by canonical channel id"
+        );
     }
 
     #[test]

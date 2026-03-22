@@ -276,8 +276,8 @@ async fn wait_for_chat_signal_message(
         };
 
         let observed: Vec<String> = state
-            .all_messages()
-            .into_iter()
+            .all_channels()
+            .flat_map(|channel| state.messages_for_channel(&channel.id).iter())
             .map(|message| {
                 format!(
                     "sender={} content={}",
@@ -289,8 +289,8 @@ async fn wait_for_chat_signal_message(
             .collect();
 
         if state
-            .all_messages()
-            .into_iter()
+            .all_channels()
+            .flat_map(|channel| state.messages_for_channel(&channel.id).iter())
             .any(|message| message.sender_id == sender_id && message.content == expected_content)
         {
             return Ok(());
@@ -320,8 +320,8 @@ async fn ensure_chat_signal_message_absent(
         };
 
         if state
-            .all_messages()
-            .into_iter()
+            .all_channels()
+            .flat_map(|channel| state.messages_for_channel(&channel.id).iter())
             .any(|message| message.sender_id == sender_id && message.content == forbidden_content)
         {
             return Err(anyhow!(

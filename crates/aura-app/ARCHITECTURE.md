@@ -166,6 +166,12 @@ Converted semantic-owner paths also follow two stricter publication rules:
   shared observed-projection helper path in `src/workflows/observed_projection.rs`;
   workflow modules must reuse that helper instead of defining local
   `emit_*_state_observed` variants
+- `ChatState` serializes channels only in the canonical `HashMap<ChannelId,
+  Channel>` form, and app/workflow callers must iterate messages per channel
+  explicitly rather than relying on broad compatibility helpers
+- home insertion/removal APIs in `src/views/home.rs` are explicit about
+  selection policy; callers may add or remove homes, but they must choose any
+  fallback selection themselves instead of depending on implicit wrapper policy
 - parity-critical strong-command and semantic-query paths may not treat
   unverifiable scope/home state as success, and they may not upgrade legacy
   `dm:` descriptors or empty observed membership into canonical participant

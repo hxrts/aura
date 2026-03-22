@@ -33,6 +33,13 @@ use aura_terminal::tui::context::InitializedAppCore;
 #[path = "../support/mod.rs"]
 mod support;
 
+fn collect_messages(chat_state: &aura_app::views::ChatState) -> Vec<&aura_app::views::Message> {
+    chat_state
+        .all_channels()
+        .flat_map(|channel| chat_state.messages_for_channel(&channel.id).iter())
+        .collect()
+}
+
 /// REGRESSION TEST: Echo fails when contacts are imported via invite codes
 /// before creating a channel (mimics real TUI flow).
 ///
@@ -233,7 +240,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             Ok(chat_state) = chat_stream.recv() => {
-                let messages: Vec<_> = chat_state.all_messages().into_iter().collect();
+                let messages = collect_messages(&chat_state);
                 eprintln!(
                     "[Test] Signal update: {} messages total",
                     messages.len()
@@ -372,7 +379,7 @@ async fn demo_echo_with_empty_channel_members() {
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             Ok(chat_state) = chat_stream.recv() => {
-                let messages: Vec<_> = chat_state.all_messages().into_iter().collect();
+                let messages = collect_messages(&chat_state);
                 eprintln!(
                     "[Empty Members Test] Signal update: {} messages",
                     messages.len()
@@ -518,8 +525,7 @@ async fn demo_echo_persists_after_scheduler_update() {
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             Ok(chat_state) = chat_stream.recv() => {
-                if chat_state
-                    .all_messages()
+                if collect_messages(&chat_state)
                     .iter()
                     .any(|msg| msg.content == content && msg.sender_id != bob_authority)
                 {
@@ -633,8 +639,7 @@ async fn demo_echo_with_direct_member_ids_control() {
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             Ok(chat_state) = chat_stream.recv() => {
-                if chat_state
-                    .all_messages()
+                if collect_messages(&chat_state)
                     .iter()
                     .any(|msg| msg.content == content && msg.sender_id != bob_authority)
                 {

@@ -160,20 +160,21 @@ impl DemoSignalCoordinator {
         let mut last_count = self.last_message_count.lock().await;
 
         if current_count > *last_count {
-            // New messages - check if any are from Bob
-            // Note: all_messages() returns refs in arbitrary order, so we check all
-            // This is a demo approximation; production code would track per-channel
-            for msg in chat_state.all_messages() {
-                if msg.sender_id == self.bob_authority {
-                    let channel = msg.channel_id.to_string();
+            // New messages - check if any are from Bob.
+            // This is a demo approximation; production code would track per-channel.
+            for channel in chat_state.all_channels() {
+                for msg in chat_state.messages_for_channel(&channel.id) {
+                    if msg.sender_id == self.bob_authority {
+                        let channel = msg.channel_id.to_string();
 
-                    let agent_event = AgentEvent::MessageReceived {
-                        from: self.bob_authority,
-                        channel,
-                        content: msg.content.clone(),
-                    };
-                    self.sim_bridge.send_agent_event(agent_event);
-                    tracing::debug!("Demo: Forwarded Bob's message to agents");
+                        let agent_event = AgentEvent::MessageReceived {
+                            from: self.bob_authority,
+                            channel,
+                            content: msg.content.clone(),
+                        };
+                        self.sim_bridge.send_agent_event(agent_event);
+                        tracing::debug!("Demo: Forwarded Bob's message to agents");
+                    }
                 }
             }
             *last_count = current_count;

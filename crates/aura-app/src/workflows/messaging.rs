@@ -1333,8 +1333,8 @@ async fn next_observed_projection_timestamp_ms(app_core: &Arc<RwLock<AppCore>>) 
         .map(|channel| channel.last_activity)
         .max();
     let message_activity = chat
-        .all_messages()
-        .into_iter()
+        .all_channels()
+        .flat_map(|channel| chat.messages_for_channel(&channel.id).iter())
         .map(|message| message.timestamp)
         .max();
 
@@ -5557,7 +5557,10 @@ mod tests {
         home.online_count = 0;
 
         let mut homes = HomesState::new();
-        homes.add_home_with_auto_select(home);
+        let result = homes.add_home(home);
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
         {
             let mut core = app_core.write().await;
             core.views_mut().set_homes(homes);
@@ -5599,7 +5602,10 @@ mod tests {
         });
 
         let mut homes = HomesState::new();
-        homes.add_home_with_auto_select(home);
+        let result = homes.add_home(home);
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
         {
             let mut core = app_core.write().await;
             core.views_mut().set_homes(homes);
@@ -5645,7 +5651,10 @@ mod tests {
         });
 
         let mut homes = HomesState::new();
-        homes.add_home_with_auto_select(home);
+        let result = homes.add_home(home);
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
         {
             let mut core = app_core.write().await;
             core.views_mut().set_homes(homes);
@@ -5699,7 +5708,10 @@ mod tests {
         });
 
         let mut homes = HomesState::new();
-        homes.add_home_with_auto_select(primary_home);
+        let result = homes.add_home(primary_home);
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
         homes.add_home(moderation_home);
         {
             let mut core = app_core.write().await;
@@ -5755,7 +5767,10 @@ mod tests {
         });
 
         let mut homes = HomesState::new();
-        homes.add_home_with_auto_select(primary_home);
+        let result = homes.add_home(primary_home);
+        if result.was_first {
+            homes.select_home(Some(result.home_id));
+        }
         homes.add_home(moderation_home);
         {
             let mut core = app_core.write().await;

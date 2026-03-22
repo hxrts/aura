@@ -142,7 +142,10 @@ pub async fn wait_for_message(
     predicate: impl Fn(&aura_app::views::Message) -> bool,
 ) -> ChatState {
     wait_for_chat(app_core, |state| {
-        state.all_messages().iter().any(|m| predicate(m))
+        state
+            .all_channels()
+            .flat_map(|channel| state.messages_for_channel(&channel.id).iter())
+            .any(&predicate)
     })
     .await
 }

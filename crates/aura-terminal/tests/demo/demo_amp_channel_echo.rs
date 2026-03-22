@@ -129,9 +129,11 @@ async fn demo_amp_channel_echoes_peer_message() {
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             Ok(chat_state) = chat_stream.recv() => {
-                for msg in chat_state.all_messages() {
-                    if msg.content == content && msg.sender_id != bob_authority {
-                        echoes.insert(msg.sender_id);
+                for channel in chat_state.all_channels() {
+                    for msg in chat_state.messages_for_channel(&channel.id) {
+                        if msg.content == content && msg.sender_id != bob_authority {
+                            echoes.insert(msg.sender_id);
+                        }
                     }
                 }
                 if echoes.len() >= 2 {

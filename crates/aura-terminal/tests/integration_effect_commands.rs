@@ -808,8 +808,10 @@ async fn test_send_message_propagates_to_chat_signal() {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
         println!("  Final messages: {}", chat.message_count());
-        for msg in chat.all_messages() {
-            println!("    - [{}] {}", msg.channel_id, msg.content);
+        for channel in chat.all_channels() {
+            for msg in chat.messages_for_channel(&channel.id) {
+                println!("    - [{}] {}", msg.channel_id, msg.content);
+            }
         }
         chat.message_count()
     };
