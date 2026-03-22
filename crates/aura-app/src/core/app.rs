@@ -17,6 +17,7 @@ use crate::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
     SyncStatus as RuntimeSyncStatus,
 };
+use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::views::ViewState;
 use crate::workflows::runtime::timeout_runtime_call as timeout_runtime_call_bounded;
 
@@ -119,6 +120,12 @@ pub struct AppCore {
     /// selection heuristics.
     active_home_selection: Option<ChannelId>,
 
+    /// Authoritative semantic facts owned by `aura-app` workflow publication.
+    ///
+    /// Signals mirror this store for subscribers, but the store is the
+    /// semantic source of truth for parity-critical workflow reads and updates.
+    authoritative_semantic_facts: Vec<AuthoritativeSemanticFact>,
+
     /// Optional RuntimeBridge for runtime operations (sync, signing, network)
     ///
     /// When present, enables:
@@ -198,6 +205,7 @@ impl AppCore {
             account_id,
             views: ViewState::default(),
             active_home_selection: None,
+            authoritative_semantic_facts: Vec::new(),
             runtime: None,
             reactive,
             #[cfg(feature = "callbacks")]
@@ -265,6 +273,7 @@ impl AppCore {
             account_id,
             views: ViewState::default(),
             active_home_selection: None,
+            authoritative_semantic_facts: Vec::new(),
             runtime: None,
             reactive,
             #[cfg(feature = "callbacks")]
@@ -360,6 +369,16 @@ impl AppCore {
     /// Store the authoritative active-home selection.
     pub fn set_active_home_selection(&mut self, home_id: Option<ChannelId>) {
         self.active_home_selection = home_id;
+    }
+
+    /// Return a clone of the authoritative semantic-facts store.
+    pub fn authoritative_semantic_facts(&self) -> Vec<AuthoritativeSemanticFact> {
+        self.authoritative_semantic_facts.clone()
+    }
+
+    /// Replace the authoritative semantic-facts store.
+    pub fn set_authoritative_semantic_facts(&mut self, facts: Vec<AuthoritativeSemanticFact>) {
+        self.authoritative_semantic_facts = facts;
     }
 
     // ==================== Reactive Effects ====================

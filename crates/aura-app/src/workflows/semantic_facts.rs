@@ -576,16 +576,11 @@ pub(in crate::workflows) fn issue_channel_membership_ready_proof(
 }
 
 #[allow(dead_code)]
-#[aura_macros::authoritative_source(kind = "signal")]
+#[aura_macros::authoritative_source(kind = "app_core")]
 pub(in crate::workflows) async fn authoritative_semantic_facts_snapshot(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<Vec<AuthoritativeSemanticFact>, AuraError> {
-    read_signal(
-        app_core,
-        &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-        AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
-    )
-    .await
+    Ok(app_core.read().await.authoritative_semantic_facts())
 }
 
 #[aura_macros::authoritative_source(kind = "signal")]
@@ -993,15 +988,29 @@ where
     F: FnOnce(&mut Vec<AuthoritativeSemanticFact>),
 {
     let _guard = AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE.lock().await;
-    let mut facts = authoritative_semantic_facts_snapshot(app_core).await?;
-    update(&mut facts);
-    emit_signal(
+    let (previous_facts, updated_facts) = {
+        let mut core = app_core.write().await;
+        let previous_facts = core.authoritative_semantic_facts();
+        let mut updated_facts = previous_facts.clone();
+        update(&mut updated_facts);
+        core.set_authoritative_semantic_facts(updated_facts.clone());
+        (previous_facts, updated_facts)
+    };
+    if let Err(error) = emit_signal(
         app_core,
         &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-        facts,
+        updated_facts,
         AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
     )
     .await
+    {
+        app_core
+            .write()
+            .await
+            .set_authoritative_semantic_facts(previous_facts);
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Publish one authoritative semantic fact, replacing any prior fact with the same key.
@@ -1185,18 +1194,59 @@ mod tests {
     use crate::{AppConfig, AppCore};
 
     #[tokio::test]
-    async fn authoritative_semantic_facts_snapshot_requires_registered_signal() {
+    async fn authoritative_semantic_facts_snapshot_reads_owned_store_without_registered_signal() {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
+        {
+            let mut core = app_core.write().await;
+            core.set_authoritative_semantic_facts(vec![
+                AuthoritativeSemanticFact::PendingHomeInvitationReady,
+            ]);
+        }
 
-        let error = authoritative_semantic_facts_snapshot(&app_core)
+        let facts = authoritative_semantic_facts_snapshot(&app_core)
             .await
-            .expect_err("authoritative semantic facts should require a registered signal");
+            .expect("authoritative semantic facts should read from the owned app-core store");
+        assert_eq!(
+            facts,
+            vec![AuthoritativeSemanticFact::PendingHomeInvitationReady]
+        );
+    }
+
+    #[tokio::test]
+    async fn authoritative_semantic_fact_update_restores_owned_store_on_signal_emit_failure() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        {
+            let mut core = app_core.write().await;
+            core.set_authoritative_semantic_facts(vec![
+                AuthoritativeSemanticFact::PendingHomeInvitationReady,
+            ]);
+        }
+
+        let error = publish_authoritative_semantic_fact(
+            &app_core,
+            authorize_readiness_publication(AuthoritativeSemanticFact::ContactLinkReady {
+                authority_id: "owner-a".into(),
+                contact_count: 1,
+            }),
+        )
+        .await
+        .expect_err("signal emission should still fail when the signal is unregistered");
         assert!(
             error.to_string().contains("Signal not found")
-                || error.to_string().contains("semantic_facts"),
+                || error.to_string().contains("authoritative_semantic_facts"),
             "unexpected error: {error}"
+        );
+
+        let facts = authoritative_semantic_facts_snapshot(&app_core)
+            .await
+            .expect("owned semantic-facts store should remain readable after failed emit");
+        assert_eq!(
+            facts,
+            vec![AuthoritativeSemanticFact::PendingHomeInvitationReady]
         );
     }
 
