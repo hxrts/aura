@@ -3,10 +3,10 @@
 //! Wraps `aura_sync::SyncService` for integration with the agent runtime.
 //! Provides lifecycle management and configuration for automatic background sync.
 
+use super::config_profiles::impl_service_config_profiles;
 use super::service_actor::{
     validate_actor_transition, ActorLifecyclePhase, ActorOwnedServiceRoot, ServiceActorHandle,
 };
-use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::{ReconfigurationManager, ReconfigurationManagerError, SessionDelegationTransfer};
 use crate::core::default_context_id_for_authority;
@@ -240,11 +240,13 @@ impl SyncServiceManager {
     async fn command_handle(
         &self,
     ) -> Result<ServiceActorHandle<SyncServiceManager, SyncCommand>, ServiceError> {
-        self.shared.owner.command_handle(
-            self.name(),
-            "sync command actor unavailable; service is not fully started",
-        )
-        .await
+        self.shared
+            .owner
+            .command_handle(
+                self.name(),
+                "sync command actor unavailable; service is not fully started",
+            )
+            .await
     }
 
     fn spawn_command_actor(
@@ -363,7 +365,10 @@ impl SyncServiceManager {
             ActorLifecyclePhase::Starting,
         )?;
 
-        self.shared.owner.set_state(SyncManagerState::Starting).await;
+        self.shared
+            .owner
+            .set_state(SyncManagerState::Starting)
+            .await;
 
         // Build aura-sync service config from our config
         let sync_config = SyncServiceConfig {
@@ -427,7 +432,10 @@ impl SyncServiceManager {
             ActorLifecyclePhase::Stopping,
         )?;
 
-        self.shared.owner.set_state(SyncManagerState::Stopping).await;
+        self.shared
+            .owner
+            .set_state(SyncManagerState::Stopping)
+            .await;
 
         let snapshot = self.state_snapshot().await.ok();
         if let Some(snapshot) = snapshot.as_ref() {
@@ -436,7 +444,8 @@ impl SyncServiceManager {
         let service = snapshot.and_then(|snapshot| snapshot.service);
         self.shared.owner.take_commands().await;
 
-        let maintenance_shutdown_error = if let Some(task_group) = self.shared.owner.take_tasks().await {
+        let maintenance_shutdown_error =
+            if let Some(task_group) = self.shared.owner.take_tasks().await {
                 match task_group
                     .shutdown_with_timeout(Duration::from_secs(2))
                     .await

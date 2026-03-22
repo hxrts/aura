@@ -91,9 +91,11 @@ impl<Domain, C, State> ActorOwnedServiceRoot<Domain, C, State> {
         service: &'static str,
         unavailable_message: &'static str,
     ) -> Result<ServiceActorHandle<Domain, C>, ServiceError> {
-        self.commands.lock().await.clone().ok_or_else(|| {
-            ServiceError::unavailable(service, unavailable_message)
-        })
+        self.commands
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| ServiceError::unavailable(service, unavailable_message))
     }
 
     pub(crate) async fn take_commands(&self) -> Option<ServiceActorHandle<Domain, C>> {

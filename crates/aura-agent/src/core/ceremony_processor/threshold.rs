@@ -54,7 +54,9 @@ impl<'a> ThresholdHandler<'a> {
         // The target authority is the authority we're setting up threshold signing for
         // and must be carried explicitly by producers.
         let Some(target_authority_str) = envelope.metadata.get("target-authority-id") else {
-            tracing::warn!("Malformed device threshold key package envelope: missing target-authority-id");
+            tracing::warn!(
+                "Malformed device threshold key package envelope: missing target-authority-id"
+            );
             return ProcessResult::Skip;
         };
         let authority_id = match target_authority_str.parse::<AuthorityId>() {

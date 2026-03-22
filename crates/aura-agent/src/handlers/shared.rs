@@ -95,7 +95,10 @@ impl HandlerUtilities {
     }
 }
 
-pub fn map_handler_effect_error(label: &'static str, error: impl Display) -> crate::core::AgentError {
+pub fn map_handler_effect_error(
+    label: &'static str,
+    error: impl Display,
+) -> crate::core::AgentError {
     crate::core::AgentError::effects(format!("{label}: {error}"))
 }
 

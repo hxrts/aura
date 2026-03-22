@@ -12,7 +12,7 @@
 //! Intent → Authorize (Biscuit) → Journal → Reduce → View → Sync
 //! ```
 
-use super::{Intent, IntentError, StateSnapshot};
+use super::{IntentError, StateSnapshot};
 use crate::runtime_bridge::{
     BridgeAuthorityInfo, BridgeDeviceInfo, LanPeerInfo, RuntimeBridge, SettingsBridgeState,
     SyncStatus as RuntimeSyncStatus,
@@ -77,9 +77,9 @@ pub struct SubscriptionId {
 /// The portable application core.
 ///
 /// This struct provides the main API for interacting with Aura:
-/// - Dispatch intents (user actions that become facts)
-/// - Query current state
-/// - Subscribe to state changes
+/// - query current state
+/// - subscribe to state changes
+/// - access runtime-backed workflow and bridge operations
 ///
 /// ## Platform Usage
 ///
@@ -87,21 +87,18 @@ pub struct SubscriptionId {
 /// ```rust,ignore
 /// let app = AppCore::new(config)?;
 /// let signal = app.chat_signal(); // futures-signals
-/// app.dispatch(Intent::SendMessage { ... })?;
 /// ```
 ///
 /// ### iOS (Swift via UniFFI)
 /// ```swift
 /// let app = try AppCore(config: config)
 /// app.subscribe(observer: myObserver)
-/// try app.dispatch(.sendMessage(...))
 /// ```
 ///
 /// ### Android (Kotlin via UniFFI)
 /// ```kotlin
 /// val app = AppCore(config)
 /// app.subscribe(observer)
-/// app.dispatch(Intent.SendMessage(...))
 /// ```
 pub struct AppCore {
     /// The current authority (user identity)
@@ -135,7 +132,6 @@ pub struct AppCore {
     ///
     /// When absent (demo/offline mode):
     /// - Local-only state management
-    /// - Intent dispatch still works (creates facts)
     /// - No network operations available
     runtime: Option<Arc<dyn RuntimeBridge>>,
 
@@ -609,130 +605,6 @@ impl AppCore {
         .await
         .ok()
         .flatten()
-    }
-
-    // ==================== Intent Dispatch ====================
-
-    /// Dispatch an intent (user action that becomes a fact)
-    ///
-    /// The intent flows through:
-    /// 1. Validation - check intent structure and constraints
-    /// 2. Authority check - require authority for journaled intents
-    /// 3. Conversion to fact - transform intent to journal fact
-    /// 4. Journal queue - add to pending facts
-    /// 5. View reduction - applied in `dispatch_async()` after commit
-    /// 6. Sync to peers - handled by transport layer (see aura-transport)
-    ///
-    /// Note: For intents that require journaling, use `dispatch_async()` instead
-    /// as it provides proper random ordering. This synchronous version uses
-    /// deterministic ordering based on intent content.
-    ///
-    /// Biscuit authorization is available when integrating with aura-agent runtime
-    /// (see docs/106_authorization.md for details).
-    #[cfg(any(feature = "app-internals", test))]
-    pub fn dispatch(&mut self, intent: Intent) -> Result<String, IntentError> {
-        self.validate_intent(&intent)?;
-        Err(IntentError::service_error(
-            "AppCore.dispatch no longer journals legacy string facts; use runtime-backed operations",
-        ))
-    }
-
-    /// Validate an intent before dispatch
-    #[allow(dead_code)]
-    fn validate_intent(&self, intent: &Intent) -> Result<(), IntentError> {
-        match intent {
-            Intent::SendMessage { content, .. } => {
-                if content.is_empty() {
-                    return Err(IntentError::validation_failed("Message content is empty"));
-                }
-                if content.len() > 10000 {
-                    return Err(IntentError::validation_failed("Message too long"));
-                }
-            }
-            Intent::SetNickname { nickname, .. } => {
-                if nickname.is_empty() {
-                    return Err(IntentError::validation_failed("Nickname is empty"));
-                }
-                if nickname.len() > 100 {
-                    return Err(IntentError::validation_failed("Nickname too long"));
-                }
-            }
-            Intent::SetHomeName { name, .. } => {
-                if name.is_empty() {
-                    return Err(IntentError::validation_failed("Home name is empty"));
-                }
-            }
-            Intent::GrantModerator { home_id, target_id } => {
-                use aura_core::types::identifiers::AuthorityId;
-
-                let snapshot = self.snapshot();
-                let target = target_id.parse::<AuthorityId>().map_err(|_| {
-                    IntentError::validation_failed(format!("Invalid authority ID: {target_id}"))
-                })?;
-
-                let home = snapshot
-                    .homes
-                    .all_homes()
-                    .find(|b| b.context_id == Some(*home_id))
-                    .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
-
-                if !home.is_admin() {
-                    return Err(IntentError::unauthorized(
-                        "Only moderators can grant moderator role",
-                    ));
-                }
-
-                let Some(member) = home.member(&target) else {
-                    return Err(IntentError::validation_failed(format!(
-                        "Member not found: {target_id}"
-                    )));
-                };
-
-                if matches!(member.role, crate::views::HomeRole::Moderator) {
-                    return Err(IntentError::validation_failed(
-                        "Target already has moderator designation",
-                    ));
-                }
-
-                if !matches!(member.role, crate::views::HomeRole::Member) {
-                    return Err(IntentError::validation_failed(
-                        "Only members can be designated as moderators",
-                    ));
-                }
-            }
-            Intent::RevokeModerator { home_id, target_id } => {
-                use aura_core::types::identifiers::AuthorityId;
-
-                let snapshot = self.snapshot();
-                let target = target_id.parse::<AuthorityId>().map_err(|_| {
-                    IntentError::validation_failed(format!("Invalid authority ID: {target_id}"))
-                })?;
-
-                let home = snapshot
-                    .homes
-                    .all_homes()
-                    .find(|b| b.context_id == Some(*home_id))
-                    .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
-
-                if !home.is_admin() {
-                    return Err(IntentError::unauthorized(
-                        "Only moderators can revoke moderator role",
-                    ));
-                }
-
-                let Some(member) = home.member(&target) else {
-                    return Err(IntentError::validation_failed(format!(
-                        "Member not found: {target_id}"
-                    )));
-                };
-
-                if !matches!(member.role, crate::views::HomeRole::Moderator) {
-                    return Err(IntentError::validation_failed("Target is not a moderator"));
-                }
-            }
-            _ => {}
-        }
-        Ok(())
     }
 
     /// Get a snapshot of the current state
@@ -1473,18 +1345,6 @@ impl ReactiveEffects for AppCore {
     }
 }
 
-// =============================================================================
-// IntentEffects Implementation
-// =============================================================================
-// Note: IntentEffects implementation is planned but deferred until AppCore
-// uses interior mutability. The trait method `dispatch(&self)` conflicts with
-// the existing `dispatch(&mut self)` method. When we refactor AppCore to use
-// RwLock/Mutex internally, we can implement IntentEffects properly.
-//
-// For now, use AppCore::dispatch() directly for intent dispatch.
-// The IntentMetadata trait is implemented on Intent (in intent.rs) for
-// authorization level checking.
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1504,25 +1364,10 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_empty_message() {
-        let config = AppConfig::default();
-        let mut app = AppCore::new(config).unwrap();
-
-        let result = app.dispatch(Intent::SendMessage {
-            channel_id: aura_core::types::identifiers::ContextId::new_from_entropy([0u8; 32]),
-            content: "".to_string(),
-            reply_to: None,
-        });
-
-        assert!(matches!(result, Err(IntentError::ValidationFailed { .. })));
-    }
-
-    #[test]
     fn test_snapshot_empty() {
         let config = AppConfig::default();
         let app = AppCore::new(config).unwrap();
         let snapshot = app.snapshot();
         assert!(snapshot.is_empty());
     }
-
 }

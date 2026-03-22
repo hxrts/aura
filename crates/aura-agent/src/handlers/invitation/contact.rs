@@ -1,6 +1,6 @@
 use super::*;
-use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 use aura_journal::fact::RelationalFact;
+use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,

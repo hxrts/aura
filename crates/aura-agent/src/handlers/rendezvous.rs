@@ -4,8 +4,8 @@
 //! channel establishment, and relay coordination.
 
 use super::shared::{
-    build_transport_metadata, context_commitment_from_journal, resolve_charge_peer,
-    HandlerContext, HandlerUtilities,
+    build_transport_metadata, context_commitment_from_journal, resolve_charge_peer, HandlerContext,
+    HandlerUtilities,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::consensus::build_consensus_params;
@@ -699,14 +699,17 @@ pub async fn execute_guard_outcome(
         )));
     }
 
-    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id(), |command| {
-        match command {
-            EffectCommand::SendHandshake { peer, .. }
-            | EffectCommand::SendHandshakeResponse { peer, .. }
-            | EffectCommand::RecordReceipt { peer, .. } => Some(*peer),
-            _ => None,
-        }
-    });
+    let charge_peer =
+        resolve_charge_peer(
+            &outcome.effects,
+            authority.authority_id(),
+            |command| match command {
+                EffectCommand::SendHandshake { peer, .. }
+                | EffectCommand::SendHandshakeResponse { peer, .. }
+                | EffectCommand::RecordReceipt { peer, .. } => Some(*peer),
+                _ => None,
+            },
+        );
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in outcome.effects {

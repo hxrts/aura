@@ -15,8 +15,8 @@ use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingCounts, CeremonyProcessingOutcome,
     DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
-    LanPeerInfo, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge,
-    SettingsBridgeState, SyncStatus,
+    LanPeerInfo, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge, SettingsBridgeState,
+    SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui::workflows::authority::{authority_key_prefix, deserialize_authority};
@@ -789,10 +789,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to store AMP bootstrap key: {e}"))
             })?;
 
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let bootstrap_fact = ChannelBootstrap {
             context,
@@ -1361,10 +1358,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         reason: Option<String>,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let fact = HomeKickFact::new_ms(
             context_id,
@@ -1387,10 +1381,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         reason: Option<String>,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let fact = HomeBanFact::new_ms(
             context_id,
@@ -1413,10 +1404,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         target: AuthorityId,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let fact = HomeUnbanFact::new_ms(
             context_id,
@@ -1438,10 +1426,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         duration_secs: Option<u64>,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
         let expires_at = duration_secs.map(|s| now.ts_ms.saturating_add(s.saturating_mul(1000)));
 
         let fact = HomeMuteFact::new_ms(
@@ -1465,10 +1450,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         target: AuthorityId,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let fact = HomeUnmuteFact::new_ms(
             context_id,
@@ -1489,10 +1471,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message_id: String,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let fact = HomePinFact::new_ms(
             context_id,
@@ -1513,10 +1492,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message_id: String,
     ) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        let now = effects
-            .physical_time()
-            .await
-            .map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let fact = HomeUnpinFact::new_ms(
             context_id,
@@ -4706,7 +4682,9 @@ mod tests {
                 );
             }
             CeremonyProcessingOutcome::NoProgress => {
-                panic!("transported channel acceptance should not collapse to a no-progress outcome");
+                panic!(
+                    "transported channel acceptance should not collapse to a no-progress outcome"
+                );
             }
         }
 
