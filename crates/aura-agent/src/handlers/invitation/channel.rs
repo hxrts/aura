@@ -86,7 +86,7 @@ impl<'a> InvitationChannelHandler<'a> {
         let envelope = TransportEnvelope {
             destination: invitation.sender_id,
             source: acceptor_id,
-            context: default_context_id_for_authority(invitation.sender_id),
+            context: invitation.context_id,
             payload,
             metadata,
             receipt: None,
@@ -117,41 +117,38 @@ impl<'a> InvitationChannelHandler<'a> {
         let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
             .map_err(|error| AgentError::internal(error.to_string()))?
             .with_rendezvous_manager(rendezvous_manager.clone());
-        let fallback_context = default_context_id_for_authority(sender_id);
-        let mut contexts = vec![fallback_context];
-        if invitation_context != fallback_context {
-            contexts.push(invitation_context);
-        }
+        for attempt in 0..CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
+            if effects
+                .is_channel_established(invitation_context, sender_id)
+                .await
+            {
+                return Ok(());
+            }
 
-        for context_id in contexts {
-            for attempt in 0..CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
-                if effects.is_channel_established(context_id, sender_id).await {
-                    return Ok(());
-                }
-
-                let result = handler
-                    .initiate_channel(effects, context_id, sender_id)
+            let result = handler
+                .initiate_channel(effects, invitation_context, sender_id)
+                .await
+                .map_err(|error| AgentError::runtime(error.to_string()))?;
+            if result.success
+                && effects
+                    .is_channel_established(invitation_context, sender_id)
                     .await
-                    .map_err(|error| AgentError::runtime(error.to_string()))?;
-                if result.success && effects.is_channel_established(context_id, sender_id).await {
-                    return Ok(());
-                }
+            {
+                return Ok(());
+            }
 
-                let _ = rendezvous_manager.trigger_discovery().await;
-                let _ = effects
-                    .sleep_ms(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS)
-                    .await;
+            let _ = rendezvous_manager.trigger_discovery().await;
+            let _ = effects
+                .sleep_ms(CHANNEL_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS)
+                .await;
 
-                if attempt + 1 == CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
-                    let detail = result.error.unwrap_or_else(|| {
-                        format!(
-                            "peer channel for sender {sender_id} in {context_id} did not establish"
-                        )
-                    });
-                    if context_id == fallback_context {
-                        return Err(AgentError::runtime(detail));
-                    }
-                }
+            if attempt + 1 == CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS {
+                let detail = result.error.unwrap_or_else(|| {
+                    format!(
+                        "peer channel for sender {sender_id} in {invitation_context} did not establish"
+                    )
+                });
+                return Err(AgentError::runtime(detail));
             }
         }
 
@@ -498,9 +495,11 @@ impl<'a> InvitationChannelHandler<'a> {
             {
                 let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
                 return Ok(Some(ChannelInviteDetails {
-                    context_id: shareable
-                        .context_id
-                        .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+                    context_id: require_channel_invitation_context(
+                        &shareable.invitation_id,
+                        shareable.sender_id,
+                        shareable.context_id,
+                    )?,
                     channel_id: home_id,
                     home_id: home_id.to_string(),
                     home_name,

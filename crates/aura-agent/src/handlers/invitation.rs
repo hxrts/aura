@@ -254,6 +254,19 @@ fn require_channel_invitation_name(
     Ok(home_name)
 }
 
+fn require_channel_invitation_context(
+    invitation_id: &InvitationId,
+    sender_id: AuthorityId,
+    context_id: Option<ContextId>,
+) -> AgentResult<ContextId> {
+    context_id.ok_or_else(|| {
+        AgentError::invalid(format!(
+            "channel invitation {} from {} missing authoritative context",
+            invitation_id, sender_id
+        ))
+    })
+}
+
 #[cfg(test)]
 fn channel_id_from_home_id(home_id: &str) -> AgentResult<ChannelId> {
     ChannelId::from_str(home_id).map_err(|e| {
@@ -1291,9 +1304,11 @@ impl InvitationHandler {
             }
         }
         let context_id = match &shareable.invitation_type {
-            InvitationType::Channel { .. } => shareable
-                .context_id
-                .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+            InvitationType::Channel { .. } => require_channel_invitation_context(
+                &shareable.invitation_id,
+                shareable.sender_id,
+                shareable.context_id,
+            )?,
             _ => self.context.effect_context.context_id(),
         };
 
@@ -1559,9 +1574,22 @@ impl InvitationHandler {
                 };
 
                 let context_id = match &shareable.invitation_type {
-                    InvitationType::Channel { .. } => shareable
-                        .context_id
-                        .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+                    InvitationType::Channel { .. } => match require_channel_invitation_context(
+                        &shareable.invitation_id,
+                        shareable.sender_id,
+                        shareable.context_id,
+                    ) {
+                        Ok(context_id) => context_id,
+                        Err(error) => {
+                            tracing::warn!(
+                                invitation_id = %shareable.invitation_id,
+                                sender = %shareable.sender_id,
+                                error = %error,
+                                "Skipping imported channel invitation without authoritative context"
+                            );
+                            continue;
+                        }
+                    },
                     _ => self.context.effect_context.context_id(),
                 };
 
@@ -1617,9 +1645,24 @@ impl InvitationHandler {
             Self::load_imported_invitation(effects, own_id, invitation_id).await
         {
             let context_id = match &shareable.invitation_type {
-                InvitationType::Channel { .. } => shareable
-                    .context_id
-                    .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+                InvitationType::Channel { .. } => {
+                    match require_channel_invitation_context(
+                        &shareable.invitation_id,
+                        shareable.sender_id,
+                        shareable.context_id,
+                    ) {
+                        Ok(context_id) => context_id,
+                        Err(error) => {
+                            tracing::warn!(
+                                invitation_id = %shareable.invitation_id,
+                                sender = %shareable.sender_id,
+                                error = %error,
+                                "Skipping imported channel invitation choreography without authoritative context"
+                            );
+                            return None;
+                        }
+                    }
+                }
                 _ => self.context.effect_context.context_id(),
             };
             let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
@@ -2783,6 +2826,34 @@ mod tests {
         }
     }
 
+    async fn cache_test_peer_descriptor_in_context(
+        effects: &AuraEffectSystem,
+        peer: AuthorityId,
+        context_id: ContextId,
+        addr: &str,
+        now_ms: u64,
+    ) {
+        let manager = effects
+            .rendezvous_manager()
+            .expect("test rendezvous manager should be attached");
+        let hint = TransportHint::tcp_direct(addr.trim_start_matches("tcp://")).unwrap();
+        manager
+            .cache_descriptor(RendezvousDescriptor {
+                authority_id: peer,
+                device_id: None,
+                context_id,
+                transport_hints: vec![hint],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: now_ms.saturating_sub(1),
+                valid_until: now_ms.saturating_add(86_400_000),
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .unwrap();
+    }
+
     async fn accept_invitation_without_notification(
         handler: &InvitationHandler,
         effects: Arc<AuraEffectSystem>,
@@ -3899,6 +3970,14 @@ mod tests {
             .await;
 
         let context_id = ContextId::new_from_entropy([223u8; 32]);
+        cache_test_peer_descriptor_in_context(
+            receiver_effects.as_ref(),
+            sender_id,
+            context_id,
+            "tcp://127.0.0.1:55001",
+            now_ms,
+        )
+        .await;
         let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-real-transport"));
         sender_effects
             .create_channel(ChannelCreateParams {
@@ -3976,6 +4055,96 @@ mod tests {
             home.member(&receiver_id).is_some(),
             "sender home state should include receiver after transported acceptance"
         );
+    }
+
+    #[tokio::test]
+    async fn import_channel_invitation_requires_authoritative_context() {
+        let receiver_id = AuthorityId::new_from_entropy([217u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-missing-channel-context"),
+            sender_id: AuthorityId::new_from_entropy([218u8; 32]),
+            context_id: None,
+            invitation_type: InvitationType::Channel {
+                home_id: canonical_home_id(18),
+                nickname_suggestion: Some("No Context House".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Join No Context House".to_string()),
+        };
+
+        let error = handler
+            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .await
+            .expect_err("channel invitation import must require authoritative context");
+
+        assert!(error.to_string().contains("missing authoritative context"));
+    }
+
+    #[tokio::test]
+    async fn channel_acceptance_notification_requires_invitation_context_descriptor() {
+        let sender_id = AuthorityId::new_from_entropy([219u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([220u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55118",
+            1_700_000_000_000,
+        )
+        .await;
+
+        let invitation_context = ContextId::new_from_entropy([56u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-channel-context-strict"),
+            sender_id,
+            context_id: Some(invitation_context),
+            invitation_type: InvitationType::Channel {
+                home_id: canonical_home_id(19),
+                nickname_suggestion: Some("Context Strict House".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: Some("Join Context Strict House".to_string()),
+        };
+
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .await
+            .expect("channel invitation import should succeed");
+        let channel_invite = handler
+            .resolve_channel_invitation(effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect("channel invitation resolution should succeed")
+            .expect("channel invitation should remain available");
+        handler
+            .materialize_channel_invitation_acceptance(effects.as_ref(), &channel_invite)
+            .await
+            .expect("channel invitation accept should succeed locally");
+
+        let error = handler
+            .notify_channel_invitation_acceptance(effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect_err("notification must not fall back to sender default context");
+
+        assert!(error
+            .to_string()
+            .contains("Peer descriptor not found in cache"));
     }
 
     #[tokio::test]

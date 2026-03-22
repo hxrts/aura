@@ -168,9 +168,24 @@ impl<'a> InvitationCacheHandler<'a> {
             Self::load_imported_invitation(effects, own_id, invitation_id).await
         {
             let context_id = match &shareable.invitation_type {
-                InvitationType::Channel { .. } => shareable
-                    .context_id
-                    .unwrap_or_else(|| default_context_id_for_authority(shareable.sender_id)),
+                InvitationType::Channel { .. } => {
+                    match require_channel_invitation_context(
+                        &shareable.invitation_id,
+                        shareable.sender_id,
+                        shareable.context_id,
+                    ) {
+                        Ok(context_id) => context_id,
+                        Err(error) => {
+                            tracing::warn!(
+                                invitation_id = %shareable.invitation_id,
+                                sender = %shareable.sender_id,
+                                error = %error,
+                                "Skipping cached imported channel invitation without authoritative context"
+                            );
+                            return best;
+                        }
+                    }
+                }
                 _ => self.handler.context.effect_context.context_id(),
             };
             let invitation = Invitation {
