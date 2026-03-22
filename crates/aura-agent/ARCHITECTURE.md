@@ -406,6 +406,12 @@ Rules:
 
 Architecture/tooling split: runtime ownership boundaries that can be closed by types, visibility, or compile-fail tests should not rely primarily on shell grep checks. `just check-arch` remains the right gate for repo-wide runtime/integration invariants.
 
+Legacy cleanup rule: `aura-agent` should not keep dormant runtime migration
+infrastructure, compatibility constructors, or scheduler re-export shims once
+no sanctioned caller remains. Shared transport simulation wiring is
+`SharedTransport::new` plus explicit registration only; legacy one-off inbox
+wrappers are removed instead of being kept as speculative escape hatches.
+
 ## Testing
 
 ### Strategy

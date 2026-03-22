@@ -831,18 +831,13 @@ fn topological_sort(views: Vec<Arc<dyn AnyView>>) -> Vec<Arc<dyn AnyView>> {
 // Delta Types and Reduction Functions
 // =============================================================================
 //
-// Reduction types have been extracted to the `reductions` module for better
-// organization. Re-export them here for backward compatibility.
-
-#[allow(unused_imports)]
-pub use super::reductions::{
-    ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction, InvitationReduction,
-    RecoveryReduction,
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reactive::reductions::{
+        ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction,
+        InvitationReduction, RecoveryReduction,
+    };
     use crate::fact_registry::build_fact_registry;
     use aura_chat::{ChatDelta, ChatFact};
     use aura_core::{

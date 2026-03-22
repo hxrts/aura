@@ -553,6 +553,22 @@ Primary enforcement belongs in typed ownership primitives and proc-macro declara
 
 Shell checks such as semantic-owner bounded-await and frontend/harness boundary wrappers are secondary fences for narrow escape hatches, not the source of truth for semantic correctness.
 
+Phase-6 rollup rule:
+
+1. extend typed ownership primitives or proc-macro declarations first
+2. add or update compile-fail coverage for the newly-closed misuse shape
+3. place syntax-owned enforcement in `aura-macros` lint binaries and run it
+   through `just lint-arch-syntax` or `just ci-ownership-policy`
+4. keep shell backstops only for integration-governance checks that cannot be
+   proved in types or Rust-native syntax analysis
+5. delete the legacy helper, compatibility wrapper, migration shim, or stale
+   test that the stronger contract replaced in the same milestone
+
+Do not keep dormant fallback modules, compatibility constructors, or
+"temporary" legacy upgrade paths after the strong contract exists. If a rule
+can be enforced by types, macros, compile-fail suites, or Rust-native lints,
+that enforcement is primary and the shell layer stays thin.
+
 For proof-bearing postconditions specifically, the desired enforcement order is:
 
 1. private proof constructors

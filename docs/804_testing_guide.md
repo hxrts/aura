@@ -183,6 +183,18 @@ final CI entrypoints:
 - `just ci-harness-ownership-policy` for the harness-specific ownership policy
 - `just ci-user-flow-policy` for shared UX governance and documentation sync
 
+Testing/enforcement split:
+
+- prefer `trybuild` compile-fail coverage when the misuse is fundamentally an
+  API-shape or visibility violation
+- prefer Rust-native lint binaries in `aura-macros` when the misuse is a
+  syntax-level boundary or naming/flow-shape rule
+- keep shell scripts for repo-wide governance, integration topology, or
+  end-to-end harness policy that cannot realistically be proved at compile time
+- when a stronger contract lands, remove the superseded legacy helper,
+  compatibility branch, migration shim, or stale regression fixture rather than
+  leaving both paths active
+
 The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). The bootstrap staging/handoff promise is completion-based: callers may treat it as confirmation that the owned bootstrap/rebootstrap transition finished, not merely that the request was queued. Channel-returning bridge responses now distinguish weak selected-channel ids from authoritative channel bindings; a payload that lacks context is not a binding. Browser harness failures also surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__` and `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`; those globals are diagnostic-only and do not replace the authoritative `UiSnapshot`/`RenderHeartbeat` payloads. Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`, and browser-owned maintenance polling should share one bounded helper for sleep/cancellation/pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
 ### Shared Semantic Ownership Inventory
