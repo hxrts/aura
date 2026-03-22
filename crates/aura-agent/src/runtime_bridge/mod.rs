@@ -3819,16 +3819,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
-        Ok(if let Ok(invitation_service) = self.agent.invitations() {
-            invitation_service
-                .list_pending()
-                .await
-                .iter()
-                .map(convert_invitation_to_bridge_info)
-                .collect()
-        } else {
-            Vec::new()
-        })
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
+        Ok(invitation_service
+            .list_pending()
+            .await
+            .iter()
+            .map(convert_invitation_to_bridge_info)
+            .collect())
     }
 
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
@@ -3848,19 +3848,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {
-        // Get pending invitations where we are the sender
-        Ok(if let Ok(invitation_service) = self.agent.invitations() {
-            let our_authority = self.agent.authority_id();
-            invitation_service
-                .list_pending()
-                .await
-                .iter()
-                .filter(|inv| inv.sender_id == our_authority)
-                .map(|inv| inv.receiver_id)
-                .collect()
-        } else {
-            Vec::new()
-        })
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
+        let our_authority = self.agent.authority_id();
+        Ok(invitation_service
+            .list_pending()
+            .await
+            .iter()
+            .filter(|inv| inv.sender_id == our_authority)
+            .map(|inv| inv.receiver_id)
+            .collect())
     }
 
     // =========================================================================
@@ -4902,5 +4901,61 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(storage_root);
+    }
+
+    #[tokio::test]
+    async fn try_list_pending_invitations_requires_accepting_invitation_service() {
+        let authority = AuthorityId::new_from_entropy([36u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([37u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        agent.runtime().activity_gate().begin_shutdown();
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_list_pending_invitations()
+            .await
+            .expect_err("stopping runtime should reject invitation queries");
+        assert!(
+            error.to_string().contains("invitation_service"),
+            "expected invitation service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_invited_peer_ids_requires_accepting_invitation_service() {
+        let authority = AuthorityId::new_from_entropy([38u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([39u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        agent.runtime().activity_gate().begin_shutdown();
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_invited_peer_ids()
+            .await
+            .expect_err("stopping runtime should reject invited-peer queries");
+        assert!(
+            error.to_string().contains("invitation_service"),
+            "expected invitation service error, got: {error}"
+        );
     }
 }

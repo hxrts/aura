@@ -261,6 +261,9 @@ Runtime bridge lookup follows the same strong-ref rule:
   listing must also fail explicitly on storage/tree read errors; they may not
   synthesize default snapshots or current-only fallback rows that look like
   authoritative inventory
+- invitation-backed runtime bridge queries must also fail explicitly when the
+  runtime is no longer accepting public operations; they may not collapse
+  `invitation_service` unavailability into empty pending/invited sets
 
 ## Canonical Host/VM Boundary
 
