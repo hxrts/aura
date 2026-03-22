@@ -310,15 +310,10 @@ impl RendezvousHandler {
         let peer_descriptor = match self.cache_manager.get_descriptor(context_id, peer).await {
             Some(descriptor) => descriptor,
             None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => {
-                    let descriptor = manager.get_descriptor(context_id, peer).await;
-                    let descriptor = match descriptor {
-                        Some(value) => Some(value),
-                        None => manager.get_any_descriptor_for_authority(peer).await,
-                    };
-                    descriptor
-                        .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?
-                }
+                Some(manager) => manager
+                    .get_descriptor(context_id, peer)
+                    .await
+                    .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?,
                 None => return Err(AgentError::invalid("Peer descriptor not found in cache")),
             },
         };

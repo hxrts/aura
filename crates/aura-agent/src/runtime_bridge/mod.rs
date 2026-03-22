@@ -1777,12 +1777,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?
             .with_rendezvous_manager((*rendezvous_manager).clone());
 
-        let fallback_context = default_context_id_for_authority(peer);
-        let mut contexts = vec![context];
-        if fallback_context != context {
-            contexts.push(fallback_context);
-        }
-
         let rounds = if harness_mode_enabled() {
             harness_sync_rounds()
         } else {
@@ -1794,67 +1788,56 @@ impl RuntimeBridge for AgentRuntimeBridge {
             0
         };
 
-        let mut last_error: Option<String> = None;
-        for channel_context in contexts {
-            if effects.is_channel_established(channel_context, peer).await {
+        if effects.is_channel_established(context, peer).await {
+            self.seed_sync_peers_from_rendezvous().await;
+            self.sync_seeded_peers().await?;
+            return Ok(());
+        }
+
+        let result = handler
+            .initiate_channel(&effects, context, peer)
+            .await
+            .map_err(|e| {
+                IntentError::network_error(format!(
+                    "Failed to initiate peer channel for {peer} in {context}: {e}"
+                ))
+            });
+
+        let result = match result {
+            Ok(value) => value,
+            Err(error) => return Err(IntentError::network_error(error.to_string())),
+        };
+
+        if !result.success {
+            return Err(IntentError::network_error(
+                result
+                    .error
+                    .unwrap_or_else(|| "peer channel initiation was denied".to_string()),
+            ));
+        }
+
+        for round in 0..rounds {
+            if effects.is_channel_established(context, peer).await {
                 self.seed_sync_peers_from_rendezvous().await;
                 self.sync_seeded_peers().await?;
                 return Ok(());
             }
 
-            let result = handler
-                .initiate_channel(&effects, channel_context, peer)
-                .await
-                .map_err(|e| {
-                    IntentError::network_error(format!(
-                        "Failed to initiate peer channel for {peer} in {channel_context}: {e}"
-                    ))
-                });
-
-            let result = match result {
-                Ok(value) => value,
-                Err(error) => {
-                    last_error = Some(error.to_string());
-                    continue;
-                }
-            };
-
-            if !result.success {
-                last_error = Some(
-                    result
-                        .error
-                        .unwrap_or_else(|| "peer channel initiation was denied".to_string()),
-                );
-                continue;
+            if harness_mode_enabled() {
+                let _ = rendezvous::trigger_discovery(self).await;
             }
+            self.seed_sync_peers_from_rendezvous().await;
+            self.sync_seeded_peers().await?;
+            self.process_ceremony_messages().await?;
 
-            for round in 0..rounds {
-                if effects.is_channel_established(channel_context, peer).await {
-                    self.seed_sync_peers_from_rendezvous().await;
-                    self.sync_seeded_peers().await?;
-                    return Ok(());
-                }
-
-                if harness_mode_enabled() {
-                    let _ = rendezvous::trigger_discovery(self).await;
-                }
-                self.seed_sync_peers_from_rendezvous().await;
-                self.sync_seeded_peers().await?;
-                self.process_ceremony_messages().await?;
-
-                if round + 1 < rounds && backoff_ms > 0 {
-                    self.sleep_ms(backoff_ms).await;
-                }
+            if round + 1 < rounds && backoff_ms > 0 {
+                self.sleep_ms(backoff_ms).await;
             }
-
-            last_error = Some(format!(
-                "peer channel for {peer} in {channel_context} did not establish after bounded convergence"
-            ));
         }
 
-        Err(IntentError::network_error(last_error.unwrap_or_else(|| {
-            format!("peer channel for {peer} in {context} did not establish after bounded convergence")
-        })))
+        Err(IntentError::network_error(format!(
+            "peer channel for {peer} in {context} did not establish after bounded convergence"
+        )))
     }
 
     // =========================================================================
@@ -4278,7 +4261,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ensure_peer_channel_requires_sync_after_post_initiation_establishment() {
+    async fn ensure_peer_channel_rejects_default_context_descriptor_fallback() {
         let _guard = env_lock().lock().unwrap();
         let _env_restore = EnvRestore::capture(&[
             "AURA_HARNESS_MODE",
@@ -4333,23 +4316,14 @@ mod tests {
             .await
             .expect("cache fallback descriptor for initiation");
 
-        let publish_manager = manager.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            publish_manager
-                .cache_descriptor(make_descriptor(context))
-                .await
-                .expect("cache target-context descriptor after initiation");
-        });
-
         let bridge = AgentRuntimeBridge::new(agent);
         let error = bridge
             .ensure_peer_channel(context, peer)
             .await
-            .expect_err("post-initiation establishment should still fail when sync cannot run");
+            .expect_err("peer channel initiation must not use fallback-context descriptors");
         assert!(
-            error.to_string().contains("sync_service"),
-            "expected sync service error, got: {error}"
+            error.to_string().contains(&context.to_string()),
+            "expected requested-context failure, got: {error}"
         );
     }
 
