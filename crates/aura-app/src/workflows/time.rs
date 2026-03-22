@@ -85,11 +85,10 @@ pub async fn sleep_ms(app_core: &Arc<RwLock<AppCore>>, ms: u64) -> Result<(), Au
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AppConfig, AppCore};
 
     #[tokio::test]
     async fn current_time_ms_without_runtime_returns_typed_error() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
 
         let error = current_time_ms(&app_core)
             .await
@@ -99,7 +98,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_first_timestamp_without_runtime_returns_typed_error() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
 
         let error = local_first_timestamp_ms(&app_core, "time-test", &[])
             .await

@@ -359,7 +359,6 @@ mod tests {
     use crate::views::chat::{Channel, ChannelType};
     use crate::views::recovery::{Guardian, GuardianStatus, RecoveryState};
     use crate::workflows::signals::read_signal;
-    use crate::AppConfig;
     use aura_core::hash::hash;
     use aura_core::types::identifiers::ContextId;
     use std::path::Path;
@@ -476,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_homes_projection_observed_updates_view_and_signal_through_one_helper() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         init_signals_for_test(&app_core).await;
 
         let home_id = ChannelId::from_bytes(hash(b"observed-projection-homes-shared-helper"));
@@ -516,7 +515,7 @@ mod tests {
 
     #[tokio::test]
     async fn replace_recovery_projection_observed_updates_view_and_signal_through_one_helper() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         init_signals_for_test(&app_core).await;
 
         let recovery = RecoveryState::from_parts(

@@ -1609,7 +1609,7 @@ mod tests {
     #[tokio::test]
     async fn test_frost_integration_through_effect_system() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
 
         // Generate 2-of-3 FROST keys through the effect system
         let result = effect_system.frost_generate_keys(2, 3).await;
@@ -1674,7 +1674,7 @@ mod tests {
     #[tokio::test]
     async fn test_guard_effect_system_enables_amp_journal_effects() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
 
         // Pure guards + EffectInterpreter are used; legacy bridges removed.
         let context = ContextId::new_from_entropy([1u8; 32]);
@@ -1692,7 +1692,7 @@ mod tests {
     #[test]
     fn test_simulation_uses_isolated_storage_for_default_config() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
 
         assert_ne!(
             effect_system.config().storage.base_path,
@@ -1703,7 +1703,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_and_sync_handlers_are_wired() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
 
         // Tree state should be retrievable (empty but deterministic)
         let state = effect_system.get_current_state().await.unwrap();
@@ -1723,7 +1723,7 @@ mod tests {
     #[tokio::test]
     async fn test_threshold_queries_use_threshold_config_metadata() {
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
         let authority = AuthorityId::new_from_entropy([33u8; 32]);
 
         effect_system

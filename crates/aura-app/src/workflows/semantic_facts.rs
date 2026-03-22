@@ -1077,6 +1077,7 @@ pub(in crate::workflows) async fn publish_authoritative_operation_failure_with_i
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn authoritative_status_for_instance(
     facts: &[AuthoritativeSemanticFact],
     operation_id: &OperationId,
@@ -1096,6 +1097,7 @@ pub(crate) fn authoritative_status_for_instance(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn assert_succeeded_with_postcondition(
     facts: &[AuthoritativeSemanticFact],
     operation_id: &OperationId,
@@ -1114,6 +1116,7 @@ pub(crate) fn assert_succeeded_with_postcondition(
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn assert_terminal_failure_or_cancelled(
     facts: &[AuthoritativeSemanticFact],
     operation_id: &OperationId,
@@ -1155,17 +1158,12 @@ mod tests {
     fn runtime_backed_test_app_core() -> Arc<RwLock<AppCore>> {
         let authority = AuthorityId::new_from_entropy([42; 32]);
         let runtime = Arc::new(OfflineRuntimeBridge::new(authority));
-        Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime)
-                .unwrap_or_else(|error| panic!("{error}")),
-        ))
+        crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime)
     }
 
     #[tokio::test]
     async fn authoritative_semantic_facts_snapshot_reads_owned_store_without_registered_signal() {
-        let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
-        ));
+        let app_core = crate::testing::default_test_app_core();
         {
             let mut core = app_core.write().await;
             core.set_authoritative_semantic_facts(vec![
@@ -1184,9 +1182,7 @@ mod tests {
 
     #[tokio::test]
     async fn authoritative_semantic_fact_update_restores_owned_store_on_signal_emit_failure() {
-        let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
-        ));
+        let app_core = crate::testing::default_test_app_core();
         {
             let mut core = app_core.write().await;
             core.set_authoritative_semantic_facts(vec![
@@ -1255,9 +1251,7 @@ mod tests {
 
     #[tokio::test]
     async fn prove_home_created_requires_registered_homes_signal() {
-        let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
-        ));
+        let app_core = crate::testing::default_test_app_core();
         let home_id = ChannelId::new(aura_core::Hash32([7; 32]));
 
         let error = prove_home_created(&app_core, home_id)

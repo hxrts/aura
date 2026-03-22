@@ -117,6 +117,8 @@ pub mod reactive;
 // RuntimeBridge implementation (for aura-app dependency inversion)
 #[cfg(feature = "choreo-backend-telltale-vm")]
 mod runtime_bridge;
+#[cfg(test)]
+mod testing;
 
 // Journal fact registry helpers (public helper functions)
 #[cfg(feature = "choreo-backend-telltale-vm")]

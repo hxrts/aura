@@ -2929,23 +2929,18 @@ mod tests {
         let shared_transport = crate::runtime::SharedTransport::new();
         let config = AgentConfig::default();
         let peer = AuthorityId::new_from_entropy([135u8; 32]);
-        let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-                &config,
-                authority.authority_id(),
-                shared_transport.clone(),
-            )
-            .unwrap(),
+        let effects = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &config,
+            authority.authority_id(),
+            shared_transport.clone(),
         );
         // Materialize a destination participant on the shared transport.
-        let _peer_effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+        let _peer_effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
                 &config,
                 peer,
                 shared_transport,
-            )
-            .unwrap(),
-        );
+            );
         let handler = InvitationHandler::new(authority.clone()).unwrap();
 
         let invitation = handler
@@ -2988,23 +2983,18 @@ mod tests {
         let shared_transport = crate::runtime::SharedTransport::new();
         let config = AgentConfig::default();
         let peer = AuthorityId::new_from_entropy([139u8; 32]);
-        let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-                &config,
-                authority.authority_id(),
-                shared_transport.clone(),
-            )
-            .unwrap(),
+        let effects = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &config,
+            authority.authority_id(),
+            shared_transport.clone(),
         );
         // Materialize a destination participant on the shared transport.
-        let _peer_effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+        let _peer_effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
                 &config,
                 peer,
                 shared_transport,
-            )
-            .unwrap(),
-        );
+            );
         let handler = InvitationHandler::new(authority.clone()).unwrap();
 
         let invitation = handler
@@ -3145,9 +3135,8 @@ mod tests {
     async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
         let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
-        );
+        let effects =
+            crate::testing::simulation_effect_system_for_authority_arc(&config, own_authority);
 
         let authority_context = AuthorityContext::new(own_authority);
 
@@ -3225,22 +3214,18 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([124u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
 
-        let sender_effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+        let sender_effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
                 &config,
                 sender_id,
                 shared_transport.clone(),
-            )
-            .unwrap(),
-        );
-        let receiver_effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+            );
+        let receiver_effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
                 &config,
                 receiver_id,
                 shared_transport.clone(),
-            )
-            .unwrap(),
-        );
+            );
 
         let sender_handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();

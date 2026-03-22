@@ -341,7 +341,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_discovered_peers_default() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let state = get_discovered_peers(&app_core).await;
         assert!(state.peers.is_empty());

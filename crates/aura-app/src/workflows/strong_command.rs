@@ -2025,7 +2025,6 @@ macro_rules! strong_command_executor {
 mod tests {
     use super::*;
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
-    use crate::AppConfig;
     #[cfg(feature = "signals")]
     use crate::{
         signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
@@ -2038,7 +2037,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_is_deterministic_for_repeated_resolution() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let bob = Contact {
             id: AuthorityId::new_from_entropy([1u8; 32]),
             nickname: "bob".to_string(),
@@ -2070,7 +2069,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_reports_ambiguous_authority_matches() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let bob = Contact {
             id: AuthorityId::new_from_entropy([2u8; 32]),
             nickname: "bob".to_string(),
@@ -2131,7 +2130,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_reports_stale_snapshot_token() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let bob = Contact {
             id: AuthorityId::new_from_entropy([4u8; 32]),
             nickname: "bob".to_string(),
@@ -2172,7 +2171,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_accepts_explicit_authority_id_without_contact_entry() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let resolver = CommandResolver::default();
         let snapshot = resolver.capture_snapshot(&app_core).await;
         let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
@@ -2196,7 +2195,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_resolves_existing_channel_for_mode() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let channel_id = ChannelId::from_bytes([9u8; 32]);
 
         {
@@ -2248,7 +2247,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_marks_unknown_join_channel_as_will_create() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let resolver = CommandResolver::default();
         let snapshot = resolver.capture_snapshot(&app_core).await;
 
@@ -2278,7 +2277,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_rejects_unknown_join_channel_id_without_materialization() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let resolver = CommandResolver::default();
         let snapshot = resolver.capture_snapshot(&app_core).await;
         let unknown_channel_id = ChannelId::from_bytes([9u8; 32]).to_string();
@@ -2301,7 +2300,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolver_does_not_treat_home_names_as_existing_channels() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let home_id = ChannelId::from_bytes([10u8; 32]);
         let owner = AuthorityId::new_from_entropy([16u8; 32]);
         let context_id = ContextId::new_from_entropy([17u8; 32]);
@@ -2449,7 +2448,7 @@ mod tests {
 
     #[tokio::test]
     async fn join_create_plan_uses_global_scope_and_accepted_consistency() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let resolver = CommandResolver::default();
         let snapshot = resolver.capture_snapshot(&app_core).await;
 
@@ -2503,7 +2502,7 @@ mod tests {
     #[cfg(feature = "signals")]
     #[tokio::test]
     async fn whois_plan_does_not_reresolve_after_contacts_change() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let original = Contact {
             id: AuthorityId::new_from_entropy([21u8; 32]),
             nickname: "bob".to_string(),
@@ -2563,7 +2562,7 @@ mod tests {
     #[cfg(feature = "signals")]
     #[tokio::test]
     async fn consistency_barrier_reports_runtime_unavailable_degraded_state() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([31u8; 32]));
         let plan = PlannedCommand::Moderator(CommandPlan {
             actor: None,
@@ -2587,7 +2586,7 @@ mod tests {
     #[cfg(feature = "signals")]
     #[tokio::test]
     async fn consistency_barrier_reports_replicated_when_join_is_visible() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let channel_id = ChannelId::from_bytes([32u8; 32]);
 
         {
@@ -2641,7 +2640,7 @@ mod tests {
     #[cfg(feature = "signals")]
     #[tokio::test]
     async fn consistency_barrier_treats_missing_leave_scope_as_replicated() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let missing_channel = ChannelId::from_bytes([44u8; 32]);
 
         let plan = PlannedCommand::Membership(CommandPlan {
@@ -2769,7 +2768,7 @@ mod tests {
     #[cfg(feature = "signals")]
     #[tokio::test]
     async fn execute_planned_join_preserves_join_operation_id() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let resolver = CommandResolver::default();

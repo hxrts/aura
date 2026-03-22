@@ -785,9 +785,9 @@ mod tests {
             device_id: authority.device_id(),
             ..Default::default()
         };
-        Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, authority.authority_id())
-                .unwrap(),
+        crate::testing::simulation_effect_system_for_authority_arc(
+            &config,
+            authority.authority_id(),
         )
     }
 

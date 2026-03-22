@@ -478,7 +478,6 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::core::AuthorityContext;
-    use crate::runtime::effects::AuraEffectSystem;
     use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
@@ -487,7 +486,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context.clone()).unwrap();
 
         let status = handler.authentication_status(&effects).await.unwrap();
@@ -501,7 +500,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context).unwrap();
 
         let challenge = handler.create_challenge(&effects).await.unwrap();
@@ -516,7 +515,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Create a response for a non-existent challenge
@@ -538,7 +537,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Step 1: Generate threshold keys (2-of-3) via standardized API
@@ -593,7 +592,7 @@ mod tests {
         let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
-        let effects = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Create a challenge

@@ -5813,7 +5813,7 @@ mod tests {
 
     #[tokio::test]
     async fn require_send_message_readiness_fails_when_authoritative_facts_are_unavailable() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let channel = AuthoritativeChannelRef::new(
             ChannelId::from_bytes(hash(b"semantic-readiness-channel")),
             ContextId::new_from_entropy(hash(b"semantic-readiness-context")),

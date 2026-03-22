@@ -386,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn key_package_requires_explicit_target_authority_metadata() {
         let authority_id = AuthorityId::new_from_entropy([11u8; 32]);
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&AgentConfig::default()).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
         let tracker = CeremonyTracker::new(Arc::new(PhysicalTimeHandler::new()));
         let runner = CeremonyRunner::new(tracker.clone());
         let signing_service = ThresholdSigningService::new(effects.clone());

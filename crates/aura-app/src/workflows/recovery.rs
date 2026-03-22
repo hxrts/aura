@@ -475,9 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_recovery_status_default() {
-        let config = AppConfig::default();
-        let core = AppCore::new(config).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
+        let app_core = crate::testing::default_test_app_core();
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let status = get_recovery_status(&app_core).await.unwrap();
@@ -487,9 +485,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_recovery_state() {
-        let config = AppConfig::default();
-        let core = AppCore::new(config).unwrap();
-        let app_core = Arc::new(RwLock::new(core));
+        let app_core = crate::testing::default_test_app_core();
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         // Set recovery state with active recovery process

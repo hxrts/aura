@@ -345,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_settings_default() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // Workflows assume reactive signals are initialized.
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
@@ -358,7 +358,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_mfa_policy_without_runtime() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // Without a runtime bridge, updating MFA policy should fail
         let result = update_mfa_policy(&app_core, true).await;

@@ -481,7 +481,7 @@ mod tests {
     #[tokio::test]
     async fn test_is_admin_no_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let is_admin_result = is_admin(&app_core).await;
         assert!(!is_admin_result);
@@ -490,7 +490,7 @@ mod tests {
     #[tokio::test]
     async fn test_grant_moderator_no_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let result = grant_moderator(&app_core, None, "user-123").await;
         assert!(result.is_err());
@@ -499,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn test_revoke_moderator_no_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let result = revoke_moderator(&app_core, None, "user-123").await;
         assert!(result.is_err());
@@ -567,7 +567,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_target_authority_supports_contact_lookup() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
 
         {
@@ -660,7 +660,7 @@ mod tests {
         let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
             [9u8; 32],
         )));
-        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime).unwrap()));
+        let app_core = crate::testing::test_app_core_with_runtime(config, runtime);
         {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();

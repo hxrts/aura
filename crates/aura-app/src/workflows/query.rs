@@ -202,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_contacts() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let contacts = list_contacts(&app_core).await;
         // Default should have empty contacts
@@ -212,7 +212,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_user_info_not_found() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let result = get_user_info(&app_core, "nonexistent").await;
         assert!(result.is_err());
@@ -221,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_user_info_reads_materialized_contacts() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
         let bob = Contact {
@@ -250,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_participants_requires_materialized_channel() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let error = list_participants(&app_core, "dm:user-123")
             .await
@@ -261,7 +261,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_participants_does_not_fallback_to_all_contacts() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let bob_id = AuthorityId::new_from_entropy([8u8; 32]);
         let bob = Contact {

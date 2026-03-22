@@ -897,7 +897,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let result = ping(&app_core).await;
         assert!(result.is_ok());
@@ -906,7 +906,7 @@ mod tests {
     #[tokio::test]
     async fn test_is_available() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let available = is_available(&app_core).await;
         assert!(available);
@@ -915,7 +915,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_account_completes_all_stages() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // An offline AppCore (no runtime, signals not initialized) will encounter
         // partial failures during refresh.  The function should still complete
@@ -927,7 +927,7 @@ mod tests {
     #[tokio::test]
     async fn install_contacts_refresh_hook_requires_runtime_task_spawner() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let error = install_contacts_refresh_hook(&app_core)
             .await
@@ -940,7 +940,7 @@ mod tests {
     #[tokio::test]
     async fn install_chat_refresh_hook_requires_runtime_task_spawner() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let error = install_chat_refresh_hook(&app_core)
             .await
@@ -954,7 +954,7 @@ mod tests {
     #[tokio::test]
     async fn install_authoritative_readiness_hook_requires_runtime_task_spawner() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let error = install_authoritative_readiness_hook(&app_core)
             .await

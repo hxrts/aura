@@ -973,9 +973,7 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use crate::runtime::effects::AuraEffectSystem;
     use aura_rendezvous::GuardDecision;
-    use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -995,7 +993,7 @@ mod tests {
         let authority = create_test_authority(80);
         let context_id = ContextId::new_from_entropy([180u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
@@ -1013,7 +1011,7 @@ mod tests {
         let authority = create_test_authority(81);
         let context_id = ContextId::new_from_entropy([181u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Deny {
@@ -1031,7 +1029,7 @@ mod tests {
         let authority = create_test_authority(82);
         let context_id = ContextId::new_from_entropy([182u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let descriptor = RendezvousDescriptor {
             authority_id: authority.authority_id(),
@@ -1063,7 +1061,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([183u8; 32]);
         let peer = AuthorityId::new_from_entropy([84u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
@@ -1083,7 +1081,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([185u8; 32]);
         let peer = AuthorityId::new_from_entropy([86u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
@@ -1108,7 +1106,7 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let context_id = ContextId::new_from_entropy([151u8; 32]);
         let result = handler
@@ -1160,7 +1158,7 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let context_id = ContextId::new_from_entropy([154u8; 32]);
         let peer = AuthorityId::new_from_entropy([55u8; 32]);
@@ -1197,7 +1195,7 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let context_id = ContextId::new_from_entropy([156u8; 32]);
         let peer = AuthorityId::new_from_entropy([57u8; 32]);
