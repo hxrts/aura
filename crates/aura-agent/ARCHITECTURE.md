@@ -270,6 +270,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - authority listing must fail on account-config read failure or corrupt stored
   authority records; it may not publish a partial authority inventory that
   looks authoritative after skipping unreadable entries
+- runtime bridge reachability checks must use only current-context transport or
+  current-context descriptor evidence; they may not promote peer-default-
+  context or LAN-discovery caches into an authoritative online answer
 - runtime-owned relational-fact pull must fail explicitly when rendezvous is
   unavailable or no websocket-capable descriptor exists for the target peer; it
   may not downgrade missing transport reachability into a zero-fact success

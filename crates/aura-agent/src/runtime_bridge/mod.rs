@@ -1556,22 +1556,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
             if rendezvous.get_descriptor(context, peer).await.is_some() {
                 return true;
             }
-
-            let fallback_context = default_context_id_for_authority(peer);
-            if fallback_context != context
-                && rendezvous
-                    .get_descriptor(fallback_context, peer)
-                    .await
-                    .is_some()
-            {
-                return true;
-            }
-
-            // Fallback: check if peer is discovered on LAN (handles descriptor cache
-            // eviction or timing races where the descriptor hasn't been dual-cached yet)
-            if rendezvous.get_lan_discovered_peer(peer).await.is_some() {
-                return true;
-            }
         }
 
         false
@@ -5092,6 +5076,67 @@ mod tests {
             error.to_string().contains("invitation_service"),
             "expected invitation service error, got: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn is_peer_online_requires_current_context_descriptor() {
+        let authority = AuthorityId::new_from_entropy([50u8; 32]);
+        let peer = AuthorityId::new_from_entropy([51u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([52u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let effects = agent.runtime().effects();
+        let manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            authority,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+        let service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(&manager, &service_context)
+            .await
+            .expect("start rendezvous manager");
+
+        manager
+            .cache_descriptor(aura_rendezvous::facts::RendezvousDescriptor {
+                authority_id: peer,
+                device_id: None,
+                context_id: default_context_id_for_authority(peer),
+                transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+                    "127.0.0.1:6553",
+                )
+                .expect("tcp hint")],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 0,
+                valid_until: u64::MAX,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .expect("cache peer-default-context descriptor");
+
+        let bridge = AgentRuntimeBridge::new(agent);
+        assert!(
+            !bridge.is_peer_online(peer).await,
+            "peer online checks must not promote peer-default-context descriptors into current-context reachability"
+        );
+
+        crate::runtime::services::RuntimeService::stop(&manager)
+            .await
+            .expect("stop rendezvous manager");
     }
 
     #[tokio::test]
