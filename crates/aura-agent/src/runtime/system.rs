@@ -40,7 +40,7 @@ use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_protocol::amp::get_channel_state;
-use aura_rendezvous::{DescriptorBuilder, RendezvousDescriptor, TransportHint};
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
 use std::collections::{BTreeMap, VecDeque};
@@ -1427,64 +1427,40 @@ pub(crate) async fn publish_lan_descriptor_with(
         return Ok(());
     }
 
-    match handler
+    let result = handler
         .publish_descriptor(&effects, context_id, hints.clone(), [0u8; 32], 0)
         .await
-    {
-        Ok(result) if result.success => {
-            if let Some(descriptor) = result.descriptor {
-                let descriptor = RendezvousDescriptor {
-                    device_id: Some(device_id),
-                    ..descriptor
-                };
-                install_lan_descriptor(rendezvous_manager, descriptor).await?;
-                return Ok(());
-            }
-            tracing::warn!("LAN descriptor publish succeeded without descriptor payload");
-        }
-        Ok(result) => {
-            tracing::warn!(
-                error = %result.error.unwrap_or_else(|| "unknown error".to_string()),
-                "LAN descriptor publish failed"
-            );
-        }
-        Err(error) => {
-            tracing::warn!(
-                error = %error,
-                "LAN descriptor publish errored; falling back to runtime-local descriptor"
-            );
-        }
-    }
-
-    let now_ms = effects
-        .time_effects()
-        .physical_time()
-        .await
-        .map_err(|error| {
-            ServiceError::startup_failed(
-                "rendezvous_publish",
-                format!("failed to read physical time for LAN descriptor fallback: {error}"),
-            )
-        })?
-        .ts_ms;
-    let descriptor = DescriptorBuilder::new(
-        authority_id,
-        rendezvous_manager.config().descriptor_validity.as_millis() as u64,
-        None,
-    )
-    .build(context_id, hints, [0u8; 32], now_ms);
-    let descriptor = RendezvousDescriptor {
-        device_id: Some(device_id),
-        ..descriptor
-    };
-    tracing::warn!(
-        authority = %authority_id,
-        context_id = %context_id,
-        "Installed runtime-local LAN descriptor fallback"
-    );
+        .map_err(|error| ServiceError::startup_failed("rendezvous_publish", error.to_string()))?;
+    let descriptor = require_published_lan_descriptor(result, device_id)?;
     install_lan_descriptor(rendezvous_manager, descriptor).await?;
 
     Ok(())
+}
+
+fn require_published_lan_descriptor(
+    result: crate::handlers::rendezvous::RendezvousResult,
+    device_id: DeviceId,
+) -> Result<RendezvousDescriptor, ServiceError> {
+    if !result.success {
+        return Err(ServiceError::startup_failed(
+            "rendezvous_publish",
+            result
+                .error
+                .unwrap_or_else(|| "LAN descriptor publish failed".to_string()),
+        ));
+    }
+
+    let descriptor = result.descriptor.ok_or_else(|| {
+        ServiceError::startup_failed(
+            "rendezvous_publish",
+            "LAN descriptor publish succeeded without descriptor payload".to_string(),
+        )
+    })?;
+
+    Ok(RendezvousDescriptor {
+        device_id: Some(device_id),
+        ..descriptor
+    })
 }
 
 #[cfg(test)]
@@ -1492,6 +1468,7 @@ mod tests {
     use super::*;
     use crate::runtime::builder::EffectSystemBuilder;
     use crate::runtime::services::SyncManagerConfig;
+    use aura_core::ContextId;
 
     #[test]
     fn runtime_activity_gate_transitions_and_rejects_new_public_work() {
@@ -1568,5 +1545,75 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(service_names.contains(&"runtime_maintenance"));
+    }
+
+    #[test]
+    fn lan_descriptor_publish_requires_descriptor_payload() {
+        let context_id = ContextId::new_from_entropy([12u8; 32]);
+        let device_id = DeviceId::new_from_entropy([14u8; 32]);
+        let result = crate::handlers::rendezvous::RendezvousResult {
+            success: true,
+            context_id,
+            peer: None,
+            descriptor: None,
+            error: None,
+        };
+
+        let error = require_published_lan_descriptor(result, device_id)
+            .expect_err("missing descriptor payload must fail closed");
+
+        assert!(error.to_string().contains("descriptor payload"));
+        assert!(error.to_string().contains("rendezvous_publish"));
+    }
+
+    #[test]
+    fn lan_descriptor_publish_requires_success_result() {
+        let context_id = ContextId::new_from_entropy([15u8; 32]);
+        let device_id = DeviceId::new_from_entropy([16u8; 32]);
+        let result = crate::handlers::rendezvous::RendezvousResult {
+            success: false,
+            context_id,
+            peer: None,
+            descriptor: None,
+            error: Some("guard denied".to_string()),
+        };
+
+        let error = require_published_lan_descriptor(result, device_id)
+            .expect_err("failed publication must stay terminal");
+
+        assert!(error.to_string().contains("guard denied"));
+        assert!(error.to_string().contains("rendezvous_publish"));
+    }
+
+    #[test]
+    fn lan_descriptor_publish_preserves_device_binding() {
+        let authority_id = AuthorityId::new_from_entropy([17u8; 32]);
+        let context_id = ContextId::new_from_entropy([18u8; 32]);
+        let device_id = DeviceId::new_from_entropy([19u8; 32]);
+        let result = crate::handlers::rendezvous::RendezvousResult {
+            success: true,
+            context_id,
+            peer: None,
+            descriptor: Some(RendezvousDescriptor {
+                authority_id,
+                device_id: None,
+                context_id,
+                transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:7000").unwrap()],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 1,
+                valid_until: 2,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            }),
+            error: None,
+        };
+
+        let descriptor = require_published_lan_descriptor(result, device_id)
+            .expect("successful publish with payload should keep device binding");
+
+        assert_eq!(descriptor.device_id, Some(device_id));
+        assert_eq!(descriptor.context_id, context_id);
+        assert_eq!(descriptor.authority_id, authority_id);
     }
 }
