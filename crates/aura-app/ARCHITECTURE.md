@@ -146,6 +146,11 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - accepting a pending home/channel invitation requires the current
   runtime-authoritative pending invitation witness; owner code may not spin a
   local retry window waiting for that invitation to appear after dispatch
+- join-channel and pending-channel-accept workflows that return terminal-facing
+  channel selection data must return a typed `ChannelBindingWitness` (and, for
+  pending acceptance, an `AcceptedPendingChannelBinding`) from the owned
+  workflow path instead of asking Layer 7 to rediscover the canonical channel
+  identity by name or local projection heuristics
 - each converted semantic domain should have one publication helper and one
   ownership label; context/home/neighborhood workflows must not drift into
   mirrored `views_mut().set_*` plus ad hoc signal emission paths

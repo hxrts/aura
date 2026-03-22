@@ -104,7 +104,7 @@ fn spawn_local_terminal_result_callback<
     on_success: Success,
     on_failure: Failure,
 ) where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Action: FnOnce(Arc<IoContext>) -> ActionFut + Send + 'static,
     ActionFut: Future<Output = crate::error::TerminalResult<T>> + Send + 'static,
     Success: FnOnce(UiUpdateSender, T) -> SuccessFut + Send + 'static,
@@ -164,7 +164,7 @@ fn spawn_observed_result_callback<T, Action, ActionFut, Success, SuccessFut, Fai
     on_success: Success,
     on_failure: Failure,
 ) where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Action: FnOnce(Arc<IoContext>) -> ActionFut + Send + 'static,
     ActionFut: Future<Output = crate::error::TerminalResult<T>> + Send + 'static,
     Success: FnOnce(UiUpdateSender, T) -> SuccessFut + Send + 'static,
@@ -199,7 +199,7 @@ fn spawn_handoff_workflow_callback<T, Fut, F>(
     panic_context: &'static str,
     workflow: F,
 ) where
-    T: Send + 'static,
+    T: Clone + Send + 'static,
     Fut: Future<Output = WorkflowTerminalOutcome<T>> + Send + 'static,
     F: FnOnce(
             Arc<RwLock<aura_app::ui::types::AppCore>>,
@@ -207,6 +207,45 @@ fn spawn_handoff_workflow_callback<T, Fut, F>(
         ) -> Fut
         + Send
         + 'static,
+{
+    spawn_handoff_workflow_callback_with_success(
+        ctx,
+        tx,
+        operation,
+        operation_id,
+        kind,
+        scope,
+        toast_scope,
+        failure_prefix,
+        panic_context,
+        workflow,
+        |_tx, _value| async {},
+    );
+}
+
+fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+    operation: WorkflowHandoffOperationOwner,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+    scope: SemanticOperationTransferScope,
+    toast_scope: &'static str,
+    failure_prefix: &'static str,
+    panic_context: &'static str,
+    workflow: F,
+    on_success: Success,
+) where
+    T: Clone + Send + 'static,
+    Fut: Future<Output = WorkflowTerminalOutcome<T>> + Send + 'static,
+    F: FnOnce(
+            Arc<RwLock<aura_app::ui::types::AppCore>>,
+            Option<aura_app::ui_contract::OperationInstanceId>,
+        ) -> Fut
+        + Send
+        + 'static,
+    Success: FnOnce(UiUpdateSender, T) -> SuccessFut + Send + 'static,
+    SuccessFut: Future<Output = ()> + Send + 'static,
 {
     let app_core = ctx.app_core_raw().clone();
     let operation_instance_id = operation.harness_handle().instance_id().clone();
@@ -219,9 +258,10 @@ fn spawn_handoff_workflow_callback<T, Fut, F>(
             .await
         {
             Ok(WorkflowTerminalOutcome {
-                result: Ok(_),
+                result: Ok(value),
                 terminal,
             }) => {
+                on_success(tx.clone(), value).await;
                 if let Err(error) = apply_handed_off_terminal_status(
                     &app_core,
                     &tx,

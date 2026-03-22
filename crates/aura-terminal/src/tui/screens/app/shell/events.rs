@@ -1,25 +1,31 @@
 use super::*;
+use crate::tui::channel_selection::{
+    authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
+};
+use aura_app::ui_contract::ChannelBindingWitness;
 
 pub(super) fn resolve_committed_selected_channel_id(
     state: &TuiState,
     shared_channels: &[Channel],
-) -> Option<String> {
+) -> Option<CommittedChannelSelection> {
     shared_channels
         .get(state.chat.selected_channel)
-        .map(|channel| channel.id.clone())
+        .map(|channel| CommittedChannelSelection::new(channel.id.clone()))
 }
 
 pub(super) fn handle_channel_selection_change(
     current: &TuiState,
     new_state: &TuiState,
     shared_channels: &Arc<parking_lot::RwLock<Vec<Channel>>>,
-    selected_channel_id: &Arc<parking_lot::RwLock<Option<String>>>,
-    selected_channel_binding: &Arc<parking_lot::RwLock<Option<SelectedChannelBinding>>>,
+    selected_channel_id: &SharedCommittedChannelSelection,
+    selected_channel_binding: &Arc<parking_lot::RwLock<Option<ChannelBindingWitness>>>,
 ) {
     let idx = new_state.chat.selected_channel;
 
     let channels = shared_channels.read().clone();
-    let next_selected = channels.get(idx).map(|channel| channel.id.clone());
+    let next_selected = channels
+        .get(idx)
+        .map(|channel| CommittedChannelSelection::new(channel.id.clone()));
     let current_selected = selected_channel_id.read().clone();
 
     if new_state.chat.selected_channel == current.chat.selected_channel
@@ -34,17 +40,17 @@ pub(super) fn handle_channel_selection_change(
     }
     {
         let mut guard = selected_channel_binding.write();
-        *guard = channels
-            .get(idx)
-            .map(SelectedChannelBinding::from_authoritative_channel);
+        *guard = channels.get(idx).map(authoritative_channel_binding);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{handle_channel_selection_change, resolve_committed_selected_channel_id};
+    use crate::tui::channel_selection::CommittedChannelSelection;
     use crate::tui::state::TuiState;
     use crate::tui::types::Channel;
+    use aura_app::ui_contract::ChannelBindingWitness;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -59,7 +65,7 @@ mod tests {
         state.chat.selected_channel = 1;
         assert_eq!(
             resolve_committed_selected_channel_id(&state, &channels),
-            Some("channel-2".to_string())
+            Some(CommittedChannelSelection::new("channel-2"))
         );
 
         state.chat.selected_channel = 4;
@@ -83,10 +89,7 @@ mod tests {
         )]));
         let selected_channel_id = Arc::new(parking_lot::RwLock::new(None));
         let selected_channel_binding = Arc::new(parking_lot::RwLock::new(Some(
-            super::SelectedChannelBinding {
-                channel_id: "channel-1".to_string(),
-                context_id: Some("ctx-123".to_string()),
-            },
+            ChannelBindingWitness::new("channel-1", Some("ctx-123".to_string())),
         )));
 
         handle_channel_selection_change(
@@ -97,13 +100,13 @@ mod tests {
             &selected_channel_binding,
         );
 
-        assert_eq!(*selected_channel_id.read(), Some("channel-1".to_string()));
+        assert_eq!(
+            *selected_channel_id.read(),
+            Some(CommittedChannelSelection::new("channel-1"))
+        );
         assert_eq!(
             *selected_channel_binding.read(),
-            Some(super::SelectedChannelBinding {
-                channel_id: "channel-1".to_string(),
-                context_id: None,
-            })
+            Some(ChannelBindingWitness::new("channel-1", None))
         );
     }
 
@@ -125,6 +128,8 @@ mod tests {
         assert!(!send_branch.contains("sending shortly"));
         assert!(!send_branch.contains("tokio::time::sleep"));
         assert!(!send_branch.contains("selected_channel_id_for_dispatch.read()"));
+        assert!(!send_branch.contains("visible_message_channel_id"));
+        assert!(send_branch.contains("No committed channel selected"));
     }
 
     #[test]
@@ -172,6 +177,46 @@ mod tests {
         assert!(!create_branch.contains("runtime.export_invitation"));
         assert!(!import_branch.contains("runtime.import_invitation"));
         assert!(!import_branch.contains("runtime.accept_invitation"));
+    }
+
+    #[test]
+    fn join_and_accept_callbacks_consume_binding_witnesses() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let chat_callbacks_path =
+            repo_root.join("crates/aura-terminal/src/tui/callbacks/factories/chat.rs");
+        let source = std::fs::read_to_string(&chat_callbacks_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", chat_callbacks_path.display())
+        });
+
+        assert!(source.contains("join_channel_by_name_with_binding_terminal_status"));
+        assert!(source.contains("accept_pending_channel_invitation_with_binding_terminal_status"));
+        assert!(source.contains("UiUpdate::ChannelSelected(binding)"));
+        assert!(source.contains("UiUpdate::ChannelSelected(accepted.binding)"));
+    }
+
+    #[test]
+    fn slash_join_does_not_repair_selection_by_channel_name() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let chat_callbacks_path =
+            repo_root.join("crates/aura-terminal/src/tui/callbacks/factories/chat.rs");
+        let source = std::fs::read_to_string(&chat_callbacks_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", chat_callbacks_path.display())
+        });
+        let parsed_start = source
+            .find(
+                "let parsed = match aura_app::ui::workflows::strong_command::ParsedCommand::parse(",
+            )
+            .unwrap_or_else(|| panic!("missing slash-command parse path"));
+        let join_callback_start = source[parsed_start..]
+            .find("fn make_join_channel(")
+            .map(|offset| parsed_start + offset)
+            .unwrap_or_else(|| panic!("missing join-channel callback factory"));
+        let slash_command_branch = &source[parsed_start..join_callback_start];
+
+        assert!(!slash_command_branch.contains("joined_channel_name"));
+        assert!(!slash_command_branch.contains("get_chat_state("));
+        assert!(!slash_command_branch.contains("candidate.name.eq_ignore_ascii_case"));
+        assert!(!slash_command_branch.contains("UiUpdate::ChannelSelected("));
     }
 
     #[test]

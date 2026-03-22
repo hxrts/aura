@@ -56,6 +56,7 @@ pub mod updates;
 
 // Shared infrastructure
 pub mod callbacks;
+pub(crate) mod channel_selection;
 pub(crate) mod chat_scope;
 pub mod commands;
 pub mod effects;

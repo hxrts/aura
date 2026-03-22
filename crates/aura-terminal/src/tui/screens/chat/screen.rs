@@ -23,6 +23,9 @@ use aura_app::ui::types::{format_timestamp, ChatState};
 use crate::tui::callbacks::{
     CreateChannelCallback, RetryMessageCallback, SendCallback, SetTopicCallback,
 };
+use crate::tui::channel_selection::{
+    authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
+};
 use crate::tui::chat_scope::{active_home_scope_id, effective_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -30,7 +33,7 @@ use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
 use crate::tui::theme::{list_item_colors, Spacing, Theme};
 use crate::tui::types::{format_contact_name, Channel, Contact, Message};
-use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use crate::tui::updates::{send_ui_update_required_blocking, UiUpdate, UiUpdateSender};
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -104,7 +107,7 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 }
 
 /// Shared selected channel identity for cross-component communication.
-pub type SharedSelectedChannel = Arc<RwLock<Option<String>>>;
+pub type SharedSelectedChannel = SharedCommittedChannelSelection;
 pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 
 /// Props for ChatScreen
@@ -220,9 +223,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
                     let scope = active_scope.read().clone();
-                    let selected_channel_id = shared_selected
-                        .as_ref()
-                        .and_then(|selected| selected.read().clone());
+                    let selected_channel_id = shared_selected.as_ref().and_then(|selected| {
+                        selected
+                            .read()
+                            .clone()
+                            .map(|selection| selection.channel_id().to_string())
+                    });
                     let effective_scope = effective_home_scope_id(
                         &chat_state,
                         scope.as_deref(),
@@ -278,9 +284,16 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                             .iter()
                             .any(|channel| channel.id.to_string() == *channel_id)
                     }) {
-                        let update = UiUpdate::ChannelSelected(selected_channel_id);
-                        if tx.try_send(update.clone()).is_err() {
-                            let _ = tx.blocking_send(update);
+                        if let Some(channel) = scoped
+                            .iter()
+                            .find(|channel| channel.id.to_string() == selected_channel_id)
+                        {
+                            let _ = send_ui_update_required_blocking(
+                                tx,
+                                UiUpdate::ChannelSelected(authoritative_channel_binding(
+                                    &Channel::from(*channel),
+                                )),
+                            );
                         }
                     }
 
@@ -289,9 +302,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         message_count: selected_channel_message_count,
                         selected_index: None,
                     };
-                    if tx.try_send(update.clone()).is_err() {
-                        let _ = tx.blocking_send(update);
-                    }
+                    let _ = send_ui_update_required_blocking(tx, update);
                 }
 
                 // Update chat state; selection-aware message rendering happens at render time.
@@ -305,10 +316,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let chat_state = reactive_chat_state.read().clone();
     let contacts = reactive_contacts.read().clone();
     let active_scope = reactive_active_scope.read().clone();
-    let committed_selected_channel_id = props
-        .selected_channel
-        .as_ref()
-        .and_then(|selected| selected.read().clone());
+    let committed_selected_channel_id = props.selected_channel.as_ref().and_then(|selected| {
+        selected
+            .read()
+            .clone()
+            .map(|selection| selection.channel_id().to_string())
+    });
     let effective_scope = effective_home_scope_id(
         &chat_state,
         active_scope.as_deref(),
@@ -334,7 +347,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let selected_channel_index = props
         .selected_channel
         .as_ref()
-        .and_then(|selected| selected.read().clone())
+        .and_then(|selected| {
+            selected
+                .read()
+                .clone()
+                .map(|selection| selection.channel_id().to_string())
+        })
         .and_then(|selected_id| {
             channels
                 .iter()
@@ -353,8 +371,11 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let selected_channel_id = channels.get(selected_channel_index).map(|ch| ch.id.clone());
     if let Some(shared_selected) = props.selected_channel.as_ref() {
         let mut guard = shared_selected.write();
-        if *guard != selected_channel_id {
-            *guard = selected_channel_id.clone();
+        let next_selection = selected_channel_id
+            .clone()
+            .map(CommittedChannelSelection::new);
+        if *guard != next_selection {
+            *guard = next_selection;
         }
     }
     let messages: Vec<Message> = props
