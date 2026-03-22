@@ -396,6 +396,11 @@ mod tests {
     use aura_app::{AppConfig, AppCore};
     use tokio::sync::mpsc;
 
+    async fn init_signals_for_test(app_core: &Arc<RwLock<AppCore>>) {
+        let mut core = app_core.write().await;
+        core.init_signals().await.unwrap_or_else(|error| panic!("{error}"));
+    }
+
     #[derive(Clone, Copy)]
     struct OperationInvariantCase {
         operation_id: fn() -> OperationId,
@@ -451,9 +456,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
         let owner = SubmittedOperationOwner::submit_local_terminal(
@@ -477,9 +480,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
         let owner = SubmittedOperationOwner::submit_for_app_handoff(
@@ -608,9 +609,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
@@ -674,9 +673,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
@@ -732,9 +729,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 

@@ -234,13 +234,13 @@ pub async fn start_device_removal_ceremony(
         || runtime.initiate_device_removal_ceremony(device_id),
     )
     .await?
-        .map(|ceremony_id| {
-            CeremonyHandle::new(
-                ceremony_id,
-                crate::runtime_bridge::CeremonyKind::DeviceRemoval,
-            )
-        })
-        .map_err(|e| ceremony_op("start device removal", e).into())
+    .map(|ceremony_id| {
+        CeremonyHandle::new(
+            ceremony_id,
+            crate::runtime_bridge::CeremonyKind::DeviceRemoval,
+        )
+    })
+    .map_err(|e| ceremony_op("start device removal", e).into())
 }
 
 /// Polling policy for ceremonies.

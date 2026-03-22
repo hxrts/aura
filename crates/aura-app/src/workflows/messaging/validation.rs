@@ -32,9 +32,9 @@ pub(super) async fn authoritative_home_moderation_status(
         || runtime.moderation_status(context_id, channel_id, authority_id, timestamp_ms),
     )
     .await?
-        .map_err(|error| {
-            crate::workflows::error::runtime_call("authoritative moderation status", error).into()
-        })
+    .map_err(|error| {
+        crate::workflows::error::runtime_call("authoritative moderation status", error).into()
+    })
 }
 
 pub(super) fn intent_error_is_not_found(error: &IntentError) -> bool {

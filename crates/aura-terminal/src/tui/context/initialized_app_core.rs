@@ -18,14 +18,21 @@ pub struct InitializedAppCore {
 
 impl InitializedAppCore {
     pub async fn new(app_core: Arc<RwLock<AppCore>>) -> Result<Self, AuraError> {
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .map_err(|e| AuraError::internal(e.to_string()))?;
-
         let runtime = {
             let core = app_core.read().await;
             core.runtime().cloned()
         };
+
+        if runtime.is_some() {
+            AppCore::init_signals_with_hooks(&app_core)
+                .await
+                .map_err(|e| AuraError::internal(e.to_string()))?;
+        } else {
+            let mut core = app_core.write().await;
+            core.init_signals()
+                .await
+                .map_err(|e| AuraError::internal(e.to_string()))?;
+        }
 
         Ok(Self { app_core, runtime })
     }

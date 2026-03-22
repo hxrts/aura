@@ -136,8 +136,8 @@ pub mod types {
     };
     pub use crate::runtime_bridge::{
         BoxedRuntimeBridge, CeremonyKind, InvitationBridgeStatus, InvitationBridgeType,
-        InvitationInfo, LanPeerInfo, RendezvousStatus, RuntimeBridge, RuntimeStatus,
-        SyncStatus as RuntimeSyncStatus,
+        InvitationInfo, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus, RuntimeBridge,
+        RuntimeStatus, SyncStatus as RuntimeSyncStatus,
     };
     pub use crate::thresholds::{
         default_channel_threshold, default_guardian_threshold, normalize_channel_threshold,

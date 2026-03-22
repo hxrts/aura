@@ -76,7 +76,11 @@ pub struct HarnessEventDetails {
 
 impl HarnessEventDetails {
     #[must_use]
-    pub fn with_field(mut self, key: impl Into<String>, value: impl Into<HarnessEventValue>) -> Self {
+    pub fn with_field(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<HarnessEventValue>,
+    ) -> Self {
         self.fields.insert(key.into(), value.into());
         self
     }

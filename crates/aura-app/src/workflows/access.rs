@@ -61,13 +61,13 @@ async fn send_relational_fact_with_retry(
                 || runtime.send_chat_fact(peer, context_id, fact),
             )
             .await?
-                .map_err(|error| {
-                    AuraError::from(super::error::WorkflowError::DeliveryFailed {
-                        peer: peer.to_string(),
-                        attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
-                        source: AuraError::agent(error.to_string()),
-                    })
+            .map_err(|error| {
+                AuraError::from(super::error::WorkflowError::DeliveryFailed {
+                    peer: peer.to_string(),
+                    attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
+                    source: AuraError::agent(error.to_string()),
                 })
+            })
         }
     })
     .await

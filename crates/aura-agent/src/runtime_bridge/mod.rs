@@ -1809,11 +1809,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         if !result.success {
-            return Err(IntentError::network_error(
-                result
-                    .error
-                    .unwrap_or_else(|| "peer channel initiation was denied".to_string()),
-            ));
+            return Err(IntentError::network_error(result.error.unwrap_or_else(
+                || "peer channel initiation was denied".to_string(),
+            )));
         }
 
         for round in 0..rounds {
@@ -4295,21 +4293,22 @@ mod tests {
             .expect("runtime rendezvous service")
             .clone();
 
-        let make_descriptor = move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
-            authority_id: peer,
-            device_id: None,
-            context_id: descriptor_context,
-            transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
-                "127.0.0.1:6556",
-            )
-            .expect("tcp hint")],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
-            valid_from: 0,
-            valid_until: u64::MAX,
-            nonce: [0u8; 32],
-            nickname_suggestion: None,
-        };
+        let make_descriptor =
+            move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
+                authority_id: peer,
+                device_id: None,
+                context_id: descriptor_context,
+                transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+                    "127.0.0.1:6556",
+                )
+                .expect("tcp hint")],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 0,
+                valid_until: u64::MAX,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            };
 
         manager
             .cache_descriptor(make_descriptor(fallback_context))

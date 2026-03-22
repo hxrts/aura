@@ -202,43 +202,6 @@ pub struct AccountBackup {
     pub source_device: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct LegacyAccountConfig {
-    authority_id: String,
-    context_id: String,
-    #[serde(default)]
-    nickname_suggestion: Option<String>,
-    created_at: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct LegacyAccountBackup {
-    version: u32,
-    account: LegacyAccountConfig,
-    journal: Option<String>,
-    backup_at: u64,
-    source_device: Option<String>,
-}
-
-impl TryFrom<LegacyAccountBackup> for AccountBackup {
-    type Error = String;
-
-    fn try_from(value: LegacyAccountBackup) -> Result<Self, Self::Error> {
-        Ok(Self {
-            version: value.version,
-            account: AccountConfig {
-                authority_id: parse_authority_id_compatible(&value.account.authority_id)?,
-                context_id: parse_context_id_compatible(&value.account.context_id)?,
-                nickname_suggestion: value.account.nickname_suggestion,
-                created_at: value.account.created_at,
-            },
-            journal: value.journal,
-            backup_at: value.backup_at,
-            source_device: value.source_device,
-        })
-    }
-}
-
 impl AccountBackup {
     /// Create a new account backup
     pub fn new(
@@ -287,15 +250,8 @@ impl AccountBackup {
         let json =
             String::from_utf8(json_bytes).map_err(|e| format!("Invalid backup code UTF-8: {e}"))?;
 
-        let backup = match serde_json::from_str::<AccountBackup>(&json) {
-            Ok(backup) => backup,
-            Err(parse_error) => {
-                let legacy_backup: LegacyAccountBackup = serde_json::from_str(&json)
-                    .map_err(|_| format!("Invalid backup format: {parse_error}"))?;
-                AccountBackup::try_from(legacy_backup)
-                    .map_err(|e| format!("Invalid backup format: {e}"))?
-            }
-        };
+        let backup = serde_json::from_str::<AccountBackup>(&json)
+            .map_err(|e| format!("Invalid backup format: {e}"))?;
 
         Ok(backup)
     }
@@ -315,31 +271,13 @@ impl AccountBackup {
         }
 
         // Verify string representations can round-trip through canonical parsers.
-        parse_authority_id_compatible(&self.account.authority_id.to_string())?;
-        parse_context_id_compatible(&self.account.context_id.to_string())?;
+        AuthorityId::from_str(&self.account.authority_id.to_string())
+            .map_err(|_| format!("Invalid authority_id format: {}", self.account.authority_id))?;
+        ContextId::from_str(&self.account.context_id.to_string())
+            .map_err(|_| format!("Invalid context_id format: {}", self.account.context_id))?;
 
         Ok(())
     }
-}
-
-fn parse_legacy_uuid(raw: &str) -> Result<uuid::Uuid, String> {
-    let bytes = hex::decode(raw).map_err(|e| format!("Invalid legacy hex identifier: {e}"))?;
-    let uuid_bytes: [u8; 16] = bytes
-        .try_into()
-        .map_err(|_| format!("Invalid legacy hex identifier length: {}", raw.len()))?;
-    Ok(uuid::Uuid::from_bytes(uuid_bytes))
-}
-
-fn parse_authority_id_compatible(raw: &str) -> Result<AuthorityId, String> {
-    AuthorityId::from_str(raw)
-        .or_else(|_| parse_legacy_uuid(raw).map(AuthorityId::from_uuid))
-        .map_err(|_| format!("Invalid authority_id format: {raw}"))
-}
-
-fn parse_context_id_compatible(raw: &str) -> Result<ContextId, String> {
-    ContextId::from_str(raw)
-        .or_else(|_| parse_legacy_uuid(raw).map(ContextId::from_uuid))
-        .map_err(|_| format!("Invalid context_id format: {raw}"))
 }
 
 #[cfg(test)]
@@ -411,11 +349,11 @@ mod tests {
 
     #[test]
     fn test_backup_validate_invalid_authority_id() {
-        let legacy_json = r#"{
+        let json = r#"{
             "version": 1,
             "account": {
                 "authority_id": "invalid",
-                "context_id": "fedcba9876543210fedcba9876543210",
+                "context_id": "context-fedcba98-7654-3210-fedc-ba9876543210",
                 "nickname_suggestion": "test",
                 "created_at": 0
             },
@@ -425,42 +363,10 @@ mod tests {
         }"#;
         let encoded = {
             use base64::Engine;
-            let payload = base64::engine::general_purpose::STANDARD.encode(legacy_json);
+            let payload = base64::engine::general_purpose::STANDARD.encode(json);
             format!("{BACKUP_PREFIX}{payload}")
         };
         let result = AccountBackup::decode(&encoded);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_backup_decode_legacy_hex_ids() {
-        let legacy_json = r#"{
-            "version": 1,
-            "account": {
-                "authority_id": "0123456789abcdef0123456789abcdef",
-                "context_id": "fedcba9876543210fedcba9876543210",
-                "nickname_suggestion": "test",
-                "created_at": 123
-            },
-            "journal": null,
-            "backup_at": 456,
-            "source_device": "legacy-device"
-        }"#;
-
-        let encoded = {
-            use base64::Engine;
-            let payload = base64::engine::general_purpose::STANDARD.encode(legacy_json);
-            format!("{BACKUP_PREFIX}{payload}")
-        };
-
-        let decoded = AccountBackup::decode(&encoded).expect("legacy backup should decode");
-        assert_eq!(
-            decoded.account.authority_id.to_string(),
-            "authority-01234567-89ab-cdef-0123-456789abcdef"
-        );
-        assert_eq!(
-            decoded.account.context_id.to_string(),
-            "context-fedcba98-7654-3210-fedc-ba9876543210"
-        );
     }
 }

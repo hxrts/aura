@@ -162,7 +162,9 @@ where
     F: FnOnce() -> Fut,
     Fut: Future<Output = T>,
 {
-    let budget = workflow_timeout_budget(runtime, duration).await.map_err(AuraError::from)?;
+    let budget = workflow_timeout_budget(runtime, duration)
+        .await
+        .map_err(AuraError::from)?;
     match execute_with_runtime_timeout_budget(runtime, &budget, || async {
         Ok::<T, AuraError>(call().await)
     })
@@ -171,11 +173,13 @@ where
         Ok(value) => Ok(value),
         Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout(operation, stage, budget.timeout_ms());
-            Err(AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
-                operation,
-                stage,
-                timeout_ms: budget.timeout_ms(),
-            }))
+            Err(AuraError::from(
+                crate::workflows::error::WorkflowError::TimedOut {
+                    operation,
+                    stage,
+                    timeout_ms: budget.timeout_ms(),
+                },
+            ))
         }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),

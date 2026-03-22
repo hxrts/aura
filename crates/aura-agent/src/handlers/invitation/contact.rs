@@ -195,6 +195,7 @@ impl<'a> InvitationContactHandler<'a> {
                     effects.as_ref(),
                 )
                 .await?;
+                effects.await_next_view_update().await;
 
                 let contact_fact = ContactFact::Added {
                     context_id,
@@ -215,6 +216,7 @@ impl<'a> InvitationContactHandler<'a> {
                     )
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
+                effects.await_next_view_update().await;
 
                 let mut updated = invitation.clone();
                 updated.status = InvitationStatus::Accepted;
@@ -322,6 +324,7 @@ impl<'a> InvitationContactHandler<'a> {
                     effects.as_ref(),
                 )
                 .await?;
+                effects.await_next_view_update().await;
 
                 let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await;
                 let membership = ChannelMembershipFact::new(
@@ -337,6 +340,7 @@ impl<'a> InvitationContactHandler<'a> {
                     .commit_relational_facts(vec![membership])
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
+                effects.await_next_view_update().await;
 
                 let mut updated = invitation.clone();
                 updated.status = InvitationStatus::Accepted;
@@ -398,6 +402,7 @@ impl<'a> InvitationContactHandler<'a> {
                     .commit_relational_facts(vec![fact])
                     .await
                     .map_err(|e| AgentError::effects(e.to_string()))?;
+                effects.await_next_view_update().await;
 
                 processed = processed.saturating_add(1);
                 continue;

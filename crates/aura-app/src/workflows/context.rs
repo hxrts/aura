@@ -3,6 +3,7 @@
 //! This module contains context/navigation operations that are portable across all frontends.
 //! It follows the reactive signal pattern and manages neighborhood navigation state.
 
+pub use crate::workflows::time::current_time_ms;
 use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     ui_contract::{
@@ -28,7 +29,6 @@ use aura_core::{
     AuraError,
 };
 use std::sync::Arc;
-pub use crate::workflows::time::current_time_ms;
 
 const MISSING_ACTIVE_HOME_MESSAGE: &str =
     "No active home selected. Open Neighborhood and create or select a home.";
@@ -725,9 +725,14 @@ pub async fn initialize_test_home(
 mod tests {
     use super::*;
     use crate::views::home::HomeState;
-    use crate::AppConfig;
     use crate::workflows::signals::emit_signal;
+    use crate::AppConfig;
     use aura_core::crypto::hash::hash;
+
+    async fn init_signals_for_test(app_core: &Arc<RwLock<AppCore>>) {
+        let mut core = app_core.write().await;
+        core.init_signals().await.unwrap();
+    }
 
     async fn publish_test_homes_signal(app_core: &Arc<RwLock<AppCore>>) {
         emit_signal(
@@ -770,7 +775,7 @@ mod tests {
     async fn test_resolve_active_home_uses_selected_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([21u8; 32]);
 
         let selected_home = ChannelId::from_bytes(hash(b"selected-home"));
@@ -801,7 +806,7 @@ mod tests {
     async fn test_resolve_active_home_prefers_authoritative_selection_over_view_current_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([24u8; 32]);
         let selected_home = ChannelId::from_bytes(hash(b"selected-home-authoritative"));
         let selected_ctx = ContextId::new_from_entropy(hash(b"selected-ctx-authoritative"));
@@ -842,7 +847,7 @@ mod tests {
     async fn test_resolve_active_home_requires_explicit_or_selected_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
 
         let home_a = ChannelId::from_bytes(hash(b"home-z"));
@@ -881,7 +886,7 @@ mod tests {
     async fn test_resolve_active_home_returns_guidance_when_missing() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         publish_test_homes_signal(&app_core).await;
 
         let error = resolve_active_home(&app_core).await.unwrap_err();
@@ -892,7 +897,7 @@ mod tests {
     async fn test_current_home_context_uses_active_home_when_available() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
         let home_id = ChannelId::from_bytes(hash(b"chat-home"));
         let home_ctx = ContextId::new_from_entropy(hash(b"chat-home-ctx"));
@@ -922,7 +927,7 @@ mod tests {
     async fn test_current_home_context_requires_active_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         publish_test_homes_signal(&app_core).await;
 
         let error = current_home_context(&app_core).await.unwrap_err();
@@ -933,7 +938,7 @@ mod tests {
     async fn test_move_position_selects_known_target_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
-        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([11u8; 32]);
 
         let home_a = ChannelId::from_bytes(hash(b"home-a"));

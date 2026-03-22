@@ -120,11 +120,9 @@ fn tool_api_primitives_control_local_pty_instance() {
         ToolResponse::Error { message } => panic!("screen failed: {message}"),
         ToolResponse::Ok { payload } => panic!("unexpected screen payload: {payload:?}"),
     };
-    assert!(
-        screen_payload
-            .diagnostic_authoritative_screen
-            .contains("hello-pty")
-    );
+    assert!(screen_payload
+        .diagnostic_authoritative_screen
+        .contains("hello-pty"));
     assert!(screen_payload.diagnostic_raw_screen.contains("hello-pty"));
 
     let tail_payload = match tool_api.handle_request(ToolRequest::TailLog {

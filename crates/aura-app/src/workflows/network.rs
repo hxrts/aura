@@ -284,9 +284,9 @@ async fn emit_discovered_peers_signal(
             || runtime.try_get_invited_peer_ids(),
         )
         .await?
-            .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
-            .into_iter()
-            .collect()
+        .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
+        .into_iter()
+        .collect()
     } else {
         HashSet::new()
     };

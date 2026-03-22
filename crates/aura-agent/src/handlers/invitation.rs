@@ -4227,7 +4227,7 @@ mod tests {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
-            context_id: None,
+            context_id: Some(default_context_id_for_authority(sender_id)),
             invitation_type: InvitationType::Channel {
                 home_id,
                 nickname_suggestion: Some("Maple House".to_string()),
@@ -4323,7 +4323,7 @@ mod tests {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
-            context_id: None,
+            context_id: Some(default_context_id_for_authority(sender_id)),
             invitation_type: InvitationType::Channel {
                 home_id,
                 nickname_suggestion: Some("Oak House".to_string()),
@@ -4439,7 +4439,7 @@ mod tests {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
-            context_id: None,
+            context_id: Some(expected_context),
             invitation_type: InvitationType::Channel {
                 home_id,
                 nickname_suggestion: Some("Maple House".to_string()),
@@ -4526,7 +4526,7 @@ mod tests {
             version: ShareableInvitation::CURRENT_VERSION,
             invitation_id: invitation_id.clone(),
             sender_id,
-            context_id: None,
+            context_id: Some(default_context_id_for_authority(sender_id)),
             invitation_type: InvitationType::Channel {
                 home_id,
                 nickname_suggestion: Some("Elm House".to_string()),

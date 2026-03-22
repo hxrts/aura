@@ -125,9 +125,7 @@ pub fn parse_bundle(payload: &str) -> Result<ReplayBundle> {
 mod tests {
     use super::response_semantics_match;
     use crate::config::ScreenSource;
-    use crate::tool_api::{
-        ClipboardPayload, DiagnosticScreenCapture, ToolPayload, ToolResponse,
-    };
+    use crate::tool_api::{ClipboardPayload, DiagnosticScreenCapture, ToolPayload, ToolResponse};
 
     #[test]
     fn replay_response_semantics_reject_payload_drift() {

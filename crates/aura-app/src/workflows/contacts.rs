@@ -59,7 +59,7 @@ pub async fn add_contact(
         || runtime.commit_relational_facts(&facts),
     )
     .await?
-        .map_err(|e| runtime_call("add contact", e))?;
+    .map_err(|e| runtime_call("add contact", e))?;
 
     Ok(())
 }
@@ -110,7 +110,7 @@ pub async fn add_contacts_batch(
         || runtime.commit_relational_facts(&facts),
     )
     .await?
-        .map_err(|e| runtime_call("add contacts", e))?;
+    .map_err(|e| runtime_call("add contacts", e))?;
 
     Ok(())
 }
@@ -156,7 +156,7 @@ pub async fn update_contact_nickname(
         || runtime.commit_relational_facts(&facts),
     )
     .await?
-        .map_err(|e| runtime_call("commit contact nickname", e))?;
+    .map_err(|e| runtime_call("commit contact nickname", e))?;
 
     Ok(())
 }
@@ -192,7 +192,7 @@ pub async fn remove_contact(
         || runtime.commit_relational_facts(&facts),
     )
     .await?
-        .map_err(|e| runtime_call("remove contact", e))?;
+    .map_err(|e| runtime_call("remove contact", e))?;
 
     Ok(())
 }
@@ -231,7 +231,7 @@ pub async fn set_read_receipt_policy(
         || runtime.commit_relational_facts(&facts),
     )
     .await?
-        .map_err(|e| runtime_call("update read receipt policy", e))?;
+    .map_err(|e| runtime_call("update read receipt policy", e))?;
 
     Ok(())
 }
@@ -293,7 +293,7 @@ pub async fn emit_read_receipts(
             || runtime.commit_relational_facts(&facts),
         )
         .await?
-            .map_err(|e| runtime_call("emit read receipts", e))?;
+        .map_err(|e| runtime_call("emit read receipts", e))?;
     }
 
     Ok(count)
