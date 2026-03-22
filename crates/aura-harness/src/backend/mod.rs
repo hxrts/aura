@@ -40,6 +40,11 @@ pub struct ObservedOperation {
     pub state: OperationState,
 }
 
+pub enum DiagnosticObservationProbe<'a> {
+    DomPatterns(&'a [String]),
+    Target(&'a str),
+}
+
 pub trait ObservationBackend {
     fn ui_snapshot(&self) -> Result<UiSnapshot>;
     fn wait_for_ui_snapshot_event(
@@ -491,29 +496,36 @@ impl BackendHandle {
         }
     }
 
-    pub fn wait_for_diagnostic_dom_patterns(
+    pub fn wait_for_diagnostic_observation_probe(
         &self,
-        patterns: &[String],
+        probe: DiagnosticObservationProbe<'_>,
         timeout_ms: u64,
     ) -> Option<Result<String>> {
         match self {
-            Self::Local(backend) => backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms),
-            Self::Browser(backend) => {
-                backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms)
-            }
-            Self::Ssh(backend) => backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms),
-        }
-    }
-
-    pub fn wait_for_diagnostic_target(
-        &self,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        match self {
-            Self::Local(backend) => backend.wait_for_diagnostic_target(selector, timeout_ms),
-            Self::Browser(backend) => backend.wait_for_diagnostic_target(selector, timeout_ms),
-            Self::Ssh(backend) => backend.wait_for_diagnostic_target(selector, timeout_ms),
+            Self::Local(backend) => match probe {
+                DiagnosticObservationProbe::DomPatterns(patterns) => {
+                    backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms)
+                }
+                DiagnosticObservationProbe::Target(selector) => {
+                    backend.wait_for_diagnostic_target(selector, timeout_ms)
+                }
+            },
+            Self::Browser(backend) => match probe {
+                DiagnosticObservationProbe::DomPatterns(patterns) => {
+                    backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms)
+                }
+                DiagnosticObservationProbe::Target(selector) => {
+                    backend.wait_for_diagnostic_target(selector, timeout_ms)
+                }
+            },
+            Self::Ssh(backend) => match probe {
+                DiagnosticObservationProbe::DomPatterns(patterns) => {
+                    backend.wait_for_diagnostic_dom_patterns(patterns, timeout_ms)
+                }
+                DiagnosticObservationProbe::Target(selector) => {
+                    backend.wait_for_diagnostic_target(selector, timeout_ms)
+                }
+            },
         }
     }
 
@@ -903,11 +915,7 @@ mod tests {
             ["pub fn ", "as_", "observation("].concat(),
             ["pub fn ", "as_", "raw_ui_mut("].concat(),
             ["pub fn ", "as_", "shared_semantic_mut("].concat(),
-            [
-                "runtime identity ",
-                "staging is not supported by backend",
-            ]
-            .concat(),
+            ["runtime identity ", "staging is not supported by backend"].concat(),
         ];
 
         for forbidden in forbidden {
@@ -916,6 +924,27 @@ mod tests {
                 "backend wrapper cleanup regressed: found {forbidden:?}"
             );
         }
+    }
+
+    #[test]
+    fn backend_handle_uses_single_diagnostic_observation_probe_surface() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/backend/mod.rs"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read backend source: {error}"));
+        let old_dom_wrapper = ["pub fn ", "wait_for_diagnostic_dom_patterns("].concat();
+        let old_target_wrapper = ["pub fn ", "wait_for_diagnostic_target("].concat();
+        let new_probe_wrapper = ["pub fn ", "wait_for_diagnostic_observation_probe("].concat();
+
+        assert!(
+            !source.contains(&old_dom_wrapper),
+            "backend handle should not expose a dedicated dom-pattern wait wrapper"
+        );
+        assert!(
+            !source.contains(&old_target_wrapper),
+            "backend handle should not expose a dedicated selector wait wrapper"
+        );
+        assert!(source.contains(&new_probe_wrapper));
     }
 
     struct RecordingSemanticBackend {

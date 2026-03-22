@@ -3444,9 +3444,9 @@ fn wait_for_semantic_state_snapshot(
         let snapshot = if supports_ui_snapshot {
             let remaining = deadline.saturating_duration_since(Instant::now());
             match tool_api.wait_for_ui_snapshot_event(instance_id, remaining, snapshot_version) {
-                Ok(Some((snapshot, version))) => {
-                    snapshot_version = Some(version);
-                    snapshot
+                Ok(Some(event)) => {
+                    snapshot_version = Some(event.version);
+                    event.snapshot
                 }
                 Ok(None) => match fetch_ui_snapshot(tool_api, instance_id) {
                     Ok(snapshot) => snapshot,
@@ -3673,21 +3673,21 @@ fn wait_for_parity(
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if wait_local_next && local_backend_kind == "playwright_browser" {
-            if let Some((snapshot, version)) =
+            if let Some(event) =
                 tool_api.wait_for_ui_snapshot_event(instance_id, remaining, local_version)?
             {
-                local = snapshot;
-                local_version = Some(version);
+                local = event.snapshot;
+                local_version = Some(event.version);
             } else {
                 blocking_sleep(Duration::from_millis(40));
                 local = fetch_ui_snapshot(tool_api, instance_id)?;
             }
         } else if !wait_local_next && peer_backend_kind == "playwright_browser" {
-            if let Some((snapshot, version)) =
+            if let Some(event) =
                 tool_api.wait_for_ui_snapshot_event(peer_instance, remaining, peer_version)?
             {
-                peer = snapshot;
-                peer_version = Some(version);
+                peer = event.snapshot;
+                peer_version = Some(event.version);
             } else {
                 blocking_sleep(Duration::from_millis(40));
                 peer = fetch_ui_snapshot(tool_api, peer_instance)?;

@@ -22,7 +22,8 @@ use aura_core::{hash::hash, AuthorityId};
 use tokio::time::Instant;
 
 use crate::backend::{
-    BackendHandle, SemanticCommandRequest as BackendSemanticCommandRequest,
+    BackendHandle, DiagnosticObservationProbe,
+    SemanticCommandRequest as BackendSemanticCommandRequest,
     SemanticCommandResponse as BackendSemanticCommandResponse,
 };
 use crate::config::{InstanceMode, RunConfig, RuntimeSubstrate, ScreenSource};
@@ -43,6 +44,16 @@ const WEB_SERVER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 struct OwnedWebServer {
     child: Child,
     url: String,
+}
+
+pub enum DiagnosticObservationWait<'a> {
+    Pattern {
+        pattern: &'a str,
+        source: ScreenSource,
+    },
+    Target {
+        selector: &'a str,
+    },
 }
 
 pub struct HarnessCoordinator {
@@ -721,133 +732,122 @@ impl HarnessCoordinator {
         backend.submit_semantic_command(request)
     }
 
-    pub fn wait_for_diagnostic_screen(
+    pub fn wait_for_diagnostic_observation(
         &mut self,
         instance_id: &str,
-        pattern: &str,
+        wait: DiagnosticObservationWait<'_>,
         timeout_ms: u64,
     ) -> Result<String> {
-        self.wait_for_diagnostic_screen_with_source(
-            instance_id,
-            pattern,
-            timeout_ms,
-            ScreenSource::Default,
-        )
-    }
+        match wait {
+            DiagnosticObservationWait::Target { selector } => {
+                let backend = self
+                    .backends
+                    .get(instance_id)
+                    .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+                if let Some(result) = backend.wait_for_diagnostic_observation_probe(
+                    DiagnosticObservationProbe::Target(selector),
+                    timeout_ms,
+                ) {
+                    let screen = result?;
+                    self.events.push(
+                        "observation",
+                        "wait_for_selector",
+                        Some(instance_id.to_string()),
+                        event_details!({
+                            "selector" => selector,
+                            "timeout_ms" => timeout_ms
+                        }),
+                    );
+                    return Ok(screen);
+                }
 
-    pub fn wait_for_diagnostic_screen_with_source(
-        &mut self,
-        instance_id: &str,
-        pattern: &str,
-        timeout_ms: u64,
-        source: ScreenSource,
-    ) -> Result<String> {
-        if matches!(source, ScreenSource::Dom) {
-            let patterns = wait_pattern_candidates(pattern);
-            if let Some(result) = self
-                .backends
-                .get(instance_id)
-                .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
-                .wait_for_diagnostic_dom_patterns(&patterns, timeout_ms)
-            {
-                let screen = result?;
+                bail!(
+                    "wait_for_selector is not supported by backend {}",
+                    backend.backend_kind()
+                )
+            }
+            DiagnosticObservationWait::Pattern { pattern, source } => {
+                if matches!(source, ScreenSource::Dom) {
+                    let patterns = wait_pattern_candidates(pattern);
+                    if let Some(result) = self
+                        .backends
+                        .get(instance_id)
+                        .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
+                        .wait_for_diagnostic_observation_probe(
+                            DiagnosticObservationProbe::DomPatterns(&patterns),
+                            timeout_ms,
+                        )
+                    {
+                        let screen = result?;
+                        self.events.push(
+                            "observation",
+                            "wait_for",
+                            Some(instance_id.to_string()),
+                            event_details!({
+                                "pattern" => pattern,
+                                "normalized_pattern" => normalize_screen(pattern),
+                                "attempts" => 1_u64,
+                                "matched_view" => "normalized",
+                                "source" => format!("{source:?}").to_ascii_lowercase()
+                            }),
+                        );
+                        return Ok(screen);
+                    }
+                }
+
+                let poll_ms: u64 = 40;
+                let mut attempts = 0_u64;
+                let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+
+                loop {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    let screen = self.diagnostic_screen_with_source(instance_id, source)?;
+                    let normalized = normalize_screen(&screen);
+                    if wait_pattern_matches(&normalized, pattern) {
+                        self.events.push(
+                            "observation",
+                            "wait_for",
+                            Some(instance_id.to_string()),
+                            event_details!({
+                                "pattern" => pattern,
+                                "normalized_pattern" => normalize_screen(pattern),
+                                "attempts" => attempts + 1,
+                                "matched_view" => "normalized",
+                                "source" => format!("{source:?}").to_ascii_lowercase()
+                            }),
+                        );
+                        return Ok(screen);
+                    }
+                    attempts = attempts.saturating_add(1);
+                    let now = Instant::now();
+                    if now >= deadline {
+                        break;
+                    }
+                    let remaining = deadline.saturating_duration_since(now);
+                    let delay = remaining.min(Duration::from_millis(poll_ms));
+                    if !delay.is_zero() {
+                        blocking_sleep(delay);
+                    }
+                }
+
                 self.events.push(
-                    "observation",
-                    "wait_for",
+                    "error",
+                    "wait_for_timeout",
                     Some(instance_id.to_string()),
                     event_details!({
                         "pattern" => pattern,
                         "normalized_pattern" => normalize_screen(pattern),
-                        "attempts" => 1_u64,
-                        "matched_view" => "normalized",
+                        "timeout_ms" => timeout_ms,
                         "source" => format!("{source:?}").to_ascii_lowercase()
                     }),
                 );
-                return Ok(screen);
+                bail!(
+                    "wait_for timed out for instance {instance_id} pattern {pattern:?} timeout_ms={timeout_ms}"
+                )
             }
         }
-
-        let poll_ms: u64 = 40;
-        let mut attempts = 0_u64;
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-
-        loop {
-            if Instant::now() >= deadline {
-                break;
-            }
-            let screen = self.diagnostic_screen_with_source(instance_id, source)?;
-            let normalized = normalize_screen(&screen);
-            if wait_pattern_matches(&normalized, pattern) {
-                self.events.push(
-                    "observation",
-                    "wait_for",
-                    Some(instance_id.to_string()),
-                    event_details!({
-                        "pattern" => pattern,
-                        "normalized_pattern" => normalize_screen(pattern),
-                        "attempts" => attempts + 1,
-                        "matched_view" => "normalized",
-                        "source" => format!("{source:?}").to_ascii_lowercase()
-                    }),
-                );
-                return Ok(screen);
-            }
-            attempts = attempts.saturating_add(1);
-            let now = Instant::now();
-            if now >= deadline {
-                break;
-            }
-            let remaining = deadline.saturating_duration_since(now);
-            let delay = remaining.min(Duration::from_millis(poll_ms));
-            if !delay.is_zero() {
-                blocking_sleep(delay);
-            }
-        }
-
-        self.events.push(
-            "error",
-            "wait_for_timeout",
-            Some(instance_id.to_string()),
-            event_details!({
-                "pattern" => pattern,
-                "normalized_pattern" => normalize_screen(pattern),
-                "timeout_ms" => timeout_ms,
-                "source" => format!("{source:?}").to_ascii_lowercase()
-            }),
-        );
-        bail!(
-            "wait_for timed out for instance {instance_id} pattern {pattern:?} timeout_ms={timeout_ms}"
-        )
-    }
-
-    pub fn wait_for_diagnostic_target(
-        &mut self,
-        instance_id: &str,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Result<String> {
-        let backend = self
-            .backends
-            .get(instance_id)
-            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        if let Some(result) = backend.wait_for_diagnostic_target(selector, timeout_ms) {
-            let screen = result?;
-            self.events.push(
-                "observation",
-                "wait_for_selector",
-                Some(instance_id.to_string()),
-                event_details!({
-                    "selector" => selector,
-                    "timeout_ms" => timeout_ms
-                }),
-            );
-            return Ok(screen);
-        }
-
-        bail!(
-            "wait_for_selector is not supported by backend {}",
-            backend.backend_kind()
-        )
     }
 
     pub fn tail_log(&mut self, instance_id: &str, lines: usize) -> Result<Vec<String>> {
