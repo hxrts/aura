@@ -213,6 +213,9 @@ Rules:
 - Runtime bridge query APIs fail explicitly when a required runtime service is
   absent; they do not return empty authoritative-looking peer/discovery results
   as a fallback.
+- Runtime bridge lifecycle APIs that can distinguish `no progress`,
+  `already running`, `processed`, or `degraded` must return typed outcomes
+  rather than flattening those states into `Result<(), _>`.
 
 The current owner may be hosted by an actor, but ownership itself remains a single-owner move boundary, not a shared mutable actor coordination pattern.
 

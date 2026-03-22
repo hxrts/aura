@@ -11,6 +11,7 @@
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
+use aura_app::runtime_bridge::DiscoveryTriggerOutcome;
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
 #[cfg(target_arch = "wasm32")]
 use aura_core::effects::network::NetworkError;
@@ -1363,7 +1364,9 @@ impl RendezvousManager {
     /// Trigger an on-demand discovery refresh
     ///
     /// For LAN discovery, this starts the LAN discovery service if not already running.
-    pub async fn trigger_discovery(&self) -> Result<(), RendezvousManagerError> {
+    pub async fn trigger_discovery(
+        &self,
+    ) -> Result<DiscoveryTriggerOutcome, RendezvousManagerError> {
         if self.config.lan_discovery.enabled && !self.is_lan_discovery_running().await {
             let tasks = self
                 .shared
@@ -1373,9 +1376,10 @@ impl RendezvousManager {
                 .ok_or(RendezvousManagerError::MissingSupervisedTasks)?;
             self.shared.owner.install_tasks(tasks.clone()).await;
             self.start_lan_discovery(tasks).await?;
+            return Ok(DiscoveryTriggerOutcome::Started);
         }
 
-        Ok(())
+        Ok(DiscoveryTriggerOutcome::AlreadyRunning)
     }
 
     /// Send an invitation to a LAN peer

@@ -196,9 +196,19 @@ The ownership declaration is part of the change, not optional follow-up document
 
 Every parity-critical operation must have typed terminal behavior. Direct boundaries use `Result<T, E>`. Long-running operations use typed lifecycle phases: `Submitted`, zero or more intermediate phases, then `Succeeded`, `Failed(E)`, or `Cancelled`.
 
+Runtime-owned bridge APIs must follow the same rule. If a public runtime call can
+distinguish `no progress`, `started`, `already running`, `processed`,
+`degraded`, or `mutated`, it must return a typed outcome instead of collapsing
+those states into `Result<(), E>`.
+
 Every submitted operation must reach a terminal state. Terminal states may not regress. Owner drop must publish failure or cancellation explicitly.
 
 Terminality alone is not strong enough. Aura also requires owner-internal liveness: a legal owner may not contain unbounded internal work that can keep an operation in `OperationState::Submitting` forever. If the owner can hang indefinitely while still technically being the "right" owner, the architecture is incomplete.
+
+Timeout-triggered returns do not relax this rule. A timeout may fail an
+operation, but it may not silently convert an ambiguous owner-internal state
+into nominal success. Typed `NoProgress` or `Degraded` outcomes are preferable
+to unit success when runtime-owned work can observe those distinctions.
 
 ## Semantic Owner Protocol
 

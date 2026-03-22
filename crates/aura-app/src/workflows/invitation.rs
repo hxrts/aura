@@ -2403,7 +2403,7 @@ pub async fn decline_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    timeout_runtime_call(
+    let _ = timeout_runtime_call(
         &runtime,
         "decline_invitation",
         "decline_invitation",
@@ -2412,7 +2412,8 @@ pub async fn decline_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("decline invitation", e)))?;
+    Ok(())
 }
 
 /// Decline an invitation by string ID for callers that only carry string keys.
@@ -2435,7 +2436,7 @@ pub async fn cancel_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    timeout_runtime_call(
+    let _ = timeout_runtime_call(
         &runtime,
         "cancel_invitation",
         "cancel_invitation",
@@ -2444,7 +2445,8 @@ pub async fn cancel_invitation(
     )
     .await
     .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))
+    .map_err(|e| AuraError::from(super::error::runtime_call("cancel invitation", e)))?;
+    Ok(())
 }
 
 /// Cancel an invitation by string ID for callers that only carry string keys.
@@ -3523,7 +3525,12 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
-        runtime.set_accept_invitation_result(Ok(()));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("pending-channel-binding"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
         let channel_id = ChannelId::from_bytes([113u8; 32]);
         let context_id = ContextId::new_from_entropy([114u8; 32]);
         let sender_id = AuthorityId::new_from_entropy([115u8; 32]);
@@ -3578,7 +3585,12 @@ mod tests {
     async fn accept_device_enrollment_invitation_fails_closed_on_ceremony_processing_error() {
         let authority = AuthorityId::new_from_entropy([121u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
-        runtime.set_accept_invitation_result(Ok(()));
+        runtime.set_accept_invitation_result(Ok(
+            crate::runtime_bridge::InvitationMutationOutcome {
+                invitation_id: InvitationId::new("device-enrollment-fail-closed"),
+                new_status: crate::runtime_bridge::InvitationBridgeStatus::Accepted,
+            },
+        ));
         runtime.set_process_ceremony_result(Err(crate::core::IntentError::service_error(
             "ceremony inbox unavailable",
         )));

@@ -13,7 +13,9 @@ use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     AuthoritativeChannelBinding, AuthoritativeModerationStatus, BridgeAuthorityInfo,
-    BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus, RuntimeBridge,
+    BridgeDeviceInfo, CeremonyProcessingCounts, CeremonyProcessingOutcome,
+    DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
+    LanPeerInfo, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge,
     SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
@@ -1667,7 +1669,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
-    async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
+    async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError> {
         let (processed_acceptances, processed_completions) = self
             .agent
             .process_ceremony_acceptances()
@@ -1716,24 +1718,29 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 0
             };
 
-        if processed_acceptances > 0
-            || processed_completions > 0
-            || processed_contact_messages > 0
-            || processed_handshakes > 0
-        {
-            if let Err(error) = self.refresh_reachability_after_ceremony_processing().await {
-                tracing::debug!(
-                    acceptances = processed_acceptances,
-                    completions = processed_completions,
-                    contact_messages = processed_contact_messages,
-                    handshakes = processed_handshakes,
-                    error = %error,
-                    "post-processing reachability refresh did not converge"
-                );
-            }
+        let counts = CeremonyProcessingCounts {
+            acceptances: processed_acceptances,
+            completions: processed_completions,
+            contact_messages: processed_contact_messages,
+            handshakes: processed_handshakes,
+        };
+
+        if counts.total() == 0 {
+            return Ok(CeremonyProcessingOutcome::NoProgress);
         }
 
-        Ok(())
+        let reachability_refresh = match self.refresh_reachability_after_ceremony_processing().await
+        {
+            Ok(()) => ReachabilityRefreshOutcome::Refreshed,
+            Err(error) => ReachabilityRefreshOutcome::Degraded {
+                reason: error.to_string(),
+            },
+        };
+
+        Ok(CeremonyProcessingOutcome::Processed {
+            counts,
+            reachability_refresh,
+        })
     }
 
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
@@ -1850,7 +1857,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         rendezvous::get_rendezvous_status(self).await
     }
 
-    async fn trigger_discovery(&self) -> Result<(), IntentError> {
+    async fn trigger_discovery(&self) -> Result<DiscoveryTriggerOutcome, IntentError> {
         rendezvous::trigger_discovery(self).await
     }
 
@@ -3682,7 +3689,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(convert_invitation_to_bridge_info(&invitation))
     }
 
-    async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+    async fn accept_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         let invitation_service = self
             .agent
             .invitations()
@@ -3706,7 +3716,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })?;
 
         if result.success {
-            Ok(())
+            Ok(InvitationMutationOutcome {
+                invitation_id,
+                new_status: InvitationBridgeStatus::Accepted,
+            })
         } else {
             Err(IntentError::internal_error(result.error.unwrap_or_else(
                 || "Failed to accept invitation".to_string(),
@@ -3714,7 +3727,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
-    async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+    async fn decline_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         let invitation_service = self
             .agent
             .invitations()
@@ -3730,7 +3746,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
 
         if result.success {
-            Ok(())
+            Ok(InvitationMutationOutcome {
+                invitation_id,
+                new_status: InvitationBridgeStatus::Declined,
+            })
         } else {
             Err(IntentError::internal_error(result.error.unwrap_or_else(
                 || "Failed to decline invitation".to_string(),
@@ -3738,7 +3757,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
     }
 
-    async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+    async fn cancel_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         let invitation_service = self
             .agent
             .invitations()
@@ -3754,7 +3776,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
 
         if result.success {
-            Ok(())
+            Ok(InvitationMutationOutcome {
+                invitation_id,
+                new_status: InvitationBridgeStatus::Cancelled,
+            })
         } else {
             Err(IntentError::internal_error(result.error.unwrap_or_else(
                 || "Failed to cancel invitation".to_string(),
@@ -4618,26 +4643,37 @@ mod tests {
             Some(invitation.invitation_id.as_str()),
         );
         sender_effects.requeue_envelope(acceptance_envelope);
-        let direct_processed = crate::handlers::invitation::InvitationHandler::new(
-            crate::core::AuthorityContext::new_with_device(
-                authority,
-                sender_agent.runtime().device_id(),
-            ),
-        )
-        .expect("sender invitation handler")
-        .process_contact_invitation_acceptances(sender_effects.clone())
-        .await
-        .expect("directly process transported acceptance");
-        assert!(
-            direct_processed >= 1,
-            "direct invitation handler should process transported channel acceptance"
-        );
+        let first_outcome = sender_bridge
+            .process_ceremony_messages()
+            .await
+            .expect("process transported channel acceptance");
+        match first_outcome {
+            CeremonyProcessingOutcome::Processed {
+                counts,
+                reachability_refresh,
+            } => {
+                assert!(
+                    counts.contact_messages >= 1,
+                    "expected channel acceptance transport to count as processed contact/channel traffic: {counts:?}"
+                );
+                assert!(
+                    matches!(
+                        reachability_refresh,
+                        ReachabilityRefreshOutcome::Degraded { .. }
+                    ),
+                    "missing sync service should surface an explicit degraded refresh outcome"
+                );
+            }
+            CeremonyProcessingOutcome::NoProgress => {
+                panic!("transported channel acceptance should not collapse to a no-progress outcome");
+            }
+        }
 
-        for _ in 0..8 {
-            sender_bridge
+        for _ in 0..7 {
+            let _ = sender_bridge
                 .process_ceremony_messages()
                 .await
-                .expect("process transported channel acceptance");
+                .expect("continue processing transported channel acceptance");
             let participants = sender_bridge
                 .amp_list_channel_participants(context, channel)
                 .await
@@ -4879,6 +4915,57 @@ mod tests {
             error.to_string().contains("rendezvous_service"),
             "expected rendezvous service error, got: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn trigger_discovery_returns_typed_noop_when_lan_discovery_is_disabled() {
+        let authority = AuthorityId::new_from_entropy([80u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([81u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let config = AgentConfig::default().with_lan_discovery_enabled(false);
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config.clone())
+                .with_rendezvous_config(config.rendezvous_config())
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let outcome = bridge
+            .trigger_discovery()
+            .await
+            .expect("discovery trigger should return a typed outcome");
+        assert_eq!(outcome, DiscoveryTriggerOutcome::AlreadyRunning);
+    }
+
+    #[tokio::test]
+    async fn process_ceremony_messages_returns_no_progress_when_nothing_is_pending() {
+        let authority = AuthorityId::new_from_entropy([82u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([83u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let outcome = bridge
+            .process_ceremony_messages()
+            .await
+            .expect("empty inbox should be a typed no-progress outcome");
+        assert_eq!(outcome, CeremonyProcessingOutcome::NoProgress);
     }
 
     #[tokio::test]

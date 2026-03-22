@@ -576,8 +576,8 @@ impl UiUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::{pin_mut, poll};
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration};
 
     #[test]
     fn test_ui_update_channel() {
@@ -645,23 +645,16 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         tx.send(UiUpdate::SyncStarted).await.unwrap();
 
-        let publish = tokio::spawn({
-            let tx = tx.clone();
-            async move {
-                publish_ui_update(
-                    &tx,
-                    UiUpdate::SyncCompleted,
-                    UiUpdatePublication::RequiredUnordered,
-                )
-                .await
-            }
-        });
-
-        sleep(Duration::from_millis(25)).await;
-        assert!(!publish.is_finished());
+        let publish = publish_ui_update(
+            &tx,
+            UiUpdate::SyncCompleted,
+            UiUpdatePublication::RequiredUnordered,
+        );
+        pin_mut!(publish);
+        assert!(poll!(publish.as_mut()).is_pending());
 
         assert!(matches!(rx.recv().await, Some(UiUpdate::SyncStarted)));
-        assert!(publish.await.unwrap());
+        assert!(publish.await);
         assert!(matches!(rx.recv().await, Some(UiUpdate::SyncCompleted)));
     }
 

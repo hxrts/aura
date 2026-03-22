@@ -16,9 +16,10 @@
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyKind,
-    CeremonyStatus, DeviceEnrollmentStart, InvitationBridgeStatus, InvitationBridgeType,
-    InvitationInfo, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus, RuntimeBridge,
-    SettingsBridgeState, SyncStatus,
+    CeremonyProcessingOutcome, CeremonyStatus, DeviceEnrollmentStart, DiscoveryTriggerOutcome,
+    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, InvitationMutationOutcome,
+    KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus, RuntimeBridge, SettingsBridgeState,
+    SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
@@ -811,8 +812,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
-    async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
-        Ok(())
+    async fn process_ceremony_messages(&self) -> Result<CeremonyProcessingOutcome, IntentError> {
+        Ok(CeremonyProcessingOutcome::NoProgress)
     }
 
     async fn sync_with_peer(&self, _peer_id: &str) -> Result<(), IntentError> {
@@ -842,8 +843,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         })
     }
 
-    async fn trigger_discovery(&self) -> Result<(), IntentError> {
-        Ok(())
+    async fn trigger_discovery(&self) -> Result<DiscoveryTriggerOutcome, IntentError> {
+        Ok(DiscoveryTriggerOutcome::AlreadyRunning)
     }
 
     async fn try_get_lan_peers(&self) -> Result<Vec<LanPeerInfo>, IntentError> {
@@ -1204,7 +1205,10 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(info)
     }
 
-    async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+    async fn accept_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         // First, update the invitation status
         let invitation = {
             let mut invitations = self.invitations.write().await;
@@ -1263,15 +1267,24 @@ impl RuntimeBridge for MockRuntimeBridge {
             self.emit_contacts_signal().await;
         }
 
-        Ok(())
+        Ok(InvitationMutationOutcome {
+            invitation_id: invitation.invitation_id,
+            new_status: InvitationBridgeStatus::Accepted,
+        })
     }
 
-    async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+    async fn decline_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         let mut invitations = self.invitations.write().await;
         let key = InvitationId::new(invitation_id.to_string());
         if let Some(inv) = invitations.get_mut(&key) {
             inv.status = InvitationBridgeStatus::Declined;
-            Ok(())
+            Ok(InvitationMutationOutcome {
+                invitation_id: key,
+                new_status: InvitationBridgeStatus::Declined,
+            })
         } else {
             Err(IntentError::internal_error(format!(
                 "Invitation not found: {invitation_id}"
@@ -1279,12 +1292,18 @@ impl RuntimeBridge for MockRuntimeBridge {
         }
     }
 
-    async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
+    async fn cancel_invitation(
+        &self,
+        invitation_id: &str,
+    ) -> Result<InvitationMutationOutcome, IntentError> {
         let mut invitations = self.invitations.write().await;
         let key = InvitationId::new(invitation_id.to_string());
         if let Some(inv) = invitations.get_mut(&key) {
             inv.status = InvitationBridgeStatus::Cancelled;
-            Ok(())
+            Ok(InvitationMutationOutcome {
+                invitation_id: key,
+                new_status: InvitationBridgeStatus::Cancelled,
+            })
         } else {
             Err(IntentError::internal_error(format!(
                 "Invitation not found: {invitation_id}"
