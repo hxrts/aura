@@ -147,16 +147,6 @@ struct ThresholdConfigMetadata {
     agreement_mode: aura_core::threshold::AgreementMode,
 }
 
-#[derive(Debug, Deserialize)]
-struct ThresholdMetadataFallback {
-    threshold: u16,
-    total_participants: u16,
-    #[serde(default)]
-    participants: Vec<ParticipantIdentity>,
-    #[serde(default)]
-    agreement_mode: aura_core::threshold::AgreementMode,
-}
-
 async fn load_threshold_state_from_storage(
     effects: &crate::runtime::AuraEffectSystem,
     authority_id: AuthorityId,
@@ -182,7 +172,7 @@ async fn load_threshold_state_from_storage(
         format!("{}", epoch),
     );
 
-    let config = match effects
+    let metadata: ThresholdConfigMetadata = effects
         .secure_retrieve(
             &config_location,
             &[
@@ -191,53 +181,52 @@ async fn load_threshold_state_from_storage(
             ],
         )
         .await
-    {
-        Ok(bytes) => {
-            let metadata: ThresholdConfigMetadata =
-                serde_json::from_slice(&bytes).map_err(|e| {
-                    AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
-                })?;
-            ThresholdState {
-                epoch,
-                threshold: metadata.threshold_k,
-                total_participants: metadata.total_n,
-                participants: metadata.participants,
-                agreement_mode: metadata.agreement_mode,
-            }
-        }
-        Err(_) => {
-            let legacy_location = SecureStorageLocation::with_sub_key(
-                "threshold_metadata",
-                format!("{}", authority_id),
-                format!("{}", epoch),
-            );
-            let legacy_bytes = effects
-                .secure_retrieve(
-                    &legacy_location,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await
-                .map_err(|_| {
-                    AuraError::invalid(
-                        "Consensus requires an existing threshold configuration".to_string(),
-                    )
-                })?;
-            let metadata: ThresholdMetadataFallback = serde_json::from_slice(&legacy_bytes)
-                .map_err(|e| {
-                    AuraError::internal(format!("Failed to deserialize threshold metadata: {}", e))
-                })?;
-            ThresholdState {
-                epoch,
-                threshold: metadata.threshold,
-                total_participants: metadata.total_participants,
-                participants: metadata.participants,
-                agreement_mode: metadata.agreement_mode,
-            }
-        }
-    };
+        .map_err(|_| {
+            AuraError::invalid("Consensus requires an existing threshold configuration".to_string())
+        })
+        .and_then(|bytes| {
+            serde_json::from_slice(&bytes).map_err(|e| {
+                AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
+            })
+        })?;
 
-    Ok(config)
+    Ok(ThresholdState {
+        epoch,
+        threshold: metadata.threshold_k,
+        total_participants: metadata.total_n,
+        participants: metadata.participants,
+        agreement_mode: metadata.agreement_mode,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use crate::runtime::AuraEffectSystem;
+    use aura_core::effects::ThresholdSigningEffects;
+
+    #[tokio::test]
+    async fn load_threshold_state_requires_threshold_config_metadata() {
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::simulation_for_test(&config)
+            .expect("simulation effect system should build");
+        let authority = AuthorityId::new_from_entropy([21u8; 32]);
+        let participants = vec![ParticipantIdentity::Device(effects.device_id())];
+
+        let (new_epoch, _, _) = effects
+            .rotate_keys(&authority, 1, 1, &participants)
+            .await
+            .expect("effect-layer rotate_keys should still write legacy metadata");
+        effects
+            .commit_key_rotation(&authority, new_epoch)
+            .await
+            .expect("effect-layer commit should update epoch state");
+
+        let error = load_threshold_state_from_storage(&effects, authority)
+            .await
+            .expect_err("consensus must require threshold_config metadata");
+
+        assert!(error.to_string().contains("threshold configuration"));
+    }
 }
