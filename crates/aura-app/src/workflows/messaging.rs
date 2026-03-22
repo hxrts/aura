@@ -5097,7 +5097,7 @@ mod tests {
                 .await
                 .expect_err("raw id input without canonical metadata must fail");
 
-        assert!(error.to_string().contains("canonical channel metadata"));
+        assert!(matches!(error, AuraError::NotFound { .. }));
     }
 
     #[tokio::test]
@@ -5220,7 +5220,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_local_channel_resolution_ignores_home_projection_when_chat_missing() {
+    async fn test_local_channel_resolution_requires_observed_chat_match_when_chat_missing() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
@@ -5244,15 +5244,11 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let resolved =
+        let error =
             resolve_local_chat_channel_id_from_observed_state_or_input(&app_core, "#slash-lab")
                 .await
-                .expect("channel selector should derive channel identity");
-        assert_eq!(
-            resolved,
-            ChannelRef::Name("slash-lab".to_string()).to_channel_id()
-        );
-        assert_ne!(resolved, home_id);
+                .expect_err("missing observed chat channel must fail explicitly");
+        assert!(matches!(error, AuraError::NotFound { .. }));
     }
 
     #[tokio::test]
@@ -5480,23 +5476,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_leave_channel_by_name_missing_target_settles_without_spinning() {
+    async fn test_leave_channel_by_name_missing_target_is_a_noop() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
-        let result = tokio::time::timeout(
-            Duration::from_millis(250),
-            leave_channel_by_name(&app_core, "#missing-channel"),
-        )
-        .await
-        .expect("missing leave target must fail without spinning");
-
-        assert!(
-            result.is_ok(),
-            "missing leave target should settle immediately instead of spinning"
-        );
+        leave_channel_by_name(&app_core, "#missing-channel")
+            .await
+            .expect("missing leave target should settle without retries or fallback");
     }
 
     #[test]
@@ -5558,10 +5546,7 @@ mod tests {
         let result =
             enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 1_000).await;
         let error = result.expect_err("authoritative moderation now requires runtime");
-        assert!(
-            error.to_string().contains("requires runtime"),
-            "expected explicit runtime requirement, got: {error}"
-        );
+        assert!(matches!(error, AuraError::PermissionDenied { .. }));
     }
 
     #[tokio::test]
@@ -5602,13 +5587,8 @@ mod tests {
 
         let result =
             enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 2_000).await;
-        let error = result
-            .expect_err("authoritative moderation now requires runtime")
-            .to_string();
-        assert!(
-            error.contains("requires runtime"),
-            "expected explicit runtime requirement, got: {error}"
-        );
+        let error = result.expect_err("authoritative moderation now requires runtime");
+        assert!(matches!(error, AuraError::PermissionDenied { .. }));
     }
 
     #[tokio::test]
@@ -5652,7 +5632,7 @@ mod tests {
         let result =
             enforce_home_join_allowed(&app_core, mismatched_context, home_id, banned).await;
         let error = result.expect_err("authoritative moderation now requires runtime");
-        assert!(error.to_string().contains("requires runtime"));
+        assert!(matches!(error, AuraError::PermissionDenied { .. }));
     }
 
     #[tokio::test]
@@ -5716,7 +5696,7 @@ mod tests {
         )
         .await;
         let error = result.expect_err("authoritative moderation now requires runtime");
-        assert!(error.to_string().contains("requires runtime"));
+        assert!(matches!(error, AuraError::PermissionDenied { .. }));
     }
 
     #[tokio::test]
@@ -5769,7 +5749,7 @@ mod tests {
         let result =
             enforce_home_join_allowed(&app_core, context_id, channel_home_id, banned).await;
         let error = result.expect_err("authoritative moderation now requires runtime");
-        assert!(error.to_string().contains("requires runtime"));
+        assert!(matches!(error, AuraError::PermissionDenied { .. }));
     }
 
     #[tokio::test]

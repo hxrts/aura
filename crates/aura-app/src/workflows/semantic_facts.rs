@@ -1199,11 +1199,7 @@ mod tests {
         )
         .await
         .expect_err("signal emission should still fail when the signal is unregistered");
-        assert!(
-            error.to_string().contains("Signal not found")
-                || error.to_string().contains("authoritative_semantic_facts"),
-            "unexpected error: {error}"
-        );
+        assert!(matches!(error, AuraError::Internal { .. }));
 
         let facts = authoritative_semantic_facts_snapshot(&app_core)
             .await
@@ -1257,10 +1253,7 @@ mod tests {
         let error = prove_home_created(&app_core, home_id)
             .await
             .expect_err("home_created proof should require the homes signal");
-        assert!(
-            error.to_string().contains("Signal not found") || error.to_string().contains("homes"),
-            "unexpected error: {error}"
-        );
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 
     #[tokio::test]

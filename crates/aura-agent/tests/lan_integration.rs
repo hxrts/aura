@@ -105,9 +105,12 @@ async fn create_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>>
 }
 
 async fn create_runtime_app(agent: Arc<AuraAgent>) -> TestResult<Arc<RwLock<AppCore>>> {
-    let mut app = AppCore::with_runtime(AppConfig::default(), agent.as_runtime_bridge())?;
-    app.init_signals().await?;
-    Ok(Arc::new(RwLock::new(app)))
+    let app = Arc::new(RwLock::new(AppCore::with_runtime(
+        AppConfig::default(),
+        agent.as_runtime_bridge(),
+    )?));
+    AppCore::init_signals_with_hooks(&app).await?;
+    Ok(app)
 }
 
 async fn wait_for_lan_peer(agent: &AuraAgent, peer_id: AuthorityId) -> TestResult {

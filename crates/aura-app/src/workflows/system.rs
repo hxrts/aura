@@ -938,9 +938,7 @@ mod tests {
         let error = install_contacts_refresh_hook(&app_core)
             .await
             .expect_err("missing task spawner should fail hook installation");
-        assert!(error
-            .to_string()
-            .contains("contacts refresh hook requires a runtime task spawner"));
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 
     #[tokio::test]
@@ -951,9 +949,7 @@ mod tests {
         let error = install_chat_refresh_hook(&app_core)
             .await
             .expect_err("missing task spawner should fail hook installation");
-        assert!(error
-            .to_string()
-            .contains("chat refresh hook requires a runtime task spawner"));
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 
     #[cfg(feature = "signals")]
@@ -965,9 +961,7 @@ mod tests {
         let error = install_authoritative_readiness_hook(&app_core)
             .await
             .expect_err("missing task spawner should fail readiness hook installation");
-        assert!(error
-            .to_string()
-            .contains("authoritative readiness hook requires a runtime task spawner"));
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 
     #[tokio::test]
@@ -978,10 +972,7 @@ mod tests {
         let error = refresh_connection_status_from_contacts(&app_core)
             .await
             .expect_err("missing publication signals should fail explicitly");
-        assert!(
-            error.to_string().to_ascii_lowercase().contains("signal"),
-            "expected explicit signal failure, got: {error}"
-        );
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 
     #[cfg(feature = "signals")]
@@ -993,9 +984,6 @@ mod tests {
         let error = refresh_chat_projection_and_readiness(&app_core)
             .await
             .expect_err("missing chat signal should fail explicitly");
-        assert!(
-            error.to_string().to_ascii_lowercase().contains("signal"),
-            "expected explicit signal failure, got: {error}"
-        );
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 }

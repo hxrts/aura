@@ -870,7 +870,7 @@ mod tests {
         publish_test_homes_signal(&app_core).await;
 
         let error = resolve_active_home(&app_core).await.unwrap_err();
-        assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
+        assert!(matches!(error, AuraError::NotFound { .. }));
     }
 
     #[tokio::test]
@@ -881,7 +881,7 @@ mod tests {
         publish_test_homes_signal(&app_core).await;
 
         let error = resolve_active_home(&app_core).await.unwrap_err();
-        assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
+        assert!(matches!(error, AuraError::NotFound { .. }));
     }
 
     #[tokio::test]
@@ -925,7 +925,7 @@ mod tests {
         publish_test_homes_signal(&app_core).await;
 
         let error = current_home_context(&app_core).await.unwrap_err();
-        assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
+        assert!(matches!(error, AuraError::NotFound { .. }));
     }
 
     #[tokio::test]

@@ -1033,8 +1033,10 @@ impl ChatSignalView {
             })
             .await
         {
-            let lowered = err.to_string().to_ascii_lowercase();
-            if !lowered.contains("already") && !lowered.contains("exists") {
+            if get_channel_state(self.effects.as_ref(), context_id, channel_id)
+                .await
+                .is_err()
+            {
                 tracing::warn!(
                     context_id = %context_id,
                     channel_id = %channel_id,

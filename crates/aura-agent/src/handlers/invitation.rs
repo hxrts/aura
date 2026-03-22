@@ -472,18 +472,14 @@ impl InvitationHandler {
         &self,
         effects: &AuraEffectSystem,
         invitation_type: &InvitationType,
-    ) -> ContextId {
-        let fallback_context = self.context.effect_context.context_id();
+    ) -> AgentResult<ContextId> {
         let InvitationType::Channel { home_id, .. } = invitation_type else {
-            return fallback_context;
+            return Ok(self.context.effect_context.context_id());
         };
 
         let own_id = self.context.authority.authority_id();
-        let Ok(envelopes) =
-            load_relational_fact_envelopes_by_type(effects, own_id, CHAT_FACT_TYPE_ID).await
-        else {
-            return fallback_context;
-        };
+        let envelopes = load_relational_fact_envelopes_by_type(effects, own_id, CHAT_FACT_TYPE_ID)
+            .await?;
 
         for envelope in envelopes {
             let Some(ChatFact::ChannelCreated {
@@ -497,11 +493,13 @@ impl InvitationHandler {
             };
 
             if channel_id == *home_id && creator_id == own_id {
-                return context_id;
+                return Ok(context_id);
             }
         }
 
-        fallback_context
+        Err(AgentError::context(format!(
+            "Failed to resolve authoritative invitation context for channel {home_id}"
+        )))
     }
 
     async fn validate_cached_invitation_accept(
@@ -611,9 +609,8 @@ impl InvitationHandler {
                 effects.as_ref(),
                 "resolve_invitation_context",
                 async {
-                    Ok(self
-                        .resolve_invitation_context(effects.as_ref(), &invitation_type)
-                        .await)
+                    self.resolve_invitation_context(effects.as_ref(), &invitation_type)
+                        .await
                 },
             )
             .await?
