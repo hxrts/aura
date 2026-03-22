@@ -4,7 +4,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 
-use crate::backend::InstanceBackend;
+use crate::backend::{DiagnosticBackend, InstanceBackend};
 use crate::config::InstanceConfig;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -147,12 +147,38 @@ impl InstanceBackend for SshTunnelBackend {
         Ok(())
     }
 
+    fn health_check(&self) -> Result<bool> {
+        Ok(self.state == BackendState::Running && self.last_probe_ok)
+    }
+
+    fn is_healthy(&self) -> bool {
+        self.state == BackendState::Running && self.last_probe_ok
+    }
+}
+
+impl DiagnosticBackend for SshTunnelBackend {
     fn diagnostic_screen_snapshot(&self) -> Result<String> {
         bail!("ssh_tunnel snapshot is not implemented yet")
     }
 
-    fn send_keys(&mut self, _keys: &str) -> Result<()> {
-        bail!("ssh_tunnel send_keys is not implemented yet")
+    fn diagnostic_dom_snapshot(&self) -> Result<String> {
+        self.diagnostic_screen_snapshot()
+    }
+
+    fn wait_for_diagnostic_dom_patterns(
+        &self,
+        _patterns: &[String],
+        _timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        None
+    }
+
+    fn wait_for_diagnostic_target(
+        &self,
+        _selector: &str,
+        _timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        None
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
@@ -172,12 +198,8 @@ impl InstanceBackend for SshTunnelBackend {
         Ok(result)
     }
 
-    fn health_check(&self) -> Result<bool> {
-        Ok(self.state == BackendState::Running && self.last_probe_ok)
-    }
-
-    fn is_healthy(&self) -> bool {
-        self.state == BackendState::Running && self.last_probe_ok
+    fn read_clipboard(&self) -> Result<String> {
+        bail!("ssh_tunnel clipboard reads are not implemented yet")
     }
 }
 

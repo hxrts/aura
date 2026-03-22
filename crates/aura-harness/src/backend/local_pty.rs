@@ -27,8 +27,9 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    latest_invitation_code, ChannelBinding, ContactInvitationCode, InstanceBackend, RawUiBackend,
-    SharedSemanticBackend, SubmittedAction, UiOperationHandle, UiSnapshotEvent,
+    latest_invitation_code, ChannelBinding, ContactInvitationCode, DiagnosticBackend,
+    InstanceBackend, ObservationBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
+    UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -693,10 +694,6 @@ impl InstanceBackend for LocalPtyBackend {
         "local_pty"
     }
 
-    fn supports_ui_snapshot(&self) -> bool {
-        self.requires_tui_readiness()
-    }
-
     fn start(&mut self) -> Result<()> {
         if self.state == BackendState::Running {
             return Ok(());
@@ -893,165 +890,6 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(())
     }
 
-    fn diagnostic_screen_snapshot(&self) -> Result<String> {
-        let session = self
-            .session
-            .as_ref()
-            .with_context(|| format!("instance {} is not running", self.config.id))?;
-        const SETTLE_DELAY_MS: u64 = 25;
-        const MAX_SETTLE_ATTEMPTS: u8 = 8;
-        const HEADER_RECOVERY_DELAY_MS: u64 = 20;
-        const HEADER_RECOVERY_ATTEMPTS: u8 = 30;
-
-        let mut last_generation = session.parse_generation.load(Ordering::Acquire);
-        let mut last_screen = Self::read_screen(&session.parser);
-
-        for _ in 0..MAX_SETTLE_ATTEMPTS {
-            blocking_sleep(Duration::from_millis(SETTLE_DELAY_MS));
-            let current_generation = session.parse_generation.load(Ordering::Acquire);
-            let current_screen = Self::read_screen(&session.parser);
-            if current_generation == last_generation && current_screen == last_screen {
-                return Ok(self.select_authoritative_screen(current_screen));
-            }
-            last_generation = current_generation;
-            last_screen = current_screen;
-        }
-
-        // Transitional frames can briefly miss the nav header while a full-screen redraw
-        // is still in flight. Sample for a short bounded window before falling back.
-        let mut recovered_screen = last_screen;
-        if !has_nav_header(&recovered_screen) {
-            for _ in 0..HEADER_RECOVERY_ATTEMPTS {
-                blocking_sleep(Duration::from_millis(HEADER_RECOVERY_DELAY_MS));
-                recovered_screen = Self::read_screen(&session.parser);
-                if has_nav_header(&recovered_screen) {
-                    break;
-                }
-            }
-        }
-
-        Ok(self.select_authoritative_screen(recovered_screen))
-    }
-
-    fn ui_snapshot(&self) -> Result<UiSnapshot> {
-        let session = self
-            .session
-            .as_ref()
-            .with_context(|| format!("instance {} is not running", self.config.id))?;
-        let guard = session
-            .ui_snapshot_feed
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(snapshot) = guard.latest.clone() {
-            return Ok(snapshot);
-        }
-        drop(guard);
-        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
-        let guard = session
-            .ui_snapshot_feed
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        guard.latest.clone().with_context(|| {
-            format!(
-                "TUI UI snapshot unavailable for instance {} via {}",
-                self.config.id,
-                session.ui_snapshot_socket_path.display()
-            )
-        })
-    }
-
-    fn wait_for_ui_snapshot_event(
-        &self,
-        timeout: Duration,
-        after_version: Option<u64>,
-    ) -> Option<Result<UiSnapshotEvent>> {
-        let session = self.session.as_ref()?;
-        let deadline = Instant::now() + timeout;
-        let mut guard = session
-            .ui_snapshot_feed
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        loop {
-            if let Some(snapshot) = guard.latest.clone() {
-                let version = guard.version;
-                if after_version.map_or(true, |required| version > required) {
-                    return Some(Ok(UiSnapshotEvent { snapshot, version }));
-                }
-            }
-            drop(guard);
-            if let Err(error) =
-                self.ensure_session_alive(session, "publishing a newer UI snapshot event")
-            {
-                return Some(Err(error));
-            }
-            guard = session
-                .ui_snapshot_feed
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let now = Instant::now();
-            if now >= deadline {
-                return Some(Err(anyhow::anyhow!(
-                    "timed out waiting for TUI UI snapshot event on instance {} after_version={:?}",
-                    self.config.id,
-                    after_version
-                )));
-            }
-            let poll_timeout = deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(250));
-            let timeout_result = session
-                .ui_snapshot_feed
-                .ready
-                .wait_timeout(guard, poll_timeout)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            guard = timeout_result.0;
-        }
-    }
-
-    fn send_keys(&mut self, keys: &str) -> Result<()> {
-        let session = self
-            .session
-            .as_ref()
-            .with_context(|| format!("instance {} is not running", self.config.id))?;
-        if !keys.as_bytes().contains(&0x1b) {
-            let mut writer = session.writer.blocking_lock();
-            writer
-                .write_all(keys.as_bytes())
-                .with_context(|| format!("failed writing keys for instance {}", self.config.id))?;
-            writer.flush().context("failed flushing PTY writer")?;
-            return Ok(());
-        }
-
-        let bytes = keys.as_bytes();
-        let mut index = 0usize;
-        while index < bytes.len() {
-            {
-                let mut writer = session.writer.blocking_lock();
-                writer
-                    .write_all(&bytes[index..index + 1])
-                    .with_context(|| {
-                        format!("failed writing keys for instance {}", self.config.id)
-                    })?;
-                writer.flush().context("failed flushing PTY writer")?;
-            }
-
-            if bytes[index] == 0x1b
-                && bytes
-                    .get(index + 1)
-                    .map_or(true, |next| *next != b'[' && *next != b'O')
-            {
-                // Prevent accidental Alt-key combos when callers intend standalone Esc.
-                blocking_sleep(Duration::from_millis(40));
-            }
-            index += 1;
-        }
-        Ok(())
-    }
-
     fn inject_message(&mut self, message: &str) -> Result<()> {
         let sanitized = message
             .chars()
@@ -1067,58 +905,6 @@ impl InstanceBackend for LocalPtyBackend {
         // Mirror browser-submitted message text by switching to Chat, entering insert
         // mode, and submitting the message payload.
         self.send_keys(&format!("\u{1b}2i{sanitized}\r"))
-    }
-
-    fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
-        let Some(path) = &self.config.log_path else {
-            return Ok(Vec::new());
-        };
-
-        let mut candidates = Vec::with_capacity(2);
-        candidates.push(path.clone());
-        candidates.push(PathBuf::from(format!("{}.dat", path.display())));
-
-        let mut body: Option<String> = None;
-        for candidate in candidates {
-            let bytes = match fs::read(&candidate) {
-                Ok(bytes) => bytes,
-                Err(_) => continue,
-            };
-            body = Some(String::from_utf8_lossy(&bytes).into_owned());
-            break;
-        }
-        let Some(body) = body else {
-            return Ok(Vec::new());
-        };
-
-        let mut result: Vec<String> = body.lines().map(ToOwned::to_owned).collect();
-        if result.len() > lines {
-            result = result.split_off(result.len() - lines);
-        }
-        Ok(result)
-    }
-
-    fn read_clipboard(&self) -> Result<String> {
-        let path = Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env)
-            .map(PathBuf::from)
-            .map(Self::absolutize_path)
-            .unwrap_or_else(|| {
-                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"))
-            });
-        let mut text = fs::read_to_string(&path).map_err(|error| {
-            anyhow::anyhow!(
-                "failed reading clipboard file {} for instance {}: {error}",
-                path.display(),
-                self.config.id
-            )
-        })?;
-        while matches!(text.chars().last(), Some('\n' | '\r')) {
-            text.pop();
-        }
-        if text.is_empty() {
-            anyhow::bail!("clipboard for instance {} is empty", self.config.id);
-        }
-        Ok(text)
     }
 
     fn authority_id(&mut self) -> Result<Option<String>> {
@@ -1209,6 +995,199 @@ impl InstanceBackend for LocalPtyBackend {
     }
 }
 
+impl DiagnosticBackend for LocalPtyBackend {
+    fn diagnostic_screen_snapshot(&self) -> Result<String> {
+        let session = self
+            .session
+            .as_ref()
+            .with_context(|| format!("instance {} is not running", self.config.id))?;
+        const SETTLE_DELAY_MS: u64 = 25;
+        const MAX_SETTLE_ATTEMPTS: u8 = 8;
+        const HEADER_RECOVERY_DELAY_MS: u64 = 20;
+        const HEADER_RECOVERY_ATTEMPTS: u8 = 30;
+
+        let mut last_generation = session.parse_generation.load(Ordering::Acquire);
+        let mut last_screen = Self::read_screen(&session.parser);
+
+        for _ in 0..MAX_SETTLE_ATTEMPTS {
+            blocking_sleep(Duration::from_millis(SETTLE_DELAY_MS));
+            let current_generation = session.parse_generation.load(Ordering::Acquire);
+            let current_screen = Self::read_screen(&session.parser);
+            if current_generation == last_generation && current_screen == last_screen {
+                return Ok(self.select_authoritative_screen(current_screen));
+            }
+            last_generation = current_generation;
+            last_screen = current_screen;
+        }
+
+        let mut recovered_screen = last_screen;
+        if !has_nav_header(&recovered_screen) {
+            for _ in 0..HEADER_RECOVERY_ATTEMPTS {
+                blocking_sleep(Duration::from_millis(HEADER_RECOVERY_DELAY_MS));
+                recovered_screen = Self::read_screen(&session.parser);
+                if has_nav_header(&recovered_screen) {
+                    break;
+                }
+            }
+        }
+
+        Ok(self.select_authoritative_screen(recovered_screen))
+    }
+
+    fn diagnostic_dom_snapshot(&self) -> Result<String> {
+        self.diagnostic_screen_snapshot()
+    }
+
+    fn wait_for_diagnostic_dom_patterns(
+        &self,
+        _patterns: &[String],
+        _timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        None
+    }
+
+    fn wait_for_diagnostic_target(
+        &self,
+        _selector: &str,
+        _timeout_ms: u64,
+    ) -> Option<Result<String>> {
+        None
+    }
+
+    fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
+        let Some(path) = &self.config.log_path else {
+            return Ok(Vec::new());
+        };
+
+        let mut candidates = Vec::with_capacity(2);
+        candidates.push(path.clone());
+        candidates.push(PathBuf::from(format!("{}.dat", path.display())));
+
+        let mut body: Option<String> = None;
+        for candidate in candidates {
+            let bytes = match fs::read(&candidate) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            body = Some(String::from_utf8_lossy(&bytes).into_owned());
+            break;
+        }
+        let Some(body) = body else {
+            return Ok(Vec::new());
+        };
+
+        let mut result: Vec<String> = body.lines().map(ToOwned::to_owned).collect();
+        if result.len() > lines {
+            result = result.split_off(result.len() - lines);
+        }
+        Ok(result)
+    }
+
+    fn read_clipboard(&self) -> Result<String> {
+        let path = Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env)
+            .map(PathBuf::from)
+            .map(Self::absolutize_path)
+            .unwrap_or_else(|| {
+                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"))
+            });
+        let mut text = fs::read_to_string(&path).map_err(|error| {
+            anyhow::anyhow!(
+                "failed reading clipboard file {} for instance {}: {error}",
+                path.display(),
+                self.config.id
+            )
+        })?;
+        while matches!(text.chars().last(), Some('\n' | '\r')) {
+            text.pop();
+        }
+        if text.is_empty() {
+            anyhow::bail!("clipboard for instance {} is empty", self.config.id);
+        }
+        Ok(text)
+    }
+}
+
+impl ObservationBackend for LocalPtyBackend {
+    fn ui_snapshot(&self) -> Result<UiSnapshot> {
+        let session = self
+            .session
+            .as_ref()
+            .with_context(|| format!("instance {} is not running", self.config.id))?;
+        let guard = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(snapshot) = guard.latest.clone() {
+            return Ok(snapshot);
+        }
+        drop(guard);
+        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
+        let guard = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.latest.clone().with_context(|| {
+            format!(
+                "TUI UI snapshot unavailable for instance {} via {}",
+                self.config.id,
+                session.ui_snapshot_socket_path.display()
+            )
+        })
+    }
+
+    fn wait_for_ui_snapshot_event(
+        &self,
+        timeout: Duration,
+        after_version: Option<u64>,
+    ) -> Option<Result<UiSnapshotEvent>> {
+        let session = self.session.as_ref()?;
+        let deadline = Instant::now() + timeout;
+        let mut guard = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some(snapshot) = guard.latest.clone() {
+                let version = guard.version;
+                if after_version.map_or(true, |required| version > required) {
+                    return Some(Ok(UiSnapshotEvent { snapshot, version }));
+                }
+            }
+            drop(guard);
+            if let Err(error) =
+                self.ensure_session_alive(session, "publishing a newer UI snapshot event")
+            {
+                return Some(Err(error));
+            }
+            guard = session
+                .ui_snapshot_feed
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let now = Instant::now();
+            if now >= deadline {
+                return Some(Err(anyhow::anyhow!(
+                    "timed out waiting for TUI UI snapshot event on instance {} after_version={:?}",
+                    self.config.id,
+                    after_version
+                )));
+            }
+            let poll_timeout = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(250));
+            let timeout_result = session
+                .ui_snapshot_feed
+                .ready
+                .wait_timeout(guard, poll_timeout)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard = timeout_result.0;
+        }
+    }
+}
+
 impl Drop for LocalPtyBackend {
     fn drop(&mut self) {
         let _ = self.stop();
@@ -1216,6 +1195,46 @@ impl Drop for LocalPtyBackend {
 }
 
 impl RawUiBackend for LocalPtyBackend {
+    fn send_keys(&mut self, keys: &str) -> Result<()> {
+        let session = self
+            .session
+            .as_ref()
+            .with_context(|| format!("instance {} is not running", self.config.id))?;
+        if !keys.as_bytes().contains(&0x1b) {
+            let mut writer = session.writer.blocking_lock();
+            writer
+                .write_all(keys.as_bytes())
+                .with_context(|| format!("failed writing keys for instance {}", self.config.id))?;
+            writer.flush().context("failed flushing PTY writer")?;
+            return Ok(());
+        }
+
+        let bytes = keys.as_bytes();
+        let mut index = 0usize;
+        while index < bytes.len() {
+            {
+                let mut writer = session.writer.blocking_lock();
+                writer
+                    .write_all(&bytes[index..index + 1])
+                    .with_context(|| {
+                        format!("failed writing keys for instance {}", self.config.id)
+                    })?;
+                writer.flush().context("failed flushing PTY writer")?;
+            }
+
+            if bytes[index] == 0x1b
+                && bytes
+                    .get(index + 1)
+                    .map_or(true, |next| *next != b'[' && *next != b'O')
+            {
+                // Prevent accidental Alt-key combos when callers intend standalone Esc.
+                blocking_sleep(Duration::from_millis(40));
+            }
+            index += 1;
+        }
+        Ok(())
+    }
+
     fn click_button(&mut self, label: &str) -> Result<()> {
         let _ = label;
         anyhow::bail!("local_pty does not support label-driven button clicks")

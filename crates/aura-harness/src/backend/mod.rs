@@ -41,14 +41,17 @@ pub struct ObservedOperation {
 }
 
 pub trait ObservationBackend {
-    fn diagnostic_screen_snapshot(&self) -> Result<String>;
-    fn diagnostic_dom_snapshot(&self) -> Result<String>;
     fn ui_snapshot(&self) -> Result<UiSnapshot>;
     fn wait_for_ui_snapshot_event(
         &self,
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>>;
+}
+
+pub trait DiagnosticBackend {
+    fn diagnostic_screen_snapshot(&self) -> Result<String>;
+    fn diagnostic_dom_snapshot(&self) -> Result<String>;
     fn wait_for_diagnostic_dom_patterns(
         &self,
         patterns: &[String],
@@ -61,6 +64,15 @@ pub trait ObservationBackend {
 }
 
 pub trait RawUiBackend {
+    fn send_keys(&mut self, keys: &str) -> Result<()>;
+    fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
+        let sequence = tool_key_sequence(key);
+        let repeat = repeat.max(1);
+        for _ in 0..repeat {
+            self.send_keys(sequence)?;
+        }
+        Ok(())
+    }
     fn click_button(&mut self, label: &str) -> Result<()>;
     fn activate_control(&mut self, control_id: ControlId) -> Result<()>;
     fn click_target(&mut self, selector: &str) -> Result<()>;
@@ -72,60 +84,10 @@ pub trait RawUiBackend {
 pub trait InstanceBackend {
     fn id(&self) -> &str;
     fn backend_kind(&self) -> &'static str;
-    fn supports_ui_snapshot(&self) -> bool {
-        false
-    }
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self) -> Result<()>;
-    fn diagnostic_screen_snapshot(&self) -> Result<String>;
-    fn diagnostic_dom_snapshot(&self) -> Result<String> {
-        self.diagnostic_screen_snapshot()
-    }
-    fn ui_snapshot(&self) -> Result<UiSnapshot> {
-        bail!(
-            "structured UI snapshots are not supported by backend {}",
-            self.backend_kind()
-        )
-    }
-    fn wait_for_ui_snapshot_event(
-        &self,
-        _timeout: Duration,
-        _after_version: Option<u64>,
-    ) -> Option<Result<UiSnapshotEvent>> {
-        None
-    }
-    fn wait_for_diagnostic_dom_patterns(
-        &self,
-        _patterns: &[String],
-        _timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        None
-    }
-    fn wait_for_diagnostic_target(
-        &self,
-        _selector: &str,
-        _timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        None
-    }
-    fn send_keys(&mut self, keys: &str) -> Result<()>;
-    fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
-        let sequence = tool_key_sequence(key);
-        let repeat = repeat.max(1);
-        for _ in 0..repeat {
-            self.send_keys(sequence)?;
-        }
-        Ok(())
-    }
-    fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn inject_message(&mut self, _message: &str) -> Result<()> {
         Ok(())
-    }
-    fn read_clipboard(&self) -> Result<String> {
-        bail!(
-            "clipboard reads are not supported by backend {}",
-            self.backend_kind()
-        )
     }
     fn authority_id(&mut self) -> Result<Option<String>> {
         Ok(None)
@@ -147,52 +109,6 @@ pub trait InstanceBackend {
         self.start()
     }
     fn is_healthy(&self) -> bool;
-}
-
-impl<T: InstanceBackend + ?Sized> ObservationBackend for T {
-    fn diagnostic_screen_snapshot(&self) -> Result<String> {
-        InstanceBackend::diagnostic_screen_snapshot(self)
-    }
-
-    fn diagnostic_dom_snapshot(&self) -> Result<String> {
-        InstanceBackend::diagnostic_dom_snapshot(self)
-    }
-
-    fn ui_snapshot(&self) -> Result<UiSnapshot> {
-        InstanceBackend::ui_snapshot(self)
-    }
-
-    fn wait_for_ui_snapshot_event(
-        &self,
-        timeout: Duration,
-        after_version: Option<u64>,
-    ) -> Option<Result<UiSnapshotEvent>> {
-        InstanceBackend::wait_for_ui_snapshot_event(self, timeout, after_version)
-    }
-
-    fn wait_for_diagnostic_dom_patterns(
-        &self,
-        patterns: &[String],
-        timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        InstanceBackend::wait_for_diagnostic_dom_patterns(self, patterns, timeout_ms)
-    }
-
-    fn wait_for_diagnostic_target(
-        &self,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        InstanceBackend::wait_for_diagnostic_target(self, selector, timeout_ms)
-    }
-
-    fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
-        InstanceBackend::tail_log(self, lines)
-    }
-
-    fn read_clipboard(&self) -> Result<String> {
-        InstanceBackend::read_clipboard(self)
-    }
 }
 
 pub trait SharedSemanticBackend {
@@ -498,7 +414,7 @@ impl BackendHandle {
         }
     }
 
-    pub fn as_trait_mut(&mut self) -> &mut dyn InstanceBackend {
+    pub fn as_lifecycle_mut(&mut self) -> &mut dyn InstanceBackend {
         match self {
             Self::Local(backend) => backend,
             Self::Browser(backend) => backend.as_mut(),
@@ -506,11 +422,30 @@ impl BackendHandle {
         }
     }
 
-    pub fn as_trait(&self) -> &dyn InstanceBackend {
+    pub fn as_lifecycle(&self) -> &dyn InstanceBackend {
         match self {
             Self::Local(backend) => backend,
             Self::Browser(backend) => backend.as_ref(),
             Self::Ssh(backend) => backend,
+        }
+    }
+
+    pub fn as_diagnostic(&self) -> &dyn DiagnosticBackend {
+        match self {
+            Self::Local(backend) => backend,
+            Self::Browser(backend) => backend.as_ref(),
+            Self::Ssh(backend) => backend,
+        }
+    }
+
+    pub fn as_observation(&self) -> Result<&dyn ObservationBackend> {
+        match self {
+            Self::Local(backend) => Ok(backend),
+            Self::Browser(backend) => Ok(backend.as_ref()),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not implement the structured observation contract",
+                backend.backend_kind()
+            ),
         }
     }
 
@@ -540,9 +475,9 @@ impl BackendHandle {
 #[cfg(test)]
 mod tests {
     use super::{
-        BackendHandle, InstanceBackend, ObservationBackend, SemanticCommandRequest,
-        SemanticCommandResponse, SemanticCommandValue, SharedSemanticBackend, SubmissionState,
-        UiOperationHandle, UiSnapshotEvent,
+        BackendHandle, DiagnosticBackend, InstanceBackend, ObservationBackend,
+        SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
+        SharedSemanticBackend, SubmissionState, UiOperationHandle, UiSnapshotEvent,
     };
     use crate::config::{InstanceConfig, InstanceMode};
     use anyhow::{anyhow, Result};
@@ -631,10 +566,6 @@ mod tests {
             "test"
         }
 
-        fn supports_ui_snapshot(&self) -> bool {
-            true
-        }
-
         fn start(&mut self) -> Result<()> {
             Ok(())
         }
@@ -643,27 +574,18 @@ mod tests {
             Ok(())
         }
 
+        fn is_healthy(&self) -> bool {
+            true
+        }
+    }
+
+    impl DiagnosticBackend for ReadOnlyBackend {
         fn diagnostic_screen_snapshot(&self) -> Result<String> {
             Ok("snapshot".to_string())
         }
 
         fn diagnostic_dom_snapshot(&self) -> Result<String> {
             Ok("dom".to_string())
-        }
-
-        fn ui_snapshot(&self) -> Result<UiSnapshot> {
-            Ok(Self::snapshot_value())
-        }
-
-        fn wait_for_ui_snapshot_event(
-            &self,
-            _timeout: Duration,
-            after_version: Option<u64>,
-        ) -> Option<Result<UiSnapshotEvent>> {
-            Some(Ok(UiSnapshotEvent {
-                snapshot: Self::snapshot_value(),
-                version: after_version.unwrap_or(0) + 1,
-            }))
         }
 
         fn wait_for_diagnostic_dom_patterns(
@@ -682,17 +604,8 @@ mod tests {
             Some(Ok("target-match".to_string()))
         }
 
-        fn send_keys(&mut self, _keys: &str) -> Result<()> {
-            self.mutation_calls.set(self.mutation_calls.get() + 1);
-            Ok(())
-        }
-
         fn tail_log(&self, _lines: usize) -> Result<Vec<String>> {
             Ok(vec!["log".to_string()])
-        }
-
-        fn is_healthy(&self) -> bool {
-            true
         }
 
         fn read_clipboard(&self) -> Result<String> {
@@ -700,14 +613,32 @@ mod tests {
         }
     }
 
+    impl ObservationBackend for ReadOnlyBackend {
+        fn ui_snapshot(&self) -> Result<UiSnapshot> {
+            Ok(Self::snapshot_value())
+        }
+
+        fn wait_for_ui_snapshot_event(
+            &self,
+            _timeout: Duration,
+            after_version: Option<u64>,
+        ) -> Option<Result<UiSnapshotEvent>> {
+            Some(Ok(UiSnapshotEvent {
+                snapshot: Self::snapshot_value(),
+                version: after_version.unwrap_or(0) + 1,
+            }))
+        }
+    }
+
     #[test]
     fn observation_endpoints_are_side_effect_free() -> Result<()> {
         let backend = ReadOnlyBackend::new();
         let observer: &dyn ObservationBackend = &backend;
+        let diagnostic: &dyn DiagnosticBackend = &backend;
 
-        assert_eq!(observer.diagnostic_screen_snapshot()?, "snapshot");
-        assert_eq!(observer.diagnostic_screen_snapshot()?, "snapshot");
-        assert_eq!(observer.diagnostic_dom_snapshot()?, "dom");
+        assert_eq!(diagnostic.diagnostic_screen_snapshot()?, "snapshot");
+        assert_eq!(diagnostic.diagnostic_screen_snapshot()?, "snapshot");
+        assert_eq!(diagnostic.diagnostic_dom_snapshot()?, "dom");
         assert_eq!(observer.ui_snapshot()?.revision.semantic_seq, 7);
         assert_eq!(observer.ui_snapshot()?.revision.semantic_seq, 7);
         assert_eq!(
@@ -718,19 +649,19 @@ mod tests {
             8
         );
         assert_eq!(
-            observer
+            diagnostic
                 .wait_for_diagnostic_dom_patterns(&["chat".to_string()], 1)
                 .ok_or_else(|| anyhow::anyhow!("dom result should be present"))??,
             "dom-match"
         );
         assert_eq!(
-            observer
+            diagnostic
                 .wait_for_diagnostic_target("#aura-screen-chat", 1)
                 .ok_or_else(|| anyhow::anyhow!("target result should be present"))??,
             "target-match"
         );
-        assert_eq!(observer.tail_log(1)?, vec!["log".to_string()]);
-        assert_eq!(observer.read_clipboard()?, "clipboard");
+        assert_eq!(diagnostic.tail_log(1)?, vec!["log".to_string()]);
+        assert_eq!(diagnostic.read_clipboard()?, "clipboard");
         assert_eq!(backend.mutation_calls.get(), 0);
         Ok(())
     }

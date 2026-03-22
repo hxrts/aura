@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::scenario_contract::{
-    ActorId, ScenarioDefinition, ScenarioStep as SemanticStep, SemanticScenarioFile,
+    ActorId, ScenarioAction as SemanticAction, ScenarioDefinition, ScenarioStep as SemanticStep,
+    SemanticScenarioFile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -184,6 +185,8 @@ pub struct ScenarioConfig {
     pub schema_version: u32,
     pub id: String,
     pub goal: String,
+    #[serde(skip)]
+    pub classification: Option<ScenarioClassification>,
     pub execution_mode: Option<String>,
     #[serde(default)]
     pub required_capabilities: Vec<String>,
@@ -202,6 +205,7 @@ impl TryFrom<ScenarioDefinition> for ScenarioConfig {
             schema_version: SCENARIO_SCHEMA_VERSION,
             id,
             goal,
+            classification: None,
             execution_mode: None,
             required_capabilities: Vec::new(),
             compatibility_steps: Vec::new(),
@@ -238,12 +242,15 @@ pub fn load_scenario_inventory(path: Option<&Path>) -> Result<Vec<ScenarioInvent
 pub fn load_scenario_config(path: &Path) -> Result<ScenarioConfig> {
     let semantic = load_semantic_scenario_definition(path)
         .with_context(|| format!("failed to load semantic scenario at {}", path.display()))?;
-    ScenarioConfig::try_from(semantic).with_context(|| {
+    let classification = scenario_classification_for_path(path)?;
+    let mut scenario = ScenarioConfig::try_from(semantic).with_context(|| {
         format!(
             "failed to build harness scenario model from semantic scenario {}",
             path.display()
         )
-    })
+    })?;
+    scenario.classification = classification;
+    Ok(scenario)
 }
 
 pub fn load_semantic_scenario_definition(path: &Path) -> Result<ScenarioDefinition> {
@@ -515,6 +522,24 @@ impl ScenarioConfig {
         (!self.is_semantic_scenario()).then_some(self.compatibility_steps.as_slice())
     }
 
+    #[must_use]
+    pub const fn classification(&self) -> Option<ScenarioClassification> {
+        self.classification
+    }
+
+    #[must_use]
+    pub fn is_frontend_conformance_semantic(&self) -> bool {
+        self.is_semantic_scenario()
+            && self
+                .classification
+                .is_some_and(ScenarioClassification::is_frontend_conformance)
+    }
+
+    #[must_use]
+    pub fn is_shared_semantic(&self) -> bool {
+        self.is_semantic_scenario() && !self.is_frontend_conformance_semantic()
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != SCENARIO_SCHEMA_VERSION {
             bail!(
@@ -569,6 +594,17 @@ impl ScenarioConfig {
                 if !step_ids.insert(step.id.clone()) {
                     bail!("duplicate scenario step id: {}", step.id);
                 }
+            }
+            if self.is_shared_semantic()
+                && self
+                    .semantic_steps
+                    .iter()
+                    .any(|step| matches!(step.action, SemanticAction::Ui(_)))
+            {
+                bail!(
+                    "shared semantic scenario {} contains frontend-local ui mechanics; classify it as frontend_conformance instead",
+                    self.id
+                );
             }
             return Ok(());
         }
@@ -1110,6 +1146,7 @@ mod tests {
             schema_version: SCENARIO_SCHEMA_VERSION,
             id: "compat-reject-scripted".to_string(),
             goal: "reject legacy compatibility mode alias".to_string(),
+            classification: None,
             execution_mode: Some("scripted".to_string()),
             required_capabilities: Vec::new(),
             compatibility_steps: vec![crate::config::CompatibilityStep {
@@ -1134,6 +1171,7 @@ mod tests {
             schema_version: SCENARIO_SCHEMA_VERSION,
             id: "compat-require-mode".to_string(),
             goal: "reject implicit compatibility execution mode".to_string(),
+            classification: None,
             execution_mode: None,
             required_capabilities: Vec::new(),
             compatibility_steps: vec![crate::config::CompatibilityStep {

@@ -151,7 +151,7 @@ pub fn check_scenario_capabilities(
 }
 
 fn is_shared_semantic_scenario(scenario: &ScenarioConfig) -> bool {
-    scenario.execution_mode.is_none() && !scenario.semantic_steps.is_empty()
+    scenario.is_shared_semantic()
 }
 
 #[cfg(test)]
@@ -247,6 +247,7 @@ mod tests {
             schema_version: 1,
             id: "semantic-shared".to_string(),
             goal: "semantic ssh rejection".to_string(),
+            classification: None,
             execution_mode: None,
             required_capabilities: vec![],
             compatibility_steps: Vec::new(),
