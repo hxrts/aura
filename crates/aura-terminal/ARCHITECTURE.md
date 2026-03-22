@@ -42,7 +42,10 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Channel-targeting flows must consume either a committed selection token carried forward from authoritative UI focus or a typed workflow-returned `ChannelBindingWitness`. The shell may not re-resolve or repair targets from channel names, last visible messages, or other heuristic UI state.
 - Converted ceremony-monitoring paths must consume typed upstream lifecycle terminality and surface timeout or rollback-incomplete outcomes explicitly; the TUI may not silently discard those terminal states.
 - Relative-time display clocks are local observed-only maintenance for formatting. They may refresh labels such as "2m ago", but they must not gate, infer, or repair parity-critical ceremony or readiness state.
-- Slash-command outcome metadata must consume the upstream typed strong-command failure classification from `aura-app`; `aura-terminal` may format that metadata for users, but it must not infer semantic reason codes from local error-string matching.
+- Slash-command outcome metadata must consume the upstream typed strong-command
+  completion/degraded classification from `aura-app`; `aura-terminal` may
+  format that metadata for users, but it must not infer semantic reason codes
+  from local error-string matching.
 
 ### InvariantTerminalUiBoundary
 

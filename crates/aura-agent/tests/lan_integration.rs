@@ -958,8 +958,10 @@ async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmut
     )
     .await?;
     assert_eq!(
-        promote_self.consistency_state,
-        strong_command_workflow::ConsistencyState::Enforced
+        promote_self.completion_outcome,
+        strong_command_workflow::CommandCompletionOutcome::Satisfied(
+            strong_command_workflow::ConsistencyWitness::Enforced
+        )
     );
 
     let bob_target = {
@@ -986,8 +988,10 @@ async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmut
     )
     .await?;
     assert_eq!(
-        mute.consistency_state,
-        strong_command_workflow::ConsistencyState::Enforced
+        mute.completion_outcome,
+        strong_command_workflow::CommandCompletionOutcome::Satisfied(
+            strong_command_workflow::ConsistencyWitness::Enforced
+        )
     );
 
     let muted_payload = "blocked-by-mute";
@@ -1009,8 +1013,10 @@ async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmut
     )
     .await?;
     assert_eq!(
-        unmute.consistency_state,
-        strong_command_workflow::ConsistencyState::Enforced
+        unmute.completion_outcome,
+        strong_command_workflow::CommandCompletionOutcome::Satisfied(
+            strong_command_workflow::ConsistencyWitness::Enforced
+        )
     );
 
     let after = "after-unmute-cross-instance";
