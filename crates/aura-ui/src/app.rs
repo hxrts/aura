@@ -92,6 +92,7 @@ struct NeighborhoodRuntimeMember {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct NeighborhoodRuntimeChannel {
+    id: String,
     name: String,
     topic: String,
 }
@@ -282,6 +283,7 @@ fn scoped_channels(
             }
         })
         .map(|channel| NeighborhoodRuntimeChannel {
+            id: channel.id.to_string(),
             name: channel.name.clone(),
             topic: channel.topic.clone().unwrap_or_default(),
         })
@@ -2124,18 +2126,17 @@ fn submit_runtime_chat_input(
             let raw = format!("/{command_input}");
             match parse_chat_command(&raw) {
                 Ok(ChatCommand::Join { channel }) => {
-                    let channel_for_selection = channel.clone();
                     controller_for_task.push_log(&format!("chat_join: start channel={channel}"));
                     messaging_workflows::join_channel_by_name(&app_core, &channel)
                         .await
-                        .map(|_| {
-                            controller_for_task.select_channel_by_name(&channel_for_selection);
+                        .map(|channel_id| {
+                            controller_for_task.select_channel_by_id(&channel_id);
                             controller_for_task.push_runtime_fact(RuntimeFact::ChannelJoined {
-                                channel: Some(ChannelFactKey::named(channel_for_selection.clone())),
+                                channel: Some(ChannelFactKey::identified(channel_id.clone())),
                                 source: Some("join_command".to_string()),
                             });
                             controller_for_task.push_log(&format!(
-                                "chat_join: success channel={channel_for_selection} selected={channel_for_selection}"
+                                "chat_join: success channel={channel} selected_id={channel_id}"
                             ));
                             Some(format!("joined #{}", channel.trim_start_matches('#')))
                         })
@@ -3589,23 +3590,28 @@ fn NeighborhoodScreen(
         .min(display_members.len().saturating_sub(1));
     let selected_runtime_member = display_members.get(selected_member_index).cloned();
 
-    let selected_channel_name = model.selected_channel_name().unwrap_or("none").to_string();
+    let selected_channel_id = model.selected_channel_id().unwrap_or("none").to_string();
     let display_channels = if !runtime.channels.is_empty() {
         let has_selected = runtime
             .channels
             .iter()
-            .any(|channel| channel.name == selected_channel_name);
+            .any(|channel| channel.id == selected_channel_id);
         runtime
             .channels
             .iter()
             .enumerate()
             .map(|(idx, channel)| {
                 let is_selected = if has_selected {
-                    channel.name == selected_channel_name
+                    channel.id == selected_channel_id
                 } else {
                     idx == 0
                 };
-                (channel.name.clone(), channel.topic.clone(), is_selected)
+                (
+                    channel.id.clone(),
+                    channel.name.clone(),
+                    channel.topic.clone(),
+                    is_selected,
+                )
             })
             .collect::<Vec<_>>()
     } else {
@@ -3614,6 +3620,7 @@ fn NeighborhoodScreen(
             .iter()
             .map(|channel| {
                 (
+                    channel.id.clone(),
                     channel.name.clone(),
                     channel.topic.clone(),
                     channel.selected,
@@ -3623,8 +3630,8 @@ fn NeighborhoodScreen(
     };
     let selected_channel_name = display_channels
         .iter()
-        .find(|(_, _, selected)| *selected)
-        .map(|(name, _, _)| name.clone())
+        .find(|(_, _, _, selected)| *selected)
+        .map(|(_, name, _, _)| name.clone())
         .unwrap_or_else(|| "none".to_string());
     let social_mode_label = if is_detail { "Entered" } else { "Browsing" };
     let selected_home_id = home_rows
@@ -3706,16 +3713,16 @@ fn NeighborhoodScreen(
                                             p { class: "m-0 text-sm text-muted-foreground", "No channels" }
                                         } else {
                                             div { class: "aura-list space-y-2 min-w-0",
-                                for (channel_name, channel_topic, is_selected) in &display_channels {
+                                for (channel_id, channel_name, channel_topic, is_selected) in &display_channels {
                                                     button {
                                                         r#type: "button",
-                                                        id: list_item_dom_id(ListId::Channels, channel_name),
+                                                        id: list_item_dom_id(ListId::Channels, channel_id),
                                                         class: "block w-full min-w-0 text-left",
                                                         onclick: {
                                                             let controller = controller.clone();
-                                                            let channel_name = channel_name.clone();
+                                                            let channel_id = channel_id.clone();
                                                             move |_| {
-                                                                controller.select_channel_by_name(&channel_name);
+                                                                controller.select_channel_by_id(&channel_id);
                                                                 render_tick.set(render_tick() + 1);
                                                             }
                                                         },
@@ -6581,5 +6588,41 @@ mod tests {
         assert!(branch.contains("else if state.has_failed"));
         assert!(branch.contains("else if state.is_complete"));
         assert!(!branch.contains("time_workflows::sleep_ms"));
+    }
+
+    #[test]
+    fn chat_selection_paths_use_canonical_channel_ids_instead_of_name_selection() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-ui/src/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+
+        let join_start = source
+            .find("Ok(ChatCommand::Join { channel }) => {")
+            .unwrap_or_else(|| panic!("missing ChatCommand::Join branch"));
+        let join_end = source[join_start..]
+            .find("Ok(ChatCommand::Leave) => {")
+            .map(|offset| join_start + offset)
+            .unwrap_or_else(|| panic!("missing ChatCommand::Leave branch"));
+        let join_branch = &source[join_start..join_end];
+
+        assert!(join_branch.contains(".map(|channel_id| {"));
+        assert!(join_branch.contains("select_channel_by_id(&channel_id)"));
+        assert!(join_branch.contains("ChannelFactKey::identified(channel_id.clone())"));
+        assert!(!join_branch.contains("select_channel_by_name("));
+
+        let channels_start = source
+            .find(
+                "for (channel_id, channel_name, channel_topic, is_selected) in &display_channels {",
+            )
+            .unwrap_or_else(|| panic!("missing display_channels loop"));
+        let channels_end = source[channels_start..]
+            .find("UiListItem {")
+            .map(|offset| channels_start + offset)
+            .unwrap_or_else(|| panic!("missing channel list item"));
+        let channels_branch = &source[channels_start..channels_end];
+
+        assert!(channels_branch.contains("controller.select_channel_by_id(&channel_id);"));
+        assert!(!channels_branch.contains("select_channel_by_name("));
     }
 }

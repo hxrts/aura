@@ -215,7 +215,9 @@ fn handle_contacts_char(model: &mut UiModel, ch: char) {
         'c' => {
             if let Some(contact) = model.selected_contact_name().map(str::to_string) {
                 model.set_screen(ScreenId::Chat);
-                model.select_channel_by_name(&format!("DM: {contact}"));
+                let channel_id =
+                    ensure_named_channel(model, &format!("DM: {contact}"), String::new());
+                model.select_channel_id(Some(&channel_id));
             }
         }
         'd' => {}
@@ -492,8 +494,8 @@ fn handle_modal_enter(model: &mut UiModel, modal: ModalState, clipboard: &dyn Cl
                         state.threshold = state.threshold.clamp(1, max_threshold.max(1));
                         let channel = state.name.trim().to_string();
                         let topic = state.topic.clone();
-                        ensure_named_channel(model, &channel, topic.clone());
-                        model.select_channel_by_name(&channel);
+                        let channel_id = ensure_named_channel(model, &channel, topic.clone());
+                        model.select_channel_id(Some(&channel_id));
                         if !topic.trim().is_empty() {
                             model.set_selected_channel_topic(topic);
                         }
@@ -783,8 +785,8 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                 match command {
                     aura_app::ui::types::ChatCommand::Join { channel } => {
                         let channel = channel.trim_start_matches('#').to_string();
-                        ensure_named_channel(model, &channel, String::new());
-                        model.select_channel_by_name(&channel);
+                        let channel_id = ensure_named_channel(model, &channel, String::new());
+                        model.select_channel_id(Some(&channel_id));
                         model.toast = Some(command_toast(
                             '✓',
                             "ok",
@@ -884,8 +886,8 @@ fn submit_chat_input(model: &mut UiModel, text: &str) {
                         }
                     }
                     aura_app::ui::types::ChatCommand::Msg { text, .. } => {
-                        ensure_dm_channel(model);
-                        model.select_channel_by_name("dm");
+                        let channel_id = ensure_dm_channel(model);
+                        model.select_channel_id(Some(&channel_id));
                         model.messages.push(text);
                         model.toast = Some(command_toast(
                             '✓',
@@ -1008,11 +1010,11 @@ fn handle_escape(model: &mut UiModel) {
     model.toast = None;
 }
 
-fn ensure_dm_channel(model: &mut UiModel) {
-    ensure_named_channel(model, "dm", String::new());
+fn ensure_dm_channel(model: &mut UiModel) -> String {
+    ensure_named_channel(model, "dm", String::new())
 }
 
-fn ensure_named_channel(model: &mut UiModel, channel_name: &str, topic: String) {
+fn ensure_named_channel(model: &mut UiModel, channel_name: &str, topic: String) -> String {
     if let Some(row) = model
         .channels
         .iter_mut()
@@ -1021,14 +1023,16 @@ fn ensure_named_channel(model: &mut UiModel, channel_name: &str, topic: String) 
         if !topic.trim().is_empty() {
             row.topic = topic;
         }
-        return;
+        return row.id.clone();
     }
+    let channel_id = channel_name.to_string();
     model.channels.push(ChannelRow {
-        id: channel_name.to_string(),
+        id: channel_id.clone(),
         name: channel_name.to_string(),
         selected: false,
         topic,
     });
+    channel_id
 }
 
 fn parse_reason_code_for_command_error(message: &str) -> &'static str {
@@ -1953,8 +1957,9 @@ mod tests {
         let clipboard = MemoryClipboard::default();
 
         model.set_screen(ScreenId::Chat);
-        crate::keyboard::ensure_named_channel(&mut model, "demo-trio-room", String::new());
-        model.select_channel_by_name("demo-trio-room");
+        let channel_id =
+            crate::keyboard::ensure_named_channel(&mut model, "demo-trio-room", String::new());
+        model.select_channel_id(Some(&channel_id));
         model.input_mode = true;
         model.input_buffer = "demo-e2e-trio-token".to_string();
 
@@ -1962,6 +1967,27 @@ mod tests {
 
         assert!(model.messages.iter().any(|msg| msg.contains("Alice")));
         assert!(model.messages.iter().any(|msg| msg.contains("Carol")));
+    }
+
+    #[test]
+    fn ensure_named_channel_reuses_existing_channel_id_for_matching_name() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.channels.push(crate::model::ChannelRow {
+            id: "channel-123".to_string(),
+            name: "Slash Lab".to_string(),
+            selected: false,
+            topic: String::new(),
+        });
+
+        let channel_id = crate::keyboard::ensure_named_channel(
+            &mut model,
+            "slash lab",
+            "updated topic".to_string(),
+        );
+
+        assert_eq!(channel_id, "channel-123");
+        assert_eq!(model.channels.len(), 1);
+        assert_eq!(model.channels[0].topic, "updated topic");
     }
 
     #[test]
