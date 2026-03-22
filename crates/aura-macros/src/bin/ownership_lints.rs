@@ -1002,26 +1002,20 @@ impl OwnershipVisitor<'_> {
                         | "observed-display-update"
                         | "authoritative-source"
                         | "first-run-default"
-                        | "deprecated-legacy-bridge"
                         | "fact-backed"
                 )
             }),
             LintMode::WorkflowNoViewWrites => tags.iter().any(|tag| {
                 matches!(
                     tag.as_str(),
-                    "observed-display-update" | "fact-backed" | "deprecated-legacy-bridge"
+                    "observed-display-update" | "fact-backed"
                 )
             }),
-            LintMode::WorkflowNoFallbackDefaults => tags.iter().any(|tag| {
-                matches!(
-                    tag.as_str(),
-                    "first-run-default" | "deprecated-legacy-bridge"
-                )
-            }),
-            LintMode::WorkflowNoViewDerivedReadiness
-            | LintMode::WorkflowNoViewDerivedRecipientResolution => {
-                tags.iter().any(|tag| tag == "deprecated-legacy-bridge")
+            LintMode::WorkflowNoFallbackDefaults => {
+                tags.iter().any(|tag| matches!(tag.as_str(), "first-run-default"))
             }
+            LintMode::WorkflowNoViewDerivedReadiness
+            | LintMode::WorkflowNoViewDerivedRecipientResolution => false,
             LintMode::WorkflowUnboundedRuntimeAwaits => false,
             _ => false,
         }
