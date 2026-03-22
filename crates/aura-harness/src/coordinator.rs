@@ -148,11 +148,11 @@ impl HarnessCoordinator {
                     .backends
                     .get_mut(&id)
                     .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
-                let backend_kind = backend.as_lifecycle().backend_kind();
+                let backend_kind = backend.backend_kind();
                 eprintln!(
                     "[harness] startup phase=backend_start begin instance={id} backend={backend_kind}"
                 );
-                backend.as_lifecycle_mut().start()?;
+                backend.start()?;
                 eprintln!(
                     "[harness] startup phase=backend_start done instance={id} backend={backend_kind}"
                 );
@@ -195,7 +195,6 @@ impl HarnessCoordinator {
             self.backends
                 .get(&id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?
-                .as_lifecycle()
                 .wait_until_ready(BACKEND_READY_TIMEOUT)?;
             eprintln!(
                 "[harness] startup phase=ready_check done instance={id} backend={backend_kind}"
@@ -248,7 +247,7 @@ impl HarnessCoordinator {
                 .backends
                 .get(instance_id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-            if backend.as_lifecycle().health_check()? {
+            if backend.health_check()? {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -273,12 +272,12 @@ impl HarnessCoordinator {
                 instance_id.clone(),
                 thread::spawn(move || {
                     let mut backend = backend;
-                    let backend_kind = backend.as_lifecycle().backend_kind();
+                    let backend_kind = backend.backend_kind();
                     let result = (|| -> Result<()> {
                         eprintln!(
                             "[harness] startup phase=backend_start begin instance={instance_id} backend={backend_kind}"
                         );
-                        backend.as_lifecycle_mut().start()?;
+                        backend.start()?;
                         eprintln!(
                             "[harness] startup phase=backend_start done instance={instance_id} backend={backend_kind}"
                         );
@@ -287,7 +286,7 @@ impl HarnessCoordinator {
                         );
                         let deadline = Instant::now() + BACKEND_HEALTH_TIMEOUT;
                         loop {
-                            if backend.as_lifecycle().health_check()? {
+                            if backend.health_check()? {
                                 break;
                             }
                             if Instant::now() >= deadline {
@@ -371,8 +370,8 @@ impl HarnessCoordinator {
                     .backends
                     .get_mut(id)
                     .ok_or_else(|| anyhow!("unknown instance_id: {id}"))?;
-                let backend_kind = backend.as_lifecycle().backend_kind();
-                backend.as_lifecycle_mut().stop()?;
+                let backend_kind = backend.backend_kind();
+                backend.stop()?;
                 backend_kind
             };
             self.events.push(
@@ -423,7 +422,7 @@ impl HarnessCoordinator {
                 .backends
                 .get(instance_id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-            if !backend.as_lifecycle().health_check()? {
+            if !backend.health_check()? {
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -474,8 +473,8 @@ impl HarnessCoordinator {
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
         match source {
-            ScreenSource::Default => backend.as_diagnostic().diagnostic_screen_snapshot(),
-            ScreenSource::Dom => backend.as_diagnostic().diagnostic_dom_snapshot(),
+            ScreenSource::Default => backend.diagnostic_screen_snapshot(),
+            ScreenSource::Dom => backend.diagnostic_dom_snapshot(),
         }
     }
 
@@ -484,7 +483,7 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        let snapshot = backend.as_observation()?.ui_snapshot()?;
+        let snapshot = backend.ui_snapshot()?;
         self.events.push(
             "observation",
             "ui_snapshot",
@@ -510,13 +509,9 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        let Some(event) = backend
-            .as_observation()?
-            .wait_for_ui_snapshot_event(timeout, after_version)
-        else {
+        let Some(event) = backend.wait_for_ui_snapshot_event(timeout, after_version)? else {
             return Ok(None);
         };
-        let event = event?;
         self.events.push(
             "observation",
             "ui_snapshot_event",
@@ -539,7 +534,7 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        Ok(backend.as_lifecycle().backend_kind())
+        Ok(backend.backend_kind())
     }
 
     pub fn supports_ui_snapshot(&self, instance_id: &str) -> Result<bool> {
@@ -547,7 +542,7 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        Ok(backend.as_observation().is_ok())
+        Ok(backend.supports_ui_snapshot())
     }
 
     pub fn send_keys(&mut self, instance_id: &str, keys: &str) -> Result<()> {
@@ -557,7 +552,7 @@ impl HarnessCoordinator {
                 .backends
                 .get_mut(instance_id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-            backend.as_raw_ui_mut()?.send_keys(normalized.as_ref())?;
+            backend.send_keys(normalized.as_ref())?;
         }
 
         self.events.push(
@@ -583,7 +578,7 @@ impl HarnessCoordinator {
                 "repeat" => repeat.max(1)
             }),
         );
-        backend.as_raw_ui_mut()?.send_key(key, repeat)
+        backend.send_key(key, repeat)
     }
 
     pub fn click_button(&mut self, instance_id: &str, label: &str) -> Result<()> {
@@ -597,7 +592,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             event_details!({ "label" => label }),
         );
-        backend.as_raw_ui_mut()?.click_button(label)
+        backend.click_button(label)
     }
 
     pub fn activate_control(&mut self, instance_id: &str, control_id: ControlId) -> Result<()> {
@@ -611,7 +606,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             event_details!({ "control_id" => format!("{control_id:?}") }),
         );
-        backend.as_raw_ui_mut()?.activate_control(control_id)
+        backend.activate_control(control_id)
     }
 
     pub fn click_target(&mut self, instance_id: &str, selector: &str) -> Result<()> {
@@ -625,7 +620,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             event_details!({ "selector" => selector }),
         );
-        backend.as_raw_ui_mut()?.click_target(selector)
+        backend.click_target(selector)
     }
 
     pub fn fill_input(&mut self, instance_id: &str, selector: &str, value: &str) -> Result<()> {
@@ -642,7 +637,7 @@ impl HarnessCoordinator {
                 "bytes" => value.len()
             }),
         );
-        backend.as_raw_ui_mut()?.fill_input(selector, value)
+        backend.fill_input(selector, value)
     }
 
     pub fn fill_field(&mut self, instance_id: &str, field_id: FieldId, value: &str) -> Result<()> {
@@ -659,7 +654,7 @@ impl HarnessCoordinator {
                 "bytes" => value.len()
             }),
         );
-        backend.as_raw_ui_mut()?.fill_field(field_id, value)
+        backend.fill_field(field_id, value)
     }
 
     pub fn activate_list_item(
@@ -681,9 +676,7 @@ impl HarnessCoordinator {
                 "item_id" => item_id
             }),
         );
-        backend
-            .as_raw_ui_mut()?
-            .activate_list_item(list_id, item_id)
+        backend.activate_list_item(list_id, item_id)
     }
 
     pub fn create_contact_invitation(
@@ -704,7 +697,6 @@ impl HarnessCoordinator {
             }),
         );
         backend
-            .as_shared_semantic_mut()?
             .submit_create_contact_invitation(receiver_authority_id)
             .map(|submitted| submitted.value.code)
     }
@@ -726,9 +718,7 @@ impl HarnessCoordinator {
                 "intent" => format!("{:?}", request.kind()).to_ascii_lowercase()
             }),
         );
-        backend
-            .as_shared_semantic_mut()?
-            .submit_semantic_command(request)
+        backend.submit_semantic_command(request)
     }
 
     pub fn wait_for_diagnostic_screen(
@@ -758,7 +748,6 @@ impl HarnessCoordinator {
                 .backends
                 .get(instance_id)
                 .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
-                .as_diagnostic()
                 .wait_for_diagnostic_dom_patterns(&patterns, timeout_ms)
             {
                 let screen = result?;
@@ -841,10 +830,7 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        if let Some(result) = backend
-            .as_diagnostic()
-            .wait_for_diagnostic_target(selector, timeout_ms)
-        {
+        if let Some(result) = backend.wait_for_diagnostic_target(selector, timeout_ms) {
             let screen = result?;
             self.events.push(
                 "observation",
@@ -860,7 +846,7 @@ impl HarnessCoordinator {
 
         bail!(
             "wait_for_selector is not supported by backend {}",
-            backend.as_lifecycle().backend_kind()
+            backend.backend_kind()
         )
     }
 
@@ -869,7 +855,7 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        let result = backend.as_diagnostic().tail_log(lines)?;
+        let result = backend.tail_log(lines)?;
         self.events.push(
             "observation",
             "tail_log",
@@ -884,7 +870,7 @@ impl HarnessCoordinator {
             .backends
             .get(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        let text = backend.as_diagnostic().read_clipboard()?;
+        let text = backend.read_clipboard()?;
 
         self.events.push(
             "observation",
@@ -900,7 +886,7 @@ impl HarnessCoordinator {
             .backends
             .get_mut(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
-        let authority_id = backend.as_lifecycle_mut().authority_id()?;
+        let authority_id = backend.authority_id()?;
         self.events.push(
             "observation",
             "get_authority_id",
@@ -979,7 +965,6 @@ impl HarnessCoordinator {
                 self.backends
                     .get(instance_id)
                     .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
-                    .as_lifecycle()
                     .wait_until_ready(BACKEND_READY_TIMEOUT)?;
                 self.events.push(
                     "lifecycle",
@@ -995,13 +980,11 @@ impl HarnessCoordinator {
                 self.backends
                     .get_mut(instance_id)
                     .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
-                    .as_lifecycle_mut()
                     .stage_runtime_identity(&authority_id, &provisional_device_id)?;
                 self.wait_for_backend_health(instance_id, BACKEND_HEALTH_TIMEOUT)?;
                 self.backends
                     .get(instance_id)
                     .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?
-                    .as_lifecycle()
                     .wait_until_ready(BACKEND_READY_TIMEOUT)?;
                 self.events.push(
                     "lifecycle",
@@ -1030,7 +1013,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             event_details!(),
         );
-        backend.as_lifecycle_mut().restart()
+        backend.restart()
     }
 
     pub fn kill(&mut self, instance_id: &str) -> Result<()> {
@@ -1044,7 +1027,7 @@ impl HarnessCoordinator {
             Some(instance_id.to_string()),
             event_details!(),
         );
-        backend.as_lifecycle_mut().stop()
+        backend.stop()
     }
 
     pub fn event_snapshot(&self) -> Vec<crate::events::HarnessEvent> {
