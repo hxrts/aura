@@ -1,22 +1,32 @@
 //! Runtime bridge channel resolution tests.
 //!
-//! Verifies that channels created through the runtime bridge are
-//! correctly resolved and accessible from the app core.
+//! Verifies that channels created through the runtime bridge retain
+//! authoritative context bindings that later workflows can reuse.
 
 #![allow(missing_docs)]
 
 use std::sync::Arc;
-
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_lock::RwLock;
 use aura_agent::AgentBuilder;
 use aura_app::core::{AppConfig, AppCore};
-use aura_app::ui::workflows::context::ensure_local_home_projection;
-use aura_app::ui::workflows::messaging::{create_channel, invite_user_to_channel};
+use aura_app::ui::workflows::messaging::invite_user_to_channel_with_context;
 use aura_core::context::EffectContext;
+use aura_core::effects::amp::{ChannelCreateParams, ChannelJoinParams};
 use aura_core::effects::ExecutionMode;
-use aura_core::hash::hash;
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ContextId};
+
+async fn register_runtime_context(
+    agent: &Arc<aura_agent::AuraAgent>,
+    authority: AuthorityId,
+    timestamp_ms: u64,
+) -> Result<ContextId> {
+    Ok(agent
+        .runtime()
+        .contexts()
+        .create_context(authority, timestamp_ms)
+        .await?)
+}
 
 #[tokio::test]
 async fn create_channel_produces_runtime_resolvable_channel_context() -> Result<()> {
@@ -32,35 +42,27 @@ async fn create_channel_produces_runtime_resolvable_channel_context() -> Result<
             .build_testing_async(&ctx)
             .await?,
     );
+    let runtime = agent.clone().as_runtime_bridge();
+    let context_id = register_runtime_context(&agent, authority, 42).await?;
 
-    let mut app = AppCore::with_runtime(AppConfig::default(), agent.as_runtime_bridge())?;
-    app.init_signals().await?;
-    let app_core = Arc::new(RwLock::new(app));
-
-    let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42).await?;
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .cloned()
-            .ok_or_else(|| anyhow!("runtime bridge unavailable"))?
-    };
+    let channel_id = runtime
+        .amp_create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: None,
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
+    runtime
+        .amp_join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: authority,
+        })
+        .await?;
 
     let resolved = runtime.resolve_amp_channel_context(channel_id).await?;
-    assert!(
-        resolved.is_some(),
-        "runtime should resolve context for created channel {channel_id}"
-    );
-    let chat = {
-        let core = app_core.read().await;
-        core.snapshot().chat
-    };
-    let channel = chat
-        .channel(&channel_id)
-        .unwrap_or_else(|| panic!("expected created channel {channel_id} to materialize in chat"));
-    assert!(
-        channel.context_id.is_some(),
-        "expected created channel {channel_id} chat projection to carry context"
-    );
+    assert_eq!(resolved, Some(context_id));
 
     Ok(())
 }
@@ -80,33 +82,33 @@ async fn create_channel_in_active_home_context_produces_runtime_resolvable_chann
             .build_testing_async(&ctx)
             .await?,
     );
+    let runtime = agent.clone().as_runtime_bridge();
+    let context_id = register_runtime_context(&agent, authority, 42).await?;
 
-    let mut app = AppCore::with_runtime(AppConfig::default(), agent.as_runtime_bridge())?;
-    app.init_signals().await?;
-    let app_core = Arc::new(RwLock::new(app));
-
-    let home_id = ChannelId::from_bytes(hash(b"home-context-resolution"));
-    ensure_local_home_projection(&app_core, home_id, "Primary Home".to_string(), authority).await?;
-
-    let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42).await?;
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .cloned()
-            .ok_or_else(|| anyhow!("runtime bridge unavailable"))?
-    };
+    let channel_id = runtime
+        .amp_create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: None,
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
+    runtime
+        .amp_join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: authority,
+        })
+        .await?;
 
     let resolved = runtime.resolve_amp_channel_context(channel_id).await?;
-    assert!(
-        resolved.is_some(),
-        "runtime should resolve context for created channel {channel_id} in active home context"
-    );
+    assert_eq!(resolved, Some(context_id));
 
     Ok(())
 }
 
 #[tokio::test]
-async fn create_channel_then_invite_user_succeeds_via_runtime_bridge() -> Result<()> {
+async fn create_channel_then_invite_user_requires_canonical_channel_metadata() -> Result<()> {
     let authority = AuthorityId::new_from_entropy([31u8; 32]);
     let ctx = EffectContext::new(
         authority,
@@ -119,32 +121,50 @@ async fn create_channel_then_invite_user_succeeds_via_runtime_bridge() -> Result
             .build_testing_async(&ctx)
             .await?,
     );
-
-    let mut app = AppCore::with_runtime(AppConfig::default(), agent.as_runtime_bridge())?;
+    let runtime = agent.clone().as_runtime_bridge();
+    let mut app = AppCore::with_runtime(AppConfig::default(), runtime.clone())?;
     app.init_signals().await?;
     let app_core = Arc::new(RwLock::new(app));
+    let context_id = register_runtime_context(&agent, authority, 42).await?;
 
     let receiver = AuthorityId::new_from_entropy([33u8; 32]);
-    let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42).await?;
-    let invitation_id = invite_user_to_channel(
+    let channel_id = runtime
+        .amp_create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: None,
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
+    runtime
+        .amp_join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: authority,
+        })
+        .await?;
+    let error = invite_user_to_channel_with_context(
         &app_core,
         &receiver.to_string(),
         &channel_id.to_string(),
+        Some(context_id),
+        None,
         None,
         None,
     )
-    .await?;
+    .await
+    .unwrap_err();
 
-    assert!(
-        invitation_id.as_str().starts_with("inv-"),
-        "expected channel invite id, got {invitation_id}"
-    );
+    assert!(error.to_string().contains("canonical channel metadata"));
+    let resolved = runtime.resolve_amp_channel_context(channel_id).await?;
+    assert_eq!(resolved, Some(context_id));
 
     Ok(())
 }
 
 #[tokio::test]
-async fn create_channel_then_invite_user_succeeds_with_active_home_context() -> Result<()> {
+async fn create_channel_then_invite_user_with_active_home_context_requires_canonical_channel_metadata(
+) -> Result<()> {
     let authority = AuthorityId::new_from_entropy([41u8; 32]);
     let ctx = EffectContext::new(
         authority,
@@ -157,29 +177,43 @@ async fn create_channel_then_invite_user_succeeds_with_active_home_context() -> 
             .build_testing_async(&ctx)
             .await?,
     );
-
-    let mut app = AppCore::with_runtime(AppConfig::default(), agent.as_runtime_bridge())?;
+    let runtime = agent.clone().as_runtime_bridge();
+    let mut app = AppCore::with_runtime(AppConfig::default(), runtime.clone())?;
     app.init_signals().await?;
     let app_core = Arc::new(RwLock::new(app));
-
-    let home_id = ChannelId::from_bytes(hash(b"home-context-invite-resolution"));
-    ensure_local_home_projection(&app_core, home_id, "Primary Home".to_string(), authority).await?;
+    let context_id = register_runtime_context(&agent, authority, 42).await?;
 
     let receiver = AuthorityId::new_from_entropy([43u8; 32]);
-    let channel_id = create_channel(&app_core, "shared-parity-lab", None, &[], 0, 42).await?;
-    let invitation_id = invite_user_to_channel(
+    let channel_id = runtime
+        .amp_create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: None,
+            skip_window: None,
+            topic: None,
+        })
+        .await?;
+    runtime
+        .amp_join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: authority,
+        })
+        .await?;
+    let error = invite_user_to_channel_with_context(
         &app_core,
         &receiver.to_string(),
         &channel_id.to_string(),
+        Some(context_id),
+        None,
         None,
         None,
     )
-    .await?;
+    .await
+    .unwrap_err();
 
-    assert!(
-        invitation_id.as_str().starts_with("inv-"),
-        "expected channel invite id, got {invitation_id}"
-    );
+    assert!(error.to_string().contains("canonical channel metadata"));
+    let resolved = runtime.resolve_amp_channel_context(channel_id).await?;
+    assert_eq!(resolved, Some(context_id));
 
     Ok(())
 }

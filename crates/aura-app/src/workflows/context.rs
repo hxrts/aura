@@ -729,6 +729,20 @@ mod tests {
     use crate::workflows::signals::emit_signal;
     use aura_core::crypto::hash::hash;
 
+    async fn publish_test_homes_signal(app_core: &Arc<RwLock<AppCore>>) {
+        emit_signal(
+            app_core,
+            &*HOMES_SIGNAL,
+            {
+                let core = app_core.read().await;
+                core.views().get_homes()
+            },
+            HOMES_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn test_set_context() {
         let config = AppConfig::default();
@@ -756,6 +770,7 @@ mod tests {
     async fn test_resolve_active_home_uses_selected_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([21u8; 32]);
 
         let selected_home = ChannelId::from_bytes(hash(b"selected-home"));
@@ -774,6 +789,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
+        publish_test_homes_signal(&app_core).await;
+
         let resolved = resolve_active_home(&app_core).await.unwrap();
         assert_eq!(resolved.home_id, selected_home);
         assert_eq!(resolved.context_id, selected_ctx);
@@ -784,6 +801,7 @@ mod tests {
     async fn test_resolve_active_home_prefers_authoritative_selection_over_view_current_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([24u8; 32]);
         let selected_home = ChannelId::from_bytes(hash(b"selected-home-authoritative"));
         let selected_ctx = ContextId::new_from_entropy(hash(b"selected-ctx-authoritative"));
@@ -812,6 +830,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
+        publish_test_homes_signal(&app_core).await;
+
         let resolved = resolve_active_home(&app_core).await.unwrap();
         assert_eq!(resolved.home_id, selected_home);
         assert_eq!(resolved.context_id, selected_ctx);
@@ -822,6 +842,7 @@ mod tests {
     async fn test_resolve_active_home_requires_explicit_or_selected_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
 
         let home_a = ChannelId::from_bytes(hash(b"home-z"));
@@ -850,6 +871,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
+        publish_test_homes_signal(&app_core).await;
+
         let error = resolve_active_home(&app_core).await.unwrap_err();
         assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
     }
@@ -858,6 +881,8 @@ mod tests {
     async fn test_resolve_active_home_returns_guidance_when_missing() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        publish_test_homes_signal(&app_core).await;
 
         let error = resolve_active_home(&app_core).await.unwrap_err();
         assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
@@ -867,6 +892,7 @@ mod tests {
     async fn test_current_home_context_uses_active_home_when_available() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
         let home_id = ChannelId::from_bytes(hash(b"chat-home"));
         let home_ctx = ContextId::new_from_entropy(hash(b"chat-home-ctx"));
@@ -884,6 +910,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
+        publish_test_homes_signal(&app_core).await;
+
         let resolved_ctx = current_home_context(&app_core)
             .await
             .expect("context should resolve");
@@ -894,6 +922,8 @@ mod tests {
     async fn test_current_home_context_requires_active_home() {
         let config = AppConfig::default();
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        publish_test_homes_signal(&app_core).await;
 
         let error = current_home_context(&app_core).await.unwrap_err();
         assert!(error.to_string().contains(MISSING_ACTIVE_HOME_MESSAGE));
@@ -945,17 +975,7 @@ mod tests {
             });
             core.views_mut().set_neighborhood(neighborhood);
         }
-        emit_signal(
-            &app_core,
-            &*HOMES_SIGNAL,
-            {
-                let core = app_core.read().await;
-                core.views().get_homes()
-            },
-            HOMES_SIGNAL_NAME,
-        )
-        .await
-        .unwrap();
+        publish_test_homes_signal(&app_core).await;
 
         move_position(&app_core, &home_b.to_string(), "full")
             .await

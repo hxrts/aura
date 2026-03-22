@@ -1156,10 +1156,29 @@ cfg_if! {
                                 if !requires_rebootstrap {
                                     controller.info_toast("Device enrollment complete");
                                     bootstrap_account_ready.set(true);
-                                    controller.set_account_setup_state(true, "", None);
-                                    controller.set_screen(ScreenId::Neighborhood);
-                                    controller
-                                        .publish_ui_snapshot(controller.semantic_model_snapshot());
+                                    if let Err(error) = harness_bridge::schedule_browser_ui_mutation(
+                                        controller.clone(),
+                                        move |controller| {
+                                            controller.set_account_setup_state(true, "", None);
+                                            controller.set_screen(ScreenId::Neighborhood);
+                                        },
+                                    )
+                                    .await
+                                    {
+                                        let error = WebUiError::operation(
+                                            WebUiOperation::ImportDeviceEnrollmentCode,
+                                            "WEB_DEVICE_ENROLLMENT_FINALIZE_UI_MUTATION_FAILED",
+                                            format!("{error:?}"),
+                                        );
+                                        let message = error.user_message();
+                                        bootstrap_account_ready.set(false);
+                                        controller.set_account_setup_state(
+                                            false,
+                                            "",
+                                            Some(message.clone()),
+                                        );
+                                        import_error.set(Some(error));
+                                    }
                                 } else {
                                     controller.info_toast("Switching runtime to finish import");
                                 }

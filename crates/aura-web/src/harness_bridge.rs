@@ -285,7 +285,7 @@ fn publish_current_ui_snapshot(controller: &UiController) {
     controller.publish_ui_snapshot(controller.semantic_model_snapshot());
 }
 
-async fn schedule_browser_ui_mutation(
+pub(crate) async fn schedule_browser_ui_mutation(
     controller: Arc<UiController>,
     action: impl FnOnce(&UiController) + 'static,
 ) -> Result<(), JsValue> {
