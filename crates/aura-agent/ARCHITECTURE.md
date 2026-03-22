@@ -273,6 +273,8 @@ Runtime bridge lookup follows the same strong-ref rule:
 - runtime bridge reachability checks must use only current-context transport or
   current-context descriptor evidence; they may not promote peer-default-
   context or LAN-discovery caches into an authoritative online answer
+- peer-channel initiation must also use only descriptors bound to the requested
+  context; it may not retry the peer's default context as a hidden fallback
 - runtime-owned relational-fact pull must fail explicitly when rendezvous is
   unavailable or no websocket-capable descriptor exists for the target peer; it
   may not downgrade missing transport reachability into a zero-fact success
