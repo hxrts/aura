@@ -299,11 +299,13 @@ impl AgentRuntimeBridge {
 
     async fn sync_seeded_peers(&self) -> Result<(), IntentError> {
         let Some(sync) = self.agent.runtime().sync() else {
-            return Ok(());
+            return Err(service_unavailable("sync_service"));
         };
         let peers = sync.peers().await;
         if peers.is_empty() {
-            return Ok(());
+            return Err(IntentError::validation_failed(
+                "No sync peers are available for synchronization",
+            ));
         }
         let effects = self.agent.runtime().effects();
         sync.sync_with_peers(&effects, peers)
@@ -5217,6 +5219,63 @@ mod tests {
                 .to_string()
                 .contains("No websocket direct transport hint available"),
             "expected websocket-hint error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_seeded_peers_requires_sync_service() {
+        let authority = AuthorityId::new_from_entropy([59u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([60u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .sync_seeded_peers()
+            .await
+            .expect_err("missing sync service should be explicit");
+        assert!(
+            error.to_string().contains("sync_service"),
+            "expected sync service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_seeded_peers_requires_seeded_peer_set() {
+        let authority = AuthorityId::new_from_entropy([61u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([62u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_sync()
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .sync_seeded_peers()
+            .await
+            .expect_err("empty sync peer set should be explicit");
+        assert!(
+            error
+                .to_string()
+                .contains("No sync peers are available for synchronization"),
+            "expected empty-peer sync error, got: {error}"
         );
     }
 }
