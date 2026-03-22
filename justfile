@@ -628,6 +628,7 @@ ci-harness-ownership-policy:
     bash scripts/check/harness-actor-vs-move-ownership.sh
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
     bash scripts/check/harness-typed-semantic-errors.sh
+    bash scripts/check/harness-typed-json-boundary.sh
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
     bash scripts/check/harness-authoritative-fact-boundary.sh
 
@@ -767,6 +768,9 @@ ci-harness-readiness-ownership:
 
 ci-harness-typed-semantic-errors:
     bash scripts/check/harness-typed-semantic-errors.sh
+
+ci-harness-typed-json-boundary:
+    bash scripts/check/harness-typed-json-boundary.sh
 
 ci-harness-move-ownership-boundary:
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness

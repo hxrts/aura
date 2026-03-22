@@ -169,6 +169,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - Treat `SharedSemanticBackend` plus `UiSnapshot` / `UiSnapshotEvent` as the primary shared-semantic contract. If you need raw screen or DOM data, the API and variable names must say `diagnostic`.
 - When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
 - If a convenience helper still needs exported data after submission, the follow-on wait must bind to an authoritative runtime event or projection contract, not a modal/screen side effect.
+- Shared semantic executor/replay/backend core must decode typed `ToolPayload` and bridge structs directly. Keep `serde_json::Value` and `serde_json::from_value` quarantined to outer CLI/browser boundary adapters.
 - Keep unsupported capability failures attached to the exact unsupported operation. Do not add back generic backend-cast helpers that hide which contract was actually requested.
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 - Do not add new inventory-backed or shared-flow dependents to `compatibility_step.rs`. If you touch that IR, keep the retention surface limited to `tests/phases/phase3_state_machine.rs` and executor-internal metadata/wait shaping, or delete it instead.

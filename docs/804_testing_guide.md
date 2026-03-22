@@ -113,6 +113,7 @@ For parity-critical waits and assertions:
 - executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers; do not keep a second harness-local convergence graph
 - projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation; runtime-event, toast, and exact operation-state waits still fail closed across restarts
 - semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or `Submitting`
+- shared semantic harness core should decode typed `ToolPayload` and bridge structs directly; keep raw `serde_json::Value` plumbing at outer CLI/browser adapters only
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
 - harness mode may change instrumentation and render stability, but it must not change business-flow semantics
 
