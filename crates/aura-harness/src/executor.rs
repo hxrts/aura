@@ -31,7 +31,10 @@ use crate::backend::{observe_operation, ChannelBinding, UiOperationHandle};
 use crate::config::{CompatibilityAction, CompatibilityStep, ScenarioConfig, ScreenSource};
 use crate::introspection::ToastLevel;
 use crate::timeouts::blocking_sleep;
-use crate::tool_api::{DiagnosticScreenCapture, ToolApi, ToolKey, ToolRequest, ToolResponse};
+use crate::tool_api::{
+    ClipboardPayload, DiagnosticScreenCapture, ToolApi, ToolKey, ToolPayload, ToolRequest,
+    ToolResponse,
+};
 
 const CLIPBOARD_PASTE_CHUNK_CHARS: usize = 48;
 const CLIPBOARD_PASTE_INTER_CHUNK_DELAY_MS: u64 = 5;
@@ -550,23 +553,18 @@ fn execute_compatibility_step(
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let clipboard_text = loop {
-                let attempt_error = match dispatch_payload(
+                let attempt_error = match dispatch_clipboard_payload(
                     tool_api,
                     ToolRequest::ReadClipboard {
                         instance_id: source_instance_id.clone(),
                     },
                 ) {
-                    Ok(payload) => {
-                        if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str)
-                        {
-                            let trimmed = text.trim();
-                            if !trimmed.is_empty() {
-                                break text.to_string();
-                            }
-                            "read_clipboard returned empty text".to_string()
-                        } else {
-                            "read_clipboard response missing text".to_string()
+                    Ok(ClipboardPayload { text }) => {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            break text;
                         }
+                        "read_clipboard returned empty text".to_string()
                     }
                     Err(error) => error.to_string(),
                 };
@@ -822,7 +820,7 @@ fn execute_semantic_step(
             } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
                 let regex_pattern = resolve_template(regex, context)?;
-                let payload = dispatch_payload_in_lane(
+                let capture = dispatch_diagnostic_screen_capture_in_lane(
                     tool_api,
                     semantic_lane,
                     ToolRequest::Screen {
@@ -830,7 +828,6 @@ fn execute_semantic_step(
                         screen_source: ScreenSource::Default,
                     },
                 )?;
-                let capture: DiagnosticScreenCapture = serde_json::from_value(payload)?;
                 let field = screen_field_from_extract_source(*from);
                 let source = screen_field_value(&capture, field);
                 let regex = Regex::new(&regex_pattern)
@@ -2412,23 +2409,19 @@ fn execute_semantic_send_clipboard(
     let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let clipboard_text = loop {
-        let attempt_error = match dispatch_payload_in_lane(
+        let attempt_error = match dispatch_clipboard_payload_in_lane(
             tool_api,
             lane,
             ToolRequest::ReadClipboard {
                 instance_id: source_instance_id.to_string(),
             },
         ) {
-            Ok(payload) => {
-                if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str) {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        break text.to_string();
-                    }
-                    "read_clipboard returned empty text".to_string()
-                } else {
-                    "read_clipboard response missing text".to_string()
+            Ok(ClipboardPayload { text }) => {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    break text;
                 }
+                "read_clipboard returned empty text".to_string()
             }
             Err(error) => error.to_string(),
         };
@@ -2737,18 +2730,16 @@ fn read_clipboard_value_in_lane(
 ) -> Result<String> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        let attempt = dispatch_payload_in_lane(
+        let attempt = dispatch_clipboard_payload_in_lane(
             tool_api,
             lane,
             ToolRequest::ReadClipboard {
                 instance_id: instance_id.to_string(),
             },
         );
-        if let Ok(payload) = attempt {
-            if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str) {
-                if !text.trim().is_empty() {
-                    return Ok(text.to_string());
-                }
+        if let Ok(ClipboardPayload { text }) = attempt {
+            if !text.trim().is_empty() {
+                return Ok(text);
             }
         }
 
@@ -2882,14 +2873,13 @@ fn fetch_ui_snapshot_in_lane(
     lane: ExecutionLane,
     instance_id: &str,
 ) -> Result<UiSnapshot> {
-    let payload = dispatch_payload_in_lane(
+    dispatch_ui_snapshot_payload_in_lane(
         tool_api,
         lane,
         ToolRequest::UiState {
             instance_id: instance_id.to_string(),
         },
-    )?;
-    serde_json::from_value(payload).map_err(Into::into)
+    )
 }
 
 fn fetch_diagnostic_screen_capture(
@@ -2897,14 +2887,13 @@ fn fetch_diagnostic_screen_capture(
     instance_id: &str,
     screen_source: ScreenSource,
 ) -> Result<DiagnosticScreenCapture> {
-    let payload = dispatch_payload(
+    dispatch_diagnostic_screen_capture(
         tool_api,
         ToolRequest::Screen {
             instance_id: instance_id.to_string(),
             screen_source,
         },
-    )?;
-    serde_json::from_value(payload).map_err(Into::into)
+    )
 }
 
 fn semantic_wait_matches(step: &CompatibilityStep, snapshot: &UiSnapshot) -> bool {
@@ -3732,14 +3721,13 @@ fn diagnostic_screen_contains(
     instance_id: &str,
     needle: &str,
 ) -> Result<bool> {
-    let payload = dispatch_payload(
+    let capture = dispatch_diagnostic_screen_capture(
         tool_api,
         ToolRequest::Screen {
             instance_id: instance_id.to_string(),
             screen_source: ScreenSource::Default,
         },
     )?;
-    let capture: DiagnosticScreenCapture = serde_json::from_value(payload)?;
     let screen = capture.diagnostic_authoritative_screen;
     Ok(screen.contains(needle))
 }
@@ -3837,20 +3825,67 @@ fn dispatch_payload_in_lane(
     tool_api: &mut ToolApi,
     lane: ExecutionLane,
     request: ToolRequest,
-) -> Result<serde_json::Value> {
+) -> Result<ToolPayload> {
     if matches!(lane, ExecutionLane::SharedSemantic) && shared_semantic_raw_ui_request(&request) {
         bail!(
             "shared semantic lane may not issue raw UI request {request:?}; move this flow to the semantic command plane or frontend-conformance coverage"
         );
     }
     match tool_api.handle_request(request) {
-        ToolResponse::Ok { payload } => payload.to_json_value().map_err(Into::into),
+        ToolResponse::Ok { payload } => Ok(payload),
         ToolResponse::Error { message } => Err(anyhow!(message)),
     }
 }
 
-fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serde_json::Value> {
-    dispatch_payload_in_lane(tool_api, ExecutionLane::FrontendConformance, request)
+fn dispatch_clipboard_payload_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    request: ToolRequest,
+) -> Result<ClipboardPayload> {
+    match dispatch_payload_in_lane(tool_api, lane, request)? {
+        ToolPayload::Clipboard(payload) => Ok(payload),
+        payload => bail!("expected clipboard payload, got {payload:?}"),
+    }
+}
+
+fn dispatch_clipboard_payload(
+    tool_api: &mut ToolApi,
+    request: ToolRequest,
+) -> Result<ClipboardPayload> {
+    dispatch_clipboard_payload_in_lane(tool_api, ExecutionLane::FrontendConformance, request)
+}
+
+fn dispatch_ui_snapshot_payload_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    request: ToolRequest,
+) -> Result<UiSnapshot> {
+    match dispatch_payload_in_lane(tool_api, lane, request)? {
+        ToolPayload::UiSnapshot(snapshot) => Ok(snapshot),
+        payload => bail!("expected ui snapshot payload, got {payload:?}"),
+    }
+}
+
+fn dispatch_diagnostic_screen_capture_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    request: ToolRequest,
+) -> Result<DiagnosticScreenCapture> {
+    match dispatch_payload_in_lane(tool_api, lane, request)? {
+        ToolPayload::DiagnosticScreenCapture(capture) => Ok(capture),
+        payload => bail!("expected diagnostic screen capture payload, got {payload:?}"),
+    }
+}
+
+fn dispatch_diagnostic_screen_capture(
+    tool_api: &mut ToolApi,
+    request: ToolRequest,
+) -> Result<DiagnosticScreenCapture> {
+    dispatch_diagnostic_screen_capture_in_lane(
+        tool_api,
+        ExecutionLane::FrontendConformance,
+        request,
+    )
 }
 
 fn dispatch_clipboard_text_in_lane(
