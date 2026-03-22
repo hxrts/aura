@@ -3,6 +3,7 @@
 //! Wraps `aura_social` types for integration with the agent runtime.
 //! Provides social topology, relay selection, and data availability.
 
+use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use async_trait::async_trait;
 use aura_core::effects::relay::{RelayCandidate, RelayContext, RelaySelector};
@@ -31,7 +32,7 @@ impl Default for SocialManagerConfig {
     }
 }
 
-impl SocialManagerConfig {
+impl_service_config_profiles!(SocialManagerConfig {
     /// Create config for testing
     pub fn for_testing() -> Self {
         Self {
@@ -39,7 +40,7 @@ impl SocialManagerConfig {
             auto_refresh_enabled: false,
         }
     }
-}
+});
 
 /// State of the social manager
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

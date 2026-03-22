@@ -10,6 +10,7 @@
 //! receipts based on the configured retention period.
 
 use super::state::with_state_mut_validated;
+use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::AgentConfig;
 use crate::runtime::TaskGroup;
@@ -44,7 +45,7 @@ impl Default for ReceiptManagerConfig {
     }
 }
 
-impl ReceiptManagerConfig {
+impl_service_config_profiles!(ReceiptManagerConfig {
     /// Create config for testing with shorter intervals
     pub fn for_testing() -> Self {
         Self {
@@ -61,7 +62,7 @@ impl ReceiptManagerConfig {
             ..Default::default()
         }
     }
-}
+});
 
 /// Unique identifier for a receipt
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
