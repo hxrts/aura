@@ -35,6 +35,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - When bridge flows can only observe a selected channel id without authoritative
   context, they must publish an explicit weak selection payload instead of a
   binding-shaped response.
+- Browser-owned semantic snapshot publication goes through one helper aligned
+  with `UiController::publish_ui_snapshot`; shell code must not repeat ad hoc
+  `semantic_model_snapshot()` plus publish pairs at bootstrap/finalization
+  callsites.
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
@@ -61,6 +65,9 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   sync are explicitly non-semantic upkeep. They may keep local runtime/browser
   state moving, but they must not become browser-owned semantic lifecycle
   authorities.
+- Browser-owned maintenance loops share one bounded helper for interval sleep,
+  cancellation, and visible pause reporting so the maintenance contract stays
+  uniform across browser-owned tasks.
 - The browser shell is an `Observed` plus bridge crate for shared semantic flows. It may submit commands and expose projections, but it must not own terminal semantic lifecycle truth for parity-critical operations.
 
 ### InvariantBrowserHarnessBridgePublishesSemanticState

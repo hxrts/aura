@@ -276,8 +276,10 @@ fn selected_authority_id(controller: &UiController) -> Option<String> {
         })
 }
 
-fn publish_current_ui_snapshot(controller: &UiController) {
-    controller.publish_ui_snapshot(controller.semantic_model_snapshot());
+pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {
+    let snapshot = controller.semantic_model_snapshot();
+    controller.publish_ui_snapshot(snapshot.clone());
+    snapshot
 }
 
 pub(crate) async fn schedule_browser_ui_mutation(
@@ -288,7 +290,7 @@ pub(crate) async fn schedule_browser_ui_mutation(
     let (tx, rx) = oneshot::channel::<()>();
     let action = Rc::new(StdRefCell::new(Some(Box::new(move || {
         action(controller.as_ref());
-        publish_current_ui_snapshot(controller.as_ref());
+        let _ = publish_semantic_controller_snapshot(controller.as_ref());
     }) as Box<dyn FnOnce()>)));
     let callback_action = action.clone();
     let callback = Closure::once(move || {
@@ -483,7 +485,7 @@ async fn submit_semantic_command(
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             controller.set_account_setup_state(true, "", None);
             controller.set_screen(ScreenId::Neighborhood);
-            publish_current_ui_snapshot(controller.as_ref());
+            let _ = publish_semantic_controller_snapshot(controller.as_ref());
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
@@ -1059,7 +1061,7 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
         };
         if let Ok(controller) = current_controller() {
             controller.set_screen(target);
-            publish_current_ui_snapshot(controller.as_ref());
+            let _ = publish_semantic_controller_snapshot(controller.as_ref());
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
@@ -1080,7 +1082,7 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
         if let Ok(controller) = current_controller() {
             controller.set_screen(ScreenId::Settings);
             controller.set_settings_section(browser_settings_section(target));
-            publish_current_ui_snapshot(controller.as_ref());
+            let _ = publish_semantic_controller_snapshot(controller.as_ref());
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
