@@ -285,6 +285,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - peer-channel setup must not report success after a channel becomes visible if
   the follow-on seeded sync step cannot run; established transport evidence and
   post-establishment sync remain one fail-closed completion contract
+- peer-channel bounded convergence after initiation must also fail closed on
+  sync or ceremony-processing errors; it may not suppress post-initiation
+  failures and still report channel setup success
 
 ## Canonical Host/VM Boundary
 

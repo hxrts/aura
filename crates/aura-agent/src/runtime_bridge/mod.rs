@@ -1839,8 +1839,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     let _ = rendezvous::trigger_discovery(self).await;
                 }
                 self.seed_sync_peers_from_rendezvous().await;
-                let _ = self.sync_seeded_peers().await;
-                let _ = self.process_ceremony_messages().await;
+                self.sync_seeded_peers().await?;
+                self.process_ceremony_messages().await?;
 
                 if round + 1 < rounds && backoff_ms > 0 {
                     self.sleep_ms(backoff_ms).await;
@@ -4118,6 +4118,7 @@ mod tests {
     use aura_core::effects::TransportEffects;
     use aura_core::hash::hash;
     use aura_journal::commitment_tree::storage::TREE_OPS_INDEX_KEY;
+    use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -4126,6 +4127,32 @@ mod tests {
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvRestore {
+        saved: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                saved: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
     }
 
     fn unique_test_path(label: &str) -> PathBuf {
@@ -4244,6 +4271,82 @@ mod tests {
             .ensure_peer_channel(context, peer)
             .await
             .expect_err("established peer channel should still fail when sync cannot run");
+        assert!(
+            error.to_string().contains("sync_service"),
+            "expected sync service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_peer_channel_requires_sync_after_post_initiation_establishment() {
+        let _guard = env_lock().lock().unwrap();
+        let _env_restore = EnvRestore::capture(&[
+            "AURA_HARNESS_MODE",
+            "AURA_HARNESS_SYNC_ROUNDS",
+            "AURA_HARNESS_SYNC_BACKOFF_MS",
+        ]);
+        std::env::set_var("AURA_HARNESS_MODE", "1");
+        std::env::set_var("AURA_HARNESS_SYNC_ROUNDS", "2");
+        std::env::set_var("AURA_HARNESS_SYNC_BACKOFF_MS", "50");
+
+        let authority = AuthorityId::new_from_entropy([78u8; 32]);
+        let peer = AuthorityId::new_from_entropy([79u8; 32]);
+        let context = ContextId::new_from_entropy([80u8; 32]);
+        let fallback_context = default_context_id_for_authority(peer);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([81u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_rendezvous()
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let manager = agent
+            .runtime()
+            .rendezvous()
+            .expect("runtime rendezvous service")
+            .clone();
+
+        let make_descriptor = move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
+            authority_id: peer,
+            device_id: None,
+            context_id: descriptor_context,
+            transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+                "127.0.0.1:6556",
+            )
+            .expect("tcp hint")],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: 0,
+            valid_until: u64::MAX,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+
+        manager
+            .cache_descriptor(make_descriptor(fallback_context))
+            .await
+            .expect("cache fallback descriptor for initiation");
+
+        let publish_manager = manager.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            publish_manager
+                .cache_descriptor(make_descriptor(context))
+                .await
+                .expect("cache target-context descriptor after initiation");
+        });
+
+        let bridge = AgentRuntimeBridge::new(agent);
+        let error = bridge
+            .ensure_peer_channel(context, peer)
+            .await
+            .expect_err("post-initiation establishment should still fail when sync cannot run");
         assert!(
             error.to_string().contains("sync_service"),
             "expected sync service error, got: {error}"
