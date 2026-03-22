@@ -22,16 +22,23 @@ use crate::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::runtime::{timeout_runtime_call, workflow_best_effort};
 use crate::workflows::signals::{emit_signal, read_signal};
-use crate::AppCore;
+use crate::{AppCore, ReactiveHandler};
 use async_lock::RwLock;
-use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::reactive::{ReactiveEffects, Signal};
 use aura_core::{AuraError, OwnedTaskSpawner};
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 const SYSTEM_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
+
+#[cfg(not(target_arch = "wasm32"))]
+type BoxRefreshFuture = Pin<Box<dyn Future<Output = Result<(), AuraError>> + Send + 'static>>;
+#[cfg(target_arch = "wasm32")]
+type BoxRefreshFuture = Pin<Box<dyn Future<Output = Result<(), AuraError>> + 'static>>;
+type RefreshHook = Arc<dyn Fn(Arc<RwLock<AppCore>>) -> BoxRefreshFuture + Send + Sync + 'static>;
 
 // ============================================================================
 // OTA Upgrade Parsing Types and Functions
@@ -308,6 +315,153 @@ async fn emit_chat_snapshot_signal(app_core: &Arc<RwLock<AppCore>>) -> Result<()
     emit_signal(app_core, &*CHAT_SIGNAL, chat, CHAT_SIGNAL_NAME).await
 }
 
+async fn publish_connection_status_bundle(
+    app_core: &Arc<RwLock<AppCore>>,
+    contacts_state: crate::views::ContactsState,
+    connection: ConnectionStatus,
+    network_status: Option<NetworkStatus>,
+    transport_peers: Option<usize>,
+) -> Result<(), AuraError> {
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(emit_signal(
+            app_core,
+            &*CONTACTS_SIGNAL,
+            contacts_state,
+            CONTACTS_SIGNAL_NAME,
+        ))
+        .await;
+    let _ = best_effort
+        .capture(emit_signal(
+            app_core,
+            &*CONNECTION_STATUS_SIGNAL,
+            connection,
+            CONNECTION_STATUS_SIGNAL_NAME,
+        ))
+        .await;
+    if let Some(network_status) = network_status {
+        let _ = best_effort
+            .capture(emit_signal(
+                app_core,
+                &*NETWORK_STATUS_SIGNAL,
+                network_status,
+                NETWORK_STATUS_SIGNAL_NAME,
+            ))
+            .await;
+    }
+    if let Some(transport_peers) = transport_peers {
+        let _ = best_effort
+            .capture(emit_signal(
+                app_core,
+                &*TRANSPORT_PEERS_SIGNAL,
+                transport_peers,
+                TRANSPORT_PEERS_SIGNAL_NAME,
+            ))
+            .await;
+    }
+    best_effort.finish()
+}
+
+fn log_refresh_hook_error(refresh_name: &'static str, error: &AuraError) {
+    #[cfg(feature = "instrumented")]
+    tracing::warn!(refresh_name, error = %error, "system refresh hook pass failed");
+
+    #[cfg(not(feature = "instrumented"))]
+    let _ = (refresh_name, error);
+}
+
+async fn refresh_chat_projection_and_readiness(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(emit_chat_snapshot_signal(app_core))
+        .await;
+    #[cfg(feature = "signals")]
+    {
+        let _ = best_effort
+            .capture(super::messaging::refresh_authoritative_channel_membership_readiness(app_core))
+            .await;
+        let _ = best_effort
+            .capture(
+                super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core),
+            )
+            .await;
+    }
+    best_effort.finish()
+}
+
+#[cfg(feature = "signals")]
+async fn refresh_authoritative_contact_link_readiness_hook(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    super::invitation::refresh_authoritative_contact_link_readiness(app_core).await
+}
+
+#[cfg(feature = "signals")]
+async fn refresh_authoritative_channel_and_recipient_readiness_hook(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(super::messaging::refresh_authoritative_channel_membership_readiness(app_core))
+        .await;
+    let _ = best_effort
+        .capture(super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core))
+        .await;
+    best_effort.finish()
+}
+
+fn spawn_coalesced_signal_refresh<T>(
+    reactive: ReactiveHandler,
+    signal: &'static Signal<T>,
+    spawner: OwnedTaskSpawner,
+    app_core: Arc<RwLock<AppCore>>,
+    refresh_name: &'static str,
+    refresh: RefreshHook,
+) where
+    T: Clone + Send + Sync + 'static,
+{
+    let refresh_in_flight = Arc::new(AtomicBool::new(false));
+    let refresh_pending = Arc::new(AtomicBool::new(false));
+    let refresh_spawner = spawner.clone();
+
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let Ok(mut stream) = reactive.subscribe(signal) else {
+            return;
+        };
+        loop {
+            let Ok(_) = stream.recv().await else {
+                break;
+            };
+
+            if refresh_in_flight.swap(true, Ordering::SeqCst) {
+                refresh_pending.store(true, Ordering::SeqCst);
+                continue;
+            }
+
+            let refresh_app_core = app_core.clone();
+            let refresh_in_flight = refresh_in_flight.clone();
+            let refresh_pending = refresh_pending.clone();
+            let refresh = refresh.clone();
+            spawn_runtime_refresh_task(&refresh_spawner, async move {
+                loop {
+                    if let Err(error) = refresh(refresh_app_core.clone()).await {
+                        log_refresh_hook_error(refresh_name, &error);
+                    }
+
+                    if refresh_pending.swap(false, Ordering::SeqCst) {
+                        continue;
+                    }
+
+                    refresh_in_flight.store(false, Ordering::SeqCst);
+                    break;
+                }
+            });
+        }
+    });
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
@@ -407,54 +561,24 @@ pub async fn refresh_connection_status_from_contacts(
             .as_ref()
             .map(|sync_status| compute_network_status(true, online_contacts, sync_status));
 
-        let _ = emit_signal(
+        publish_connection_status_bundle(
             app_core,
-            &*CONTACTS_SIGNAL,
             contacts_state,
-            CONTACTS_SIGNAL_NAME,
-        )
-        .await;
-        let _ = emit_signal(
-            app_core,
-            &*CONNECTION_STATUS_SIGNAL,
             connection,
-            CONNECTION_STATUS_SIGNAL_NAME,
+            network_status,
+            sync_status.as_ref().map(|status| status.connected_peers),
         )
-        .await;
-        if let Some(network_status) = network_status {
-            let _ = emit_signal(
-                app_core,
-                &*NETWORK_STATUS_SIGNAL,
-                network_status,
-                NETWORK_STATUS_SIGNAL_NAME,
-            )
-            .await;
-        }
-        if let Some(sync_status) = sync_status.as_ref() {
-            let _ = emit_signal(
-                app_core,
-                &*TRANSPORT_PEERS_SIGNAL,
-                sync_status.connected_peers,
-                TRANSPORT_PEERS_SIGNAL_NAME,
-            )
-            .await;
-        }
+        .await?;
     } else {
         // No runtime - emit disconnected status
-        let _ = emit_signal(
+        publish_connection_status_bundle(
             app_core,
-            &*NETWORK_STATUS_SIGNAL,
-            NetworkStatus::Disconnected,
-            NETWORK_STATUS_SIGNAL_NAME,
+            contacts_state,
+            ConnectionStatus::Offline,
+            Some(NetworkStatus::Disconnected),
+            Some(0usize),
         )
-        .await;
-        let _ = emit_signal(
-            app_core,
-            &*TRANSPORT_PEERS_SIGNAL,
-            0usize,
-            TRANSPORT_PEERS_SIGNAL_NAME,
-        )
-        .await;
+        .await?;
     }
 
     Ok(())
@@ -495,42 +619,16 @@ pub async fn install_contacts_refresh_hook(
         }
     }
 
-    let app_core = Arc::clone(app_core);
-    let refresh_in_flight = Arc::new(AtomicBool::new(false));
-    let refresh_pending = Arc::new(AtomicBool::new(false));
-    let refresh_spawner = spawner.clone();
-
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = reactive.subscribe(&*CONTACTS_SIGNAL) else {
-            return;
-        };
-        loop {
-            let Ok(_) = stream.recv().await else {
-                break;
-            };
-
-            if refresh_in_flight.swap(true, Ordering::SeqCst) {
-                refresh_pending.store(true, Ordering::SeqCst);
-                continue;
-            }
-
-            let refresh_app_core = app_core.clone();
-            let refresh_in_flight = refresh_in_flight.clone();
-            let refresh_pending = refresh_pending.clone();
-            spawn_runtime_refresh_task(&refresh_spawner, async move {
-                loop {
-                    let _ = refresh_connection_status_from_contacts(&refresh_app_core).await;
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
-        }
-    });
+    spawn_coalesced_signal_refresh(
+        reactive,
+        &*CONTACTS_SIGNAL,
+        spawner,
+        Arc::clone(app_core),
+        "contacts_refresh_hook",
+        Arc::new(|app_core| {
+            Box::pin(async move { refresh_connection_status_from_contacts(&app_core).await })
+        }),
+    );
 
     Ok(())
 }
@@ -568,52 +666,16 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
         }
     }
 
-    let app_core = Arc::clone(app_core);
-    let refresh_in_flight = Arc::new(AtomicBool::new(false));
-    let refresh_pending = Arc::new(AtomicBool::new(false));
-    let refresh_spawner = spawner.clone();
-
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = reactive.subscribe(&*SYNC_STATUS_SIGNAL) else {
-            return;
-        };
-        loop {
-            let Ok(_) = stream.recv().await else {
-                break;
-            };
-
-            if refresh_in_flight.swap(true, Ordering::SeqCst) {
-                refresh_pending.store(true, Ordering::SeqCst);
-                continue;
-            }
-
-            let refresh_app_core = app_core.clone();
-            let refresh_in_flight = refresh_in_flight.clone();
-            let refresh_pending = refresh_pending.clone();
-            spawn_runtime_refresh_task(&refresh_spawner, async move {
-                loop {
-                    let _ = emit_chat_snapshot_signal(&refresh_app_core).await;
-                    #[cfg(feature = "signals")]
-                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-                    #[cfg(feature = "signals")]
-                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
-        }
-    });
+    spawn_coalesced_signal_refresh(
+        reactive,
+        &*SYNC_STATUS_SIGNAL,
+        spawner,
+        Arc::clone(app_core),
+        "chat_refresh_hook",
+        Arc::new(|app_core| {
+            Box::pin(async move { refresh_chat_projection_and_readiness(&app_core).await })
+        }),
+    );
 
     Ok(())
 }
@@ -650,180 +712,54 @@ pub async fn install_authoritative_readiness_hook(
         }
     }
 
-    let contacts_app_core = Arc::clone(app_core);
-    let contacts_spawner = spawner.clone();
-    let contacts_reactive = reactive.clone();
-    let contacts_in_flight = Arc::new(AtomicBool::new(false));
-    let contacts_pending = Arc::new(AtomicBool::new(false));
-
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = contacts_reactive.subscribe(&*CONTACTS_SIGNAL) else {
-            return;
-        };
-        loop {
-            let Ok(_) = stream.recv().await else {
-                break;
-            };
-
-            if contacts_in_flight.swap(true, Ordering::SeqCst) {
-                contacts_pending.store(true, Ordering::SeqCst);
-                continue;
-            }
-
-            let refresh_app_core = contacts_app_core.clone();
-            let refresh_in_flight = contacts_in_flight.clone();
-            let refresh_pending = contacts_pending.clone();
-            spawn_runtime_refresh_task(&contacts_spawner, async move {
-                loop {
-                    let _ = super::invitation::refresh_authoritative_contact_link_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
-        }
-    });
-
-    let chat_app_core = Arc::clone(app_core);
-    let chat_spawner = spawner.clone();
-    let chat_in_flight = Arc::new(AtomicBool::new(false));
-    let chat_pending = Arc::new(AtomicBool::new(false));
-    let chat_reactive = reactive.clone();
-
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = chat_reactive.subscribe(&*CHAT_SIGNAL) else {
-            return;
-        };
-        loop {
-            let Ok(_) = stream.recv().await else {
-                break;
-            };
-
-            if chat_in_flight.swap(true, Ordering::SeqCst) {
-                chat_pending.store(true, Ordering::SeqCst);
-                continue;
-            }
-
-            let refresh_app_core = chat_app_core.clone();
-            let refresh_in_flight = chat_in_flight.clone();
-            let refresh_pending = chat_pending.clone();
-            spawn_runtime_refresh_task(&chat_spawner, async move {
-                loop {
-                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
-        }
-    });
-
-    let homes_app_core = Arc::clone(app_core);
-    let homes_spawner = spawner.clone();
-    let homes_in_flight = Arc::new(AtomicBool::new(false));
-    let homes_pending = Arc::new(AtomicBool::new(false));
-    let homes_reactive = reactive.clone();
-
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = homes_reactive.subscribe(&*HOMES_SIGNAL) else {
-            return;
-        };
-        loop {
-            let Ok(_) = stream.recv().await else {
-                break;
-            };
-
-            if homes_in_flight.swap(true, Ordering::SeqCst) {
-                homes_pending.store(true, Ordering::SeqCst);
-                continue;
-            }
-
-            let refresh_app_core = homes_app_core.clone();
-            let refresh_in_flight = homes_in_flight.clone();
-            let refresh_pending = homes_pending.clone();
-            spawn_runtime_refresh_task(&homes_spawner, async move {
-                loop {
-                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
-        }
-    });
-
-    let invitations_app_core = Arc::clone(app_core);
-    let invitations_spawner = spawner.clone();
-    let invitations_in_flight = Arc::new(AtomicBool::new(false));
-    let invitations_pending = Arc::new(AtomicBool::new(false));
-
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = reactive.subscribe(&*INVITATIONS_SIGNAL) else {
-            return;
-        };
-        loop {
-            let Ok(_) = stream.recv().await else {
-                break;
-            };
-
-            if invitations_in_flight.swap(true, Ordering::SeqCst) {
-                invitations_pending.store(true, Ordering::SeqCst);
-                continue;
-            }
-
-            let refresh_app_core = invitations_app_core.clone();
-            let refresh_in_flight = invitations_in_flight.clone();
-            let refresh_pending = invitations_pending.clone();
-            spawn_runtime_refresh_task(&invitations_spawner, async move {
-                loop {
-                    let _ = super::messaging::refresh_authoritative_channel_membership_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-                    let _ = super::messaging::refresh_authoritative_recipient_resolution_readiness(
-                        &refresh_app_core,
-                    )
-                    .await;
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
-        }
-    });
+    spawn_coalesced_signal_refresh(
+        reactive.clone(),
+        &*CONTACTS_SIGNAL,
+        spawner.clone(),
+        Arc::clone(app_core),
+        "authoritative_contact_link_readiness_hook",
+        Arc::new(|app_core| {
+            Box::pin(
+                async move { refresh_authoritative_contact_link_readiness_hook(&app_core).await },
+            )
+        }),
+    );
+    spawn_coalesced_signal_refresh(
+        reactive.clone(),
+        &*CHAT_SIGNAL,
+        spawner.clone(),
+        Arc::clone(app_core),
+        "authoritative_chat_readiness_hook",
+        Arc::new(|app_core| {
+            Box::pin(async move {
+                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+            })
+        }),
+    );
+    spawn_coalesced_signal_refresh(
+        reactive.clone(),
+        &*HOMES_SIGNAL,
+        spawner.clone(),
+        Arc::clone(app_core),
+        "authoritative_homes_readiness_hook",
+        Arc::new(|app_core| {
+            Box::pin(async move {
+                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+            })
+        }),
+    );
+    spawn_coalesced_signal_refresh(
+        reactive,
+        &*INVITATIONS_SIGNAL,
+        spawner,
+        Arc::clone(app_core),
+        "authoritative_invitations_readiness_hook",
+        Arc::new(|app_core| {
+            Box::pin(async move {
+                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+            })
+        }),
+    );
 
     Ok(())
 }
@@ -1026,5 +962,34 @@ mod tests {
         assert!(error
             .to_string()
             .contains("authoritative readiness hook requires a runtime task spawner"));
+    }
+
+    #[tokio::test]
+    async fn refresh_connection_status_from_contacts_fails_when_signals_are_unregistered() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = refresh_connection_status_from_contacts(&app_core)
+            .await
+            .expect_err("missing publication signals should fail explicitly");
+        assert!(
+            error.to_string().to_ascii_lowercase().contains("signal"),
+            "expected explicit signal failure, got: {error}"
+        );
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn refresh_chat_projection_and_readiness_fails_when_chat_signal_is_unregistered() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let error = refresh_chat_projection_and_readiness(&app_core)
+            .await
+            .expect_err("missing chat signal should fail explicitly");
+        assert!(
+            error.to_string().to_ascii_lowercase().contains("signal"),
+            "expected explicit signal failure, got: {error}"
+        );
     }
 }
