@@ -1,7 +1,9 @@
 //! Handler coverage validation — ensures every effect type has a testkit handler.
 
-#![allow(warnings)]
 #![allow(missing_docs)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::disallowed_methods)]
 //! Comprehensive Handler Coverage and Validation Tests
 
 /*!
@@ -17,16 +19,13 @@
 //! coverage for all defined effect traits and that the effect system
 //! functions correctly with comprehensive validation.
 
-#![allow(clippy::disallowed_methods)]
-
 use aura_composition::{
     CompositeHandler, Handler, HandlerContext, HandlerError, RegisterAllOptions, RegistrableHandler,
 };
 use aura_core::types::identifiers::{AuthorityId, DeviceId};
 use aura_protocol::handlers::AuraContext;
 use aura_protocol::handlers::{
-    core::erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry, EffectType,
-    ExecutionMode,
+    core::erased::AuraHandlerFactory, EffectRegistry, EffectType, ExecutionMode,
 };
 use std::collections::HashSet;
 
@@ -267,8 +266,8 @@ async fn test_handler_determinism() {
     // Create two handlers with the same device ID for deterministic testing
     let handler1 = AuraHandlerFactory::for_testing(device_id);
     let handler2 = AuraHandlerFactory::for_testing(device_id);
-    let ctx1 = AuraContext::for_testing(authority_id, device_id);
-    let ctx2 = AuraContext::for_testing(authority_id, device_id);
+    let _ctx1 = AuraContext::for_testing(authority_id, device_id);
+    let _ctx2 = AuraContext::for_testing(authority_id, device_id);
 
     // Both should be in testing mode (deterministic)
     assert!(handler1.execution_mode().is_deterministic());
