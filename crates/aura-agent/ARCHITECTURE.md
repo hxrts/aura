@@ -278,6 +278,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - LAN descriptor publication must fail explicitly when rendezvous publication
   is denied or returns no descriptor payload; runtime startup and maintenance
   may not install a synthetic runtime-local descriptor as a repair path
+- threshold key-rotation commit must load the runtime-owned `threshold_config`
+  written by the current rotation path; it may not resurrect legacy
+  `threshold_metadata` blobs as a compatibility upgrade inside the service
 - runtime-owned relational-fact pull must fail explicitly when rendezvous is
   unavailable or no websocket-capable descriptor exists for the target peer; it
   may not downgrade missing transport reachability into a zero-fact success
