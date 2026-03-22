@@ -348,10 +348,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
         // Workflows assume reactive signals are initialized.
-        {
-            let mut core = app_core.write().await;
-            core.init_signals().await.unwrap();
-        }
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let settings = get_settings(&app_core).await.unwrap();
         assert_eq!(settings.threshold_k, 0);

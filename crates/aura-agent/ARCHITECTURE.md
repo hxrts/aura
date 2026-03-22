@@ -381,6 +381,10 @@ Rules:
 - Public service APIs must take shared runtime-owned `TaskSupervisor` /
   `CeremonyRunner` roots from the runtime graph; they must not construct
   private owner trees internally.
+- Actor-owned runtime services that expose command ingress plus owned background
+  task groups must use one shared service-root abstraction for lifecycle state,
+  supervised tasks, and command handles rather than re-implementing that owner
+  shape per service.
 - Service health must degrade structurally when maintenance obligations fail;
   loop-local logging is not a substitute for degraded lifecycle state.
 - Inbound moderation and membership gating must fail closed when home state is

@@ -31,10 +31,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 
 use super::lan_discovery::{LanDiscoveryMetrics, LanDiscoveryService};
-use super::service_actor::{validate_actor_transition, ActorLifecyclePhase, ServiceActorHandle};
+use super::service_actor::{
+    validate_actor_transition, ActorLifecyclePhase, ActorOwnedServiceRoot, ServiceActorHandle,
+};
 
 /// Configuration for the rendezvous service manager
 #[derive(Debug, Clone)]
@@ -345,14 +347,8 @@ pub struct RendezvousManager {
 }
 
 struct RendezvousManagerShared {
-    /// Lifecycle state outside the actor for startup/shutdown/health fallback.
-    lifecycle_state: Mutex<RendezvousManagerState>,
-    /// Owned task group for service-local background work.
-    tasks: Mutex<Option<TaskGroup>>,
-    /// Typed command ingress for rendezvous-owned mutable state.
-    commands: Mutex<Option<ServiceActorHandle<RendezvousManager, RendezvousCommand>>>,
-    /// Serializes lifecycle transitions.
-    lifecycle: Mutex<()>,
+    /// Shared actor-owned runtime service root for rendezvous lifecycle.
+    owner: ActorOwnedServiceRoot<RendezvousManager, RendezvousCommand, RendezvousManagerState>,
 }
 
 impl RendezvousManager {
@@ -372,10 +368,7 @@ impl RendezvousManager {
             time,
             udp,
             shared: Arc::new(RendezvousManagerShared {
-                lifecycle_state: Mutex::new(RendezvousManagerState::Stopped),
-                tasks: Mutex::new(None),
-                commands: Mutex::new(None),
-                lifecycle: Mutex::new(()),
+                owner: ActorOwnedServiceRoot::new(RendezvousManagerState::Stopped),
             }),
         }
     }
@@ -403,7 +396,7 @@ impl RendezvousManager {
     pub async fn state(&self) -> RendezvousManagerState {
         match self.snapshot().await {
             Ok(snapshot) => snapshot.status,
-            Err(_) => *self.shared.lifecycle_state.lock().await,
+            Err(_) => self.shared.owner.state().await,
         }
     }
 
@@ -415,12 +408,11 @@ impl RendezvousManager {
     async fn command_handle(
         &self,
     ) -> Result<ServiceActorHandle<RendezvousManager, RendezvousCommand>, ServiceError> {
-        self.shared.commands.lock().await.clone().ok_or_else(|| {
-            ServiceError::unavailable(
-                self.name(),
-                "rendezvous command actor unavailable; service is not fully started",
-            )
-        })
+        self.shared.owner.command_handle(
+            self.name(),
+            "rendezvous command actor unavailable; service is not fully started",
+        )
+        .await
     }
 
     fn spawn_command_actor(
@@ -678,8 +670,8 @@ impl RendezvousManager {
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
-        let _lifecycle_guard = self.shared.lifecycle.lock().await;
-        let current_state = *self.shared.lifecycle_state.lock().await;
+        let _lifecycle_guard = self.shared.owner.lifecycle().lock().await;
+        let current_state = self.shared.owner.state().await;
         if current_state == RendezvousManagerState::Running {
             return Ok(());
         }
@@ -689,7 +681,7 @@ impl RendezvousManager {
             ActorLifecyclePhase::Starting,
         )?;
 
-        *self.shared.lifecycle_state.lock().await = RendezvousManagerState::Starting;
+        self.shared.owner.set_state(RendezvousManagerState::Starting).await;
 
         let rendezvous_config = RendezvousConfig {
             descriptor_validity_ms: self.config.descriptor_validity.as_millis() as u64,
@@ -702,8 +694,8 @@ impl RendezvousManager {
         let service_tasks = context.tasks().group(self.name());
         let command_handle =
             self.spawn_command_actor(&service_tasks, RendezvousState::new_running(service));
-        *self.shared.commands.lock().await = Some(command_handle);
-        *self.shared.lifecycle_state.lock().await = RendezvousManagerState::Running;
+        self.shared.owner.install_commands(command_handle).await;
+        self.shared.owner.set_state(RendezvousManagerState::Running).await;
 
         if self.config.auto_cleanup_enabled {
             self.start_cleanup_task(service_tasks.clone());
@@ -712,8 +704,8 @@ impl RendezvousManager {
         #[cfg(not(target_arch = "wasm32"))]
         if self.config.lan_discovery.enabled {
             if let Err(error) = self.start_lan_discovery(service_tasks.clone()).await {
-                self.shared.commands.lock().await.take();
-                *self.shared.lifecycle_state.lock().await = RendezvousManagerState::Failed;
+                self.shared.owner.take_commands().await;
+                self.shared.owner.set_state(RendezvousManagerState::Failed).await;
                 let _ = service_tasks
                     .shutdown_with_timeout(Self::SHUTDOWN_TIMEOUT)
                     .await;
@@ -721,7 +713,7 @@ impl RendezvousManager {
             }
         }
 
-        *self.shared.tasks.lock().await = Some(service_tasks);
+        self.shared.owner.install_tasks(service_tasks).await;
 
         tracing::info!(
             event = "runtime.service.rendezvous.started",
@@ -733,8 +725,8 @@ impl RendezvousManager {
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _lifecycle_guard = self.shared.lifecycle.lock().await;
-        let current_state = *self.shared.lifecycle_state.lock().await;
+        let _lifecycle_guard = self.shared.owner.lifecycle().lock().await;
+        let current_state = self.shared.owner.state().await;
         if current_state == RendezvousManagerState::Stopped {
             return Ok(());
         }
@@ -744,12 +736,12 @@ impl RendezvousManager {
             ActorLifecyclePhase::Stopping,
         )?;
 
-        *self.shared.lifecycle_state.lock().await = RendezvousManagerState::Stopping;
+        self.shared.owner.set_state(RendezvousManagerState::Stopping).await;
 
         self.stop_lan_discovery().await;
-        self.shared.commands.lock().await.take();
+        self.shared.owner.take_commands().await;
 
-        let task_shutdown_error = if let Some(tasks) = self.shared.tasks.lock().await.take() {
+        let task_shutdown_error = if let Some(tasks) = self.shared.owner.take_tasks().await {
             tasks
                 .shutdown_with_timeout(Self::SHUTDOWN_TIMEOUT)
                 .await
@@ -764,7 +756,7 @@ impl RendezvousManager {
             None
         };
 
-        *self.shared.lifecycle_state.lock().await = RendezvousManagerState::Stopped;
+        self.shared.owner.set_state(RendezvousManagerState::Stopped).await;
 
         tracing::info!(
             event = "runtime.service.rendezvous.stopped",
@@ -773,7 +765,7 @@ impl RendezvousManager {
         );
         match task_shutdown_error {
             Some(error) => {
-                *self.shared.lifecycle_state.lock().await = RendezvousManagerState::Failed;
+                self.shared.owner.set_state(RendezvousManagerState::Failed).await;
                 Err(error)
             }
             None => Ok(()),
@@ -802,7 +794,10 @@ impl RendezvousManager {
                         }
                     };
 
-                    if let Some(commands) = shared.commands.lock().await.clone() {
+                    if let Ok(commands) = shared.owner.command_handle(
+                        "rendezvous_service",
+                        "rendezvous command actor unavailable; service is not fully started",
+                    ).await {
                         let _ = commands
                             .request(|reply| RendezvousCommand::CleanupExpiredDescriptors {
                                 now_ms,
@@ -1372,11 +1367,11 @@ impl RendezvousManager {
         if self.config.lan_discovery.enabled && !self.is_lan_discovery_running().await {
             let tasks = self
                 .shared
-                .tasks
-                .lock()
+                .owner
+                .take_tasks()
                 .await
-                .clone()
                 .ok_or(RendezvousManagerError::MissingSupervisedTasks)?;
+            self.shared.owner.install_tasks(tasks.clone()).await;
             self.start_lan_discovery(tasks).await?;
         }
 
@@ -1501,7 +1496,7 @@ impl RendezvousManager {
                 snapshot.service.is_some(),
                 snapshot.lan_discovery.is_some(),
             ),
-            Err(_) => (*self.shared.lifecycle_state.lock().await, false, false),
+            Err(_) => (self.shared.owner.state().await, false, false),
         };
 
         match status {
@@ -1517,12 +1512,12 @@ impl RendezvousManager {
                         reason: "underlying service not available".to_string(),
                     };
                 }
-                if self.shared.tasks.lock().await.is_none() {
+                if !self.shared.owner.has_tasks().await {
                     return ServiceHealth::Unhealthy {
                         reason: "service task group missing".to_string(),
                     };
                 }
-                if self.shared.commands.lock().await.is_none() {
+                if !self.shared.owner.has_commands().await {
                     return ServiceHealth::Unhealthy {
                         reason: "service command actor missing".to_string(),
                     };
@@ -1849,10 +1844,9 @@ mod tests {
         RuntimeService::start(&manager, &context).await.unwrap();
         let task_group = manager
             .shared
-            .tasks
-            .lock()
+            .owner
+            .task_group()
             .await
-            .clone()
             .expect("running rendezvous service should own a task group");
 
         RuntimeService::stop(&manager).await.unwrap();

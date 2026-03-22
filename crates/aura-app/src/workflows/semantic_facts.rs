@@ -583,6 +583,7 @@ pub(in crate::workflows) async fn authoritative_semantic_facts_snapshot(
     Ok(app_core.read().await.authoritative_semantic_facts())
 }
 
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
 #[aura_macros::authoritative_source(kind = "signal")]
 pub(in crate::workflows) async fn prove_channel_membership_ready(
     app_core: &Arc<RwLock<AppCore>>,
@@ -1255,12 +1256,9 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        {
-            let mut core = app_core.write().await;
-            core.init_signals()
-                .await
-                .unwrap_or_else(|error| panic!("{error}"));
-        }
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
 
         let first = publish_authoritative_semantic_fact(
             &app_core,
@@ -1311,12 +1309,9 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        {
-            let mut core = app_core.write().await;
-            core.init_signals()
-                .await
-                .unwrap_or_else(|error| panic!("{error}"));
-        }
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
 
         publish_exact_operation_lifecycle(
             &app_core,
@@ -1350,12 +1345,9 @@ mod tests {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
         ));
-        {
-            let mut core = app_core.write().await;
-            core.init_signals()
-                .await
-                .unwrap_or_else(|error| panic!("{error}"));
-        }
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
 
         let mut invitation_context = issue_operation_context(
             &SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
