@@ -3995,10 +3995,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .nickname_suggestion
                 .filter(|value| !value.trim().is_empty()),
             Ok(None) => None,
-            Err(error) => {
-                tracing::warn!("Failed to load account config for authorities: {}", error);
-                None
-            }
+            Err(error) => return Err(error),
         };
 
         let mut authorities = vec![BridgeAuthorityInfo {
@@ -4022,8 +4019,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let Some(bytes) = (match effects.retrieve(&key).await {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    tracing::warn!("Failed to read authority record {}: {}", key, error);
-                    continue;
+                    return Err(IntentError::internal_error(format!(
+                        "Failed to read authority record {key}: {error}"
+                    )));
                 }
             }) else {
                 continue;
@@ -4032,8 +4030,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let record = match deserialize_authority(&bytes) {
                 Ok(record) => record,
                 Err(error) => {
-                    tracing::warn!("Failed to decode authority record {}: {}", key, error);
-                    continue;
+                    return Err(IntentError::internal_error(format!(
+                        "Failed to decode authority record {key}: {error}"
+                    )));
                 }
             };
 
@@ -4862,6 +4861,88 @@ mod tests {
         );
 
         let _ = fs::remove_file(storage_root);
+    }
+
+    #[tokio::test]
+    async fn try_list_authorities_requires_readable_account_config() {
+        let authority = AuthorityId::new_from_entropy([45u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([46u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let storage_root = unique_test_path("authority-list-account-config-read-error");
+        fs::create_dir_all(&storage_root).expect("create storage root");
+
+        let mut config = AgentConfig::default();
+        config.storage.base_path = storage_root.clone();
+
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        fs::create_dir_all(storage_root.join("account.json.dat"))
+            .expect("create unreadable account config directory");
+
+        let error = bridge
+            .try_list_authorities()
+            .await
+            .expect_err("account config read failure should be explicit");
+        let message = error.to_string();
+        assert!(
+            message.contains("Failed to read account.json"),
+            "authority-list failure should surface the account config read error: {message}"
+        );
+
+        let _ = fs::remove_dir_all(storage_root);
+    }
+
+    #[tokio::test]
+    async fn try_list_authorities_rejects_corrupt_authority_records() {
+        let authority = AuthorityId::new_from_entropy([47u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([48u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let storage_root = unique_test_path("authority-list-corrupt-record");
+        fs::create_dir_all(&storage_root).expect("create storage root");
+
+        let mut config = AgentConfig::default();
+        config.storage.base_path = storage_root.clone();
+
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+        let other_authority = AuthorityId::new_from_entropy([49u8; 32]);
+        let record_key = aura_app::ui::prelude::authority_storage_key(&other_authority);
+        fs::write(storage_root.join(format!("{record_key}.dat")), b"not-json")
+            .expect("write corrupt authority record");
+
+        let error = bridge
+            .try_list_authorities()
+            .await
+            .expect_err("corrupt authority record should be explicit");
+        let message = error.to_string();
+        assert!(
+            message.contains("Failed to read authority record")
+                || message.contains("Failed to decode authority record"),
+            "authority-list failure should reject corrupt records explicitly: {message}"
+        );
+
+        let _ = fs::remove_dir_all(storage_root);
     }
 
     #[tokio::test]
