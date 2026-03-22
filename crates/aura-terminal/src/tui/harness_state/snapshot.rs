@@ -1,15 +1,14 @@
 //! Snapshot export for harness observation.
 
 use super::commands::{
-    map_modal, map_screen, map_toast_kind, push_list, screen_item_id, selected_by_index,
-    TuiSemanticInputs,
+    map_modal, map_screen, map_toast_kind, push_list, selected_by_index, TuiSemanticInputs,
 };
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot, ScreenId, ToastId,
-    ToastSnapshot, UiReadiness, UiSnapshot,
+    screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
+    ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
 };
 use aura_app::ui_contract::{next_projection_revision, ProjectionRevision, QuiescenceSnapshot};
 use parking_lot::Mutex;
@@ -97,14 +96,14 @@ fn build_authoritative_ui_snapshot(
         .map(|candidate| {
             let id = map_screen(*candidate);
             ListItemSnapshot {
-                id: screen_item_id(id),
+                id: screen_item_id(id).to_string(),
                 selected: *candidate == state.screen(),
                 confirmation: ConfirmationState::Confirmed,
                 is_current: false,
             }
         })
         .collect::<Vec<_>>();
-    let selected_navigation_id = (!onboarding_active).then(|| screen_item_id(screen));
+    let selected_navigation_id = (!onboarding_active).then(|| screen_item_id(screen).to_string());
     push_list(
         &mut lists,
         &mut selections,

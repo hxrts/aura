@@ -11,8 +11,8 @@ use crate::tui::types::{
 };
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
-    ControlId, HarnessUiCommand, ListId, ListItemSnapshot, ListSnapshot, ModalId, ScreenId,
-    SelectionSnapshot, ToastKind,
+    classify_screen_item_id, classify_settings_section_item_id, ControlId, HarnessUiCommand,
+    ListId, ListItemSnapshot, ListSnapshot, ModalId, ScreenId, SelectionSnapshot, ToastKind,
 };
 use aura_app::ui::types::StateSnapshot;
 
@@ -47,13 +47,25 @@ fn screen_from_id(screen: ScreenId) -> Option<Screen> {
 }
 
 fn settings_section_from_item_id(item_id: &str) -> Option<SettingsSection> {
-    match item_id {
-        "profile" => Some(SettingsSection::Profile),
-        "guardian-threshold" => Some(SettingsSection::Threshold),
-        "request-recovery" => Some(SettingsSection::Recovery),
-        "devices" => Some(SettingsSection::Devices),
-        "authority" => Some(SettingsSection::Authority),
-        "observability" => Some(SettingsSection::Observability),
+    match classify_settings_section_item_id(item_id) {
+        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui_contract::SharedSettingsSectionId::Profile,
+        )) => Some(SettingsSection::Profile),
+        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui_contract::SharedSettingsSectionId::GuardianThreshold,
+        )) => Some(SettingsSection::Threshold),
+        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui_contract::SharedSettingsSectionId::RequestRecovery,
+        )) => Some(SettingsSection::Recovery),
+        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui_contract::SharedSettingsSectionId::Devices,
+        )) => Some(SettingsSection::Devices),
+        Some(aura_app::ui_contract::SettingsSectionSurfaceId::Shared(
+            aura_app::ui_contract::SharedSettingsSectionId::Authority,
+        )) => Some(SettingsSection::Authority),
+        Some(aura_app::ui_contract::SettingsSectionSurfaceId::FrontendSpecific(
+            aura_app::ui_contract::FrontendSpecificSettingsSectionId::Observability,
+        )) => Some(SettingsSection::Observability),
         _ => None,
     }
 }
@@ -80,18 +92,6 @@ pub(super) fn visible_home_ids(app_snapshot: &StateSnapshot) -> Vec<String> {
         .collect::<Vec<_>>();
     home_ids.extend(neighbor_home_ids);
     home_ids
-}
-
-pub(super) fn screen_item_id(screen: ScreenId) -> String {
-    match screen {
-        ScreenId::Onboarding => "onboarding",
-        ScreenId::Neighborhood => "neighborhood",
-        ScreenId::Chat => "chat",
-        ScreenId::Contacts => "contacts",
-        ScreenId::Notifications => "notifications",
-        ScreenId::Settings => "settings",
-    }
-    .to_string()
 }
 
 pub(super) fn map_modal(modal: &QueuedModal) -> Option<ModalId> {
@@ -247,14 +247,7 @@ pub(crate) fn apply_harness_command(
         },
         HarnessUiCommand::ActivateListItem { list_id, item_id } => match list_id {
             ListId::Navigation => {
-                let screen = match item_id.as_str() {
-                    "neighborhood" => Some(Screen::Neighborhood),
-                    "chat" => Some(Screen::Chat),
-                    "contacts" => Some(Screen::Contacts),
-                    "notifications" => Some(Screen::Notifications),
-                    "settings" => Some(Screen::Settings),
-                    _ => None,
-                };
+                let screen = classify_screen_item_id(&item_id).and_then(screen_from_id);
                 if let Some(screen) = screen {
                     state.router.go_to(screen);
                 }

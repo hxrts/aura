@@ -3,7 +3,10 @@
 //! Exposes the UiController to JavaScript via window.harness, enabling the test
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
-use aura_app::ui::contract::{ListId, ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
+use aura_app::ui::contract::{
+    classify_screen_item_id, classify_semantic_settings_section_item_id, ListId, ModalId,
+    RenderHeartbeat, ScreenId, UiSnapshot,
+};
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
 };
@@ -185,17 +188,6 @@ pub async fn stage_runtime_identity(serialized_identity: String) -> Result<(), J
     Ok(())
 }
 
-fn browser_screen(screen: ScreenId) -> Option<ScreenId> {
-    match screen {
-        ScreenId::Onboarding => Some(ScreenId::Onboarding),
-        ScreenId::Neighborhood => Some(ScreenId::Neighborhood),
-        ScreenId::Chat => Some(ScreenId::Chat),
-        ScreenId::Contacts => Some(ScreenId::Contacts),
-        ScreenId::Notifications => Some(ScreenId::Notifications),
-        ScreenId::Settings => Some(ScreenId::Settings),
-    }
-}
-
 fn browser_settings_section(section: SettingsSection) -> aura_ui::model::SettingsSection {
     match section {
         SettingsSection::Devices => aura_ui::model::SettingsSection::Devices,
@@ -322,10 +314,8 @@ async fn submit_semantic_command(
 ) -> Result<SemanticCommandResponse, JsValue> {
     match request.intent {
         IntentAction::OpenScreen(screen) => {
-            let target =
-                browser_screen(screen).ok_or_else(|| JsValue::from_str("unsupported screen"))?;
             schedule_browser_ui_mutation(controller.clone(), move |controller| {
-                controller.set_screen(target);
+                controller.set_screen(screen);
             })
             .await?;
             Ok(SemanticCommandResponse::accepted_without_value())
@@ -1064,14 +1054,8 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
         let Some(screen_name) = screen.as_string() else {
             return JsValue::FALSE;
         };
-        let target = match screen_name.as_str() {
-            "onboarding" => ScreenId::Onboarding,
-            "neighborhood" => ScreenId::Neighborhood,
-            "chat" => ScreenId::Chat,
-            "contacts" => ScreenId::Contacts,
-            "notifications" => ScreenId::Notifications,
-            "settings" => ScreenId::Settings,
-            _ => return JsValue::FALSE,
+        let Some(target) = classify_screen_item_id(&screen_name) else {
+            return JsValue::FALSE;
         };
         if let Ok(controller) = current_controller() {
             controller.set_screen(target);
@@ -1090,13 +1074,12 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
         let Some(section_name) = section.as_string() else {
             return JsValue::FALSE;
         };
-        let target = match section_name.as_str() {
-            "devices" => aura_ui::model::SettingsSection::Devices,
-            _ => return JsValue::FALSE,
+        let Some(target) = classify_semantic_settings_section_item_id(&section_name) else {
+            return JsValue::FALSE;
         };
         if let Ok(controller) = current_controller() {
             controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(target);
+            controller.set_settings_section(browser_settings_section(target));
             publish_current_ui_snapshot(controller.as_ref());
         }
         JsValue::TRUE

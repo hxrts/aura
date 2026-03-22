@@ -21,6 +21,7 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
     };
 
     let config_path = temp.path().join("run.toml");
+    let scenario_path = temp.path().join("scenario.toml");
     let artifacts_dir = temp.path().join("artifacts");
 
     let run_config = RunConfig {
@@ -96,12 +97,26 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
     if let Err(error) = fs::write(&config_path, config_body) {
         panic!("failed writing run config: {error}");
     }
+    if let Err(error) = fs::write(
+        &scenario_path,
+        r#"id = "phase5-shared-semantic-ssh"
+goal = "shared semantic ssh configurations fail in preflight"
+
+[[steps]]
+id = "launch"
+action = "launch_actors"
+"#,
+    ) {
+        panic!("failed writing scenario file: {error}");
+    }
 
     let binary = env!("CARGO_BIN_EXE_aura-harness");
     let output = match Command::new(binary)
         .arg("run")
         .arg("--config")
         .arg(config_path.as_os_str())
+        .arg("--scenario")
+        .arg(scenario_path.as_os_str())
         .arg("--artifacts-dir")
         .arg(artifacts_dir.as_os_str())
         .output()

@@ -14,7 +14,6 @@ use aura_app::scenario_contract::{
 };
 use serde::{Deserialize, Serialize};
 
-pub(crate) use crate::compatibility_step::{nav_control_id_for_screen, settings_section_item_id};
 pub use crate::compatibility_step::{CompatibilityAction, CompatibilityStep, ScreenSource};
 
 pub const RUN_SCHEMA_VERSION: u32 = 1;

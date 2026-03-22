@@ -25,8 +25,8 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Key Modules
 
-- `config.rs` — Schema parsing for run config, semantic scenarios, and compatibility-only executor fixtures.
-- `compatibility_step.rs` — Internal compatibility IR for frontend-conformance execution; limited to renderer-mechanic primitives.
+- `config.rs` — Schema parsing for run config, semantic scenarios, and the narrow remaining compatibility-only executor fixtures.
+- `compatibility_step.rs` — Internal compatibility IR retained only for synthetic phase-state-machine fixtures plus executor-local metadata/wait shaping; shared inventory scenarios are semantic-only.
 - `coordinator.rs` — Multi-instance orchestration and per-instance command routing.
 - `tool_api.rs` — Versioned request and typed response surface used by tests and automation.
 - `executor.rs` — Semantic and compatibility scenario execution with deterministic budgets.
@@ -46,6 +46,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Primary-lane policy: default lane targets real Aura runtime and real TUI/web surfaces.
 - Semantic-command-plane execution: shared scenarios submit typed semantic commands and await typed readiness/handle/quiescence/projection contracts.
 - Frontend-conformance isolation: renderer-specific mechanics are conformance-only and must not be the primary execution substrate for shared flows.
+- Shared scenario inventory discipline: `scenarios/harness_inventory.toml` is semantic-only for shared flows. The remaining compatibility-step IR is justified only by `tests/phases/phase3_state_machine.rs` plus executor-internal metadata/wait shaping, and must not expand back into authoritative scenario coverage.
 - Explicit lane capability contract: shared-semantic, raw-UI, and diagnostic-observation access are declared separately at preflight time; SSH is diagnostic-only until it implements the shared semantic contract.
 - The harness is an `Observed` plus orchestration crate. It may submit commands, wait on typed handles/readiness, and read projections, but it must not author semantic lifecycle truth.
 - Shared semantic execution must not keep a duplicate lifecycle graph, phase cache, or heuristic identifier repair path for accounts, contacts, channels, or messaging state.
@@ -167,6 +168,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
 - If a convenience helper still needs exported data after submission, the follow-on wait must bind to an authoritative runtime event or projection contract, not a modal/screen side effect.
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
+- Do not add new inventory-backed or shared-flow dependents to `compatibility_step.rs`. If you touch that IR, keep the retention surface limited to `tests/phases/phase3_state_machine.rs` and executor-internal metadata/wait shaping, or delete it instead.
 
 ## Testing
 
