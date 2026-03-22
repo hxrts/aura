@@ -35,145 +35,22 @@
 //! cargo test --package aura-terminal --test tui_callback_wiring -- --nocapture
 //! ```
 
-use async_lock::RwLock;
-use std::sync::Arc;
-
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::{
     Contact as ViewContact, Message, MessageDeliveryStatus, ReadReceiptPolicy, RecoveryProcess,
     RecoveryProcessStatus,
 };
-use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
-use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::types::MfaPolicy;
-use aura_testkit::MockRuntimeBridge;
 
-// ============================================================================
-// Test Helpers
-// ============================================================================
+#[path = "../support/mod.rs"]
+mod support;
 
-/// Create a test environment with IoContext and AppCore using MockRuntimeBridge
-async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+use support::{wait_for_chat, wait_for_contacts, wait_for_recovery, MockRuntimeTestEnv};
 
-    // Create MockRuntimeBridge for testing
-    let mock_bridge = Arc::new(MockRuntimeBridge::new());
-    let app_core =
-        AppCore::with_runtime(AppConfig::default(), mock_bridge).expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let initialized_app_core = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
-
-    let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core)
-        .with_existing_account(false)
-        .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{name}"))
-        .with_mode(TuiMode::Production)
-        .build()
-        .expect("IoContext builder should succeed for tests");
-
-    // Create account for testing
-    ctx.create_account(&format!("TestUser-{name}"))
-        .await
-        .expect("Failed to create account");
-
-    if let Some(runtime_authority) = {
-        let core = app_core.read().await;
-        core.runtime().map(|runtime| runtime.authority_id())
-    } {
-        app_core.write().await.set_authority(runtime_authority);
-    }
-
-    // Refresh settings from mock runtime to populate signal
-    aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
-        .await
-        .expect("Failed to refresh settings from runtime");
-
-    (Arc::new(ctx), app_core)
-}
-
-/// Cleanup test directory
-fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-}
-
-async fn wait_for_chat(
-    app_core: &Arc<RwLock<AppCore>>,
-    mut predicate: impl FnMut(&aura_app::views::ChatState) -> bool,
-) -> aura_app::views::ChatState {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
-    loop {
-        let chat = {
-            let core = app_core.read().await;
-            core.read(&*CHAT_SIGNAL).await.unwrap()
-        };
-
-        if predicate(&chat) {
-            return chat;
-        }
-
-        if tokio::time::Instant::now() >= deadline {
-            panic!("Timed out waiting for chat state to satisfy predicate");
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
-
-async fn wait_for_contacts(
-    app_core: &Arc<RwLock<AppCore>>,
-    mut predicate: impl FnMut(&aura_app::views::ContactsState) -> bool,
-) -> aura_app::views::ContactsState {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
-    loop {
-        let contacts = {
-            let core = app_core.read().await;
-            core.read(&*CONTACTS_SIGNAL).await.unwrap()
-        };
-
-        if predicate(&contacts) {
-            return contacts;
-        }
-
-        if tokio::time::Instant::now() >= deadline {
-            panic!("Timed out waiting for contacts state to satisfy predicate");
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
-
-async fn wait_for_recovery(
-    app_core: &Arc<RwLock<AppCore>>,
-    mut predicate: impl FnMut(&aura_app::views::RecoveryState) -> bool,
-) -> aura_app::views::RecoveryState {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
-    loop {
-        let recovery = {
-            let core = app_core.read().await;
-            core.read(&*RECOVERY_SIGNAL).await.unwrap()
-        };
-
-        if predicate(&recovery) {
-            return recovery;
-        }
-
-        if tokio::time::Instant::now() >= deadline {
-            panic!("Timed out waiting for recovery state to satisfy predicate");
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
+const TEST_PREFIX: &str = "aura-callback-test";
 
 // ============================================================================
 // SETTINGS FLOW TESTS - Validate actual state changes
@@ -189,7 +66,8 @@ async fn wait_for_recovery(
 async fn test_settings_nickname_actually_changes() {
     println!("\n=== Settings Nickname Actually Changes Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("nick-changes").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "nick-changes").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Get initial nickname (may be empty initially)
     println!("Phase 1: Get initial nickname");
@@ -233,7 +111,6 @@ async fn test_settings_nickname_actually_changes() {
     );
     println!("  Second update works: '{final_name}'");
 
-    cleanup_test_dir("nick-changes");
     println!("\n=== Settings Nickname Actually Changes Test PASSED ===\n");
 }
 
@@ -248,7 +125,8 @@ async fn test_settings_nickname_actually_changes() {
 async fn test_settings_mfa_policy_actually_changes() {
     println!("\n=== Settings MFA Policy Actually Changes Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("mfa-changes").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "mfa-changes").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Get initial MFA policy
     println!("Phase 1: Get initial MFA policy");
@@ -296,7 +174,6 @@ async fn test_settings_mfa_policy_actually_changes() {
     let final_policy = ctx.get_mfa_policy().await;
     println!("  Final policy: {final_policy:?}");
 
-    cleanup_test_dir("mfa-changes");
     println!("\n=== Settings MFA Policy Actually Changes Test PASSED ===\n");
 }
 
@@ -315,7 +192,8 @@ async fn test_settings_mfa_policy_actually_changes() {
 async fn test_chat_signal_message_accumulation() {
     println!("\n=== Chat Signal Message Accumulation Test ===\n");
 
-    let (_ctx, app_core) = setup_test_env("chat-accumulate").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "chat-accumulate").await;
+    let (_ctx, app_core) = env.clones();
 
     // Phase 1: Verify initial state is empty
     println!("Phase 1: Verify initial chat state is empty");
@@ -450,7 +328,6 @@ async fn test_chat_signal_message_accumulation() {
         println!("  Total messages after accumulation: {total_messages}");
     }
 
-    cleanup_test_dir("chat-accumulate");
     println!("\n=== Chat Signal Message Accumulation Test PASSED ===\n");
 }
 
@@ -469,7 +346,8 @@ async fn test_chat_signal_message_accumulation() {
 async fn test_contacts_signal_contact_tracking() {
     println!("\n=== Contacts Signal Contact Tracking Test ===\n");
 
-    let (_ctx, app_core) = setup_test_env("contacts-track").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "contacts-track").await;
+    let (_ctx, app_core) = env.clones();
 
     // Phase 1: Get initial contacts
     println!("Phase 1: Get initial contacts");
@@ -583,7 +461,6 @@ async fn test_contacts_signal_contact_tracking() {
         println!("  Updated nickname: {nickname}", nickname = alice.nickname);
     }
 
-    cleanup_test_dir("contacts-track");
     println!("\n=== Contacts Signal Contact Tracking Test PASSED ===\n");
 }
 
@@ -602,7 +479,8 @@ async fn test_contacts_signal_contact_tracking() {
 async fn test_recovery_signal_state_tracking() {
     println!("\n=== Recovery Signal State Tracking Test ===\n");
 
-    let (_ctx, app_core) = setup_test_env("recovery-track").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "recovery-track").await;
+    let (_ctx, app_core) = env.clones();
 
     // Phase 1: Verify no active recovery initially
     println!("Phase 1: Verify no active recovery initially");
@@ -760,7 +638,6 @@ async fn test_recovery_signal_state_tracking() {
         );
     }
 
-    cleanup_test_dir("recovery-track");
     println!("\n=== Recovery Signal State Tracking Test PASSED ===\n");
 }
 
@@ -778,7 +655,8 @@ async fn test_recovery_signal_state_tracking() {
 async fn test_neighborhood_position_tracking() {
     println!("\n=== Neighborhood Position Tracking Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("neighborhood-pos").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "neighborhood-pos").await;
+    let (ctx, app_core) = env.clones();
 
     // Phase 1: Navigate to a specific position
     println!("Phase 1: Navigate to downtown/library/Full");
@@ -837,7 +715,6 @@ async fn test_neighborhood_position_tracking() {
     );
     println!("  Navigate to home succeeded");
 
-    cleanup_test_dir("neighborhood-pos");
     println!("\n=== Neighborhood Position Tracking Test PASSED ===\n");
 }
 
@@ -856,7 +733,8 @@ async fn test_neighborhood_position_tracking() {
 async fn test_context_switching_works() {
     println!("\n=== Context Switching Works Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("context-switch").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "context-switch").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Verify initial context is None
     println!("Phase 1: Verify initial context is None");
@@ -912,7 +790,6 @@ async fn test_context_switching_works() {
     // Empty string may be stored as None or Some("")
     println!("  Cleared context: {cleared:?}");
 
-    cleanup_test_dir("context-switch");
     println!("\n=== Context Switching Works Test PASSED ===\n");
 }
 
@@ -930,7 +807,8 @@ async fn test_context_switching_works() {
 async fn test_dispatch_and_wait_completes() {
     println!("\n=== Dispatch And Wait Completes Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("dispatch-wait").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "dispatch-wait").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Update settings with dispatch_and_wait
     println!("Phase 1: Update nickname with dispatch_and_wait");
@@ -955,7 +833,6 @@ async fn test_dispatch_and_wait_completes() {
     );
     println!("  Name immediately available: '{name}'");
 
-    cleanup_test_dir("dispatch-wait");
     println!("\n=== Dispatch And Wait Completes Test PASSED ===\n");
 }
 
@@ -973,7 +850,8 @@ async fn test_dispatch_and_wait_completes() {
 async fn test_invalid_operations_return_errors() {
     println!("\n=== Invalid Operations Return Errors Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("invalid-ops").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "invalid-ops").await;
+    let (ctx, app_core) = env.clones();
 
     // Phase 1: Try to send message without authority (should fail or require auth)
     println!("Phase 1: Try SendMessage without full authority");
@@ -1015,7 +893,6 @@ async fn test_invalid_operations_return_errors() {
         println!("  Recovery signal readable: active={active_recovery}");
     }
 
-    cleanup_test_dir("invalid-ops");
     println!("\n=== Invalid Operations Return Errors Test PASSED ===\n");
 }
 
@@ -1028,7 +905,8 @@ async fn test_invalid_operations_return_errors() {
 async fn test_complete_settings_flow_persists() {
     println!("\n=== Complete Settings Flow Persists Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("settings-complete").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "settings-complete").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Update all settings
     println!("Phase 1: Update all settings");
@@ -1058,7 +936,6 @@ async fn test_complete_settings_flow_persists() {
     println!("  Nickname: {name}");
     println!("  MFA: {mfa:?}");
 
-    cleanup_test_dir("settings-complete");
     println!("\n=== Complete Settings Flow Persists Test PASSED ===\n");
 }
 
@@ -1067,7 +944,8 @@ async fn test_complete_settings_flow_persists() {
 async fn test_snapshot_methods_return_current_state() {
     println!("\n=== Snapshot Methods Return Current State Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("snapshot").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "snapshot").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Get snapshots
     println!("Phase 1: Get all snapshots");
@@ -1114,6 +992,5 @@ async fn test_snapshot_methods_return_current_state() {
     );
     println!("  Display name reflects update: '{updated_name}'");
 
-    cleanup_test_dir("snapshot");
     println!("\n=== Snapshot Methods Return Current State Test PASSED ===\n");
 }

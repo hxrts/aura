@@ -28,6 +28,7 @@ pub mod hints;
 pub mod signal_coordinator;
 pub mod simulator;
 
+pub use crate::demo_invitation::generate_demo_contact_invite_code;
 pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::spawn_amp_inbox_listener;

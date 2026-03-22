@@ -14,9 +14,7 @@
 //! The hints guide users through the demo flow by showing relevant information
 //! for each screen (e.g., Alice's invite code on the Invitations screen).
 
-use base64::Engine;
-
-use crate::ids;
+use crate::demo_invitation::generate_demo_contact_invite_code;
 
 /// Demo hints that can be displayed in the TUI
 #[derive(Debug, Clone, Default)]
@@ -42,8 +40,8 @@ impl DemoHints {
         // IMPORTANT: Must match AgentFactory::create_demo_agents() in demo/mod.rs
         // - Names are Title case ("Alice", "Carol")
         // - Alice uses `seed`, Carol uses `seed + 1`
-        let alice_code = generate_invite_code("Alice", seed);
-        let carol_code = generate_invite_code("Carol", seed + 1);
+        let alice_code = generate_demo_contact_invite_code("Alice", seed);
+        let carol_code = generate_demo_contact_invite_code("Carol", seed + 1);
 
         Self {
             alice_invite_code: alice_code,
@@ -80,45 +78,6 @@ impl DemoHints {
     pub fn demo_indicator(&self) -> String {
         "DEMO MODE - Alice and Carol are simulated contacts".to_string()
     }
-}
-
-/// Generate a deterministic invite code for a demo agent
-///
-/// The code format matches `ShareableInvitation` from aura-agent:
-/// `aura:v1:<base64-encoded-json>`
-///
-/// This generates CONTACT invitations (not Guardian).
-/// Guardian requests are sent in-band after someone is a contact.
-fn generate_invite_code(name: &str, seed: u64) -> String {
-    // Create deterministic authority ID matching the simulator's derivation
-    // IMPORTANT: Must use ids::authority_id() to match SimulatedAgent derivation in demo/mod.rs
-    let sender_id = ids::authority_id(&format!("demo:{}:{}:authority", seed, name));
-
-    // Create deterministic invitation ID from seed and name
-    let invitation_id = ids::uuid(&format!("demo:{}:{}:invitation", seed, name));
-
-    // Create ShareableInvitation-compatible structure
-    // Note: invitation_type uses the aura-invitation InvitationType::Contact format
-    // Guardian requests are sent in-band AFTER adding as contact
-    // IMPORTANT: Use sender_id.uuid() to get bare UUID for serde serialization
-    // (sender_id.to_string() includes "authority-" prefix which breaks deserialization)
-    let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Contact": {
-                "nickname": name
-            }
-        },
-        "expires_at": null,
-        "message": format!("Contact invitation from {} (demo)", name)
-    });
-
-    // Encode as base64 with aura:v1: prefix
-    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{}", b64)
 }
 
 #[cfg(test)]

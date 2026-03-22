@@ -10,6 +10,7 @@ use async_lock::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::unique_test_dir;
 use aura_agent::core::{AgentBuilder, AgentConfig, AuraAgent};
 use aura_agent::EffectContext;
 use aura_app::{AppConfig, AppCore};
@@ -18,8 +19,7 @@ use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::handlers::tui::{create_account, TuiMode};
 use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
-
-use super::unique_test_dir;
+use aura_testkit::MockRuntimeBridge;
 
 // ============================================================================
 // Simple Test Environment (no agent)
@@ -77,9 +77,87 @@ impl SimpleTestEnv {
     pub fn cleanup(&self) {
         let _ = std::fs::remove_dir_all(&self.test_dir);
     }
+
+    /// Clone the commonly used `(ctx, app_core)` pair.
+    pub fn clones(&self) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
+        (self.ctx.clone(), self.app_core.clone())
+    }
 }
 
 impl Drop for SimpleTestEnv {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
+/// Lightweight test environment backed by `MockRuntimeBridge`.
+///
+/// Use this for callback wiring and integration-effect tests that need a runtime
+/// without booting a full simulation agent.
+pub struct MockRuntimeTestEnv {
+    pub ctx: Arc<IoContext>,
+    pub app_core: Arc<RwLock<AppCore>>,
+    pub test_dir: PathBuf,
+}
+
+impl MockRuntimeTestEnv {
+    /// Create a new mock-runtime test environment under a deterministic prefix.
+    pub async fn new(prefix: &str, name: &str) -> Self {
+        let test_dir = std::env::temp_dir().join(format!("{prefix}-{name}"));
+        let _ = std::fs::remove_dir_all(&test_dir);
+        std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+
+        let mock_bridge = Arc::new(MockRuntimeBridge::new());
+        let app_core = AppCore::with_runtime(AppConfig::default(), mock_bridge)
+            .expect("Failed to create AppCore");
+        let app_core = Arc::new(RwLock::new(app_core));
+        let initialized_app_core = InitializedAppCore::new(app_core.clone())
+            .await
+            .expect("Failed to init signals");
+
+        let ctx = IoContext::builder()
+            .with_app_core(initialized_app_core)
+            .with_existing_account(false)
+            .with_base_path(test_dir.clone())
+            .with_device_id(format!("test-device-{name}"))
+            .with_mode(TuiMode::Production)
+            .build()
+            .expect("IoContext builder should succeed for tests");
+
+        ctx.create_account(&format!("TestUser-{name}"))
+            .await
+            .expect("Failed to create account");
+
+        if let Some(runtime_authority) = {
+            let core = app_core.read().await;
+            core.runtime().map(|runtime| runtime.authority_id())
+        } {
+            app_core.write().await.set_authority(runtime_authority);
+        }
+
+        aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
+            .await
+            .expect("Failed to refresh settings from runtime");
+
+        Self {
+            ctx: Arc::new(ctx),
+            app_core,
+            test_dir,
+        }
+    }
+
+    /// Clean up the test directory.
+    pub fn cleanup(&self) {
+        let _ = std::fs::remove_dir_all(&self.test_dir);
+    }
+
+    /// Clone the commonly used `(ctx, app_core)` pair.
+    pub fn clones(&self) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
+        (self.ctx.clone(), self.app_core.clone())
+    }
+}
+
+impl Drop for MockRuntimeTestEnv {
     fn drop(&mut self) {
         self.cleanup();
     }
@@ -222,5 +300,51 @@ pub async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>
 /// Clean up a test directory.
 pub fn cleanup_test_dir(name: &str) {
     let test_dir = std::env::temp_dir().join(format!("aura-test-{name}"));
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+/// Create a simple AppCore-only test environment under a deterministic prefix.
+pub async fn setup_test_env_with_prefix(
+    prefix: &str,
+    name: &str,
+) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
+    let test_dir = std::env::temp_dir().join(format!("{prefix}-{name}"));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+
+    let runtime = Arc::new(MockRuntimeBridge::new());
+    let app_core =
+        AppCore::with_runtime(AppConfig::default(), runtime).expect("Failed to create AppCore");
+    let app_core = Arc::new(RwLock::new(app_core));
+    let initialized_app_core = InitializedAppCore::new(app_core.clone())
+        .await
+        .expect("Failed to init signals");
+
+    let ctx = IoContext::builder()
+        .with_app_core(initialized_app_core)
+        .with_existing_account(false)
+        .with_base_path(test_dir)
+        .with_device_id(format!("test-device-{name}"))
+        .with_mode(TuiMode::Production)
+        .build()
+        .expect("IoContext builder should succeed for tests");
+
+    ctx.create_account(&format!("TestUser-{name}"))
+        .await
+        .expect("Failed to create account");
+
+    if let Some(runtime_authority) = {
+        let core = app_core.read().await;
+        core.runtime().map(|runtime| runtime.authority_id())
+    } {
+        app_core.write().await.set_authority(runtime_authority);
+    }
+
+    (Arc::new(ctx), app_core)
+}
+
+/// Clean up a deterministic test directory created with a custom prefix.
+pub fn cleanup_test_dir_with_prefix(prefix: &str, name: &str) {
+    let test_dir = std::env::temp_dir().join(format!("{prefix}-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
 }

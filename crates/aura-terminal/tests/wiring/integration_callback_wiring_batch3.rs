@@ -20,60 +20,21 @@
 //! cargo test --package aura-terminal --test tui_callback_wiring_batch3 -- --nocapture
 //! ```
 
-use async_lock::RwLock;
-use std::sync::Arc;
-
 use aura_app::signal_defs::{
     CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
     UNREAD_COUNT_SIGNAL,
 };
 use aura_app::views::RecoveryProcessStatus;
-use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
-use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 
-// ============================================================================
-// Test Helpers
-// ============================================================================
+#[path = "../support/mod.rs"]
+mod support;
 
-/// Create a test environment with IoContext and AppCore
-async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
+use support::{cleanup_test_dir_with_prefix, setup_test_env_with_prefix};
 
-    let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let app_core = InitializedAppCore::new(app_core)
-        .await
-        .expect("Failed to init signals");
-    let raw_app_core = app_core.raw().clone();
-
-    let ctx = IoContext::builder()
-        .with_app_core(app_core.clone())
-        .with_existing_account(false)
-        .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{name}"))
-        .with_mode(TuiMode::Production)
-        .build()
-        .expect("IoContext builder should succeed for tests");
-
-    // Create account for testing
-    ctx.create_account(&format!("TestUser-{name}"))
-        .await
-        .expect("Failed to create account");
-
-    (Arc::new(ctx), raw_app_core)
-}
-
-/// Cleanup test directory
-fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-}
+const TEST_PREFIX: &str = "aura-callback-test3";
 
 // ============================================================================
 // Home Operations Tests
@@ -84,7 +45,7 @@ fn cleanup_test_dir(name: &str) {
 async fn test_home_signals_initialization() {
     println!("\n=== Home Signals Initialization Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("home-init").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "home-init").await;
 
     // Phase 1: Read initialized home state
     println!("Phase 1: Check HOMES_SIGNAL initialization state");
@@ -168,7 +129,7 @@ async fn test_home_signals_initialization() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("home-init");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "home-init");
     println!("\n=== Home Signals Initialization Test PASSED ===\n");
 }
 
@@ -177,7 +138,7 @@ async fn test_home_signals_initialization() {
 async fn test_create_home_updates_signals() {
     println!("\n=== Create Home Updates Signals Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("create-home").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "create-home").await;
 
     // Phase 1: Get initial homes count
     println!("Phase 1: Get initial state");
@@ -237,7 +198,7 @@ async fn test_create_home_updates_signals() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("create-home");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "create-home");
     println!("\n=== Create Home Updates Signals Test PASSED ===\n");
 }
 
@@ -246,7 +207,7 @@ async fn test_create_home_updates_signals() {
 async fn test_home_member_operations() {
     println!("\n=== Home Member Operations Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("home-members").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "home-members").await;
 
     // Phase 1: Check initial home state for members
     println!("Phase 1: Check initial member state");
@@ -316,7 +277,7 @@ async fn test_home_member_operations() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("home-members");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "home-members");
     println!("\n=== Home Member Operations Test PASSED ===\n");
 }
 
@@ -329,7 +290,7 @@ async fn test_home_member_operations() {
 async fn test_recovery_flow_start() {
     println!("\n=== Recovery Flow Start Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("recovery-start").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "recovery-start").await;
 
     // Phase 1: Get initial recovery state
     println!("Phase 1: Get initial recovery state");
@@ -386,7 +347,7 @@ async fn test_recovery_flow_start() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("recovery-start");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "recovery-start");
     println!("\n=== Recovery Flow Start Test PASSED ===\n");
 }
 
@@ -395,7 +356,7 @@ async fn test_recovery_flow_start() {
 async fn test_recovery_cancel() {
     println!("\n=== Recovery Cancel Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("recovery-cancel").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "recovery-cancel").await;
 
     // Try to cancel recovery (even if not started)
     println!("Phase 1: Dispatch CancelRecovery");
@@ -441,7 +402,7 @@ async fn test_recovery_cancel() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("recovery-cancel");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "recovery-cancel");
     println!("\n=== Recovery Cancel Test PASSED ===\n");
 }
 
@@ -450,7 +411,7 @@ async fn test_recovery_cancel() {
 async fn test_guardian_approval_submission() {
     println!("\n=== Guardian Approval Submission Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("guardian-approval").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "guardian-approval").await;
 
     // Phase 1: Get initial recovery state
     println!("Phase 1: Get initial recovery state");
@@ -492,7 +453,7 @@ async fn test_guardian_approval_submission() {
     }
 
     drop(ctx);
-    cleanup_test_dir("guardian-approval");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "guardian-approval");
     println!("\n=== Guardian Approval Submission Test PASSED ===\n");
 }
 
@@ -505,7 +466,7 @@ async fn test_guardian_approval_submission() {
 async fn test_channel_lifecycle() {
     println!("\n=== Channel Lifecycle Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("channel-lifecycle").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "channel-lifecycle").await;
 
     // Phase 1: Get initial channel count
     println!("Phase 1: Get initial channel state");
@@ -621,7 +582,7 @@ async fn test_channel_lifecycle() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("channel-lifecycle");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "channel-lifecycle");
     println!("\n=== Channel Lifecycle Test PASSED ===\n");
 }
 
@@ -630,7 +591,7 @@ async fn test_channel_lifecycle() {
 async fn test_retry_message() {
     println!("\n=== Retry Message Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("retry-msg").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "retry-msg").await;
 
     // Phase 1: First, create a DM channel to have a valid channel
     println!("Phase 1: Setup - create DM channel");
@@ -673,7 +634,7 @@ async fn test_retry_message() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("retry-msg");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "retry-msg");
     println!("\n=== Retry Message Test PASSED ===\n");
 }
 
@@ -686,7 +647,7 @@ async fn test_retry_message() {
 async fn test_update_contact_nickname() {
     println!("\n=== Update Contact Nickname Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("contact-nickname").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "contact-nickname").await;
 
     // Phase 1: Add a contact first by importing an invitation
     println!("Phase 1: Setup - create invitation and import");
@@ -741,7 +702,7 @@ async fn test_update_contact_nickname() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("contact-nickname");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "contact-nickname");
     println!("\n=== Update Contact Nickname Test PASSED ===\n");
 }
 
@@ -750,7 +711,7 @@ async fn test_update_contact_nickname() {
 async fn test_toggle_contact_guardian() {
     println!("\n=== Toggle Contact Guardian Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("toggle-guardian").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "toggle-guardian").await;
 
     let contact_id = "guardian-candidate-123";
     // Generate a deterministic AuthorityId for the test
@@ -794,7 +755,7 @@ async fn test_toggle_contact_guardian() {
     }
 
     drop(ctx);
-    cleanup_test_dir("toggle-guardian");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "toggle-guardian");
     println!("\n=== Toggle Contact Guardian Test PASSED ===\n");
 }
 
@@ -803,7 +764,7 @@ async fn test_toggle_contact_guardian() {
 async fn test_invite_guardian() {
     println!("\n=== Invite Guardian Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("invite-guardian").await;
+    let (ctx, _app_core) = setup_test_env_with_prefix(TEST_PREFIX, "invite-guardian").await;
 
     // Phase 1: Invite guardian without contact_id (should trigger modal)
     println!("Phase 1: InviteGuardian without contact_id");
@@ -840,7 +801,7 @@ async fn test_invite_guardian() {
     }
 
     drop(ctx);
-    cleanup_test_dir("invite-guardian");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "invite-guardian");
     println!("\n=== Invite Guardian Test PASSED ===\n");
 }
 
@@ -853,7 +814,7 @@ async fn test_invite_guardian() {
 async fn test_auxiliary_signals() {
     println!("\n=== Auxiliary Signals Test ===\n");
 
-    let (_ctx, app_core) = setup_test_env("aux-signals").await;
+    let (_ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "aux-signals").await;
 
     let core = app_core.read().await;
 
@@ -895,7 +856,7 @@ async fn test_auxiliary_signals() {
     }
 
     drop(core);
-    cleanup_test_dir("aux-signals");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "aux-signals");
     println!("\n=== Auxiliary Signals Test PASSED ===\n");
 }
 
@@ -904,7 +865,7 @@ async fn test_auxiliary_signals() {
 async fn test_invitation_accept_decline() {
     println!("\n=== Invitation Accept/Decline Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("inv-accept").await;
+    let (ctx, _app_core) = setup_test_env_with_prefix(TEST_PREFIX, "inv-accept").await;
 
     // Phase 1: Create an invitation to have something to work with
     println!("Phase 1: Create invitation");
@@ -969,7 +930,7 @@ async fn test_invitation_accept_decline() {
     }
 
     drop(ctx);
-    cleanup_test_dir("inv-accept");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "inv-accept");
     println!("\n=== Invitation Accept/Decline Test PASSED ===\n");
 }
 
@@ -982,7 +943,7 @@ async fn test_invitation_accept_decline() {
 async fn test_moderation_commands() {
     println!("\n=== Moderation Commands Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("moderation").await;
+    let (ctx, _app_core) = setup_test_env_with_prefix(TEST_PREFIX, "moderation").await;
 
     let target_user = "troublemaker-123";
     let channel = "general";
@@ -1096,7 +1057,7 @@ async fn test_moderation_commands() {
     }
 
     drop(ctx);
-    cleanup_test_dir("moderation");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "moderation");
     println!("\n=== Moderation Commands Test PASSED ===\n");
 }
 
@@ -1105,7 +1066,7 @@ async fn test_moderation_commands() {
 async fn test_pin_unpin_message() {
     println!("\n=== Pin/Unpin Message Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("pin-msg").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "pin-msg").await;
 
     // Phase 1: Get initial home state for pinned messages
     println!("Phase 1: Check initial pinned messages");
@@ -1147,7 +1108,7 @@ async fn test_pin_unpin_message() {
     }
 
     drop(ctx);
-    cleanup_test_dir("pin-msg");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "pin-msg");
     println!("\n=== Pin/Unpin Message Test PASSED ===\n");
 }
 
@@ -1160,7 +1121,7 @@ async fn test_pin_unpin_message() {
 async fn test_device_management() {
     println!("\n=== Device Management Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("device-mgmt").await;
+    let (ctx, _app_core) = setup_test_env_with_prefix(TEST_PREFIX, "device-mgmt").await;
 
     // Phase 1: Add a device
     println!("Phase 1: Add device");
@@ -1206,7 +1167,7 @@ async fn test_device_management() {
     }
 
     drop(ctx);
-    cleanup_test_dir("device-mgmt");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "device-mgmt");
     println!("\n=== Device Management Test PASSED ===\n");
 }
 
@@ -1219,7 +1180,7 @@ async fn test_device_management() {
 async fn test_lan_discovery() {
     println!("\n=== LAN Discovery Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("lan-discovery").await;
+    let (ctx, _app_core) = setup_test_env_with_prefix(TEST_PREFIX, "lan-discovery").await;
 
     // Phase 1: List LAN peers
     println!("Phase 1: List LAN peers");
@@ -1245,7 +1206,7 @@ async fn test_lan_discovery() {
     }
 
     drop(ctx);
-    cleanup_test_dir("lan-discovery");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "lan-discovery");
     println!("\n=== LAN Discovery Test PASSED ===\n");
 }
 
@@ -1258,7 +1219,7 @@ async fn test_lan_discovery() {
 async fn test_send_action_emote() {
     println!("\n=== Send Action (Emote) Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("send-action").await;
+    let (ctx, _app_core) = setup_test_env_with_prefix(TEST_PREFIX, "send-action").await;
 
     // Send an action/emote
     println!("Phase 1: Send action");
@@ -1275,7 +1236,7 @@ async fn test_send_action_emote() {
     }
 
     drop(ctx);
-    cleanup_test_dir("send-action");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "send-action");
     println!("\n=== Send Action (Emote) Test PASSED ===\n");
 }
 
@@ -1288,7 +1249,7 @@ async fn test_send_action_emote() {
 async fn test_complete_contact_to_guardian_flow() {
     println!("\n=== Complete Contact to Guardian Flow Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("contact-guardian-flow").await;
+    let (ctx, app_core) = setup_test_env_with_prefix(TEST_PREFIX, "contact-guardian-flow").await;
 
     // Phase 1: Create an invitation
     println!("Phase 1: Create invitation for new contact");
@@ -1378,6 +1339,6 @@ async fn test_complete_contact_to_guardian_flow() {
 
     drop(core);
     drop(ctx);
-    cleanup_test_dir("contact-guardian-flow");
+    cleanup_test_dir_with_prefix(TEST_PREFIX, "contact-guardian-flow");
     println!("\n=== Complete Contact to Guardian Flow Test PASSED ===\n");
 }
