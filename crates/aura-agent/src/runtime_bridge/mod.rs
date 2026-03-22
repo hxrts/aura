@@ -1798,7 +1798,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         for channel_context in contexts {
             if effects.is_channel_established(channel_context, peer).await {
                 self.seed_sync_peers_from_rendezvous().await;
-                let _ = self.sync_seeded_peers().await;
+                self.sync_seeded_peers().await?;
                 return Ok(());
             }
 
@@ -1831,7 +1831,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             for round in 0..rounds {
                 if effects.is_channel_established(channel_context, peer).await {
                     self.seed_sync_peers_from_rendezvous().await;
-                    let _ = self.sync_seeded_peers().await;
+                    self.sync_seeded_peers().await?;
                     return Ok(());
                 }
 
@@ -4195,6 +4195,58 @@ mod tests {
         assert!(
             !message.contains("is not reachable"),
             "delivery error should not synthesize reachability text from transport strings: {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_peer_channel_requires_sync_after_established_channel() {
+        let authority = AuthorityId::new_from_entropy([74u8; 32]);
+        let peer = AuthorityId::new_from_entropy([75u8; 32]);
+        let context = ContextId::new_from_entropy([76u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([77u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_rendezvous()
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let manager = agent
+            .runtime()
+            .rendezvous()
+            .expect("runtime rendezvous service");
+        manager
+            .cache_descriptor(aura_rendezvous::facts::RendezvousDescriptor {
+                authority_id: peer,
+                device_id: None,
+                context_id: context,
+                transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+                    "127.0.0.1:6555",
+                )
+                .expect("tcp hint")],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 0,
+                valid_until: u64::MAX,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .expect("cache current-context descriptor");
+
+        let bridge = AgentRuntimeBridge::new(agent);
+        let error = bridge
+            .ensure_peer_channel(context, peer)
+            .await
+            .expect_err("established peer channel should still fail when sync cannot run");
+        assert!(
+            error.to_string().contains("sync_service"),
+            "expected sync service error, got: {error}"
         );
     }
 

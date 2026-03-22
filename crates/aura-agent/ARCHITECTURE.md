@@ -282,6 +282,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - runtime ceremony transport delivery failures must use the transport/network
   error class directly; they may not string-match transport error text to
   synthesize semantic reachability narratives
+- peer-channel setup must not report success after a channel becomes visible if
+  the follow-on seeded sync step cannot run; established transport evidence and
+  post-establishment sync remain one fail-closed completion contract
 
 ## Canonical Host/VM Boundary
 
