@@ -264,6 +264,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - invitation-backed runtime bridge queries must also fail explicitly when the
   runtime is no longer accepting public operations; they may not collapse
   `invitation_service` unavailability into empty pending/invited sets
+- any other runtime bridge read that depends on invitation-owned derived state,
+  including participant augmentation or settings contact counts, must follow
+  the same rule instead of downgrading service loss into partial success
 
 ## Canonical Host/VM Boundary
 

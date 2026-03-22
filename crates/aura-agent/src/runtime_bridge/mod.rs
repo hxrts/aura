@@ -816,23 +816,25 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .into_iter()
             .collect();
 
-        if let Ok(invitation_service) = self.agent.invitations() {
-            let local_authority = self.agent.authority_id();
-            for invitation in invitation_service.list_with_storage().await {
-                if invitation.status != aura_invitation::InvitationStatus::Accepted {
-                    continue;
-                }
-                if invitation.sender_id != local_authority {
-                    continue;
-                }
-                let aura_invitation::InvitationType::Channel { home_id, .. } =
-                    invitation.invitation_type
-                else {
-                    continue;
-                };
-                if invitation.context_id == context && home_id == channel {
-                    participants.insert(invitation.receiver_id);
-                }
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
+        let local_authority = self.agent.authority_id();
+        for invitation in invitation_service.list_with_storage().await {
+            if invitation.status != aura_invitation::InvitationStatus::Accepted {
+                continue;
+            }
+            if invitation.sender_id != local_authority {
+                continue;
+            }
+            let aura_invitation::InvitationType::Channel { home_id, .. } =
+                invitation.invitation_type
+            else {
+                continue;
+            };
+            if invitation.context_id == context && home_id == channel {
+                participants.insert(invitation.receiver_id);
             }
         }
 
@@ -3877,21 +3879,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         // Get contact count from invitations (accepted contact invitations)
-        let contact_count = if let Ok(service) = self.agent.invitations() {
-            service
-                .list_pending()
-                .await
-                .iter()
-                .filter(|inv| {
-                    matches!(
-                        inv.invitation_type,
-                        crate::handlers::invitation::InvitationType::Contact { .. }
-                    ) && inv.status == crate::handlers::invitation::InvitationStatus::Accepted
-                })
-                .count()
-        } else {
-            0
-        };
+        let contact_count = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?
+            .list_pending()
+            .await
+            .iter()
+            .filter(|inv| {
+                matches!(
+                    inv.invitation_type,
+                    crate::handlers::invitation::InvitationType::Contact { .. }
+                ) && inv.status == crate::handlers::invitation::InvitationStatus::Accepted
+            })
+            .count();
 
         // Settings service not yet implemented - return available data
         // When implemented, would provide: nickname_suggestion, mfa_policy from profile facts
@@ -4953,6 +4954,83 @@ mod tests {
             .try_get_invited_peer_ids()
             .await
             .expect_err("stopping runtime should reject invited-peer queries");
+        assert!(
+            error.to_string().contains("invitation_service"),
+            "expected invitation service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn amp_list_channel_participants_requires_accepting_invitation_service() {
+        let authority = AuthorityId::new_from_entropy([40u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([41u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent.clone());
+        let context = ContextId::new_from_entropy([42u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"participants-require-invitation-service"));
+
+        bridge
+            .amp_create_channel(ChannelCreateParams {
+                context,
+                channel: Some(channel),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .expect("create channel");
+        bridge
+            .amp_join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("join channel");
+
+        agent.runtime().activity_gate().begin_shutdown();
+
+        let error = bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect_err("stopping runtime should reject participant queries");
+        assert!(
+            error.to_string().contains("invitation_service"),
+            "expected invitation service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn try_get_settings_requires_accepting_invitation_service() {
+        let authority = AuthorityId::new_from_entropy([43u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([44u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        agent.runtime().activity_gate().begin_shutdown();
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .try_get_settings()
+            .await
+            .expect_err("stopping runtime should reject settings queries");
         assert!(
             error.to_string().contains("invitation_service"),
             "expected invitation service error, got: {error}"
