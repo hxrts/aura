@@ -145,6 +145,10 @@ Converted semantic-owner paths also follow two stricter publication rules:
   not synthesize a canonical `ChannelId` or `CommandScope::Channel` before the
   runtime materializes that channel; until then, completion is `Accepted`, not
   replicated by fabricated identity
+- strong-command execution owns the authoritative terminal-facing slash-command
+  failure classification; Layer 7 renderers may format the shared
+  status/reason metadata, but they may not derive semantic reason codes from
+  local `AuraError` string parsing
 
 ## Testing
 
