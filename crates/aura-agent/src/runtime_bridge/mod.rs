@@ -343,32 +343,15 @@ impl AgentRuntimeBridge {
     async fn pull_remote_relational_facts(&self, peer: AuthorityId) -> Result<usize, IntentError> {
         tracing::info!(peer = %peer, "pull_remote_relational_facts start");
         let Some(rendezvous) = self.agent.runtime().rendezvous() else {
-            tracing::info!(peer = %peer, "pull_remote_relational_facts skipped: no rendezvous");
-            return Ok(0);
+            return Err(service_unavailable("rendezvous_service"));
         };
 
         let context = default_context_id_for_authority(peer);
-        let mut descriptor = rendezvous.get_descriptor(context, peer).await;
-        if descriptor.as_ref().map_or(true, |descriptor| {
-            !descriptor
-                .transport_hints
-                .iter()
-                .any(|hint| matches!(hint, aura_rendezvous::TransportHint::WebSocketDirect { .. }))
-        }) {
-            let lan_descriptor = rendezvous
-                .list_lan_discovered_peers()
-                .await
-                .into_iter()
-                .find(|candidate| candidate.authority_id == peer)
-                .map(|candidate| candidate.descriptor);
-            if lan_descriptor.is_some() {
-                descriptor = lan_descriptor;
-            }
-        }
-        let Some(descriptor) = descriptor else {
-            tracing::info!(peer = %peer, context = %context, "pull_remote_relational_facts skipped: no descriptor");
-            return Ok(0);
-        };
+        let descriptor = rendezvous.get_descriptor(context, peer).await.ok_or_else(|| {
+            IntentError::validation_failed(format!(
+                "No current-context rendezvous descriptor available for relational fact pull to {peer}"
+            ))
+        })?;
 
         let addr: Option<String> = descriptor
             .transport_hints
@@ -380,8 +363,9 @@ impl AgentRuntimeBridge {
                 _ => None,
             });
         let Some(addr) = addr else {
-            tracing::info!(peer = %peer, "pull_remote_relational_facts skipped: no websocket direct hint");
-            return Ok(0);
+            return Err(IntentError::validation_failed(format!(
+                "No websocket direct transport hint available for relational fact pull to {peer}"
+            )));
         };
 
         let url = if addr.starts_with("ws://") || addr.starts_with("wss://") {
@@ -5153,5 +5137,86 @@ mod tests {
         crate::runtime::services::RuntimeService::stop(&manager)
             .await
             .expect("stop rendezvous manager");
+    }
+
+    #[tokio::test]
+    async fn pull_remote_relational_facts_requires_rendezvous_service() {
+        let authority = AuthorityId::new_from_entropy([53u8; 32]);
+        let peer = AuthorityId::new_from_entropy([54u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([55u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent);
+
+        let error = bridge
+            .pull_remote_relational_facts(peer)
+            .await
+            .expect_err("missing rendezvous service should be explicit");
+        assert!(
+            error.to_string().contains("rendezvous_service"),
+            "expected rendezvous service error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_remote_relational_facts_requires_websocket_direct_hint() {
+        let authority = AuthorityId::new_from_entropy([56u8; 32]);
+        let peer = AuthorityId::new_from_entropy([57u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([58u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_rendezvous()
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let manager = agent
+            .runtime()
+            .rendezvous()
+            .expect("runtime rendezvous service");
+        manager
+            .cache_descriptor(aura_rendezvous::facts::RendezvousDescriptor {
+                authority_id: peer,
+                device_id: None,
+                context_id: default_context_id_for_authority(peer),
+                transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+                    "127.0.0.1:6554",
+                )
+                .expect("tcp hint")],
+                handshake_psk_commitment: [0u8; 32],
+                public_key: [0u8; 32],
+                valid_from: 0,
+                valid_until: u64::MAX,
+                nonce: [0u8; 32],
+                nickname_suggestion: None,
+            })
+            .await
+            .expect("cache non-websocket descriptor");
+
+        let bridge = AgentRuntimeBridge::new(agent);
+        let error = bridge
+            .pull_remote_relational_facts(peer)
+            .await
+            .expect_err("missing websocket hint should be explicit");
+        assert!(
+            error
+                .to_string()
+                .contains("No websocket direct transport hint available"),
+            "expected websocket-hint error, got: {error}"
+        );
     }
 }
