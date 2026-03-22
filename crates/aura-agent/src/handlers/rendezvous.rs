@@ -3,7 +3,10 @@
 //! Handlers for rendezvous operations including descriptor publication,
 //! channel establishment, and relay coordination.
 
-use super::shared::{context_commitment_from_journal, HandlerContext, HandlerUtilities};
+use super::shared::{
+    build_transport_metadata, context_commitment_from_journal, resolve_charge_peer,
+    HandlerContext, HandlerUtilities,
+};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::{RendezvousCacheManager, RendezvousManager};
@@ -31,7 +34,6 @@ use aura_rendezvous::{
     RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Result of a rendezvous operation
@@ -697,7 +699,14 @@ pub async fn execute_guard_outcome(
         )));
     }
 
-    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id(), |command| {
+        match command {
+            EffectCommand::SendHandshake { peer, .. }
+            | EffectCommand::SendHandshakeResponse { peer, .. }
+            | EffectCommand::RecordReceipt { peer, .. } => Some(*peer),
+            _ => None,
+        }
+    });
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in outcome.effects {
@@ -713,18 +722,6 @@ pub async fn execute_guard_outcome(
     }
 
     Ok(())
-}
-
-fn resolve_charge_peer(commands: &[EffectCommand], fallback: AuthorityId) -> AuthorityId {
-    commands
-        .iter()
-        .find_map(|command| match command {
-            EffectCommand::SendHandshake { peer, .. }
-            | EffectCommand::SendHandshakeResponse { peer, .. }
-            | EffectCommand::RecordReceipt { peer, .. } => Some(*peer),
-            _ => None,
-        })
-        .unwrap_or(fallback)
 }
 
 async fn execute_effect_command(
@@ -864,15 +861,12 @@ async fn execute_send_handshake(
         ))
     })?;
 
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "content-type".to_string(),
-        "application/aura-rendezvous-handshake-init".to_string(),
-    );
-    metadata.insert("protocol-version".to_string(), "1".to_string());
-    metadata.insert(
-        "rendezvous-epoch".to_string(),
-        message.handshake.epoch.to_string(),
+    let metadata = build_transport_metadata(
+        "application/aura-rendezvous-handshake-init",
+        [
+            ("protocol-version", "1".to_string()),
+            ("rendezvous-epoch", message.handshake.epoch.to_string()),
+        ],
     );
 
     let envelope = TransportEnvelope {
@@ -909,19 +903,13 @@ async fn execute_send_handshake_response(
         ))
     })?;
 
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "content-type".to_string(),
-        "application/aura-rendezvous-handshake-complete".to_string(),
-    );
-    metadata.insert("protocol-version".to_string(), "1".to_string());
-    metadata.insert(
-        "rendezvous-epoch".to_string(),
-        message.handshake.epoch.to_string(),
-    );
-    metadata.insert(
-        "rendezvous-channel-id".to_string(),
-        hex::encode(message.channel_id),
+    let metadata = build_transport_metadata(
+        "application/aura-rendezvous-handshake-complete",
+        [
+            ("protocol-version", "1".to_string()),
+            ("rendezvous-epoch", message.handshake.epoch.to_string()),
+            ("rendezvous-channel-id", hex::encode(message.channel_id)),
+        ],
     );
 
     let envelope = TransportEnvelope {

@@ -1,4 +1,5 @@
 use super::*;
+use aura_journal::fact::RelationalFact;
 
 const INVITATION_CHANNEL_JOIN_TIMEOUT_MS: u64 = 2_000;
 const CHANNEL_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
@@ -46,20 +47,14 @@ impl<'a> InvitationChannelHandler<'a> {
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
 
-        let mut metadata = HashMap::new();
-        metadata.insert(
-            "content-type".to_string(),
-            CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
-        );
-        metadata.insert(
-            "invitation-id".to_string(),
-            invitation.invitation_id.to_string(),
-        );
-        metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
-        metadata.insert("channel-id".to_string(), home_id.to_string());
-        metadata.insert(
-            "acceptor-device-id".to_string(),
-            effects.device_id().to_string(),
+        let mut metadata = crate::handlers::shared::build_transport_metadata(
+            CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE,
+            [
+                ("invitation-id", invitation.invitation_id.to_string()),
+                ("acceptor-id", acceptor_id.to_string()),
+                ("channel-id", home_id.to_string()),
+                ("acceptor-device-id", effects.device_id().to_string()),
+            ],
         );
         let acceptor_hint = effects.lan_transport().and_then(|transport| {
             transport
@@ -509,20 +504,17 @@ impl<'a> InvitationChannelHandler<'a> {
             }
         }
 
-        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+        let Ok(envelopes) = crate::handlers::shared::load_relational_fact_envelopes_by_type(
+            effects,
+            own_id,
+            INVITATION_FACT_TYPE_ID,
+        )
+        .await
+        else {
             return Ok(None);
         };
 
-        for fact in facts.iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
-                continue;
-            }
-
+        for envelope in &envelopes {
             let Some(inv_fact) = InvitationFact::from_envelope(envelope) else {
                 continue;
             };
@@ -576,20 +568,17 @@ impl<'a> InvitationChannelHandler<'a> {
         invite: &ChannelInviteDetails,
     ) -> ContextId {
         let own_id = self.handler.context.authority.authority_id();
-        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+        let Ok(envelopes) = crate::handlers::shared::load_relational_fact_envelopes_by_type(
+            effects,
+            own_id,
+            CHAT_FACT_TYPE_ID,
+        )
+        .await
+        else {
             return invite.context_id;
         };
 
-        for fact in facts.into_iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-                continue;
-            }
-
+        for envelope in envelopes {
             let Some(ChatFact::ChannelCreated {
                 context_id,
                 channel_id,

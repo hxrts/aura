@@ -15,11 +15,11 @@
 
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyKind,
-    CeremonyProcessingOutcome, CeremonyStatus, DeviceEnrollmentStart, DiscoveryTriggerOutcome,
-    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, InvitationMutationOutcome,
-    KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus, RuntimeBridge, SettingsBridgeState,
-    SyncStatus,
+    AuthenticationStatus, AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo,
+    CeremonyKind, CeremonyProcessingOutcome, CeremonyStatus, DeviceEnrollmentStart,
+    DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo,
+    InvitationMutationOutcome, KeyRotationCeremonyStatus, LanPeerInfo, RendezvousStatus,
+    RuntimeBridge, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
@@ -1485,8 +1485,11 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Misc
     // =========================================================================
 
-    async fn is_authenticated(&self) -> bool {
-        true
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+        Ok(AuthenticationStatus::Authenticated {
+            authority_id: self.authority_id,
+            device_id: self.device_id,
+        })
     }
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {

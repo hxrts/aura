@@ -3,7 +3,9 @@
 //! Provides a clean public interface for authentication operations.
 //! Wraps `AuthHandler` with ergonomic methods and proper error handling.
 
-use super::auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
+use super::auth::{
+    AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult, AuthenticationStatus,
+};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::vm_host_bridge::AuraVmRoundDisposition;
 use crate::runtime::{
@@ -90,14 +92,9 @@ impl AuthServiceApi {
         self.handler.verify_response(&self.effects, &response).await
     }
 
-    /// Check if the agent is authenticated
-    ///
-    /// This is a simple check using the legacy authenticate method.
-    ///
-    /// # Returns
-    /// `true` if authentication passes, `false` otherwise
-    pub async fn is_authenticated(&self) -> bool {
-        self.handler.authenticate(&self.effects).await.is_ok()
+    /// Query the explicit runtime-owned authentication status.
+    pub async fn authentication_status(&self) -> AgentResult<AuthenticationStatus> {
+        self.handler.authentication_status(&self.effects).await
     }
 
     /// Get the device ID for this authentication service
@@ -541,7 +538,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_is_authenticated() {
+    async fn test_authentication_status() {
         let authority_id = AuthorityId::new_from_entropy([83u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([85u8; 32]);
@@ -551,15 +548,9 @@ mod tests {
 
         let service = AuthServiceApi::new(effects.clone(), authority_context, account_id).unwrap();
 
-        // Guard + journal pipelines can settle asynchronously under workspace load.
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
-        while tokio::time::Instant::now() < deadline {
-            if service.is_authenticated().await {
-                return;
-            }
-            let _ = effects.sleep_ms(20).await;
-        }
-        panic!("expected auth service to report authenticated within timeout");
+        let status = service.authentication_status().await.unwrap();
+        assert_eq!(status.authority_id, authority_id);
+        assert_eq!(status.device_id, service.device_id());
     }
 
     #[tokio::test]

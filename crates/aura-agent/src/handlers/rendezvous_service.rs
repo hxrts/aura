@@ -104,7 +104,7 @@ impl RendezvousServiceApi {
                 new_epoch: 0,
                 enrollment_device_id: None,
                 enrollment_nickname_suggestion: None,
-                prestate_hash: Some(prestate_hash),
+                prestate_hash,
             })
             .await
             .map_err(|e| AgentError::internal(format!("Failed to register ceremony: {e}")))?;

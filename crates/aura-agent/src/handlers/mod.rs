@@ -24,7 +24,9 @@ pub use sessions::shared::{SessionHandle, SessionStats};
 pub use sessions::SessionCoordinationRole;
 
 // Re-export auth types for public API
-pub use auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
+pub use auth::{
+    AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult, AuthenticationStatus,
+};
 pub use auth_service::AuthServiceApi;
 
 // Re-export chat types for public API

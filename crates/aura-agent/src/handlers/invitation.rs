@@ -6,7 +6,10 @@
 //! This module uses `aura_invitation::InvitationService` internally for
 //! guard chain integration. Types are re-exported from `aura_invitation`.
 
-use super::shared::{HandlerContext, HandlerUtilities};
+use super::shared::{
+    load_relational_fact_envelopes_by_type, resolve_charge_peer, HandlerContext,
+    HandlerUtilities,
+};
 use cache::InvitationCacheHandler;
 use channel::InvitationChannelHandler;
 use contact::InvitationContactHandler;
@@ -65,7 +68,6 @@ use aura_invitation::{
     GuardianAccept, GuardianConfirm, GuardianRequest, InvitationAck, InvitationOffer,
     InvitationOperation, InvitationResponse,
 };
-use aura_journal::fact::{FactContent, RelationalFact};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::future::Future;
 use std::sync::Arc;
@@ -378,21 +380,14 @@ impl InvitationHandler {
         owner_id: AuthorityId,
         contact_id: AuthorityId,
     ) -> bool {
-        let Ok(facts) = effects.load_committed_facts(owner_id).await else {
+        let Ok(envelopes) =
+            load_relational_fact_envelopes_by_type(effects, owner_id, CONTACT_FACT_TYPE_ID).await
+        else {
             return false;
         };
 
-        for fact in facts.iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
-                continue;
-            }
-
-            let Some(contact_fact) = ContactFact::from_envelope(envelope) else {
+        for envelope in envelopes {
+            let Some(contact_fact) = ContactFact::from_envelope(&envelope) else {
                 continue;
             };
 
@@ -484,20 +479,13 @@ impl InvitationHandler {
         };
 
         let own_id = self.context.authority.authority_id();
-        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+        let Ok(envelopes) =
+            load_relational_fact_envelopes_by_type(effects, own_id, CHAT_FACT_TYPE_ID).await
+        else {
             return fallback_context;
         };
 
-        for fact in facts.into_iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-                continue;
-            }
-
+        for envelope in envelopes {
             let Some(ChatFact::ChannelCreated {
                 context_id,
                 channel_id,
@@ -1125,20 +1113,13 @@ impl InvitationHandler {
         context_id: ContextId,
         channel_id: ChannelId,
     ) -> Option<String> {
-        let Ok(facts) = effects.load_committed_facts(authority_id).await else {
+        let Ok(envelopes) =
+            load_relational_fact_envelopes_by_type(effects, authority_id, CHAT_FACT_TYPE_ID).await
+        else {
             return None;
         };
 
-        for fact in facts.into_iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-                continue;
-            }
-
+        for envelope in envelopes {
             let Some(ChatFact::ChannelCreated {
                 context_id: seen_context,
                 channel_id: seen_channel,
@@ -2296,7 +2277,13 @@ pub async fn execute_guard_outcome(
     }
 
     let context_id = authority.default_context_id();
-    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id(), |command| {
+        match command {
+            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+            _ => None,
+        }
+    });
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in outcome.effects {
@@ -2325,20 +2312,6 @@ pub async fn execute_guard_outcome_for_accept(
     execute_invitation_effect_commands(local_effects, authority, effects, false).await?;
     execute_invitation_effect_commands(deferred_network_effects.commands, authority, effects, true)
         .await
-}
-
-fn resolve_charge_peer(
-    commands: &[aura_invitation::guards::EffectCommand],
-    fallback: AuthorityId,
-) -> AuthorityId {
-    commands
-        .iter()
-        .find_map(|command| match command {
-            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
-            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
-            _ => None,
-        })
-        .unwrap_or(fallback)
 }
 
 fn split_invitation_send_guard_outcome(
@@ -2395,7 +2368,13 @@ pub(crate) async fn execute_invitation_effect_commands(
     best_effort_network_failures: bool,
 ) -> AgentResult<()> {
     let context_id = authority.default_context_id();
-    let charge_peer = resolve_charge_peer(&commands, authority.authority_id());
+    let charge_peer = resolve_charge_peer(&commands, authority.authority_id(), |command| {
+        match command {
+            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+            _ => None,
+        }
+    });
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in commands {
@@ -2550,24 +2529,15 @@ async fn execute_notify_peer(
             invitation.context_id,
         )
     } else {
-        let facts = effects
-            .load_committed_facts(authority_id)
-            .await
+        let envelopes =
+            load_relational_fact_envelopes_by_type(effects, authority_id, INVITATION_FACT_TYPE_ID)
+                .await
             .map_err(|_| {
                 AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
             })?;
 
         let mut shareable: Option<(ShareableInvitation, ContextId)> = None;
-        for fact in facts.iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
-                continue;
-            }
-
+        for envelope in &envelopes {
             let Some(inv_fact) = InvitationFact::from_envelope(envelope) else {
                 continue;
             };

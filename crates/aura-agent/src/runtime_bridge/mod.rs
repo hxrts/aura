@@ -12,8 +12,8 @@ use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, Ceremony
 use crate::runtime::services::ServiceError;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    AuthoritativeChannelBinding, AuthoritativeModerationStatus, BridgeAuthorityInfo,
-    BridgeDeviceInfo, CeremonyProcessingCounts, CeremonyProcessingOutcome,
+    AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
+    BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingCounts, CeremonyProcessingOutcome,
     DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
     LanPeerInfo, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeBridge,
     SettingsBridgeState, SyncStatus,
@@ -68,6 +68,7 @@ use futures::{SinkExt, StreamExt};
 #[cfg(target_arch = "wasm32")]
 use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
+use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -93,6 +94,38 @@ const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
+
+fn internal_bridge_error(label: &'static str, error: impl Display) -> IntentError {
+    IntentError::internal_error(format!("{label}: {error}"))
+}
+
+fn map_time_read_error(error: impl Display) -> IntentError {
+    internal_bridge_error("Failed to read time", error)
+}
+
+fn map_tree_read_error(error: impl Display) -> IntentError {
+    internal_bridge_error("Failed to read tree state", error)
+}
+
+fn map_serialization_error(label: &'static str, error: impl Display) -> IntentError {
+    internal_bridge_error(label, error)
+}
+
+fn map_amp_state_error(error: impl Display) -> IntentError {
+    internal_bridge_error("AMP state lookup failed", error)
+}
+
+fn map_amp_prestate_error(error: impl Display) -> IntentError {
+    internal_bridge_error("Invalid AMP prestate", error)
+}
+
+fn map_amp_proposal_error(error: impl Display) -> IntentError {
+    internal_bridge_error("AMP proposal failed", error)
+}
+
+fn map_amp_finalize_error(error: impl Display) -> IntentError {
+    internal_bridge_error("AMP finalize failed", error)
+}
 
 fn collect_authoritative_moderation_homes(
     homes: &HomesState,
@@ -759,7 +792,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let bootstrap_fact = ChannelBootstrap {
             context,
@@ -1091,7 +1124,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let authority_id = self.agent.authority_id();
         let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
             .await
-            .map_err(|e| IntentError::internal_error(format!("AMP state lookup failed: {e}")))?;
+            .map_err(map_amp_state_error)?;
         let bump_nonce = effects.random_bytes(32).await;
         let bump_id = Hash32(hash(&bump_nonce));
         let proposal = ProposedChannelEpochBump {
@@ -1105,14 +1138,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         emit_proposed_bump(effects.as_ref(), proposal.clone())
             .await
-            .map_err(|e| IntentError::internal_error(format!("AMP proposal failed: {e}")))?;
+            .map_err(map_amp_proposal_error)?;
 
         let policy =
             aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
         if policy.allows_mode(AgreementMode::ConsensusFinalized) {
-            let tree_state = effects.get_current_state().await.map_err(|e| {
-                IntentError::internal_error(format!("Tree state lookup failed: {e}"))
-            })?;
+            let tree_state = effects
+                .get_current_state()
+                .await
+                .map_err(map_tree_read_error)?;
             let journal = effects.fetch_context_journal(context).await.map_err(|e| {
                 IntentError::internal_error(format!("Context journal lookup failed: {e}"))
             })?;
@@ -1124,7 +1158,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 vec![(authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
             )
-            .map_err(|e| IntentError::internal_error(format!("Invalid AMP prestate: {e}")))?;
+            .map_err(map_amp_prestate_error)?;
 
             let params =
                 build_consensus_params(context, effects.as_ref(), authority_id, effects.as_ref())
@@ -1148,7 +1182,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 transcript_ref,
             )
             .await
-            .map_err(|e| IntentError::internal_error(format!("AMP finalize failed: {e}")))?;
+            .map_err(map_amp_finalize_error)?;
         }
 
         tracing::info!(
@@ -1330,7 +1364,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let fact = HomeKickFact::new_ms(
             context_id,
@@ -1356,7 +1390,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let fact = HomeBanFact::new_ms(
             context_id,
@@ -1382,7 +1416,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let fact = HomeUnbanFact::new_ms(
             context_id,
@@ -1407,7 +1441,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
         let expires_at = duration_secs.map(|s| now.ts_ms.saturating_add(s.saturating_mul(1000)));
 
         let fact = HomeMuteFact::new_ms(
@@ -1434,7 +1468,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let fact = HomeUnmuteFact::new_ms(
             context_id,
@@ -1458,7 +1492,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let fact = HomePinFact::new_ms(
             context_id,
@@ -1482,7 +1516,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+            .map_err(map_time_read_error)?;
 
         let fact = HomeUnpinFact::new_ms(
             context_id,
@@ -2094,7 +2128,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let tree_state = effects
             .get_current_state()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+            .map_err(map_tree_read_error)?;
         let context_commitment = current_state.compute_prestate_hash(&authority_id);
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
@@ -2170,12 +2204,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now_ms = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .map_err(map_time_read_error)?
             .ts_ms;
         for old_id in runner
             .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
-                Some(&prestate_hash),
+                &prestate_hash,
             )
             .await
         {
@@ -2199,7 +2233,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 new_epoch: new_epoch.value(),
                 enrollment_device_id: None,
                 enrollment_nickname_suggestion: None,
-                prestate_hash: Some(prestate_hash),
+                prestate_hash,
             })
             .await
             .map_err(|e| {
@@ -2434,7 +2468,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let tree_state = effects
             .get_current_state()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+            .map_err(map_tree_read_error)?;
 
         let prestate_input = serde_json::to_vec(&(
             tree_state.epoch,
@@ -2443,7 +2477,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             threshold_value,
             total_n,
         ))
-        .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
+        .map_err(|e| map_serialization_error("Serialize prestate", e))?;
         let context_commitment = aura_core::Hash32(hash(&prestate_input));
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
@@ -2458,7 +2492,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             total_n,
             &parsed_devices,
         ))
-        .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        .map_err(|e| map_serialization_error("Serialize operation", e))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         // For K3ConsensusDkg ceremonies, we would normally run consensus to finalize the DKG.
@@ -2485,12 +2519,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now_ms = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .map_err(map_time_read_error)?
             .ts_ms;
         for old_id in runner
             .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
-                Some(&prestate_hash),
+                &prestate_hash,
             )
             .await
         {
@@ -2514,7 +2548,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 new_epoch: pending_epoch.value(),
                 enrollment_device_id: None,
                 enrollment_nickname_suggestion: None,
-                prestate_hash: Some(prestate_hash),
+                prestate_hash,
             })
             .await
             .map_err(|e| {
@@ -2631,7 +2665,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let tree_state = effects
             .get_current_state()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+            .map_err(map_tree_read_error)?;
 
         let mut device_ids: Vec<aura_core::DeviceId> = tree_state
             .leaves
@@ -2783,7 +2817,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             tree_state.root_commitment,
             participant_device_ids.clone(),
         ))
-        .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
+        .map_err(|e| map_serialization_error("Serialize prestate", e))?;
         let context_commitment = aura_core::Hash32(hash(&prestate_input));
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
@@ -2799,7 +2833,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             total_n,
             current_device_id,
         ))
-        .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        .map_err(|e| map_serialization_error("Serialize operation", e))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         let nonce_bytes = effects.random_bytes(8).await;
@@ -2837,12 +2871,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now_ms = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .map_err(map_time_read_error)?
             .ts_ms;
         for old_id in runner
             .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
-                Some(&prestate_hash),
+                &prestate_hash,
             )
             .await
         {
@@ -2866,7 +2900,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 new_epoch: pending_epoch.value(),
                 enrollment_device_id: Some(new_device_id),
                 enrollment_nickname_suggestion: nickname_for_tracker,
-                prestate_hash: Some(prestate_hash),
+                prestate_hash,
             })
             .await
             .map_err(|e| {
@@ -3030,7 +3064,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let tree_state = effects
             .get_current_state()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read tree state: {e}")))?;
+            .map_err(map_tree_read_error)?;
 
         let leaf_to_remove = tree_state
             .leaves
@@ -3171,7 +3205,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             tree_state.root_commitment,
             target_device_id,
         ))
-        .map_err(|e| IntentError::internal_error(format!("Serialize prestate: {e}")))?;
+        .map_err(|e| map_serialization_error("Serialize prestate", e))?;
         let context_commitment = aura_core::Hash32(hash(&prestate_input));
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
@@ -3186,7 +3220,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             threshold_k,
             total_n,
         ))
-        .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        .map_err(|e| map_serialization_error("Serialize operation", e))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         let consensus_required = signing_service
@@ -3246,12 +3280,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now_ms = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .map_err(map_time_read_error)?
             .ts_ms;
         for old_id in runner
             .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::DeviceRemoval,
-                Some(&prestate_hash),
+                &prestate_hash,
             )
             .await
         {
@@ -3275,7 +3309,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 new_epoch: pending_epoch.value(),
                 enrollment_device_id: Some(target_device_id),
                 enrollment_nickname_suggestion: None,
-                prestate_hash: Some(prestate_hash),
+                prestate_hash,
             })
             .await
             .map_err(|e| {
@@ -4078,12 +4112,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Authentication
     // =========================================================================
 
-    async fn is_authenticated(&self) -> bool {
-        if let Ok(auth_service) = self.agent.auth() {
-            auth_service.is_authenticated().await
-        } else {
-            false
-        }
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+        let auth_service = self
+            .agent
+            .auth()
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
+        let status = auth_service
+            .authentication_status()
+            .await
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
+        Ok(AuthenticationStatus::Authenticated {
+            authority_id: status.authority_id,
+            device_id: status.device_id,
+        })
     }
 }
 

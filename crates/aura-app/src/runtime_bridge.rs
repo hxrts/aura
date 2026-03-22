@@ -166,8 +166,23 @@ pub struct RuntimeStatus {
     pub sync: SyncStatus,
     /// Rendezvous service status
     pub rendezvous: RendezvousStatus,
-    /// Whether the runtime is authenticated
-    pub is_authenticated: bool,
+    /// Explicit authentication status.
+    pub authentication: AuthenticationStatus,
+}
+
+/// Explicit runtime authentication status.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AuthenticationStatus {
+    /// No authenticated runtime authority/device is available.
+    #[default]
+    Unauthenticated,
+    /// The runtime is authenticated for one concrete authority/device pair.
+    Authenticated {
+        /// Authenticated authority.
+        authority_id: AuthorityId,
+        /// Authenticated device.
+        device_id: DeviceId,
+    },
 }
 
 /// High-level ceremony kind exposed across the runtime bridge boundary.
@@ -1162,8 +1177,8 @@ pub trait RuntimeBridge: Send + Sync {
     // Authentication
     // =========================================================================
 
-    /// Check if the runtime is authenticated
-    async fn is_authenticated(&self) -> bool;
+    /// Query the explicit runtime authentication status.
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError>;
 
     // =========================================================================
     // Authorization / Capabilities
@@ -1218,7 +1233,7 @@ pub trait RuntimeBridge: Send + Sync {
         Ok(RuntimeStatus {
             sync: self.try_get_sync_status().await?,
             rendezvous: self.try_get_rendezvous_status().await?,
-            is_authenticated: self.is_authenticated().await,
+            authentication: self.authentication_status().await?,
         })
     }
 }
@@ -2051,8 +2066,8 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn is_authenticated(&self) -> bool {
-        false
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+        Ok(AuthenticationStatus::Unauthenticated)
     }
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {
@@ -2097,7 +2112,10 @@ mod tests {
         let bridge = OfflineRuntimeBridge::new(authority);
 
         assert_eq!(bridge.authority_id(), authority);
-        assert!(!bridge.is_authenticated().await);
+        assert_eq!(
+            bridge.authentication_status().await.unwrap(),
+            AuthenticationStatus::Unauthenticated
+        );
         assert!(!bridge.has_signing_capability().await);
         assert!(
             !bridge

@@ -4,6 +4,7 @@
 //! wiring the shared ceremony runner to the OTA ceremony executor.
 
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::handlers::shared::map_handler_time_read_error;
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
@@ -130,7 +131,7 @@ impl OtaActivationServiceApi {
                 new_epoch: proposal.activation_epoch.value(),
                 enrollment_device_id: None,
                 enrollment_nickname_suggestion: None,
-                prestate_hash: Some(prestate_hash),
+                prestate_hash,
             })
             .await
         {
@@ -186,7 +187,7 @@ impl OtaActivationServiceApi {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AgentError::effects(format!("Failed to read time: {e}")))?;
+            .map_err(map_handler_time_read_error)?;
 
         let runner_id = Self::runner_ceremony_id(ceremony_id);
         self.ceremony_runner

@@ -202,7 +202,7 @@ pub struct TrackedCeremony {
     pub timeout: Duration,
 
     /// Prestate hash at ceremony initiation (for supersession detection)
-    pub prestate_hash: Option<Hash32>,
+    pub prestate_hash: Hash32,
 
     /// Timestamp when committed (if committed)
     pub committed_at: Option<PhysicalTime>,
@@ -290,7 +290,7 @@ impl TrackedCeremony {
             ceremony_id: self.ceremony_id.clone(),
             state,
             responses,
-            prestate_hash: self.prestate_hash.unwrap_or(Hash32([0; 32])),
+            prestate_hash: self.prestate_hash,
             committed_agreement,
         }
     }
@@ -361,15 +361,8 @@ impl CeremonyTracker {
         );
     }
 
-    /// Register a new ceremony
-    ///
-    /// # Arguments
-    /// * `ceremony_id` - Unique ceremony identifier
-    /// * `threshold_k` - Minimum signers required
-    /// * `total_n` - Total number of participants
-    /// * `participants` - Participants invited
-    /// * `new_epoch` - Epoch for the new keys
-    #[allow(clippy::too_many_arguments)] // Ceremony registration requires all these distinct parameters
+    /// Register a new ceremony with explicit prestate hash for supersession tracking.
+    #[allow(clippy::too_many_arguments)]
     pub async fn register(
         &self,
         ceremony_id: CeremonyId,
@@ -381,36 +374,7 @@ impl CeremonyTracker {
         new_epoch: u64,
         enrollment_device_id: Option<DeviceId>,
         enrollment_nickname_suggestion: Option<String>,
-    ) -> Result<(), IntentError> {
-        self.register_with_prestate(
-            ceremony_id,
-            kind,
-            initiator_id,
-            threshold_k,
-            total_n,
-            participants,
-            new_epoch,
-            enrollment_device_id,
-            enrollment_nickname_suggestion,
-            None, // No prestate hash for backward compatibility
-        )
-        .await
-    }
-
-    /// Register a new ceremony with prestate hash for supersession tracking
-    #[allow(clippy::too_many_arguments)]
-    pub async fn register_with_prestate(
-        &self,
-        ceremony_id: CeremonyId,
-        kind: CeremonyKind,
-        initiator_id: AuthorityId,
-        threshold_k: u16,
-        total_n: u16,
-        participants: Vec<ParticipantIdentity>,
-        new_epoch: u64,
-        enrollment_device_id: Option<DeviceId>,
-        enrollment_nickname_suggestion: Option<String>,
-        prestate_hash: Option<Hash32>,
+        prestate_hash: Hash32,
     ) -> Result<(), IntentError> {
         let participants_set: HashSet<_> = participants.into_iter().collect();
         if participants_set.len() != total_n as usize {
@@ -900,14 +864,14 @@ impl CeremonyTracker {
     ///
     /// # Arguments
     /// * `kind` - The kind of ceremony being initiated
-    /// * `prestate_hash` - Current prestate hash (if available)
+    /// * `prestate_hash` - Current prestate hash
     ///
     /// # Returns
     /// Vector of ceremony IDs that are candidates for supersession
     pub async fn check_supersession_candidates(
         &self,
         kind: CeremonyKind,
-        prestate_hash: Option<&Hash32>,
+        prestate_hash: &Hash32,
     ) -> Vec<CeremonyId> {
         let state = self.shared.state.read().await;
 
@@ -925,11 +889,9 @@ impl CeremonyTracker {
                     return false;
                 }
 
-                // Check for prestate staleness if we have both hashes
-                if let (Some(new_hash), Some(old_hash)) = (prestate_hash, &ceremony.prestate_hash) {
-                    if new_hash != old_hash {
-                        return true; // Prestate changed, candidate for supersession
-                    }
+                // Check for prestate staleness against the explicit prestate hash.
+                if prestate_hash != &ceremony.prestate_hash {
+                    return true; // Prestate changed, candidate for supersession
                 }
 
                 // Active ceremony of same kind is always a candidate
@@ -1058,6 +1020,7 @@ mod tests {
                 100,
                 None,
                 None,
+                Hash32([1; 32]),
             )
             .await
             .unwrap();
@@ -1093,6 +1056,7 @@ mod tests {
                 100,
                 None,
                 None,
+                Hash32([2; 32]),
             )
             .await
             .unwrap();
@@ -1145,6 +1109,7 @@ mod tests {
                 100,
                 None,
                 None,
+                Hash32([3; 32]),
             )
             .await
             .unwrap();
@@ -1191,6 +1156,7 @@ mod tests {
                 100,
                 None,
                 None,
+                Hash32([4; 32]),
             )
             .await
             .unwrap();
@@ -1239,6 +1205,7 @@ mod tests {
                 100,
                 None,
                 None,
+                Hash32([5; 32]),
             )
             .await
             .unwrap();
@@ -1281,6 +1248,7 @@ mod tests {
                 100,
                 None,
                 None,
+                Hash32([6; 32]),
             )
             .await
             .unwrap();
@@ -1313,6 +1281,7 @@ mod tests {
                 0,
                 None,
                 None,
+                Hash32([7; 32]),
             )
             .await
             .unwrap();
@@ -1351,6 +1320,7 @@ mod tests {
                 0,
                 None,
                 None,
+                Hash32([8; 32]),
             )
             .await
             .unwrap();
@@ -1394,6 +1364,7 @@ mod tests {
                 42,
                 Some(device),
                 Some("My Test Device".to_string()),
+                Hash32([9; 32]),
             )
             .await
             .unwrap();
@@ -1435,6 +1406,7 @@ mod tests {
                 77,
                 None,
                 None,
+                Hash32([10; 32]),
             )
             .await
             .unwrap();
@@ -1478,6 +1450,7 @@ mod tests {
                 88,
                 Some(device_b),
                 None,
+                Hash32([11; 32]),
             )
             .await
             .unwrap();
@@ -1553,7 +1526,7 @@ mod tests {
                     agreement_mode: AgreementMode::CoordinatorSoftSafe,
                     error_message: None,
                     timeout: Duration::from_secs(30),
-                    prestate_hash: None,
+                    prestate_hash: Hash32([0; 32]),
                     committed_at: None,
                     committed_consensus_id: None,
                 }
@@ -1595,7 +1568,7 @@ mod tests {
                         agreement_mode: AgreementMode::CoordinatorSoftSafe,
                         error_message: None,
                         timeout: Duration::from_secs(30),
-                        prestate_hash: None,
+                        prestate_hash: Hash32([0; 32]),
                         committed_at: None,
                         committed_consensus_id: None,
                     });
@@ -1650,7 +1623,7 @@ mod tests {
                         agreement_mode: AgreementMode::CoordinatorSoftSafe,
                         error_message: None,
                         timeout: Duration::from_secs(30),
-                        prestate_hash: None,
+                        prestate_hash: Hash32([0; 32]),
                         committed_at: None,
                         committed_consensus_id: None,
                     });
@@ -1700,7 +1673,7 @@ mod tests {
                         agreement_mode: AgreementMode::CoordinatorSoftSafe,
                         error_message: None,
                         timeout: Duration::from_secs(30),
-                        prestate_hash: None,
+                        prestate_hash: Hash32([0; 32]),
                         committed_at: None,
                         committed_consensus_id: None,
                     });
@@ -1761,7 +1734,7 @@ mod tests {
                         agreement_mode: AgreementMode::ConsensusFinalized,
                         error_message: None,
                         timeout: Duration::from_secs(30),
-                        prestate_hash: None,
+                        prestate_hash: Hash32([0; 32]),
                         committed_at: None,
                         committed_consensus_id: None,
                     });
@@ -1822,7 +1795,7 @@ mod tests {
                         },
                         error_message: if has_failed { Some("test".to_string()) } else { None },
                         timeout: Duration::from_secs(30),
-                        prestate_hash: None,
+                        prestate_hash: Hash32([0; 32]),
                         committed_at: None,
                         committed_consensus_id: None,
                     });
@@ -1885,7 +1858,7 @@ mod tests {
                         },
                         error_message: None,
                         timeout: Duration::from_secs(30),
-                        prestate_hash: None,
+                        prestate_hash: Hash32([0; 32]),
                         committed_at: None,
                         committed_consensus_id: None,
                     });

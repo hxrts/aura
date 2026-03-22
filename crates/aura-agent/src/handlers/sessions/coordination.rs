@@ -5,7 +5,7 @@
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
-use crate::handlers::shared::HandlerUtilities;
+use crate::handlers::shared::{build_string_metadata, HandlerUtilities};
 use crate::runtime::services::SessionManager;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
 use crate::runtime::{
@@ -478,16 +478,13 @@ impl SessionOperations {
                 context: self.guard_context(),
                 payload: serde_json::to_vec(&invitation)
                     .map_err(|e| AgentError::effects(format!("serialize invitation: {e}")))?,
-                metadata: {
-                    let mut metadata = HashMap::new();
-                    metadata.insert("type".to_string(), "session_invitation".to_string());
-                    metadata.insert("session_id".to_string(), request.session_id.to_string());
-                    metadata.insert(
-                        "aura-destination-device-id".to_string(),
-                        participant_id.to_string(),
-                    );
-                    metadata
-                },
+                metadata: build_string_metadata(
+                    [
+                        ("session_id", request.session_id.to_string()),
+                        ("type", "session_invitation".to_string()),
+                        ("aura-destination-device-id", participant_id.to_string()),
+                    ],
+                ),
                 receipt: None,
             };
 

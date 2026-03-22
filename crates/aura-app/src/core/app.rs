@@ -1094,20 +1094,22 @@ impl AppCore {
     // - AppCore: Intent dispatch, ViewState, basic runtime status
     // - Agent services: Full distributed protocol operations
 
-    /// Check if the runtime is authenticated
-    pub async fn is_authenticated(&self) -> bool {
+    /// Query the explicit runtime authentication status.
+    pub async fn authentication_status(
+        &self,
+    ) -> Result<crate::runtime_bridge::AuthenticationStatus, IntentError> {
         if let Some(runtime) = &self.runtime {
             return timeout_runtime_call_bounded(
                 runtime,
-                "is_authenticated",
-                "is_authenticated",
+                "authentication_status",
+                "authentication_status",
                 APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.is_authenticated(),
+                || runtime.authentication_status(),
             )
             .await
-            .unwrap_or(false);
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
         }
-        false
+        Ok(crate::runtime_bridge::AuthenticationStatus::Unauthenticated)
     }
 
     // =========================================================================

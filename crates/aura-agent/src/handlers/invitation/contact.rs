@@ -1,5 +1,6 @@
 use super::*;
 use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
+use aura_journal::fact::RelationalFact;
 
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,
@@ -39,19 +40,13 @@ impl<'a> InvitationContactHandler<'a> {
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
 
-        let mut metadata = HashMap::new();
-        metadata.insert(
-            "content-type".to_string(),
-            CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
-        );
-        metadata.insert(
-            "invitation-id".to_string(),
-            invitation.invitation_id.to_string(),
-        );
-        metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
-        metadata.insert(
-            "acceptor-device-id".to_string(),
-            effects.device_id().to_string(),
+        let mut metadata = crate::handlers::shared::build_transport_metadata(
+            CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE,
+            [
+                ("invitation-id", invitation.invitation_id.to_string()),
+                ("acceptor-id", acceptor_id.to_string()),
+                ("acceptor-device-id", effects.device_id().to_string()),
+            ],
         );
         let acceptor_hint = effects.lan_transport().and_then(|transport| {
             transport
@@ -549,20 +544,17 @@ impl<'a> InvitationContactHandler<'a> {
             );
         }
 
-        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+        let Ok(envelopes) = crate::handlers::shared::load_relational_fact_envelopes_by_type(
+            effects,
+            own_id,
+            INVITATION_FACT_TYPE_ID,
+        )
+        .await
+        else {
             return Ok(None);
         };
 
-        for fact in facts.iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-            else {
-                continue;
-            };
-
-            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
-                continue;
-            }
-
+        for envelope in &envelopes {
             let Some(inv_fact) = InvitationFact::from_envelope(envelope) else {
                 continue;
             };

@@ -52,24 +52,21 @@ impl<'a> ThresholdHandler<'a> {
         use base64::Engine;
 
         // The target authority is the authority we're setting up threshold signing for
-        // This may be different from envelope.destination (which is the receiving device's authority)
-        let authority_id = if let Some(target_authority_str) =
-            envelope.metadata.get("target-authority-id")
-        {
-            match target_authority_str.parse::<AuthorityId>() {
-                Ok(id) => id,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        target_authority = %target_authority_str,
-                        "Invalid target-authority-id in metadata, falling back to envelope destination"
-                    );
-                    envelope.destination
-                }
+        // and must be carried explicitly by producers.
+        let Some(target_authority_str) = envelope.metadata.get("target-authority-id") else {
+            tracing::warn!("Malformed device threshold key package envelope: missing target-authority-id");
+            return ProcessResult::Skip;
+        };
+        let authority_id = match target_authority_str.parse::<AuthorityId>() {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    target_authority = %target_authority_str,
+                    "Invalid target-authority-id in device threshold key package"
+                );
+                return ProcessResult::Skip;
             }
-        } else {
-            // Backward compatibility: if no target-authority-id, use envelope destination
-            envelope.destination
         };
 
         let (Some(ceremony_id), Some(pending_epoch_str), Some(initiator_device_id_str)) = (
@@ -372,5 +369,57 @@ impl<'a> ThresholdHandler<'a> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use crate::runtime::services::reconfiguration_manager::ReconfigurationManager;
+    use aura_core::effects::transport::TransportEnvelope;
+    use aura_core::types::identifiers::ContextId;
+    use aura_effects::time::PhysicalTimeHandler;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn key_package_requires_explicit_target_authority_metadata() {
+        let authority_id = AuthorityId::new_from_entropy([11u8; 32]);
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&AgentConfig::default()).unwrap());
+        let tracker = CeremonyTracker::new(Arc::new(PhysicalTimeHandler::new()));
+        let runner = CeremonyRunner::new(tracker.clone());
+        let signing_service = ThresholdSigningService::new(effects.clone());
+        let reconfiguration = ReconfigurationManager::new();
+        let handler = ThresholdHandler::new(
+            authority_id,
+            effects.as_ref(),
+            &tracker,
+            &runner,
+            &signing_service,
+            &reconfiguration,
+        );
+
+        let mut metadata = HashMap::new();
+        metadata.insert("ceremony-id".to_string(), "ceremony-test".to_string());
+        metadata.insert("pending-epoch".to_string(), "7".to_string());
+        metadata.insert(
+            "initiator-device-id".to_string(),
+            DeviceId::new_from_entropy([12u8; 32]).to_string(),
+        );
+
+        let envelope = TransportEnvelope {
+            destination: authority_id,
+            source: authority_id,
+            context: ContextId::new_from_entropy([13u8; 32]),
+            payload: vec![1, 2, 3],
+            metadata,
+            receipt: None,
+        };
+
+        assert!(matches!(
+            handler.handle_key_package(&envelope).await,
+            ProcessResult::Skip
+        ));
     }
 }
