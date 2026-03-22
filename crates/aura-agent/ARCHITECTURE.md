@@ -267,6 +267,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - any other runtime bridge read that depends on invitation-owned derived state,
   including participant augmentation or settings contact counts, must follow
   the same rule instead of downgrading service loss into partial success
+- authority listing must fail on account-config read failure or corrupt stored
+  authority records; it may not publish a partial authority inventory that
+  looks authoritative after skipping unreadable entries
 
 ## Canonical Host/VM Boundary
 
