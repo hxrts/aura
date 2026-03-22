@@ -244,17 +244,7 @@ fn render_choose_threshold(props: &GuardianSetupModalProps) -> AnyElement<'stati
 fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'static> {
     let responses = props.ceremony_responses.clone();
     let copy = props.kind.copy();
-    let agreement_label = match props.agreement_mode {
-        AgreementMode::Provisional => "Provisional",
-        AgreementMode::CoordinatorSoftSafe => {
-            if props.reversion_risk {
-                "Soft-safe (reversion risk)"
-            } else {
-                "Soft-safe"
-            }
-        }
-        AgreementMode::ConsensusFinalized => "Finalized",
-    };
+    let agreement_label = agreement_label(props.agreement_mode, props.reversion_risk);
 
     // Count responses
     let total = responses.len();
@@ -334,6 +324,20 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
     .into_any()
 }
 
+fn agreement_label(agreement_mode: AgreementMode, reversion_risk: bool) -> &'static str {
+    match agreement_mode {
+        AgreementMode::Provisional => "Provisional",
+        AgreementMode::CoordinatorSoftSafe => {
+            if reversion_risk {
+                "Soft-safe (reversion risk)"
+            } else {
+                "Soft-safe"
+            }
+        }
+        AgreementMode::ConsensusFinalized => "Finalized",
+    }
+}
+
 fn get_footer_hints(step: &GuardianSetupStep) -> ModalFooterProps {
     let hints = match step {
         GuardianSetupStep::SelectContacts => vec![
@@ -352,4 +356,30 @@ fn get_footer_hints(step: &GuardianSetupStep) -> ModalFooterProps {
         | GuardianSetupStep::Error => vec![KeyHint::new("Esc", "Cancel")],
     };
     ModalFooterProps::new(hints)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::agreement_label;
+    use aura_core::threshold::AgreementMode;
+
+    #[test]
+    fn agreement_label_follows_typed_lifecycle_state() {
+        assert_eq!(
+            agreement_label(AgreementMode::Provisional, true),
+            "Provisional"
+        );
+        assert_eq!(
+            agreement_label(AgreementMode::CoordinatorSoftSafe, true),
+            "Soft-safe (reversion risk)"
+        );
+        assert_eq!(
+            agreement_label(AgreementMode::CoordinatorSoftSafe, false),
+            "Soft-safe"
+        );
+        assert_eq!(
+            agreement_label(AgreementMode::ConsensusFinalized, false),
+            "Finalized"
+        );
+    }
 }
