@@ -2664,63 +2664,33 @@ async fn accept_pending_home_invitation_id_owned(
     >,
 ) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
-    const HOME_ACCEPT_ATTEMPTS: usize = 200;
-    const HOME_ACCEPT_BACKOFF_MS: u64 = 150;
-
-    let initial_pending_invitation =
-        match authoritative_pending_home_or_channel_invitation(&runtime).await {
-            Ok(invitation) => invitation,
-            Err(error) => {
-                return fail_pending_invitation_accept_if_owned(
-                    Some(owner),
-                    AcceptInvitationError::AcceptFailed {
-                        detail: error.to_string(),
-                    },
-                )
-                .await;
-            }
-        };
-
-    if let Some(invitation) = initial_pending_invitation {
-        let invitation_id = invitation.invitation_id.clone();
-        accept_imported_invitation_owned(app_core, &invitation, owner, None).await?;
-        return Ok(invitation_id);
-    }
-
-    let policy = workflow_retry_policy(
-        HOME_ACCEPT_ATTEMPTS as u32,
-        Duration::from_millis(HOME_ACCEPT_BACKOFF_MS),
-        Duration::from_millis(HOME_ACCEPT_BACKOFF_MS),
-    )?;
-    let invitation_id = execute_with_runtime_retry_budget(&runtime, &policy, |_attempt| async {
-        if let Some(inv) = authoritative_pending_home_or_channel_invitation(&runtime)
-            .await
-            .map_err(|error| AcceptInvitationError::AcceptFailed {
-                detail: error.to_string(),
-            })?
-        {
-            let invitation_id = inv.invitation_id.clone();
-            accept_imported_invitation_owned(app_core, &inv, owner, None).await?;
-            return Ok(invitation_id);
+    let pending_invitation = match authoritative_pending_home_or_channel_invitation(&runtime).await
+    {
+        Ok(invitation) => invitation,
+        Err(error) => {
+            return fail_pending_invitation_accept_if_owned(
+                Some(owner),
+                AcceptInvitationError::AcceptFailed {
+                    detail: error.to_string(),
+                },
+            )
+            .await;
         }
-        converge_runtime(&runtime).await;
-        Err(AuraError::from(super::error::WorkflowError::Precondition(
-            "No pending home invitation found",
-        )))
-    })
-    .await;
+    };
 
-    if let Ok(invitation_id) = invitation_id {
-        return Ok(invitation_id);
-    }
+    let Some(invitation) = pending_invitation else {
+        return fail_pending_invitation_accept_if_owned(
+            Some(owner),
+            AcceptInvitationError::AcceptFailed {
+                detail: "No pending home invitation found".to_string(),
+            },
+        )
+        .await;
+    };
 
-    fail_pending_invitation_accept_if_owned(
-        Some(owner),
-        AcceptInvitationError::AcceptFailed {
-            detail: "No pending home invitation found".to_string(),
-        },
-    )
-    .await
+    let invitation_id = invitation.invitation_id.clone();
+    accept_imported_invitation_owned(app_core, &invitation, owner, None).await?;
+    Ok(invitation_id)
 }
 
 /// Accept the current pending home invitation and attribute the semantic operation to a specific UI instance.
