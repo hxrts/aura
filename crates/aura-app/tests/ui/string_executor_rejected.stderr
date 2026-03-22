@@ -10,6 +10,6 @@ error[E0308]: mismatched types
   |   expected due to this
   |
   = note: expected fn pointer `fn(std::string::String)`
-                found closure `{closure@$DIR/src/workflows/strong_command.rs:1738:17: 1738:84}`
+                found closure `{closure@$DIR/src/workflows/strong_command.rs:1723:17: 1723:84}`
   = note: closure has signature: `fn(ResolvedCommand)`
   = note: this error originates in the macro `strong_command_executor` (in Nightly builds, run with -Z macro-backtrace for more info)

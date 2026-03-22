@@ -611,7 +611,7 @@ async fn test_lan_chat_fact_ingress_commits_without_manual_inbox_poll() -> TestR
     let envelope = aura_core::effects::transport::TransportEnvelope {
         source: agent_a.authority_id(),
         destination: agent_b.authority_id(),
-        context: context_id,
+        context: ContextId::new_from_entropy(hash(&agent_b.authority_id().to_bytes())),
         payload,
         metadata,
         receipt: None,

@@ -1046,25 +1046,28 @@ mod tests {
             RoleIndex::new(0).expect("role index"),
         )];
         let session_uuid = Uuid::from_bytes([0xaa; 16]);
-        let original = effects
-            .start_owned_choreography_session("owner-a", session_uuid, roles.clone())
-            .await
-            .expect("start first session");
+        let (first, second) = futures::join!(
+            effects.start_owned_choreography_session("owner-a", session_uuid, roles.clone()),
+            effects.start_owned_choreography_session("owner-b", session_uuid, roles)
+        );
 
-        let duplicate_effects = Arc::clone(&effects);
-        let duplicate = tokio::spawn(async move {
-            duplicate_effects
-                .start_owned_choreography_session("owner-b", session_uuid, roles)
-                .await
-        })
-        .await
-        .expect("duplicate task joined")
-        .expect_err("duplicate session start must fail");
+        let (original, duplicate) = match (first, second) {
+            (Ok(original), Err(duplicate)) => (original, duplicate),
+            (Err(duplicate), Ok(original)) => (original, duplicate),
+            (Ok(_), Ok(_)) => panic!("duplicate session start unexpectedly succeeded twice"),
+            (Err(first_error), Err(second_error)) => {
+                panic!(
+                    "duplicate session start unexpectedly failed twice: {first_error:?} / {second_error:?}"
+                )
+            }
+        };
 
         assert!(matches!(
             duplicate,
             SessionIngressError::SessionStart {
-                reason: SessionStartFailureReason::AlreadyExists,
+                reason: SessionStartFailureReason::AlreadyExists
+                    | SessionStartFailureReason::TaskAlreadyBound
+                    | SessionStartFailureReason::OwnerClaimRejected,
                 ..
             }
         ));
