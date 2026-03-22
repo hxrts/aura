@@ -1475,6 +1475,7 @@ impl InvitationHandler {
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        let own_id = self.context.authority.authority_id();
 
         self.validate_cached_invitation_cancel(effects, invitation_id)
             .await?;
@@ -1488,8 +1489,16 @@ impl InvitationHandler {
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
-        // Remove from cache
-        let _ = self.invitation_cache.remove_invitation(invitation_id).await;
+        if let Some(mut invitation) =
+            InvitationCacheHandler::load_created_invitation(effects, own_id, invitation_id).await
+        {
+            invitation.status = InvitationStatus::Cancelled;
+            InvitationCacheHandler::persist_created_invitation(effects, own_id, &invitation)
+                .await?;
+            self.invitation_cache.cache_invitation(invitation).await;
+        } else {
+            let _ = self.invitation_cache.remove_invitation(invitation_id).await;
+        }
 
         Ok(InvitationResult {
             success: true,
@@ -3644,16 +3653,81 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([207u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([208u8; 32]);
         let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
         let sender_effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
         );
         let receiver_effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
         );
         let sender_context = AuthorityContext::new(sender_id);
         let sender_handler = InvitationHandler::new(sender_context.clone()).unwrap();
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
         let sender_service = invitation_service_for(sender_context, sender_effects.clone());
+
+        let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            sender_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        sender_effects.attach_rendezvous_manager(sender_manager.clone());
+        let sender_service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
+            .await
+            .unwrap();
+
+        let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            receiver_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
+        let receiver_service_context = crate::runtime::services::RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        crate::runtime::services::RuntimeService::start(
+            &receiver_manager,
+            &receiver_service_context,
+        )
+        .await
+        .unwrap();
+
+        register_test_app_signals(sender_effects.as_ref()).await;
+        register_test_app_signals(receiver_effects.as_ref()).await;
+
+        let now_ms = 1_700_000_000_000;
+        sender_handler
+            .cache_peer_descriptor_for_peer(
+                sender_effects.as_ref(),
+                receiver_id,
+                None,
+                Some("tcp://127.0.0.1:55021"),
+                now_ms,
+            )
+            .await;
+        receiver_handler
+            .cache_peer_descriptor_for_peer(
+                receiver_effects.as_ref(),
+                sender_id,
+                None,
+                Some("tcp://127.0.0.1:55022"),
+                now_ms,
+            )
+            .await;
 
         let context_id = ContextId::new_from_entropy([209u8; 32]);
         let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-sender-propagation"));
@@ -4145,8 +4219,22 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([219u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([220u8; 32]);
         let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
         let effects = Arc::new(
-            AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
         );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
         register_test_app_signals(effects.as_ref()).await;

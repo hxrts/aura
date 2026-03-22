@@ -4152,7 +4152,6 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::AgentBuilder;
-    use aura_chat::ChatFact;
     use aura_core::context::EffectContext;
     use aura_core::effects::ExecutionMode;
     use aura_core::effects::TransportEffects;
@@ -4223,7 +4222,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_amp_channel_context_finds_committed_channel_created_fact() {
+    async fn resolve_amp_channel_context_finds_registered_amp_checkpoint_context() {
         let authority = AuthorityId::new_from_entropy([7u8; 32]);
         let build_context = EffectContext::new(
             authority,
@@ -4238,7 +4237,13 @@ mod tests {
                 .expect("build testing agent"),
         );
         let bridge = AgentRuntimeBridge::new(agent);
-        let context = ContextId::new_from_entropy([8u8; 32]);
+        let context = bridge
+            .agent
+            .runtime()
+            .contexts()
+            .create_context(authority, 42)
+            .await
+            .expect("register context");
         let channel = ChannelId::from_bytes(hash(b"resolve-amp-channel-context"));
 
         bridge
@@ -4258,19 +4263,6 @@ mod tests {
             })
             .await
             .expect("join channel");
-        bridge
-            .commit_relational_facts(&[ChatFact::channel_created_ms(
-                context,
-                channel,
-                "shared-parity-lab".to_string(),
-                None,
-                false,
-                42,
-                authority,
-            )
-            .to_generic()])
-            .await
-            .expect("commit channel fact");
 
         let resolved = bridge
             .resolve_amp_channel_context(channel)
