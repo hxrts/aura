@@ -6,57 +6,12 @@ use std::time::Duration;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 
+use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
+
 async fn physical_sleep(duration: Duration) {
     let _ = PhysicalTimeHandler::new()
         .sleep_ms(duration.as_millis() as u64)
         .await;
-}
-
-fn key_rotation_lifecycle_toast(
-    kind: aura_app::ui::types::CeremonyKind,
-    state: aura_app::ui::workflows::ceremonies::CeremonyLifecycleState,
-) -> Option<ToastMessage> {
-    let (id_prefix, label) = match kind {
-        aura_app::ui::types::CeremonyKind::GuardianRotation => {
-            ("guardian-ceremony", "Guardian ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::DeviceRotation => {
-            ("mfa-ceremony", "Multifactor ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::DeviceEnrollment => {
-            ("device-enrollment", "Device enrollment")
-        }
-        aura_app::ui::types::CeremonyKind::DeviceRemoval => ("device-removal", "Device removal"),
-        aura_app::ui::types::CeremonyKind::Recovery => ("recovery-ceremony", "Recovery ceremony"),
-        aura_app::ui::types::CeremonyKind::Invitation => {
-            ("invitation-ceremony", "Invitation ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::RendezvousSecureChannel => {
-            ("rendezvous-ceremony", "Rendezvous ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::OtaActivation => {
-            ("ota-activation-ceremony", "OTA activation ceremony")
-        }
-    };
-
-    match state {
-        aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::TimedOut => {
-            Some(ToastMessage::error(
-                format!("{id_prefix}-lifecycle-timeout"),
-                format!("{label} did not settle before timeout"),
-            ))
-        }
-        aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::FailedRollbackIncomplete => {
-            Some(ToastMessage::error(
-                format!("{id_prefix}-rollback-incomplete"),
-                format!(
-                    "{label} failed and rollback was incomplete; manual intervention may be required"
-                ),
-            ))
-        }
-        aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::Completed
-        | aura_app::ui::workflows::ceremonies::CeremonyLifecycleState::Failed => None,
-    }
 }
 
 /// All callbacks for the settings screen
@@ -219,24 +174,7 @@ impl SettingsCallbacks {
                         )
                         .await
                     {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::KeyRotationCeremonyStatus {
-                                ceremony_id: status.ceremony_id.to_string(),
-                                kind: status.kind,
-                                accepted_count: status.accepted_count,
-                                total_count: status.total_count,
-                                threshold: status.threshold,
-                                is_complete: status.is_complete,
-                                has_failed: status.has_failed,
-                                accepted_participants: status.accepted_participants.clone(),
-                                error_message: status.error_message.clone(),
-                                pending_epoch: status.pending_epoch,
-                                agreement_mode: status.agreement_mode,
-                                reversion_risk: status.reversion_risk,
-                            },
-                        )
-                        .await;
+                        send_ui_update_required(&tx, key_rotation_status_update(&status)).await;
                     }
 
                     let tx_monitor = tx.clone();
@@ -252,20 +190,7 @@ impl SettingsCallbacks {
                             |status| {
                                 let _ = send_ui_update_lossy(
                                     &tx_monitor,
-                                    UiUpdate::KeyRotationCeremonyStatus {
-                                        ceremony_id: status.ceremony_id.to_string(),
-                                        kind: status.kind,
-                                        accepted_count: status.accepted_count,
-                                        total_count: status.total_count,
-                                        threshold: status.threshold,
-                                        is_complete: status.is_complete,
-                                        has_failed: status.has_failed,
-                                        accepted_participants: status.accepted_participants.clone(),
-                                        error_message: status.error_message.clone(),
-                                        pending_epoch: status.pending_epoch,
-                                        agreement_mode: status.agreement_mode,
-                                        reversion_risk: status.reversion_risk,
-                                    },
+                                    key_rotation_status_update(status),
                                 );
                             },
                             physical_sleep,
@@ -278,23 +203,7 @@ impl SettingsCallbacks {
                                 {
                                     let _ = send_ui_update_lossy(
                                         &tx_monitor,
-                                        UiUpdate::KeyRotationCeremonyStatus {
-                                            ceremony_id: lifecycle.status.ceremony_id.to_string(),
-                                            kind: lifecycle.status.kind,
-                                            accepted_count: lifecycle.status.accepted_count,
-                                            total_count: lifecycle.status.total_count,
-                                            threshold: lifecycle.status.threshold,
-                                            is_complete: lifecycle.status.is_complete,
-                                            has_failed: lifecycle.status.has_failed,
-                                            accepted_participants: lifecycle
-                                                .status
-                                                .accepted_participants
-                                                .clone(),
-                                            error_message: lifecycle.status.error_message.clone(),
-                                            pending_epoch: lifecycle.status.pending_epoch,
-                                            agreement_mode: lifecycle.status.agreement_mode,
-                                            reversion_risk: lifecycle.status.reversion_risk,
-                                        },
+                                        key_rotation_status_update(&lifecycle.status),
                                     );
                                 }
                                 if let Some(toast) =
@@ -498,6 +407,8 @@ mod tests {
         assert!(!add_device_branch.contains("monitor_key_rotation_ceremony("));
         assert!(add_device_branch.contains("CeremonyLifecycleState::TimedOut"));
         assert!(add_device_branch.contains("key_rotation_lifecycle_toast("));
+        assert!(settings_source.contains("use crate::tui::key_rotation::{"));
+        assert!(!add_device_branch.contains("UiUpdate::KeyRotationCeremonyStatus {"));
     }
 }
 

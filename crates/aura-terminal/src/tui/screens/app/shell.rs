@@ -65,6 +65,7 @@ use crate::tui::harness_state::{
     maybe_export_ui_snapshot, register_harness_command_sender, TuiSemanticInputs,
 };
 use crate::tui::hooks::{AppCoreContext, AppSnapshotAvailability, CallbackContext};
+use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
 use crate::tui::layout::dim;
 use crate::tui::navigation::clamp_list_index;
@@ -82,67 +83,6 @@ async fn effect_sleep(duration: std::time::Duration) {
     let _ = PhysicalTimeHandler::new()
         .sleep_ms(duration.as_millis() as u64)
         .await;
-}
-
-fn key_rotation_status_update(
-    status: &aura_app::runtime_bridge::KeyRotationCeremonyStatus,
-) -> UiUpdate {
-    UiUpdate::KeyRotationCeremonyStatus {
-        ceremony_id: status.ceremony_id.to_string(),
-        kind: status.kind,
-        accepted_count: status.accepted_count,
-        total_count: status.total_count,
-        threshold: status.threshold,
-        is_complete: status.is_complete,
-        has_failed: status.has_failed,
-        accepted_participants: status.accepted_participants.clone(),
-        error_message: status.error_message.clone(),
-        pending_epoch: status.pending_epoch,
-        agreement_mode: status.agreement_mode,
-        reversion_risk: status.reversion_risk,
-    }
-}
-
-fn key_rotation_lifecycle_toast(
-    kind: aura_app::ui::types::CeremonyKind,
-    state: CeremonyLifecycleState,
-) -> Option<ToastMessage> {
-    let (id_prefix, label) = match kind {
-        aura_app::ui::types::CeremonyKind::GuardianRotation => {
-            ("guardian-ceremony", "Guardian ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::DeviceRotation => {
-            ("mfa-ceremony", "Multifactor ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::DeviceEnrollment => {
-            ("device-enrollment", "Device enrollment")
-        }
-        aura_app::ui::types::CeremonyKind::DeviceRemoval => ("device-removal", "Device removal"),
-        aura_app::ui::types::CeremonyKind::Recovery => ("recovery-ceremony", "Recovery ceremony"),
-        aura_app::ui::types::CeremonyKind::Invitation => {
-            ("invitation-ceremony", "Invitation ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::RendezvousSecureChannel => {
-            ("rendezvous-ceremony", "Rendezvous ceremony")
-        }
-        aura_app::ui::types::CeremonyKind::OtaActivation => {
-            ("ota-activation-ceremony", "OTA activation ceremony")
-        }
-    };
-
-    match state {
-        CeremonyLifecycleState::TimedOut => Some(ToastMessage::error(
-            format!("{id_prefix}-lifecycle-timeout"),
-            format!("{label} did not settle before timeout"),
-        )),
-        CeremonyLifecycleState::FailedRollbackIncomplete => Some(ToastMessage::error(
-            format!("{id_prefix}-rollback-incomplete"),
-            format!(
-                "{label} failed and rollback was incomplete; manual intervention may be required"
-            ),
-        )),
-        CeremonyLifecycleState::Completed | CeremonyLifecycleState::Failed => None,
-    }
 }
 
 #[allow(clippy::expect_used)]

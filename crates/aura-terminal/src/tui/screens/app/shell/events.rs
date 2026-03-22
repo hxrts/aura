@@ -221,6 +221,9 @@ mod tests {
         let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
         let shell_source = std::fs::read_to_string(&shell_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let helper_path = repo_root.join("crates/aura-terminal/src/tui/key_rotation.rs");
+        let helper_source = std::fs::read_to_string(&helper_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", helper_path.display()));
 
         let guardian_start = shell_source
             .find("DispatchCommand::StartGuardianCeremony")
@@ -244,9 +247,10 @@ mod tests {
         assert!(mfa_branch.contains("CeremonyLifecycleState::TimedOut"));
         assert!(guardian_branch.contains("key_rotation_lifecycle_toast("));
         assert!(mfa_branch.contains("key_rotation_lifecycle_toast("));
-        assert!(shell_source.contains("CeremonyLifecycleState::FailedRollbackIncomplete"));
+        assert!(shell_source.contains("use crate::tui::key_rotation::{"));
+        assert!(helper_source.contains("CeremonyLifecycleState::FailedRollbackIncomplete"));
         assert!(
-            shell_source.contains("rollback was incomplete; manual intervention may be required")
+            helper_source.contains("rollback was incomplete; manual intervention may be required")
         );
     }
 }
