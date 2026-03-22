@@ -138,6 +138,8 @@ pub mod ui;
 pub mod ui_contract;
 pub mod views;
 pub(crate) mod workflows;
+#[cfg(test)]
+pub(crate) mod testing;
 
 #[cfg(feature = "signals")]
 pub mod reactive_state;

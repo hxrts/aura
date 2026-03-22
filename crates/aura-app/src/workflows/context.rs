@@ -739,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_context() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let result = set_context(&app_core, Some("context-123".to_string())).await;
         assert!(result.is_ok());
@@ -753,7 +753,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_neighborhood_state() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let state = get_neighborhood_state(&app_core).await;
         assert!(state.neighbors_is_empty());
@@ -762,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_active_home_uses_selected_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([21u8; 32]);
 
@@ -796,7 +796,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_active_home_prefers_authoritative_selection_over_view_current_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([24u8; 32]);
         let selected_home = ChannelId::from_bytes(hash(b"selected-home-authoritative"));
@@ -837,7 +837,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_active_home_requires_explicit_or_selected_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([22u8; 32]);
 
@@ -876,7 +876,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_active_home_returns_guidance_when_missing() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         publish_test_homes_signal(&app_core).await;
 
@@ -887,7 +887,7 @@ mod tests {
     #[tokio::test]
     async fn test_current_home_context_uses_active_home_when_available() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([31u8; 32]);
         let home_id = ChannelId::from_bytes(hash(b"chat-home"));
@@ -920,7 +920,7 @@ mod tests {
     #[tokio::test]
     async fn test_current_home_context_requires_active_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         publish_test_homes_signal(&app_core).await;
 
@@ -931,7 +931,7 @@ mod tests {
     #[tokio::test]
     async fn test_move_position_selects_known_target_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         init_signals_for_test(&app_core).await;
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([11u8; 32]);
 

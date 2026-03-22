@@ -150,14 +150,13 @@ mod tests {
     #[tokio::test]
     async fn test_session_metadata_update() {
         use crate::core::AgentConfig;
-        use crate::runtime::effects::AuraEffectSystem;
 
         let authority_id = AuthorityId::new_from_entropy([82u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([10u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
         let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
@@ -184,14 +183,13 @@ mod tests {
     #[tokio::test]
     async fn test_participant_management() {
         use crate::core::AgentConfig;
-        use crate::runtime::effects::AuraEffectSystem;
 
         let authority_id = AuthorityId::new_from_entropy([83u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([11u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
         let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
@@ -219,14 +217,13 @@ mod tests {
     #[tokio::test]
     async fn test_session_facts_are_journaled() {
         use crate::core::AgentConfig;
-        use crate::runtime::effects::AuraEffectSystem;
 
         let authority_id = AuthorityId::new_from_entropy([84u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([12u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
         let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
@@ -254,7 +251,6 @@ mod tests {
     #[tokio::test]
     async fn invalid_session_id_is_rejected_without_persisting() {
         use crate::core::{AgentConfig, AgentError};
-        use crate::runtime::effects::AuraEffectSystem;
         use aura_core::effects::StorageCoreEffects;
 
         let authority_id = AuthorityId::new_from_entropy([85u8; 32]);
@@ -262,7 +258,7 @@ mod tests {
         let account_id = AccountId::new_from_entropy([13u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::simulation_for_test(&config).unwrap();
+        let effect_system = crate::testing::simulation_effect_system(&config);
         let effects = Arc::new(effect_system);
 
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);

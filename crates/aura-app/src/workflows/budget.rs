@@ -818,7 +818,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_current_budget() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // Should return default budget when signal not initialized
         let budget = get_current_budget(&app_core).await;
@@ -828,7 +828,7 @@ mod tests {
     #[tokio::test]
     async fn test_budget_validation() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // Should allow adding members when budget is empty
         assert!(can_add_member(&app_core).await);
@@ -840,7 +840,7 @@ mod tests {
     #[tokio::test]
     async fn test_can_pin_content() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // Should allow pinning small content
         let result = can_pin_content(&app_core, 1024).await;
@@ -854,7 +854,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_budget() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         // Register signal
         {

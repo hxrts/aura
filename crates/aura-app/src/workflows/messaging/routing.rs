@@ -197,7 +197,7 @@ pub(super) async fn context_id_for_channel(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{runtime_bridge::OfflineRuntimeBridge, AppConfig, AppCore};
+    use crate::{runtime_bridge::OfflineRuntimeBridge, AppConfig};
     use aura_core::crypto::hash::hash;
 
     #[tokio::test]
@@ -206,8 +206,7 @@ mod tests {
         let bridge = Arc::new(OfflineRuntimeBridge::new(authority));
         let canonical_id = ChannelId::from_bytes(hash(b"routing-canonical"));
         bridge.set_materialized_channel_name_matches("shared-parity-lab", vec![canonical_id]);
-        let core = AppCore::with_runtime(AppConfig::default(), bridge).expect("runtime-backed app");
-        let app_core = Arc::new(RwLock::new(core));
+        let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), bridge);
 
         let resolved = resolve_chat_channel_id_from_state_or_input(&app_core, "#shared-parity-lab")
             .await
@@ -223,8 +222,7 @@ mod tests {
         let channel_id = ChannelId::from_bytes(hash(b"routing-channel-context"));
         let context_id = ContextId::new_from_entropy([11u8; 32]);
         bridge.set_amp_channel_context(channel_id, context_id);
-        let core = AppCore::with_runtime(AppConfig::default(), bridge).expect("runtime-backed app");
-        let app_core = Arc::new(RwLock::new(core));
+        let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), bridge);
 
         let resolved = context_id_for_channel(&app_core, channel_id, Some(authority))
             .await
@@ -235,8 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn authoritative_channel_resolution_requires_runtime() {
-        let core = AppCore::new(AppConfig::default()).expect("app core");
-        let app_core = Arc::new(RwLock::new(core));
+        let app_core = crate::testing::default_test_app_core();
 
         let error = resolve_chat_channel_id_from_state_or_input(&app_core, "#shared-parity-lab")
             .await

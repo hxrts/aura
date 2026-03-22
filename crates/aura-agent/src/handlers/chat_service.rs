@@ -1309,7 +1309,7 @@ mod tests {
     #[tokio::test]
     async fn get_history_reduces_edits_and_deletes_from_committed_facts() {
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ChatServiceApi::new(effects.clone()).unwrap();
         let group_id = group_id(7);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
@@ -1401,7 +1401,7 @@ mod tests {
     #[tokio::test]
     async fn edit_message_returns_refetched_fact_backed_message() {
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ChatServiceApi::new(effects.clone()).unwrap();
         let group_id = group_id(11);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
@@ -1462,7 +1462,7 @@ mod tests {
     #[tokio::test]
     async fn update_group_details_returns_refetched_fact_backed_group() {
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ChatServiceApi::new(effects.clone()).unwrap();
         let group_id = group_id(15);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);

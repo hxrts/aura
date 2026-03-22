@@ -782,7 +782,7 @@ mod tests {
     #[tokio::test]
     async fn moderation_requires_home() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         assert!(ban_user(
             &app_core,
@@ -817,7 +817,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_target_authority_supports_contact_lookup() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
 
         {
@@ -956,7 +956,7 @@ mod tests {
         let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
             [9u8; 32],
         )));
-        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(config, runtime).unwrap()));
+        let app_core = crate::testing::test_app_core_with_runtime(config, runtime);
         {
             let core = app_core.read().await;
             register_app_signals(core.reactive()).await.unwrap();

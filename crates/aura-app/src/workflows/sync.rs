@@ -380,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_sync_status_default() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let status = get_sync_status(&app_core).await;
         assert!(matches!(status, SyncStatus::Idle));
@@ -389,7 +389,7 @@ mod tests {
     #[tokio::test]
     async fn test_request_state_by_str_rejects_invalid_authority_id() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let error = match request_state_by_str(&app_core, "not-an-authority-id").await {
             Ok(value) => panic!("invalid authority IDs must fail at parse boundary: {value:?}"),

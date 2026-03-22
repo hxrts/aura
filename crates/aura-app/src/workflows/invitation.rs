@@ -2889,12 +2889,10 @@ mod tests {
     #[cfg(feature = "signals")]
     use crate::workflows::messaging::apply_authoritative_membership_projection;
     use crate::workflows::semantic_facts::{
-        assert_succeeded_with_postcondition, assert_terminal_failure_or_cancelled,
         assert_terminal_failure_status,
     };
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
-    use aura_core::{CeremonyId, DeviceId, Epoch};
 
     // === Invitation Role Parsing Tests ===
 
@@ -3096,7 +3094,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_invitations_default() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
 
         let invitations = list_invitations(&app_core).await;
         assert_eq!(invitations.sent_count(), 0);
@@ -3198,7 +3196,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_authoritative_invitation_readiness_requires_runtime() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
         let error = refresh_authoritative_invitation_readiness(&app_core)
             .await
             .expect_err("authoritative invitation readiness requires runtime");
@@ -3208,7 +3206,7 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_authoritative_contact_link_readiness_tracks_contacts_signal() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         {
             let core = app_core.read().await;
             crate::signal_defs::register_app_signals(&*core)
@@ -3252,7 +3250,7 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_authoritative_contact_link_readiness_requires_contacts_signal() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        let app_core = crate::testing::default_test_app_core();
 
         let error = refresh_authoritative_contact_link_readiness(&app_core)
             .await
@@ -3794,7 +3792,7 @@ mod tests {
     #[tokio::test]
     async fn test_fail_channel_invitation_publishes_terminal_failure_fact() {
         let config = AppConfig::default();
-        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let app_core = crate::testing::test_app_core(config);
         {
             let core = app_core.read().await;
             crate::signal_defs::register_app_signals(&*core)

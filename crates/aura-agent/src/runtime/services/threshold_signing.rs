@@ -1424,11 +1424,9 @@ impl RuntimeService for ThresholdSigningService {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use crate::runtime::AuraEffectSystem;
     use aura_core::threshold::SigningContext;
     use aura_core::tree::{TreeOp, TreeOpKind};
     use aura_core::Epoch;
-    use std::sync::Arc;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -1462,7 +1460,7 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_authority_seeds_initial_device_leaf_in_tree_ops() {
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ThresholdSigningService::new(effects.clone());
         let authority = test_authority();
 
@@ -1488,7 +1486,7 @@ mod tests {
     #[tokio::test]
     async fn commit_key_rotation_uses_threshold_config_metadata_written_by_effects() {
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ThresholdSigningService::new(effects.clone());
         let authority = test_authority();
         let participants = vec![ParticipantIdentity::Device(effects.device_id())];

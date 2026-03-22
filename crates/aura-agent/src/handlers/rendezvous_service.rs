@@ -624,7 +624,7 @@ mod tests {
     async fn test_service_creation() {
         let authority_context = create_test_authority(60);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RendezvousServiceApi::new(effects, authority_context);
         assert!(service.is_ok());
@@ -634,7 +634,7 @@ mod tests {
     async fn test_publish_quic_descriptor() {
         let authority_context = create_test_authority(61);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
@@ -651,7 +651,7 @@ mod tests {
     async fn test_cache_and_get_descriptor() {
         let authority_context = create_test_authority(62);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
@@ -682,7 +682,7 @@ mod tests {
     async fn test_channel_workflow() {
         let authority_context = create_test_authority(64);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
@@ -722,7 +722,7 @@ mod tests {
     async fn test_relay_request() {
         let authority_context = create_test_authority(66);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 

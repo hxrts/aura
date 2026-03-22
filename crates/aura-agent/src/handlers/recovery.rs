@@ -595,8 +595,6 @@ impl RecoveryHandler {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use crate::runtime::effects::AuraEffectSystem;
-    use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -607,7 +605,7 @@ mod tests {
     async fn recovery_can_be_initiated() {
         let authority_context = create_test_authority(130);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![
@@ -639,7 +637,7 @@ mod tests {
     async fn guardian_approvals_can_be_submitted() {
         let authority_context = create_test_authority(134);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![
@@ -698,7 +696,7 @@ mod tests {
     async fn recovery_can_be_completed() {
         let authority_context = create_test_authority(137);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([138u8; 32])];
@@ -744,7 +742,7 @@ mod tests {
     async fn recovery_can_be_cancelled() {
         let authority_context = create_test_authority(139);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![
@@ -785,7 +783,7 @@ mod tests {
     async fn invalid_threshold_is_rejected() {
         let authority_context = create_test_authority(142);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::simulation_for_test(&config).unwrap());
+        let effects = crate::testing::simulation_effect_system_arc(&config);
         let handler = RecoveryHandler::new(authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([143u8; 32])];
