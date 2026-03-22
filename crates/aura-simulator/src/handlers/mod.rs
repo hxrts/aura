@@ -15,7 +15,6 @@
 //! - Fault injection for resilience testing (Byzantine, network failures)
 //! - Time acceleration (no wall-clock waits)
 
-pub mod core;
 pub mod effect_composer;
 pub mod fault_simulation;
 pub mod scenario;
@@ -23,7 +22,6 @@ pub mod stateless_simulator;
 pub mod time_control;
 
 // Re-export all handler types
-pub use core::CoreSimulatorHandler;
 pub use effect_composer::{
     ComposedSimulationEnvironment, PropertyMonitoringConfig, SimulationEffectComposer,
     SimulationResults, SimulationScenarioConfig,

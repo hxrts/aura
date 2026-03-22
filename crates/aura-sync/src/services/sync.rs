@@ -389,106 +389,6 @@ impl SyncService {
         }
     }
 
-    /// Perform one round of automatic synchronization with PhysicalTimeEffects
-    ///
-    /// # Arguments
-    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
-    #[allow(dead_code)]
-    async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects>(
-        peer_manager: &RwLock<PeerManager>,
-        session_manager: &RwLock<SessionManager<serde_json::Value>>,
-        journal_sync: &RwLock<JournalSyncProtocol>,
-        rate_limiter: &RwLock<RateLimiter>,
-        max_concurrent: usize, // usize ok: function parameter for collection sizing
-        time_effects: &T,
-        now_instant: MonotonicInstant,
-    ) -> SyncResult<()> {
-        let tick_ts = time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?;
-
-        // Get available peers for synchronization
-        let peers = {
-            let manager = peer_manager.read();
-            manager.select_sync_peers(max_concurrent)
-        };
-
-        if peers.is_empty() {
-            return Ok(());
-        }
-
-        // Check rate limits before proceeding
-        tracing::debug!("Auto-sync tick at {}", tick_ts.ts_ms);
-        {
-            let mut limiter = rate_limiter.write();
-            for peer in &peers {
-                match limiter.check_rate_limit(*peer, 100, now_instant) {
-                    aura_core::RateLimitResult::Allowed => continue,
-                    aura_core::RateLimitResult::Denied { .. } => {
-                        return Ok(()); // Rate limited, skip this round
-                    }
-                }
-            }
-        }
-
-        // Get current active session count
-        let active_sessions = {
-            let manager = session_manager.read();
-            manager.get_statistics().active_sessions
-        };
-
-        // Respect max concurrent limit
-        if active_sessions >= max_concurrent as u64 {
-            return Ok(());
-        }
-
-        // Implement actual peer synchronization via journal_sync
-        let available_sessions = (max_concurrent as u64).saturating_sub(active_sessions) as usize;
-
-        if available_sessions == 0 {
-            tracing::debug!("No available session slots for auto-sync");
-            return Ok(());
-        }
-
-        // 1. Select best peers based on priority and health scores
-        let selected_peers =
-            Self::select_best_auto_sync_peers(peer_manager, &peers, available_sessions).await?;
-
-        if selected_peers.is_empty() {
-            tracing::debug!(
-                "No suitable peers selected for auto-sync from {} candidates",
-                peers.len()
-            );
-            return Ok(());
-        }
-
-        // 2. Initiate sync sessions with selected peers
-        let session_peers =
-            Self::create_sync_sessions(session_manager, &selected_peers, time_effects).await?;
-
-        // 3. Execute anti-entropy and journal sync protocols
-        let sync_results = Self::execute_auto_sync_protocols(journal_sync, &session_peers).await?;
-
-        // 4. Update peer scores based on sync results (get current time for timestamps)
-        let score_now = time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?;
-        Self::update_peer_scores_from_sync(peer_manager, &sync_results, &score_now).await?;
-
-        // 5. Track metrics and update session states
-        Self::update_auto_sync_metrics(&sync_results).await?;
-
-        tracing::info!(
-            "Auto-sync completed: {} peers processed, {} successful",
-            session_peers.len(),
-            sync_results.iter().filter(|(_, success)| *success).count()
-        );
-
-        Ok(())
-    }
-
     /// Check rate limits for peer sync operations
     ///
     /// # Arguments
@@ -648,22 +548,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Check if peer is currently in an active sync session
-    #[allow(dead_code)]
-    async fn is_peer_in_active_sync(&self, peer: DeviceId) -> bool {
-        let session_manager = self.session_manager.read();
-        session_manager.has_active_session(peer)
-    }
-
-    /// Execute sync protocol with a single peer
-    #[allow(dead_code)]
-    async fn execute_single_peer_sync(&self, peer: DeviceId) -> SyncResult<()> {
-        tracing::debug!("Starting auto-sync with peer {}", peer);
-        // Integration with transport/effects happens upstream; this path returns success for deterministic testing
-        tracing::info!("Auto-sync with peer {} completed", peer);
-        Ok(())
-    }
-
     /// Wait for active sessions to complete with timeout
     ///
     /// # Arguments
@@ -771,22 +655,6 @@ impl SyncService {
         }
 
         Ok(session_peers)
-    }
-
-    /// Execute auto-sync protocols for peers (static method)
-    #[allow(dead_code)]
-    async fn execute_auto_sync_protocols(
-        journal_sync: &RwLock<JournalSyncProtocol>,
-        peers: &[DeviceId],
-    ) -> SyncResult<Vec<(DeviceId, bool)>> {
-        let mut results = Vec::new();
-        for &peer in peers {
-            tracing::debug!("Auto-sync executed for peer {}", peer);
-            // success path
-            results.push((peer, true));
-            let _ = journal_sync; // keep parameter usage for compatibility
-        }
-        Ok(results)
     }
 
     /// Update peer scores based on sync results (static method)

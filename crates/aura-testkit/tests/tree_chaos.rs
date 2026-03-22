@@ -1,6 +1,10 @@
 //! Tree chaos and fault injection tests.
 
-#![allow(warnings)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::unwrap_used)]
 // DISABLED: Waiting on chaos testing infrastructure (fault injection, signature
 // verification hooks, anti-entropy protocol with digest exchange).  Remove the
 // `cfg(any())` gate once those primitives land.

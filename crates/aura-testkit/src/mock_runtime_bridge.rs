@@ -1514,7 +1514,10 @@ mod tests {
     #[tokio::test]
     async fn test_mock_runtime_bridge_basic() {
         let bridge = MockRuntimeBridge::new();
-        assert!(bridge.is_authenticated().await);
+        assert!(matches!(
+            bridge.authentication_status().await.unwrap(),
+            AuthenticationStatus::Authenticated { .. }
+        ));
         assert!(bridge.has_signing_capability().await);
     }
 

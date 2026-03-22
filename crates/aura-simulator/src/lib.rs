@@ -165,9 +165,9 @@ pub use types::{
 
 // Re-export effect handlers (pure algebraic effects)
 pub use handlers::{
-    ComposedSimulationEnvironment, CoreSimulatorHandler, PropertyMonitoringConfig,
-    SimulationEffectComposer, SimulationFaultHandler, SimulationResults, SimulationScenarioConfig,
-    SimulationScenarioHandler, SimulationTimeHandler, StatelessSimulatorHandler,
+    ComposedSimulationEnvironment, PropertyMonitoringConfig, SimulationEffectComposer,
+    SimulationFaultHandler, SimulationResults, SimulationScenarioConfig, SimulationScenarioHandler,
+    SimulationTimeHandler, StatelessSimulatorHandler,
 };
 
 // Re-export testkit bridge

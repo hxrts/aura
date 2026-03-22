@@ -209,16 +209,6 @@ impl SimulationEffectComposer {
             .build()
     }
 
-    /// Deprecated: Use `for_simulation` instead
-    #[deprecated(since = "0.1.0", note = "Use for_simulation instead")]
-    pub async fn for_simulation_async(
-        device_id: DeviceId,
-        authority_id: AuthorityId,
-        seed: u64,
-    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        Self::for_simulation(device_id, authority_id, seed).await
-    }
-
     /// Create a simulation environment with shared transport inbox for multi-agent simulations
     ///
     /// This factory enables communication between multiple simulated agents (e.g., Bob, Alice, Carol)
@@ -804,15 +794,6 @@ pub mod factory {
         SimulationEffectComposer::for_testing(device_id, authority_id).await
     }
 
-    /// Deprecated: Use `create_testing_environment` instead
-    #[deprecated(since = "0.1.0", note = "Use create_testing_environment instead")]
-    pub async fn create_testing_environment_async(
-        device_id: DeviceId,
-        authority_id: AuthorityId,
-    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        create_testing_environment(device_id, authority_id).await
-    }
-
     /// Create a deterministic simulation environment for reproducible testing
     pub async fn create_deterministic_environment(
         device_id: DeviceId,
@@ -822,15 +803,6 @@ pub mod factory {
         SimulationEffectComposer::for_simulation(device_id, authority_id, seed).await
     }
 
-    /// Deprecated: Use `create_deterministic_environment` instead
-    #[deprecated(since = "0.1.0", note = "Use create_deterministic_environment instead")]
-    pub async fn create_deterministic_environment_async(
-        device_id: DeviceId,
-        authority_id: AuthorityId,
-        seed: u64,
-    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
-        create_deterministic_environment(device_id, authority_id, seed).await
-    }
 }
 
 #[cfg(test)]
