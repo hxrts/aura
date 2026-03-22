@@ -1072,15 +1072,6 @@ impl UiModel {
         self.active_modal = None;
     }
 
-    pub(crate) fn select_channel_by_name(&mut self, name: &str) {
-        let selected_id = self
-            .channels
-            .iter()
-            .find(|row| row.name.eq_ignore_ascii_case(name))
-            .map(|row| row.id.clone());
-        self.select_channel_id(selected_id.as_deref());
-    }
-
     pub fn select_channel_id(&mut self, id: Option<&str>) {
         self.selected_channel = id.map(ToString::to_string);
         for row in &mut self.channels {
@@ -1735,11 +1726,6 @@ impl UiController {
 
     pub fn set_screen(&self, screen: ScreenId) {
         write_model(&self.model).set_screen(screen);
-        self.request_rerender();
-    }
-
-    pub(crate) fn select_channel_by_name(&self, name: &str) {
-        write_model(&self.model).select_channel_by_name(name);
         self.request_rerender();
     }
 

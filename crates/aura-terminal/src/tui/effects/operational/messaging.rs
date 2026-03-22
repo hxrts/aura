@@ -228,9 +228,7 @@ pub async fn handle_messaging(
         EffectCommand::JoinChannel { channel } => {
             // Use join_channel_by_name for string-based channel input from TUI
             match join_channel_by_name(app_core, channel).await {
-                Ok(()) => Some(Ok(OpResponse::ChannelJoined {
-                    channel_id: channel.clone(),
-                })),
+                Ok(channel_id) => Some(Ok(OpResponse::ChannelJoined { channel_id })),
                 Err(e) => Some(Err(OpError::typed(
                     OpFailureCode::JoinChannel,
                     format!("Failed to join channel: {e}"),

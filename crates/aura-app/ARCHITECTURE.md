@@ -108,6 +108,9 @@ Strict authoritative-ref rule for parity-critical workflows:
 - boundary-time name lookup may identify only already-materialized runtime
   channels; it may not mine pending invitations or renderer-local hints to
   repair missing authoritative context
+- public by-name workflow entry points that succeed must return the canonical
+  channel id they materialized so downstream Layer 7 code can carry that
+  strong identity forward instead of rebinding by display name
 - fallback/default helpers such as `*_or_fallback` are forbidden on
   parity-critical paths
 - once canonical entity metadata has an owned materialization path, downstream

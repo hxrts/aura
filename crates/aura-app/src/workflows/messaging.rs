@@ -2230,7 +2230,7 @@ async fn fail_join_channel<T>(
 pub async fn join_channel_by_name(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
-) -> Result<(), AuraError> {
+) -> Result<String, AuraError> {
     join_channel_by_name_with_instance(app_core, channel_name, None).await
 }
 
@@ -2240,7 +2240,7 @@ pub async fn join_channel_by_name_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
     instance_id: Option<OperationInstanceId>,
-) -> Result<(), AuraError> {
+) -> Result<String, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::join_channel(),
@@ -2259,7 +2259,7 @@ pub async fn join_channel_by_name_with_terminal_status(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
     instance_id: Option<OperationInstanceId>,
-) -> crate::ui_contract::WorkflowTerminalOutcome<()> {
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::join_channel(),
@@ -2296,7 +2296,7 @@ async fn join_channel_by_name_owned(
     _operation_context: Option<
         &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
     >,
-) -> Result<(), AuraError> {
+) -> Result<String, AuraError> {
     let channel_name = channel_name.trim();
     if channel_name.is_empty() {
         let error = AuraError::invalid("Channel name cannot be empty");
@@ -2336,7 +2336,7 @@ async fn join_channel_by_name_owned(
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
             .await?;
-        return Ok(());
+        return Ok(channel_id.to_string());
     }
 
     let binding =
@@ -2359,13 +2359,13 @@ async fn join_channel_by_name_owned(
     let authoritative_channel = authoritative_channel_ref(binding.channel_id, binding.context_id);
     if let Ok(proof) = prove_channel_membership_ready(app_core, channel_id).await {
         owner.publish_success_with(proof).await?;
-        return Ok(());
+        return Ok(channel_id.to_string());
     }
     if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
             .await?;
-        return Ok(());
+        return Ok(channel_id.to_string());
     }
 
     if let Err(error) =
@@ -2394,7 +2394,7 @@ async fn join_channel_by_name_owned(
     owner
         .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
         .await?;
-    Ok(())
+    Ok(channel_id.to_string())
 }
 
 /// Leave a channel using a typed ChannelId.
@@ -4333,7 +4333,7 @@ mod tests {
         .await
         .unwrap();
 
-        join_channel_by_name(&app_core, "#slash-lab")
+        let joined_channel_id = join_channel_by_name(&app_core, "#slash-lab")
             .await
             .expect("join should reuse existing channel");
 
@@ -4344,6 +4344,7 @@ mod tests {
             .count();
         assert_eq!(count, 1, "join should not duplicate named channels");
         assert!(state.channel(&existing_id).is_some());
+        assert_eq!(joined_channel_id, existing_id.to_string());
     }
 
     #[tokio::test]
