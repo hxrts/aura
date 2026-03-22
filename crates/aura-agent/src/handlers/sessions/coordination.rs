@@ -478,13 +478,11 @@ impl SessionOperations {
                 context: self.guard_context(),
                 payload: serde_json::to_vec(&invitation)
                     .map_err(|e| AgentError::effects(format!("serialize invitation: {e}")))?,
-                metadata: build_string_metadata(
-                    [
-                        ("session_id", request.session_id.to_string()),
-                        ("type", "session_invitation".to_string()),
-                        ("aura-destination-device-id", participant_id.to_string()),
-                    ],
-                ),
+                metadata: build_string_metadata([
+                    ("session_id", request.session_id.to_string()),
+                    ("type", "session_invitation".to_string()),
+                    ("aura-destination-device-id", participant_id.to_string()),
+                ]),
                 receipt: None,
             };
 

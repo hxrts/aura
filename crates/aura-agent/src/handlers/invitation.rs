@@ -2274,13 +2274,16 @@ pub async fn execute_guard_outcome(
     }
 
     let context_id = authority.default_context_id();
-    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id(), |command| {
-        match command {
-            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
-            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
-            _ => None,
-        }
-    });
+    let charge_peer =
+        resolve_charge_peer(
+            &outcome.effects,
+            authority.authority_id(),
+            |command| match command {
+                aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+                aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+                _ => None,
+            },
+        );
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in outcome.effects {
@@ -2365,13 +2368,16 @@ pub(crate) async fn execute_invitation_effect_commands(
     best_effort_network_failures: bool,
 ) -> AgentResult<()> {
     let context_id = authority.default_context_id();
-    let charge_peer = resolve_charge_peer(&commands, authority.authority_id(), |command| {
-        match command {
-            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
-            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
-            _ => None,
-        }
-    });
+    let charge_peer =
+        resolve_charge_peer(
+            &commands,
+            authority.authority_id(),
+            |command| match command {
+                aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+                aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+                _ => None,
+            },
+        );
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in commands {
@@ -2529,9 +2535,9 @@ async fn execute_notify_peer(
         let envelopes =
             load_relational_fact_envelopes_by_type(effects, authority_id, INVITATION_FACT_TYPE_ID)
                 .await
-            .map_err(|_| {
-                AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
-            })?;
+                .map_err(|_| {
+                    AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+                })?;
 
         let mut shareable: Option<(ShareableInvitation, ContextId)> = None;
         for envelope in &envelopes {

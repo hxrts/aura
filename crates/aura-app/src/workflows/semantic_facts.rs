@@ -1148,10 +1148,10 @@ pub(crate) fn assert_terminal_failure_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use crate::ui_contract::{SemanticOperationKind, SemanticOperationPhase};
     use crate::workflows::signals::read_signal_or_default;
-    use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::{AppConfig, AppCore};
     use aura_core::types::identifiers::AuthorityId;
 

@@ -9,19 +9,13 @@ pub(crate) fn new_workflow_stage_tracker(stage: &'static str) -> WorkflowStageTr
     Arc::new(Mutex::new(stage))
 }
 
-pub(crate) fn update_workflow_stage(
-    tracker: &Option<WorkflowStageTracker>,
-    stage: &'static str,
-) {
+pub(crate) fn update_workflow_stage(tracker: &Option<WorkflowStageTracker>, stage: &'static str) {
     if let Some(tracker) = tracker {
         update_workflow_stage_direct(tracker, stage);
     }
 }
 
-pub(crate) fn update_workflow_stage_direct(
-    tracker: &WorkflowStageTracker,
-    stage: &'static str,
-) {
+pub(crate) fn update_workflow_stage_direct(tracker: &WorkflowStageTracker, stage: &'static str) {
     if let Some(mut guard) = tracker.try_lock() {
         *guard = stage;
     }

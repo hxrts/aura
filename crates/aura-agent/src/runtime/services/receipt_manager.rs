@@ -9,8 +9,8 @@
 //! `RuntimeService::start()`. When enabled, it periodically prunes expired
 //! receipts based on the configured retention period.
 
-use super::state::with_state_mut_validated;
 use super::config_profiles::impl_service_config_profiles;
+use super::state::with_state_mut_validated;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::AgentConfig;
 use crate::runtime::TaskGroup;

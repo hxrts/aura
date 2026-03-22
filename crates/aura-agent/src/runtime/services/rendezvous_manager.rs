@@ -8,8 +8,8 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
-use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::config_profiles::impl_service_config_profiles;
+use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::DiscoveryTriggerOutcome;
@@ -412,11 +412,13 @@ impl RendezvousManager {
     async fn command_handle(
         &self,
     ) -> Result<ServiceActorHandle<RendezvousManager, RendezvousCommand>, ServiceError> {
-        self.shared.owner.command_handle(
-            self.name(),
-            "rendezvous command actor unavailable; service is not fully started",
-        )
-        .await
+        self.shared
+            .owner
+            .command_handle(
+                self.name(),
+                "rendezvous command actor unavailable; service is not fully started",
+            )
+            .await
     }
 
     fn spawn_command_actor(
@@ -685,7 +687,10 @@ impl RendezvousManager {
             ActorLifecyclePhase::Starting,
         )?;
 
-        self.shared.owner.set_state(RendezvousManagerState::Starting).await;
+        self.shared
+            .owner
+            .set_state(RendezvousManagerState::Starting)
+            .await;
 
         let rendezvous_config = RendezvousConfig {
             descriptor_validity_ms: self.config.descriptor_validity.as_millis() as u64,
@@ -699,7 +704,10 @@ impl RendezvousManager {
         let command_handle =
             self.spawn_command_actor(&service_tasks, RendezvousState::new_running(service));
         self.shared.owner.install_commands(command_handle).await;
-        self.shared.owner.set_state(RendezvousManagerState::Running).await;
+        self.shared
+            .owner
+            .set_state(RendezvousManagerState::Running)
+            .await;
 
         if self.config.auto_cleanup_enabled {
             self.start_cleanup_task(service_tasks.clone());
@@ -709,7 +717,10 @@ impl RendezvousManager {
         if self.config.lan_discovery.enabled {
             if let Err(error) = self.start_lan_discovery(service_tasks.clone()).await {
                 self.shared.owner.take_commands().await;
-                self.shared.owner.set_state(RendezvousManagerState::Failed).await;
+                self.shared
+                    .owner
+                    .set_state(RendezvousManagerState::Failed)
+                    .await;
                 let _ = service_tasks
                     .shutdown_with_timeout(Self::SHUTDOWN_TIMEOUT)
                     .await;
@@ -740,7 +751,10 @@ impl RendezvousManager {
             ActorLifecyclePhase::Stopping,
         )?;
 
-        self.shared.owner.set_state(RendezvousManagerState::Stopping).await;
+        self.shared
+            .owner
+            .set_state(RendezvousManagerState::Stopping)
+            .await;
 
         self.stop_lan_discovery().await;
         self.shared.owner.take_commands().await;
@@ -760,7 +774,10 @@ impl RendezvousManager {
             None
         };
 
-        self.shared.owner.set_state(RendezvousManagerState::Stopped).await;
+        self.shared
+            .owner
+            .set_state(RendezvousManagerState::Stopped)
+            .await;
 
         tracing::info!(
             event = "runtime.service.rendezvous.stopped",
@@ -769,7 +786,10 @@ impl RendezvousManager {
         );
         match task_shutdown_error {
             Some(error) => {
-                self.shared.owner.set_state(RendezvousManagerState::Failed).await;
+                self.shared
+                    .owner
+                    .set_state(RendezvousManagerState::Failed)
+                    .await;
                 Err(error)
             }
             None => Ok(()),
@@ -798,10 +818,14 @@ impl RendezvousManager {
                         }
                     };
 
-                    if let Ok(commands) = shared.owner.command_handle(
-                        "rendezvous_service",
-                        "rendezvous command actor unavailable; service is not fully started",
-                    ).await {
+                    if let Ok(commands) = shared
+                        .owner
+                        .command_handle(
+                            "rendezvous_service",
+                            "rendezvous command actor unavailable; service is not fully started",
+                        )
+                        .await
+                    {
                         let _ = commands
                             .request(|reply| RendezvousCommand::CleanupExpiredDescriptors {
                                 now_ms,

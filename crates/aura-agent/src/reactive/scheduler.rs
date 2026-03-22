@@ -834,11 +834,11 @@ fn topological_sort(views: Vec<Arc<dyn AnyView>>) -> Vec<Arc<dyn AnyView>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fact_registry::build_fact_registry;
     use crate::reactive::reductions::{
         ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction,
         InvitationReduction, RecoveryReduction,
     };
-    use crate::fact_registry::build_fact_registry;
     use aura_chat::{ChatDelta, ChatFact};
     use aura_core::{
         time::{OrderTime, PhysicalTime, TimeStamp},
