@@ -728,30 +728,30 @@ check_workflows() {
   local legacy_slash_dispatch
   legacy_slash_dispatch=$(rg --no-heading "CommandDispatcher::|CapabilityPolicy::|dispatcher\\.dispatch\\(" \
     crates/aura-terminal/src/tui/callbacks/factories -g "*.rs" || true)
-  emit_hits "Legacy slash command dispatcher usage" "$legacy_slash_dispatch"
+  emit_hits "Forbidden slash command dispatcher usage" "$legacy_slash_dispatch"
 
   local legacy_slash_parse
   legacy_slash_parse=$(rg --no-heading "parse_command\\(" \
     crates/aura-terminal/src/tui/callbacks/factories -g "*.rs" || true)
-  emit_hits "Legacy slash parse helper usage" "$legacy_slash_parse"
+  emit_hits "Forbidden slash parse helper usage" "$legacy_slash_parse"
 
   local legacy_input_parse
   legacy_input_parse=$(rg --no-heading "parse_command\\(" \
     crates/aura-terminal/src/tui/state/handlers/input.rs -g "*.rs" || true)
-  emit_hits "Legacy slash parse helper usage in input handler" "$legacy_input_parse"
+  emit_hits "Forbidden slash parse helper usage in input handler" "$legacy_input_parse"
 
   local legacy_dispatch_refs
   legacy_dispatch_refs=$(rg --no-heading "CommandDispatcher|CapabilityPolicy" \
     crates/aura-terminal/src -g "*.rs" \
     | grep -v "crates/aura-terminal/src/tui/effects/dispatcher.rs" \
     | grep -v "crates/aura-terminal/src/tui/effects/mod.rs" || true)
-  emit_hits "Legacy dispatcher references outside compatibility module" "$legacy_dispatch_refs"
+  emit_hits "Forbidden dispatcher references outside dispatcher module" "$legacy_dispatch_refs"
 
   local legacy_parse_refs
   legacy_parse_refs=$(rg --no-heading "parse_command\\(" \
     crates/aura-terminal/src -g "*.rs" \
     | grep -v "crates/aura-terminal/src/tui/commands.rs" || true)
-  emit_hits "Legacy parse helper references outside compatibility module" "$legacy_parse_refs"
+  emit_hits "Forbidden parse helper references outside commands module" "$legacy_parse_refs"
 
   local missing_strong=false
   if ! rg -q "workflows::strong_command::execute_planned" \

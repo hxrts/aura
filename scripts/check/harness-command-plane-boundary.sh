@@ -62,7 +62,7 @@ if rg -n 'submit_create_account\(|submit_create_home\(|submit_create_contact_inv
   crates/aura-harness/src/tool_api.rs >/tmp/harness-command-plane-boundary.$$ 2>/dev/null; then
   cat /tmp/harness-command-plane-boundary.$$ >&2
   rm -f /tmp/harness-command-plane-boundary.$$ || true
-  fail "legacy per-intent semantic command wrappers must not reappear in ToolApi"
+  fail "per-intent semantic command wrappers must not reappear in ToolApi"
 fi
 rm -f /tmp/harness-command-plane-boundary.$$ || true
 
@@ -70,7 +70,7 @@ if rg -n 'create_account_via_ui\(|create_home_via_ui\(|create_contact_invitation
   crates/aura-harness/src/coordinator.rs >/tmp/harness-command-plane-boundary.$$ 2>/dev/null; then
   cat /tmp/harness-command-plane-boundary.$$ >&2
   rm -f /tmp/harness-command-plane-boundary.$$ || true
-  fail "legacy per-intent semantic command wrappers must not reappear in HarnessCoordinator"
+  fail "per-intent semantic command wrappers must not reappear in HarnessCoordinator"
 fi
 rm -f /tmp/harness-command-plane-boundary.$$ || true
 

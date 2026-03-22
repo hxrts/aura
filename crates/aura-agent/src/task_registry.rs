@@ -36,7 +36,7 @@ use tokio::task::JoinHandle;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
-const COMPAT_TASK_NAME: &str = "compat.task";
+const DEFAULT_TASK_NAME: &str = "task.default";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskSupervisionError {
@@ -825,19 +825,19 @@ impl CancellationToken for TaskGroupCancellationToken {
 
 impl TaskSpawner for TaskSupervisor {
     fn spawn(&self, fut: BoxFuture<'static, ()>) {
-        let _ = self.spawn_named(COMPAT_TASK_NAME, fut);
+        let _ = self.spawn_named(DEFAULT_TASK_NAME, fut);
     }
 
     fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
         let _ = self
             .root
-            .spawn_boxed(COMPAT_TASK_NAME.to_string(), fut, Some(token));
+            .spawn_boxed(DEFAULT_TASK_NAME.to_string(), fut, Some(token));
     }
 
     fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
         let _ = self
             .root
-            .spawn_boxed_local(COMPAT_TASK_NAME.to_string(), fut, None);
+            .spawn_boxed_local(DEFAULT_TASK_NAME.to_string(), fut, None);
     }
 
     fn spawn_local_cancellable(
@@ -847,7 +847,7 @@ impl TaskSpawner for TaskSupervisor {
     ) {
         let _ = self
             .root
-            .spawn_boxed_local(COMPAT_TASK_NAME.to_string(), fut, Some(token));
+            .spawn_boxed_local(DEFAULT_TASK_NAME.to_string(), fut, Some(token));
     }
 
     fn cancellation_token(&self) -> Arc<dyn CancellationToken> {

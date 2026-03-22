@@ -469,8 +469,7 @@ mod tests {
     }
 
     async fn init_signals_for_test(app_core: &Arc<RwLock<AppCore>>) {
-        let mut core = app_core.write().await;
-        core.init_signals().await.unwrap();
+        AppCore::init_signals_with_hooks(app_core).await.unwrap();
     }
 
     #[tokio::test]
