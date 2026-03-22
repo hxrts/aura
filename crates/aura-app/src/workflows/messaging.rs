@@ -34,6 +34,9 @@ use crate::workflows::semantic_facts::{
     SemanticWorkflowOwner,
 };
 use crate::workflows::signals::read_signal;
+use crate::workflows::stage_tracker::{
+    new_workflow_stage_tracker, update_workflow_stage, WorkflowStageTracker,
+};
 use crate::{
     core::IntentError,
     runtime_bridge::{InvitationBridgeType, InvitationInfo, RuntimeBridge},
@@ -46,7 +49,7 @@ use crate::{
     },
     AppCore,
 };
-use async_lock::{Mutex, RwLock};
+use async_lock::RwLock;
 use aura_chat::{ChatFact, ChatMessageDeliveryStatus};
 use aura_core::{
     crypto::hash::hash,
@@ -66,7 +69,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
-type InviteStageTracker = Arc<Mutex<&'static str>>;
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 pub(crate) const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
@@ -132,19 +134,6 @@ async fn timeout_workflow_stage_with_deadline<T>(
         }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
-    }
-}
-
-#[allow(clippy::disallowed_types)]
-fn new_invite_stage_tracker(stage: &'static str) -> InviteStageTracker {
-    Arc::new(Mutex::new(stage))
-}
-
-fn update_invite_stage(tracker: &Option<InviteStageTracker>, stage: &'static str) {
-    if let Some(tracker) = tracker {
-        if let Some(mut guard) = tracker.try_lock() {
-            *guard = stage;
-        }
     }
 }
 
@@ -3685,11 +3674,11 @@ async fn invite_user_to_channel_with_context_owned(
         Duration::from_millis(INVITE_USER_OPERATION_TIMEOUT_MS),
     )
     .await?;
-    let stage_tracker = Some(new_invite_stage_tracker("publish_workflow_dispatched"));
+    let stage_tracker = Some(new_workflow_stage_tracker("publish_workflow_dispatched"));
 
     let result = execute_with_runtime_timeout_budget(&runtime, &deadline, || async {
         // Resolve via contacts first so command targets can use IDs or contact names.
-        update_invite_stage(&stage_tracker, "resolve_target_authority");
+        update_workflow_stage(&stage_tracker, "resolve_target_authority");
         let receiver = timeout_workflow_stage_with_deadline(
             &runtime,
             "invite_user_to_channel",
@@ -3698,7 +3687,7 @@ async fn invite_user_to_channel_with_context_owned(
             resolve_target_authority_for_invite(app_core, target_user_id),
         )
         .await?;
-        update_invite_stage(&stage_tracker, "resolve_channel_id");
+        update_workflow_stage(&stage_tracker, "resolve_channel_id");
         let channel_id = timeout_workflow_stage_with_deadline(
             &runtime,
             "invite_user_to_channel",
@@ -3710,7 +3699,7 @@ async fn invite_user_to_channel_with_context_owned(
         let channel_name_hint =
             canonical_channel_name_hint_for_invite(app_core, channel_id, channel_name_or_id)
                 .await?;
-        update_invite_stage(&stage_tracker, "invite_authority_to_channel");
+        update_workflow_stage(&stage_tracker, "invite_authority_to_channel");
 
         invite_authority_to_channel_with_context(
             app_core,
@@ -3801,16 +3790,16 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
     owner: &SemanticWorkflowOwner,
     _operation_instance_id: Option<OperationInstanceId>,
     deadline: Option<TimeoutBudget>,
-    stage_tracker: Option<InviteStageTracker>,
+    stage_tracker: Option<WorkflowStageTracker>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    update_invite_stage(&stage_tracker, "require_runtime");
+    update_workflow_stage(&stage_tracker, "require_runtime");
     let runtime = require_runtime(app_core).await?;
     let authoritative_channel = match context_id {
         Some(context_id) => AuthoritativeChannelRef::new(channel_id, context_id),
         None => {
-            update_invite_stage(&stage_tracker, "require_authoritative_context");
+            update_workflow_stage(&stage_tracker, "require_authoritative_context");
             timeout_workflow_stage_with_deadline(
                 &runtime,
                 "invite_authority_to_channel",
@@ -3827,7 +3816,7 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         }
     };
     let context_id = authoritative_channel.context_id();
-    update_invite_stage(&stage_tracker, "create_channel_invitation");
+    update_workflow_stage(&stage_tracker, "create_channel_invitation");
     let invitation = crate::workflows::invitation::create_channel_invitation_owned(
         app_core,
         receiver,
@@ -3843,7 +3832,7 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         false,
     )
     .await?;
-    update_invite_stage(&stage_tracker, "local_projection");
+    update_workflow_stage(&stage_tracker, "local_projection");
     timeout_workflow_stage_with_deadline(
         &runtime,
         "invite_authority_to_channel",
@@ -3856,7 +3845,7 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         },
     )
     .await?;
-    update_invite_stage(&stage_tracker, "ensure_invited_peer_channel");
+    update_workflow_stage(&stage_tracker, "ensure_invited_peer_channel");
     timeout_workflow_stage_with_deadline(
         &runtime,
         "invite_authority_to_channel",

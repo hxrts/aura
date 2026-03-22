@@ -229,17 +229,12 @@ enum ExactLifecyclePublication {
     ),
 }
 
-enum SemanticWorkflowPublicationState {
-    Legacy,
-    Exact(Option<SemanticOperationContext>),
-}
-
 pub(in crate::workflows) struct SemanticWorkflowOwner {
     app_core: Arc<RwLock<AppCore>>,
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
-    publication_state: Mutex<SemanticWorkflowPublicationState>,
+    publication_state: Mutex<Option<SemanticOperationContext>>,
     last_terminal_status: Mutex<Option<WorkflowTerminalStatus>>,
 }
 
@@ -251,9 +246,7 @@ impl SemanticWorkflowOwner {
         kind: SemanticOperationKind,
     ) -> Self {
         let publication_state =
-            issue_semantic_operation_context(operation_id.clone(), instance_id.clone())
-                .map(|context| SemanticWorkflowPublicationState::Exact(Some(context)))
-                .unwrap_or(SemanticWorkflowPublicationState::Legacy);
+            issue_semantic_operation_context(operation_id.clone(), instance_id.clone());
         Self {
             app_core: app_core.clone(),
             operation_id,
@@ -291,47 +284,34 @@ impl SemanticWorkflowOwner {
     ) -> Result<(), AuraError> {
         let publication = {
             let mut state = self.publication_state.lock().await;
-            match &mut *state {
-                SemanticWorkflowPublicationState::Exact(context) => match phase {
-                    SemanticOperationPhase::Succeeded => {
-                        let Some(context) = context.take() else {
-                            return Err(AuraError::invalid(
-                                "semantic workflow owner has already published terminal lifecycle",
-                            ));
-                        };
-                        Some(ExactOperationLifecyclePublication::success_from_context(
-                            semantic_lifecycle_publication_capability(),
-                            context,
-                            self.kind,
-                        ))
-                    }
-                    SemanticOperationPhase::Cancelled => {
-                        let Some(context) = context.take() else {
-                            return Err(AuraError::invalid(
-                                "semantic workflow owner has already published terminal lifecycle",
-                            ));
-                        };
-                        Some(ExactOperationLifecyclePublication::cancelled_from_context(
-                            semantic_lifecycle_publication_capability(),
-                            context,
-                            self.kind,
-                        ))
-                    }
-                    _ => {
-                        let Some(context) = context.as_mut() else {
-                            return Err(AuraError::invalid(
-                                "semantic workflow owner has already published terminal lifecycle",
-                            ));
-                        };
-                        Some(ExactOperationLifecyclePublication::phase_from_context(
-                            semantic_lifecycle_publication_capability(),
-                            context,
-                            self.kind,
-                            phase,
-                        ))
-                    }
-                },
-                SemanticWorkflowPublicationState::Legacy => None,
+            match phase {
+                SemanticOperationPhase::Succeeded => state.take().map(|context| {
+                    ExactOperationLifecyclePublication::success_from_context(
+                        semantic_lifecycle_publication_capability(),
+                        context,
+                        self.kind,
+                    )
+                }),
+                SemanticOperationPhase::Cancelled => state.take().map(|context| {
+                    ExactOperationLifecyclePublication::cancelled_from_context(
+                        semantic_lifecycle_publication_capability(),
+                        context,
+                        self.kind,
+                    )
+                }),
+                _ => {
+                    let Some(context) = state.as_mut() else {
+                        return Err(AuraError::invalid(
+                            "semantic workflow owner has already published terminal lifecycle",
+                        ));
+                    };
+                    Some(ExactOperationLifecyclePublication::phase_from_context(
+                        semantic_lifecycle_publication_capability(),
+                        context,
+                        self.kind,
+                        phase,
+                    ))
+                }
             }
         };
         let terminal_status = matches!(
@@ -379,21 +359,13 @@ impl SemanticWorkflowOwner {
         let _postcondition = proof.declared_postcondition();
         let publication = {
             let mut state = self.publication_state.lock().await;
-            match &mut *state {
-                SemanticWorkflowPublicationState::Exact(context) => {
-                    let Some(context) = context.take() else {
-                        return Err(AuraError::invalid(
-                            "semantic workflow owner has already published terminal lifecycle",
-                        ));
-                    };
-                    Some(ExactOperationLifecyclePublication::success_from_context(
-                        semantic_lifecycle_publication_capability(),
-                        context,
-                        self.kind,
-                    ))
-                }
-                SemanticWorkflowPublicationState::Legacy => None,
-            }
+            state.take().map(|context| {
+                ExactOperationLifecyclePublication::success_from_context(
+                    semantic_lifecycle_publication_capability(),
+                    context,
+                    self.kind,
+                )
+            })
         };
         let terminal_status = WorkflowTerminalStatus {
             causality: publication
@@ -425,22 +397,14 @@ impl SemanticWorkflowOwner {
     ) -> Result<(), AuraError> {
         let publication = {
             let mut state = self.publication_state.lock().await;
-            match &mut *state {
-                SemanticWorkflowPublicationState::Exact(context) => {
-                    let Some(context) = context.take() else {
-                        return Err(AuraError::invalid(
-                            "semantic workflow owner has already published terminal lifecycle",
-                        ));
-                    };
-                    Some(ExactOperationLifecyclePublication::failure_from_context(
-                        semantic_lifecycle_publication_capability(),
-                        context,
-                        self.kind,
-                        error.clone(),
-                    ))
-                }
-                SemanticWorkflowPublicationState::Legacy => None,
-            }
+            state.take().map(|context| {
+                ExactOperationLifecyclePublication::failure_from_context(
+                    semantic_lifecycle_publication_capability(),
+                    context,
+                    self.kind,
+                    error.clone(),
+                )
+            })
         };
         let terminal_status = WorkflowTerminalStatus {
             causality: publication
@@ -471,21 +435,13 @@ impl SemanticWorkflowOwner {
     ) -> Result<AuthoritativeSemanticFact, AuraError> {
         let publication = {
             let mut state = self.publication_state.lock().await;
-            match &mut *state {
-                SemanticWorkflowPublicationState::Exact(context) => {
-                    let Some(context) = context.take() else {
-                        return Err(AuraError::invalid(
-                            "semantic workflow owner has already published terminal lifecycle",
-                        ));
-                    };
-                    Some(ExactOperationLifecyclePublication::success_from_context(
-                        semantic_lifecycle_publication_capability(),
-                        context,
-                        self.kind,
-                    ))
-                }
-                SemanticWorkflowPublicationState::Legacy => None,
-            }
+            state.take().map(|context| {
+                ExactOperationLifecyclePublication::success_from_context(
+                    semantic_lifecycle_publication_capability(),
+                    context,
+                    self.kind,
+                )
+            })
         };
 
         Ok(match publication {
@@ -1192,7 +1148,18 @@ mod tests {
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use crate::ui_contract::{SemanticOperationKind, SemanticOperationPhase};
     use crate::workflows::signals::read_signal_or_default;
+    use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::{AppConfig, AppCore};
+    use aura_core::types::identifiers::AuthorityId;
+
+    fn runtime_backed_test_app_core() -> Arc<RwLock<AppCore>> {
+        let authority = AuthorityId::new_from_entropy([42; 32]);
+        let runtime = Arc::new(OfflineRuntimeBridge::new(authority));
+        Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime)
+                .unwrap_or_else(|error| panic!("{error}")),
+        ))
+    }
 
     #[tokio::test]
     async fn authoritative_semantic_facts_snapshot_reads_owned_store_without_registered_signal() {
@@ -1253,9 +1220,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_authoritative_fact_updates_do_not_lose_entries() {
-        let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
-        ));
+        let app_core = runtime_backed_test_app_core();
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
@@ -1306,9 +1271,7 @@ mod tests {
 
     #[tokio::test]
     async fn exact_operation_lifecycle_publication_retains_instance_identity() {
-        let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
-        ));
+        let app_core = runtime_backed_test_app_core();
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
@@ -1342,9 +1305,7 @@ mod tests {
 
     #[tokio::test]
     async fn exact_operation_lifecycle_round_trips_identity_under_contention() {
-        let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
-        ));
+        let app_core = runtime_backed_test_app_core();
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .unwrap_or_else(|error| panic!("{error}"));
