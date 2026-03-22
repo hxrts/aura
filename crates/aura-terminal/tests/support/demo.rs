@@ -6,7 +6,7 @@
 //! # Invite Code Generation
 //!
 //! Demo invite codes must match the derivation in:
-//! - `aura_terminal::demo::hints::generate_invite_code`
+//! - `aura_terminal::demo_invitation::generate_demo_contact_invite_code`
 //! - `aura_terminal::demo::mod::SimulatedAgent::new_with_shared_transport`
 //! - `aura_terminal::demo::mod::AgentFactory::create_demo_agents`
 //!
@@ -15,6 +15,7 @@
 //! - Alice uses `seed`, Carol uses `seed + 1`
 //! - Creates Contact invitations (not Guardian)
 
+use aura_terminal::demo_invitation::generate_demo_contact_invite_code;
 use aura_terminal::ids;
 use base64::Engine;
 
@@ -45,32 +46,7 @@ pub const CAROL: &str = "Carol";
 /// let carol_code = generate_demo_invite_code("Carol", DEFAULT_DEMO_SEED + 1);
 /// ```
 pub fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    // Create deterministic authority ID using the SAME derivation as SimulatedAgent
-    // CRITICAL: Must use ids::authority_id() for domain separation
-    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
-
-    // Create deterministic invitation ID from seed and name
-    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:invitation"));
-
-    // Create ShareableInvitation-compatible structure
-    // Uses Contact type (not Guardian) - guardian requests are sent in-band
-    let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Contact": {
-                "nickname": name
-            }
-        },
-        "expires_at": null,
-        "message": format!("Contact invitation from {name} (demo)")
-    });
-
-    // Encode as base64 with aura:v1: prefix
-    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{b64}")
+    generate_demo_contact_invite_code(name, seed)
 }
 
 /// Generate Alice's invite code with the default demo seed.
@@ -109,7 +85,7 @@ pub fn generate_demo_guardian_invite_code(name: &str, seed: u64) -> String {
         "sender_id": sender_id.uuid().to_string(),
         "invitation_type": {
             "Guardian": {
-                "nickname": name
+                "subject_authority": sender_id.uuid().to_string()
             }
         },
         "expires_at": null,

@@ -28,122 +28,23 @@
 //! cargo test --package aura-terminal --test tui_callback_wiring_batch2 -- --nocapture
 //! ```
 
-use async_lock::RwLock;
-use std::sync::Arc;
-
 use aura_app::signal_defs::{
     CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
 use aura_app::views::chat::ChannelType;
-use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::AuthorityId;
-use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::ids;
-use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
-use aura_testkit::MockRuntimeBridge;
-use base64::Engine;
+
+#[path = "../support/mod.rs"]
+mod support;
+
+use support::{generate_demo_invite_code, wait_for_chat, MockRuntimeTestEnv};
+
+const TEST_PREFIX: &str = "aura-callback-test2";
 
 fn peer_authority_id(seed: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([seed; 32])
-}
-
-fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
-    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:invitation"));
-    let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Contact": {
-                "nickname": name
-            }
-        },
-        "expires_at": null,
-        "message": format!("Contact invitation from {name} (demo)")
-    });
-    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{b64}")
-}
-
-// ============================================================================
-// Test Helpers
-// ============================================================================
-
-/// Create a test environment with IoContext and AppCore using MockRuntimeBridge
-async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
-
-    // Create MockRuntimeBridge for testing
-    let mock_bridge = Arc::new(MockRuntimeBridge::new());
-    let app_core =
-        AppCore::with_runtime(AppConfig::default(), mock_bridge).expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let initialized_app_core = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
-
-    let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core)
-        .with_existing_account(false)
-        .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{name}"))
-        .with_mode(TuiMode::Production)
-        .build()
-        .expect("IoContext builder should succeed for tests");
-
-    // Create account for testing
-    ctx.create_account(&format!("TestUser-{name}"))
-        .await
-        .expect("Failed to create account");
-
-    if let Some(runtime_authority) = {
-        let core = app_core.read().await;
-        core.runtime().map(|runtime| runtime.authority_id())
-    } {
-        app_core.write().await.set_authority(runtime_authority);
-    }
-
-    // Refresh settings from mock runtime to populate signal
-    aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
-        .await
-        .expect("Failed to refresh settings from runtime");
-
-    (Arc::new(ctx), app_core)
-}
-
-async fn wait_for_chat(
-    app_core: &Arc<RwLock<AppCore>>,
-    mut predicate: impl FnMut(&aura_app::views::ChatState) -> bool,
-) -> aura_app::views::ChatState {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
-    loop {
-        let chat = {
-            let core = app_core.read().await;
-            core.read(&*CHAT_SIGNAL).await.unwrap()
-        };
-
-        if predicate(&chat) {
-            return chat;
-        }
-
-        if tokio::time::Instant::now() >= deadline {
-            panic!("Timed out waiting for chat state to satisfy predicate");
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-}
-
-/// Cleanup test directory
-fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
 }
 
 // ============================================================================
@@ -160,7 +61,8 @@ fn cleanup_test_dir(name: &str) {
 async fn test_invitation_export_produces_valid_code() {
     println!("\n=== Invitation Export Produces Valid Code Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("inv-export").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "inv-export").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Export an invitation
     println!("Phase 1: Export invite code");
@@ -201,7 +103,6 @@ async fn test_invitation_export_produces_valid_code() {
     );
     println!("  Codes are unique");
 
-    cleanup_test_dir("inv-export");
     println!("\n=== Invitation Export Produces Valid Code Test PASSED ===\n");
 }
 
@@ -215,7 +116,8 @@ async fn test_invitation_export_produces_valid_code() {
 async fn test_invitation_roundtrip_preserves_data() {
     println!("\n=== Invitation Roundtrip Preserves Data Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("inv-roundtrip").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "inv-roundtrip").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Export an invitation
     println!("Phase 1: Export invitation");
@@ -243,7 +145,6 @@ async fn test_invitation_roundtrip_preserves_data() {
     let contact_count = contacts.contact_count();
     println!("  Contact count after import: {contact_count}");
 
-    cleanup_test_dir("inv-roundtrip");
     println!("\n=== Invitation Roundtrip Preserves Data Test PASSED ===\n");
 }
 
@@ -263,7 +164,8 @@ async fn test_invitation_roundtrip_preserves_data() {
 async fn test_start_direct_chat_creates_dm_channel() {
     println!("\n=== Start Direct Chat Creates DM Channel Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("dm-start").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "dm-start").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
@@ -327,7 +229,6 @@ async fn test_start_direct_chat_creates_dm_channel() {
     // The ChatState no longer tracks selection; that's handled in TuiState.
     println!("\n(Channel selection now handled by TUI state)");
 
-    cleanup_test_dir("dm-start");
     println!("\n=== Start Direct Chat Creates DM Channel Test PASSED ===\n");
 }
 
@@ -342,7 +243,8 @@ async fn test_start_direct_chat_creates_dm_channel() {
 async fn test_send_direct_message_adds_message() {
     println!("\n=== Send Direct Message Adds Message Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("dm-send").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "dm-send").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
@@ -433,7 +335,6 @@ async fn test_send_direct_message_adds_message() {
     println!("  Channel: {channel_id}", channel_id = msg.channel_id);
     println!("  Is own: {is_own}", is_own = msg.is_own);
 
-    cleanup_test_dir("dm-send");
     println!("\n=== Send Direct Message Adds Message Test PASSED ===\n");
 }
 
@@ -451,7 +352,8 @@ async fn test_send_direct_message_adds_message() {
 async fn test_set_channel_mode_requires_admin() {
     println!("\n=== Set Channel Mode Requires Admin Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("channel-mode").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "channel-mode").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Try to set channel mode (should fail - requires Admin auth)
     println!("Phase 1: Attempt SetChannelMode (requires Admin privileges)");
@@ -489,7 +391,6 @@ async fn test_set_channel_mode_requires_admin() {
     println!("  Channel mode (default or set): {mode:?}");
     // Mode access should always work, even without admin rights
 
-    cleanup_test_dir("channel-mode");
     println!("\n=== Set Channel Mode Requires Admin Test PASSED ===\n");
 }
 
@@ -508,7 +409,8 @@ async fn test_set_channel_mode_requires_admin() {
 async fn test_peer_management_operations() {
     println!("\n=== Peer Management Operations Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("peer-mgmt").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "peer-mgmt").await;
+    let (ctx, app_core) = env.clones();
 
     // Phase 1: Add a peer
     println!("Phase 1: Add peer");
@@ -548,7 +450,6 @@ async fn test_peer_management_operations() {
     assert!(result.is_ok(), "RemovePeer should succeed: {result:?}");
     println!("  RemovePeer dispatched");
 
-    cleanup_test_dir("peer-mgmt");
     println!("\n=== Peer Management Operations Test PASSED ===\n");
 }
 
@@ -566,7 +467,8 @@ async fn test_peer_management_operations() {
 async fn test_force_sync_updates_status() {
     println!("\n=== Force Sync Updates Status Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("force-sync").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "force-sync").await;
+    let (ctx, app_core) = env.clones();
 
     // Phase 1: Check initial sync status
     println!("Phase 1: Check initial sync status");
@@ -597,7 +499,6 @@ async fn test_force_sync_updates_status() {
     println!("  is_syncing: {is_syncing}");
     // After sync completes, should be false
 
-    cleanup_test_dir("force-sync");
     println!("\n=== Force Sync Updates Status Test PASSED ===\n");
 }
 
@@ -611,7 +512,8 @@ async fn test_force_sync_updates_status() {
 async fn test_request_state_dispatch() {
     println!("\n=== Request State Dispatch Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("req-state").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "req-state").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Request state from a peer
     println!("Phase 1: Request state from peer");
@@ -646,7 +548,6 @@ async fn test_request_state_dispatch() {
     // was properly handled by the dispatch system, not silently dropped
     println!("  Command dispatch completed (not dropped)");
 
-    cleanup_test_dir("req-state");
     println!("\n=== Request State Dispatch Test PASSED ===\n");
 }
 
@@ -663,7 +564,8 @@ async fn test_request_state_dispatch() {
 async fn test_connection_status_tracking() {
     println!("\n=== Connection Status Tracking Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("conn-status").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "conn-status").await;
+    let (ctx, app_core) = env.clones();
 
     // Phase 1: Check initial connection status
     println!("Phase 1: Check initial connection status");
@@ -694,7 +596,6 @@ async fn test_connection_status_tracking() {
         println!("  Updated connection signal: {status:?}");
     }
 
-    cleanup_test_dir("conn-status");
     println!("\n=== Connection Status Tracking Test PASSED ===\n");
 }
 
@@ -712,7 +613,8 @@ async fn test_connection_status_tracking() {
 async fn test_moderator_grant_revoke_operations() {
     println!("\n=== Moderator Grant/Revoke Operations Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("moderator-ops").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "moderator-ops").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Try to grant moderator (may fail due to authorization)
     println!("Phase 1: Try to grant moderator role");
@@ -736,7 +638,6 @@ async fn test_moderator_grant_revoke_operations() {
     println!("  RevokeModerator result: {result:?}");
     // This may also fail due to authorization
 
-    cleanup_test_dir("moderator-ops");
     println!("\n=== Moderator Grant/Revoke Operations Test PASSED ===\n");
 }
 
@@ -754,7 +655,8 @@ async fn test_moderator_grant_revoke_operations() {
 async fn test_command_authorization_levels() {
     println!("\n=== Command Authorization Levels Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("auth-levels").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "auth-levels").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Public command (should always succeed)
     println!("Phase 1: Public command (Ping)");
@@ -782,7 +684,6 @@ async fn test_command_authorization_levels() {
     assert!(result.is_ok(), "UpdateMfaPolicy should succeed: {result:?}");
     println!("  UpdateMfaPolicy succeeded");
 
-    cleanup_test_dir("auth-levels");
     println!("\n=== Command Authorization Levels Test PASSED ===\n");
 }
 
@@ -799,7 +700,8 @@ async fn test_command_authorization_levels() {
 async fn test_discover_peers_operation() {
     println!("\n=== Discover Peers Operation Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("discover-peers").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "discover-peers").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Trigger peer discovery
     println!("Phase 1: Trigger peer discovery");
@@ -819,7 +721,6 @@ async fn test_discover_peers_operation() {
     let count = ctx.known_peers_count().await;
     println!("  Known peers count: {count}");
 
-    cleanup_test_dir("discover-peers");
     println!("\n=== Discover Peers Operation Test PASSED ===\n");
 }
 
@@ -836,7 +737,8 @@ async fn test_discover_peers_operation() {
 async fn test_account_backup_roundtrip() {
     println!("\n=== Account Backup Roundtrip Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("backup").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "backup").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Export account backup
     println!("Phase 1: Export account backup");
@@ -860,7 +762,6 @@ async fn test_account_backup_roundtrip() {
     assert!(result.is_ok(), "Import should succeed: {result:?}");
     println!("  Backup import succeeded");
 
-    cleanup_test_dir("backup");
     println!("\n=== Account Backup Roundtrip Test PASSED ===\n");
 }
 
@@ -878,7 +779,8 @@ async fn test_account_backup_roundtrip() {
 async fn test_all_snapshots_consistent() {
     println!("\n=== All Snapshots Consistent Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("snapshots").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "snapshots").await;
+    let (ctx, _app_core) = env.clones();
 
     // Phase 1: Read all snapshots
     println!("Phase 1: Read all snapshots");
@@ -928,7 +830,6 @@ async fn test_all_snapshots_consistent() {
     );
     println!("  Snapshots are consistent across reads");
 
-    cleanup_test_dir("snapshots");
     println!("\n=== All Snapshots Consistent Test PASSED ===\n");
 }
 
@@ -942,7 +843,8 @@ async fn test_all_snapshots_consistent() {
 async fn test_complete_dm_flow() {
     println!("\n=== Complete DM Flow Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("dm-flow").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "dm-flow").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
@@ -1019,7 +921,6 @@ async fn test_complete_dm_flow() {
         }
     }
 
-    cleanup_test_dir("dm-flow");
     println!("\n=== Complete DM Flow Test PASSED ===\n");
 }
 
@@ -1028,7 +929,8 @@ async fn test_complete_dm_flow() {
 async fn test_complete_sync_flow() {
     println!("\n=== Complete Sync Flow Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("sync-flow").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "sync-flow").await;
+    let (ctx, app_core) = env.clones();
 
     // Phase 1: Add some peers to sync with
     println!("Phase 1: Add peers");
@@ -1076,6 +978,5 @@ async fn test_complete_sync_flow() {
     println!("  is_connected: {is_connected}");
     println!("  known_peers_count: {peer_count}");
 
-    cleanup_test_dir("sync-flow");
     println!("\n=== Complete Sync Flow Test PASSED ===\n");
 }

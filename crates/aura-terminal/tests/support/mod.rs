@@ -45,7 +45,10 @@ pub mod state_machine;
 // ============================================================================
 
 // Environment types
-pub use env::{cleanup_test_dir, setup_test_env, FullTestEnv, FullTestEnvConfig, SimpleTestEnv};
+pub use env::{
+    cleanup_test_dir, cleanup_test_dir_with_prefix, setup_test_env, setup_test_env_with_prefix,
+    FullTestEnv, FullTestEnvConfig, MockRuntimeTestEnv, SimpleTestEnv,
+};
 
 // State machine testing
 pub use state_machine::TestTui;
@@ -60,7 +63,7 @@ pub use signals::{
 // Demo helpers
 pub use demo::{
     alice_authority_id, alice_invite_code, carol_authority_id, carol_invite_code,
-    generate_demo_invite_code, DEFAULT_DEMO_SEED,
+    generate_demo_guardian_invite_code, generate_demo_invite_code, DEFAULT_DEMO_SEED,
 };
 
 // ============================================================================

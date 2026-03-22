@@ -30,25 +30,150 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::hash::hash;
 use aura_core::threshold::ThresholdConfig;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::SigningContext;
-use aura_core::{DeviceId, ThresholdSignature};
+use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner, ThresholdSignature};
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_relational::ContactFact;
 use base64::Engine;
+use futures::future::{BoxFuture, LocalBoxFuture};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{watch, RwLock};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 type AmpChannelParticipants = Arc<RwLock<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>;
 type ModerationStatuses =
     Arc<RwLock<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>;
+
+#[derive(Clone)]
+struct MockRuntimeCancellationToken {
+    shutdown_tx: watch::Sender<bool>,
+}
+
+#[async_trait]
+impl CancellationToken for MockRuntimeCancellationToken {
+    async fn cancelled(&self) {
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        if *shutdown_rx.borrow() {
+            return;
+        }
+
+        loop {
+            if shutdown_rx.changed().await.is_err() {
+                return;
+            }
+            if *shutdown_rx.borrow() {
+                return;
+            }
+        }
+    }
+
+    fn is_cancelled(&self) -> bool {
+        *self.shutdown_tx.borrow()
+    }
+}
+
+#[derive(Debug)]
+struct MockRuntimeTaskSpawnerImpl {
+    shutdown_tx: watch::Sender<bool>,
+    handles: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl MockRuntimeTaskSpawnerImpl {
+    fn new(shutdown_tx: watch::Sender<bool>) -> Self {
+        Self {
+            shutdown_tx,
+            handles: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn record(&self, handle: JoinHandle<()>) {
+        if let Ok(mut handles) = self.handles.lock() {
+            handles.push(handle);
+        }
+    }
+
+    fn abort_all(&self) {
+        let _ = self.shutdown_tx.send(true);
+        if let Ok(mut handles) = self.handles.lock() {
+            for handle in handles.drain(..) {
+                handle.abort();
+            }
+        }
+    }
+}
+
+impl TaskSpawner for MockRuntimeTaskSpawnerImpl {
+    fn spawn(&self, fut: BoxFuture<'static, ()>) {
+        self.record(tokio::spawn(fut));
+    }
+
+    fn spawn_cancellable(&self, fut: BoxFuture<'static, ()>, token: Arc<dyn CancellationToken>) {
+        self.record(tokio::spawn(async move {
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = fut => {}
+            }
+        }));
+    }
+
+    fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {
+        self.record(tokio::task::spawn_local(fut));
+    }
+
+    fn spawn_local_cancellable(
+        &self,
+        fut: LocalBoxFuture<'static, ()>,
+        token: Arc<dyn CancellationToken>,
+    ) {
+        self.record(tokio::task::spawn_local(async move {
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = fut => {}
+            }
+        }));
+    }
+
+    fn cancellation_token(&self) -> Arc<dyn CancellationToken> {
+        Arc::new(MockRuntimeCancellationToken {
+            shutdown_tx: self.shutdown_tx.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MockRuntimeTaskOwner {
+    inner: Arc<MockRuntimeTaskSpawnerImpl>,
+    spawner: OwnedTaskSpawner,
+}
+
+impl MockRuntimeTaskOwner {
+    fn new() -> Self {
+        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
+        let inner = Arc::new(MockRuntimeTaskSpawnerImpl::new(shutdown_tx));
+        let shutdown = OwnedShutdownToken::attached(inner.cancellation_token());
+        let spawner = OwnedTaskSpawner::new(inner.clone(), shutdown);
+        Self { inner, spawner }
+    }
+
+    fn owned_spawner(&self) -> OwnedTaskSpawner {
+        self.spawner.clone()
+    }
+}
+
+impl Drop for MockRuntimeTaskOwner {
+    fn drop(&mut self) {
+        self.inner.abort_all();
+    }
+}
 
 /// Mock RuntimeBridge for testing
 ///
@@ -90,6 +215,8 @@ pub struct MockRuntimeBridge {
     materialized_channel_name_matches: Arc<RwLock<HashMap<String, Vec<ChannelId>>>>,
     /// Authoritative moderation statuses keyed by (context, channel, authority).
     moderation_statuses: ModerationStatuses,
+    /// Sanctioned task owner for background refresh hooks used by app signals.
+    task_owner: MockRuntimeTaskOwner,
 }
 
 // Manual Debug impl since ReactiveHandler doesn't derive Debug
@@ -135,6 +262,7 @@ impl MockRuntimeBridge {
             amp_channel_contexts: Arc::new(RwLock::new(HashMap::new())),
             materialized_channel_name_matches: Arc::new(RwLock::new(HashMap::new())),
             moderation_statuses: Arc::new(RwLock::new(HashMap::new())),
+            task_owner: MockRuntimeTaskOwner::new(),
         }
     }
 
@@ -357,6 +485,10 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     fn reactive_handler(&self) -> ReactiveHandler {
         self.reactive_handler.clone()
+    }
+
+    fn task_spawner(&self) -> Option<OwnedTaskSpawner> {
+        Some(self.task_owner.owned_spawner())
     }
 
     async fn is_peer_online(&self, _peer: AuthorityId) -> bool {

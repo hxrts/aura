@@ -60,6 +60,10 @@ use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_testkit::MockRuntimeBridge;
 
+mod support;
+
+use support::generate_demo_guardian_invite_code;
+
 static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 fn next_test_uuid(name: &str) -> uuid::Uuid {
@@ -340,7 +344,7 @@ async fn test_invitation_flow_creates_contact() {
     // For now, we use the demo hint pattern from demo_invitation_flow.rs
     println!("\nPhase 3: Generate invite code");
     let seed = 2024u64;
-    let alice_code = generate_demo_invite_code("alice", seed);
+    let alice_code = generate_demo_guardian_invite_code("alice", seed);
     println!(
         "  Alice's code: {}...",
         &alice_code[..50.min(alice_code.len())]
@@ -426,7 +430,7 @@ async fn test_chat_flow_sends_message() {
 
     // Import invitation to establish contact
     let seed = 2024u64;
-    let alice_code = generate_demo_invite_code("alice", seed);
+    let alice_code = generate_demo_guardian_invite_code("alice", seed);
     let import_result = env
         .get_agent("bob")
         .dispatch(EffectCommand::ImportInvitation {
@@ -550,8 +554,8 @@ async fn test_guardian_recovery_flow() {
 
     // Import Alice as potential guardian
     let seed = 2024u64;
-    let alice_code = generate_demo_invite_code("alice", seed);
-    let carol_code = generate_demo_invite_code("carol", seed);
+    let alice_code = generate_demo_guardian_invite_code("alice", seed);
+    let carol_code = generate_demo_guardian_invite_code("carol", seed);
 
     println!("\nImporting guardian invitations...");
     let _ = env
@@ -733,8 +737,8 @@ async fn test_social_graph_flow() {
     // Phase 2: Import contacts
     println!("\nPhase 2: Importing contacts...");
     let seed = 2024u64;
-    let alice_code = generate_demo_invite_code("alice", seed);
-    let carol_code = generate_demo_invite_code("carol", seed);
+    let alice_code = generate_demo_guardian_invite_code("alice", seed);
+    let carol_code = generate_demo_guardian_invite_code("carol", seed);
 
     let _ = env
         .get_agent("bob")
@@ -917,9 +921,9 @@ async fn test_social_graph_contact_home_view() {
 
     // Import multiple contacts
     let seed = 2024u64;
-    let alice_code = generate_demo_invite_code("alice", seed);
-    let carol_code = generate_demo_invite_code("carol", seed);
-    let dave_code = generate_demo_invite_code("dave", seed);
+    let alice_code = generate_demo_guardian_invite_code("alice", seed);
+    let carol_code = generate_demo_guardian_invite_code("carol", seed);
+    let dave_code = generate_demo_guardian_invite_code("dave", seed);
 
     let _ = env
         .get_agent("bob")
@@ -1017,38 +1021,3 @@ async fn test_signal_emission_coverage() {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/// Generate a deterministic invite code for a demo agent (mirrors hints.rs logic)
-fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    use aura_core::hash::hash;
-    use aura_core::types::identifiers::AuthorityId;
-    use base64::Engine;
-    use uuid::Uuid;
-
-    // Create deterministic authority ID
-    let authority_entropy = hash(format!("demo:{seed}:{name}:authority").as_bytes());
-    let sender_id = AuthorityId::new_from_entropy(authority_entropy);
-
-    // Create deterministic invitation ID
-    let invitation_id_entropy = hash(format!("demo:{seed}:{name}:invitation").as_bytes());
-    let invitation_id = Uuid::from_bytes(invitation_id_entropy[..16].try_into().unwrap());
-
-    // Create ShareableInvitation-compatible structure
-    let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Guardian": {
-                "subject_authority": sender_id.uuid().to_string()
-            }
-        },
-        "expires_at": null,
-        "message": format!("Guardian invitation from {name} (demo)")
-    });
-
-    // Encode as base64 with aura:v1: prefix
-    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{b64}")
-}

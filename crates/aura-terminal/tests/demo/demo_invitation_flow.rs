@@ -22,135 +22,22 @@ use async_lock::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aura_agent::core::{AgentBuilder, AgentConfig, AuraAgent};
 use aura_agent::handlers::ShareableInvitation;
-use aura_agent::EffectContext;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::{AppConfig, AppCore};
+use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::ExecutionMode;
 use aura_core::types::identifiers::AuthorityId;
-use aura_terminal::handlers::tui::create_account;
-use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::ids;
-use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
-use base64::Engine;
-use uuid::Uuid;
+
+#[path = "../support/mod.rs"]
+mod support;
+
+use support::{generate_demo_invite_code, FullTestEnv};
 
 // ============================================================================
 // Test Infrastructure
 // ============================================================================
-
-struct TestEnv {
-    ctx: Arc<IoContext>,
-    app_core: Arc<RwLock<AppCore>>,
-    _agent: Arc<AuraAgent>,
-    test_dir: std::path::PathBuf,
-}
-
-/// Generate a deterministic invite code for a demo agent.
-///
-/// This MUST match the derivation in:
-/// - `aura_terminal::demo::hints::generate_invite_code` (invite codes)
-/// - `aura_terminal::demo::mod::SimulatedAgent::new_with_shared_transport` (agent IDs)
-/// - `aura_terminal::demo::mod::AgentFactory::create_demo_agents` (seed offsets)
-///
-/// Key rules:
-/// - Uses `ids::authority_id()` for domain-separated derivation
-/// - Alice uses `seed`, Carol uses `seed + 1`
-/// - Creates Contact invitations (not Guardian)
-fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    // Create deterministic authority ID using the SAME derivation as SimulatedAgent
-    // CRITICAL: Must use ids::authority_id() for domain separation
-    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
-
-    // Create deterministic invitation ID from seed and name
-    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:invitation"));
-
-    // Create ShareableInvitation-compatible structure
-    // Uses Contact type (not Guardian) - guardian requests are sent in-band
-    let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Contact": {
-                "nickname": name
-            }
-        },
-        "expires_at": null,
-        "message": format!("Contact invitation from {name} (demo)")
-    });
-
-    // Encode as base64 with aura:v1: prefix
-    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{b64}")
-}
-
-/// Create a test environment with IoContext and AppCore
-async fn setup_test_env(name: &str) -> TestEnv {
-    let unique = Uuid::from_bytes([3; 16]);
-    let test_dir = std::env::temp_dir().join(format!("aura-demo-test-{name}-{unique}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
-
-    let device_id_str = format!("test-device-{name}");
-    let nickname_suggestion = format!("DemoUser-{name}");
-
-    let (authority_id, context_id) = create_account(&test_dir, &nickname_suggestion)
-        .await
-        .expect("Failed to create account");
-
-    let agent_config = AgentConfig {
-        device_id: ids::device_id(&device_id_str),
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let seed = 2024u64;
-    let effect_ctx =
-        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
-
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(authority_id)
-        .build_simulation_async(seed, &effect_ctx)
-        .await
-        .expect("Failed to build simulation agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore with runtime");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let initialized_app_core = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
-
-    let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core)
-        .with_existing_account(true)
-        .with_base_path(test_dir.clone())
-        .with_device_id(device_id_str)
-        .with_mode(TuiMode::Production)
-        .build()
-        .expect("IoContext builder should succeed for tests");
-
-    TestEnv {
-        ctx: Arc::new(ctx),
-        app_core,
-        _agent: agent,
-        test_dir,
-    }
-}
 
 async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: AuthorityId) {
     let start = tokio::time::Instant::now();
@@ -339,7 +226,7 @@ async fn test_demo_invitation_codes_are_parseable() {
 async fn test_import_invitation_command_with_demo_codes() {
     println!("\n=== ImportInvitation Command Test ===\n");
 
-    let env = setup_test_env("import-demo").await;
+    let env = FullTestEnv::new("import-demo").await;
     let seed = 2024;
     // Names and seeds must match AgentFactory::create_demo_agents
     let alice_code = generate_demo_invite_code("Alice", seed);
@@ -402,7 +289,6 @@ async fn test_import_invitation_command_with_demo_codes() {
         "Carol should appear in contacts after import"
     );
 
-    let _ = std::fs::remove_dir_all(&env.test_dir);
     println!("\n=== ImportInvitation Command Test PASSED ===\n");
 }
 
@@ -419,7 +305,7 @@ async fn test_import_invitation_command_with_demo_codes() {
 async fn test_complete_demo_invitation_flow() {
     println!("\n=== Complete Demo Invitation Flow Test ===\n");
 
-    let env = setup_test_env("complete-flow").await;
+    let env = FullTestEnv::new("complete-flow").await;
     let seed = 2024;
     // Names and seeds must match AgentFactory::create_demo_agents
     let alice_code = generate_demo_invite_code("Alice", seed);
@@ -550,7 +436,6 @@ async fn test_complete_demo_invitation_flow() {
     }
 
     drop(core);
-    let _ = std::fs::remove_dir_all(&env.test_dir);
     println!("\n=== Complete Demo Invitation Flow Test PASSED ===\n");
 }
 
@@ -610,7 +495,7 @@ async fn test_demo_hints_deterministic() {
 async fn test_invalid_invitation_code_rejection() {
     println!("\n=== Invalid Invite Code Rejection Test ===\n");
 
-    let env = setup_test_env("invalid-codes").await;
+    let env = FullTestEnv::new("invalid-codes").await;
 
     // Test 1: Completely invalid format
     println!("Test 1: Invalid format");
@@ -658,7 +543,6 @@ async fn test_invalid_invitation_code_rejection() {
     println!("  Result: {result:?}");
     assert!(result.is_err(), "Invalid JSON should fail");
 
-    let _ = std::fs::remove_dir_all(&env.test_dir);
     println!("\n=== Invalid Invite Code Rejection Test PASSED ===\n");
 }
 

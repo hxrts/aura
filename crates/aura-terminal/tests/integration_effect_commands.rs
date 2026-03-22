@@ -22,8 +22,8 @@
 //! RuntimeBridge to be set up (full agent initialization). These tests will be re-enabled
 //! once we have a lightweight mock RuntimeBridge implementation for testing.
 //!
-//! See `setup_test_env()` - it uses `AppCore::new()` which sets `runtime: None`,
-//! but invitation/messaging operations require a runtime for cryptographic operations.
+//! These tests use the shared mock-runtime test environment from `tests/support`,
+//! so invitation and messaging operations still execute through a runtime-backed path.
 //!
 //! ## Bug Class This Prevents
 //!
@@ -54,93 +54,15 @@
 //! | StartDirectChat     | CHAT_SIGNAL      | ✓      | Ignored |
 //! | UpdateNickname       | CONTACTS_SIGNAL  | ✓      | Ignored |
 
-use async_lock::RwLock;
-use std::sync::Arc;
-
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::hash::hash;
-use aura_core::types::identifiers::AuthorityId;
-use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
-use aura_testkit::MockRuntimeBridge;
-use base64::Engine;
-use uuid::Uuid;
 
-// ============================================================================
-// Test Infrastructure
-// ============================================================================
+mod support;
 
-/// Generate a deterministic invite code (mirrors demo hints.rs)
-///
-/// Creates a Contact invitation (not Guardian) so that the workflow auto-accepts
-/// and adds the sender as a contact, which updates the CONTACTS_SIGNAL.
-fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    let authority_entropy = hash(format!("demo:{seed}:{name}:authority").as_bytes());
-    let sender_id = AuthorityId::new_from_entropy(authority_entropy);
-    let invitation_id_entropy = hash(format!("demo:{seed}:{name}:invitation").as_bytes());
-    let invitation_id = Uuid::from_bytes(invitation_id_entropy[..16].try_into().unwrap());
+use support::{generate_demo_invite_code, MockRuntimeTestEnv};
 
-    let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Contact": {
-                "nickname": name
-            }
-        },
-        "expires_at": null,
-        "message": format!("Contact invitation from {name} (demo)")
-    });
-
-    let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
-    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{b64}")
-}
-
-/// Create test environment with IoContext and AppCore using MockRuntimeBridge
-async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
-
-    // Create MockRuntimeBridge for testing
-    let mock_bridge = Arc::new(MockRuntimeBridge::new());
-    let app_core =
-        AppCore::with_runtime(AppConfig::default(), mock_bridge).expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let initialized_app_core = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
-
-    let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core.clone())
-        .with_existing_account(false)
-        .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{name}"))
-        .with_mode(TuiMode::Production)
-        .build()
-        .expect("IoContext builder should succeed for tests");
-
-    ctx.create_account(&format!("TestUser-{name}"))
-        .await
-        .expect("Failed to create account");
-
-    // Refresh settings from mock runtime to populate signal
-    aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
-        .await
-        .expect("Failed to refresh settings from runtime");
-
-    (Arc::new(ctx), app_core)
-}
-
-fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-}
+const TEST_PREFIX: &str = "aura-propagation-test";
 
 // ============================================================================
 // Signal Propagation Property Tests
@@ -151,7 +73,8 @@ fn cleanup_test_dir(name: &str) {
 async fn test_import_invitation_propagates_to_contacts_signal() {
     println!("\n=== ImportInvitation → CONTACTS_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("import-contacts").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "import-contacts").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Get initial contacts count
@@ -189,7 +112,6 @@ async fn test_import_invitation_propagates_to_contacts_signal() {
         "CONTACTS_SIGNAL should have one more contact after ImportInvitation"
     );
 
-    cleanup_test_dir("import-contacts");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -198,7 +120,8 @@ async fn test_import_invitation_propagates_to_contacts_signal() {
 async fn test_multiple_imports_all_propagate() {
     println!("\n=== Multiple ImportInvitation Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("multi-import").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "multi-import").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
     let bob_code = generate_demo_invite_code("bob", 2024);
     let carol_code = generate_demo_invite_code("carol", 2024);
@@ -241,7 +164,6 @@ async fn test_multiple_imports_all_propagate() {
         "Carol should be in contacts"
     );
 
-    cleanup_test_dir("multi-import");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -251,7 +173,8 @@ async fn test_multiple_imports_all_propagate() {
 async fn test_start_direct_chat_propagates_to_chat_signal() {
     println!("\n=== StartDirectChat → CHAT_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("direct-chat").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "direct-chat").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // First import Alice as a contact
@@ -315,7 +238,6 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
     let dm_channel = final_state.all_channels().find(|c| c.is_dm);
     assert!(dm_channel.is_some(), "Should have a DM channel");
 
-    cleanup_test_dir("direct-chat");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -324,7 +246,8 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
 async fn test_subscriber_receives_updates() {
     println!("\n=== Subscriber Update Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("subscriber").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "subscriber").await;
+    let (ctx, app_core) = env.clones();
 
     // Set up subscriber BEFORE the operation
     let (tx, mut rx) = tokio::sync::mpsc::channel(10);
@@ -371,7 +294,6 @@ async fn test_subscriber_receives_updates() {
         }
     }
 
-    cleanup_test_dir("subscriber");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -384,7 +306,8 @@ async fn test_subscriber_receives_updates() {
 async fn test_failed_command_does_not_propagate() {
     println!("\n=== Failed Command Non-Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("failed-cmd").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "failed-cmd").await;
+    let (ctx, app_core) = env.clones();
 
     // Get initial state
     let initial_contacts = {
@@ -412,7 +335,6 @@ async fn test_failed_command_does_not_propagate() {
         "Failed command should not modify signal state"
     );
 
-    cleanup_test_dir("failed-cmd");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -421,7 +343,8 @@ async fn test_failed_command_does_not_propagate() {
 async fn test_duplicate_import_idempotent() {
     println!("\n=== Duplicate Import Idempotency Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("duplicate").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "duplicate").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Import Alice twice
@@ -451,7 +374,6 @@ async fn test_duplicate_import_idempotent() {
         "Duplicate import should not create duplicate contacts"
     );
 
-    cleanup_test_dir("duplicate");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -464,7 +386,8 @@ async fn test_duplicate_import_idempotent() {
 async fn test_update_nickname_propagates_to_contacts_signal() {
     println!("\n=== UpdateContactNickname → CONTACTS_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("nickname").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "nickname").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Import Alice as a contact first
@@ -521,7 +444,6 @@ async fn test_update_nickname_propagates_to_contacts_signal() {
         );
     }
 
-    cleanup_test_dir("nickname");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -530,7 +452,8 @@ async fn test_update_nickname_propagates_to_contacts_signal() {
 async fn test_toggle_guardian_propagates_to_signals() {
     println!("\n=== ToggleContactGuardian → CONTACTS_SIGNAL + RECOVERY_SIGNAL Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("guardian").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "guardian").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Import Alice as a contact first
@@ -602,7 +525,6 @@ async fn test_toggle_guardian_propagates_to_signals() {
         );
     }
 
-    cleanup_test_dir("guardian");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -612,7 +534,8 @@ async fn test_toggle_guardian_propagates_to_signals() {
 async fn test_create_channel_propagates_to_chat_signal() {
     println!("\n=== CreateChannel → CHAT_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("channel").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "channel").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Import Alice first (we need a member for the channel)
@@ -683,7 +606,6 @@ async fn test_create_channel_propagates_to_chat_signal() {
         );
     }
 
-    cleanup_test_dir("channel");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -692,7 +614,8 @@ async fn test_create_channel_propagates_to_chat_signal() {
 async fn test_accept_invitation_propagates_to_signals() {
     println!("\n=== AcceptInvitation → INVITATIONS_SIGNAL + CONTACTS_SIGNAL Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("accept-inv").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "accept-inv").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Parse invitation to get ID
@@ -745,7 +668,6 @@ async fn test_accept_invitation_propagates_to_signals() {
         );
     }
 
-    cleanup_test_dir("accept-inv");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -754,7 +676,8 @@ async fn test_accept_invitation_propagates_to_signals() {
 async fn test_decline_invitation_propagates_to_signal() {
     println!("\n=== DeclineInvitation → INVITATIONS_SIGNAL Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("decline-inv").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "decline-inv").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
     let bob_code = generate_demo_invite_code("bob", 2024);
 
@@ -812,7 +735,6 @@ async fn test_decline_invitation_propagates_to_signal() {
         println!("  Note: Command failed: {:?}", result);
     }
 
-    cleanup_test_dir("decline-inv");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -822,7 +744,8 @@ async fn test_decline_invitation_propagates_to_signal() {
 async fn test_send_message_propagates_to_chat_signal() {
     println!("\n=== SendMessage → CHAT_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("send-msg").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "send-msg").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Import Alice and start a DM
@@ -904,7 +827,6 @@ async fn test_send_message_propagates_to_chat_signal() {
         );
     }
 
-    cleanup_test_dir("send-msg");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -923,7 +845,8 @@ async fn test_create_home_propagates_to_home_signal() {
 
     println!("\n=== CreateHome → HOMES_SIGNAL Propagation Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("create-home").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "create-home").await;
+    let (ctx, app_core) = env.clones();
 
     // Get initial home state
     let initial_home = {
@@ -975,7 +898,6 @@ async fn test_create_home_propagates_to_home_signal() {
         );
     }
 
-    cleanup_test_dir("create-home");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -986,7 +908,8 @@ async fn test_send_home_invitation_propagates_to_signals() {
 
     println!("\n=== SendHomeInvitation → HOMES_SIGNAL + CONTACTS_SIGNAL Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("home-invite").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "home-invite").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // First import Alice as a contact
@@ -1044,7 +967,6 @@ async fn test_send_home_invitation_propagates_to_signals() {
         );
     }
 
-    cleanup_test_dir("home-invite");
     println!("\n=== Test PASSED ===\n");
 }
 
@@ -1055,7 +977,8 @@ async fn test_social_graph_full_flow() {
 
     println!("\n=== Full Social Graph Flow Test ===\n");
 
-    let (ctx, app_core) = setup_test_env("social-graph-flow").await;
+    let env = MockRuntimeTestEnv::new(TEST_PREFIX, "social-graph-flow").await;
+    let (ctx, app_core) = env.clones();
     let alice_code = generate_demo_invite_code("alice", 2024);
     let bob_code = generate_demo_invite_code("bob", 2024);
 
@@ -1153,7 +1076,6 @@ async fn test_social_graph_full_flow() {
         println!("    - {} (id: {})", c.nickname, c.id);
     }
 
-    cleanup_test_dir("social-graph-flow");
     println!("\n=== Test PASSED ===\n");
 }
 
