@@ -492,6 +492,176 @@ impl ConsistencyState {
     }
 }
 
+/// Terminal-facing status metadata for strong command outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommandTerminalOutcomeStatus {
+    Ok,
+    Invalid,
+    Denied,
+    Failed,
+}
+
+impl CommandTerminalOutcomeStatus {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Invalid => "invalid",
+            Self::Denied => "denied",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Terminal-facing reason metadata for strong command outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommandTerminalReasonCode {
+    None,
+    MissingActiveContext,
+    PermissionDenied,
+    NotMember,
+    NotFound,
+    InvalidArgument,
+    InvalidState,
+    Muted,
+    Banned,
+    OperationTimedOut,
+    Internal,
+}
+
+impl CommandTerminalReasonCode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::MissingActiveContext => "missing_active_context",
+            Self::PermissionDenied => "permission_denied",
+            Self::NotMember => "not_member",
+            Self::NotFound => "not_found",
+            Self::InvalidArgument => "invalid_argument",
+            Self::InvalidState => "invalid_state",
+            Self::Muted => "muted",
+            Self::Banned => "banned",
+            Self::OperationTimedOut => "operation_timed_out",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+/// Typed terminal-facing classification for strong command execution failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CommandTerminalClassification {
+    pub status: CommandTerminalOutcomeStatus,
+    pub reason: CommandTerminalReasonCode,
+}
+
+impl CommandTerminalClassification {
+    #[must_use]
+    pub const fn new(
+        status: CommandTerminalOutcomeStatus,
+        reason: CommandTerminalReasonCode,
+    ) -> Self {
+        Self { status, reason }
+    }
+}
+
+fn message_contains_any(message: &str, needles: &[&str]) -> bool {
+    let lowered = message.to_ascii_lowercase();
+    needles.iter().any(|needle| lowered.contains(needle))
+}
+
+fn classify_invalid_terminal_command_message(message: &str) -> CommandTerminalClassification {
+    if message_contains_any(
+        message,
+        &[
+            "no active home",
+            "missing current channel",
+            "missing channel scope",
+        ],
+    ) {
+        CommandTerminalClassification::new(
+            CommandTerminalOutcomeStatus::Invalid,
+            CommandTerminalReasonCode::MissingActiveContext,
+        )
+    } else if message_contains_any(
+        message,
+        &[
+            "unknown authority target",
+            "unknown channel target",
+            "unknown context target",
+            "not found",
+        ],
+    ) {
+        CommandTerminalClassification::new(
+            CommandTerminalOutcomeStatus::Invalid,
+            CommandTerminalReasonCode::NotFound,
+        )
+    } else if message_contains_any(message, &["parse error", "missing required argument"]) {
+        CommandTerminalClassification::new(
+            CommandTerminalOutcomeStatus::Invalid,
+            CommandTerminalReasonCode::InvalidArgument,
+        )
+    } else if message_contains_any(
+        message,
+        &[
+            "consistency requirement",
+            "stale snapshot",
+            "invalid state",
+            "precondition failed",
+        ],
+    ) {
+        let reason = if message_contains_any(message, &["consistency requirement", "not met"]) {
+            CommandTerminalReasonCode::OperationTimedOut
+        } else {
+            CommandTerminalReasonCode::InvalidState
+        };
+        CommandTerminalClassification::new(CommandTerminalOutcomeStatus::Failed, reason)
+    } else {
+        CommandTerminalClassification::new(
+            CommandTerminalOutcomeStatus::Invalid,
+            CommandTerminalReasonCode::InvalidArgument,
+        )
+    }
+}
+
+fn classify_permission_terminal_command_message(message: &str) -> CommandTerminalClassification {
+    let reason = if message_contains_any(message, &["not a member"]) {
+        CommandTerminalReasonCode::NotMember
+    } else if message_contains_any(message, &["muted"]) {
+        CommandTerminalReasonCode::Muted
+    } else if message_contains_any(message, &["banned", "ban "]) {
+        CommandTerminalReasonCode::Banned
+    } else {
+        CommandTerminalReasonCode::PermissionDenied
+    };
+    CommandTerminalClassification::new(CommandTerminalOutcomeStatus::Denied, reason)
+}
+
+/// Classify strong command execution failures for terminal-facing outcome
+/// rendering without requiring Layer 7 string parsing.
+#[must_use]
+pub fn classify_terminal_execution_error(error: &AuraError) -> CommandTerminalClassification {
+    match error {
+        AuraError::Invalid { message } => classify_invalid_terminal_command_message(message),
+        AuraError::NotFound { .. } => CommandTerminalClassification::new(
+            CommandTerminalOutcomeStatus::Invalid,
+            CommandTerminalReasonCode::NotFound,
+        ),
+        AuraError::PermissionDenied { message } => {
+            classify_permission_terminal_command_message(message)
+        }
+        AuraError::Crypto { .. }
+        | AuraError::Network { .. }
+        | AuraError::Serialization { .. }
+        | AuraError::Storage { .. }
+        | AuraError::Internal { .. }
+        | AuraError::Terminal(_) => CommandTerminalClassification::new(
+            CommandTerminalOutcomeStatus::Failed,
+            CommandTerminalReasonCode::Internal,
+        ),
+    }
+}
+
 /// Planned command family produced after parse/resolve.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlannedCommand {
@@ -2594,5 +2764,37 @@ mod tests {
             } if *operation_id == OperationId::send_message()
                 && status.kind == SemanticOperationKind::SendChatMessage
         )));
+    }
+
+    #[test]
+    fn classify_terminal_execution_error_maps_consistency_timeout() {
+        let classification = classify_terminal_execution_error(&AuraError::invalid(
+            "command consistency requirement 'enforced' not met (state='partial-timeout')",
+        ));
+
+        assert_eq!(classification.status, CommandTerminalOutcomeStatus::Failed);
+        assert_eq!(
+            classification.reason,
+            CommandTerminalReasonCode::OperationTimedOut
+        );
+    }
+
+    #[test]
+    fn classify_terminal_execution_error_maps_unknown_precondition_to_not_found() {
+        let classification = classify_terminal_execution_error(&AuraError::invalid(
+            "precondition failed: unknown channel target: channel-123",
+        ));
+
+        assert_eq!(classification.status, CommandTerminalOutcomeStatus::Invalid);
+        assert_eq!(classification.reason, CommandTerminalReasonCode::NotFound);
+    }
+
+    #[test]
+    fn classify_terminal_execution_error_maps_permission_detail_without_terminal_string_parsing() {
+        let classification =
+            classify_terminal_execution_error(&AuraError::permission_denied("target is muted"));
+
+        assert_eq!(classification.status, CommandTerminalOutcomeStatus::Denied);
+        assert_eq!(classification.reason, CommandTerminalReasonCode::Muted);
     }
 }

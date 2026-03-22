@@ -32,6 +32,9 @@ use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
+use aura_app::ui::workflows::strong_command::{
+    classify_terminal_execution_error, CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
+};
 use aura_app::ui_contract::{
     ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
     SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
@@ -372,125 +375,14 @@ fn enqueue_invalid_lan_authority_toast(
 // Command outcome classification
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy)]
-enum CommandOutcomeStatus {
-    Ok,
-    Denied,
-    Invalid,
-    Failed,
-}
-
-impl CommandOutcomeStatus {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Ok => "ok",
-            Self::Denied => "denied",
-            Self::Invalid => "invalid",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum CommandReasonCode {
-    None,
-    MissingActiveContext,
-    PermissionDenied,
-    NotMember,
-    NotFound,
-    InvalidArgument,
-    InvalidState,
-    Muted,
-    Banned,
-    Internal,
-}
-
-impl CommandReasonCode {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::MissingActiveContext => "missing_active_context",
-            Self::PermissionDenied => "permission_denied",
-            Self::NotMember => "not_member",
-            Self::NotFound => "not_found",
-            Self::InvalidArgument => "invalid_argument",
-            Self::InvalidState => "invalid_state",
-            Self::Muted => "muted",
-            Self::Banned => "banned",
-            Self::Internal => "internal",
-        }
-    }
-}
+type CommandOutcomeStatus = CommandTerminalOutcomeStatus;
+type CommandReasonCode = CommandTerminalReasonCode;
 
 fn classify_command_error(
     error: &aura_core::AuraError,
 ) -> (CommandOutcomeStatus, CommandReasonCode) {
-    use aura_core::AuraError;
-
-    // Primary classification: match on the typed error variant.
-    match error {
-        AuraError::Invalid { .. } => {
-            let msg = error.to_string().to_ascii_lowercase();
-            if msg.contains("no active home")
-                || msg.contains("missing current channel")
-                || msg.contains("missing channel scope")
-            {
-                (
-                    CommandOutcomeStatus::Invalid,
-                    CommandReasonCode::MissingActiveContext,
-                )
-            } else if msg.contains("parse error") || msg.contains("missing required argument") {
-                (
-                    CommandOutcomeStatus::Invalid,
-                    CommandReasonCode::InvalidArgument,
-                )
-            } else if msg.contains("stale snapshot") || msg.contains("invalid state") {
-                (
-                    CommandOutcomeStatus::Failed,
-                    CommandReasonCode::InvalidState,
-                )
-            } else {
-                (
-                    CommandOutcomeStatus::Invalid,
-                    CommandReasonCode::InvalidArgument,
-                )
-            }
-        }
-        AuraError::NotFound { .. } => (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound),
-        AuraError::PermissionDenied { .. } => {
-            let msg = error.to_string().to_ascii_lowercase();
-            if msg.contains("not a member") {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::NotMember)
-            } else if msg.contains("muted") {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::Muted)
-            } else if msg.contains("banned") || msg.contains("ban ") {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::Banned)
-            } else {
-                (
-                    CommandOutcomeStatus::Denied,
-                    CommandReasonCode::PermissionDenied,
-                )
-            }
-        }
-        _ => {
-            // Fallback: string match for errors that don't use typed variants yet.
-            let msg = error.to_string().to_ascii_lowercase();
-            if msg.contains("permission denied") || msg.contains("only moderators") {
-                (
-                    CommandOutcomeStatus::Denied,
-                    CommandReasonCode::PermissionDenied,
-                )
-            } else if msg.contains("not found") || msg.contains("unknown") {
-                (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
-            } else if msg.contains("muted") {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::Muted)
-            } else if msg.contains("banned") {
-                (CommandOutcomeStatus::Denied, CommandReasonCode::Banned)
-            } else {
-                (CommandOutcomeStatus::Failed, CommandReasonCode::Internal)
-            }
-        }
-    }
+    let classification = classify_terminal_execution_error(error);
+    (classification.status, classification.reason)
 }
 
 fn classify_chat_command_error(
@@ -753,5 +645,27 @@ mod tests {
             Some(UiUpdate::InvitationImported { invitation_code })
                 if invitation_code == "code-456"
         ));
+    }
+
+    #[test]
+    fn command_error_classification_uses_upstream_typed_reason_codes() {
+        let (status, reason) = classify_command_error(&aura_core::AuraError::invalid(
+            "command consistency requirement 'enforced' not met (state='partial-timeout')",
+        ));
+
+        assert_eq!(status.as_str(), "failed");
+        assert_eq!(reason.as_str(), "operation_timed_out");
+    }
+
+    #[test]
+    fn command_outcome_message_includes_typed_timeout_metadata() {
+        let message = command_outcome_message(
+            "/invite: consistency barrier timed out (partial-timeout)",
+            CommandOutcomeStatus::Failed,
+            CommandReasonCode::OperationTimedOut,
+            Some("partial-timeout"),
+        );
+
+        assert!(message.contains("[s=failed r=operation_timed_out c=partial-timeout]"));
     }
 }

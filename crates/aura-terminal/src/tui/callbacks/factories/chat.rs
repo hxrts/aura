@@ -267,7 +267,7 @@ impl ChatCallbacks {
                                         let message = command_outcome_message(
                                             format!("/{irc_name}: {details} ({state_label})"),
                                             CommandOutcomeStatus::Failed,
-                                            CommandReasonCode::Internal,
+                                            CommandReasonCode::OperationTimedOut,
                                             Some(state_label),
                                         );
                                         send_ui_update_reliable(
