@@ -122,7 +122,7 @@ pub(super) async fn resolve_local_chat_channel_id_from_observed_state_or_input(
         return Ok(channel_id);
     }
 
-    Ok(selector.to_channel_id())
+    Err(AuraError::not_found(normalized_name.to_string()))
 }
 
 pub(super) async fn matching_local_chat_channel_ids_from_observed_state(

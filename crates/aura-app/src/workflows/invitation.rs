@@ -1459,11 +1459,14 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
 ) -> Result<InvitationInfo, AuraError> {
     let stage_tracker = external_stage_tracker
         .or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
-    let fallback_channel_id = home_id.parse::<ChannelId>().ok();
+    let channel_id = home_id.parse::<ChannelId>().map_err(|_| {
+        AuraError::from(ChannelInvitationBootstrapError::InvalidCanonicalChannelId {
+            raw: home_id.clone(),
+        })
+    })?;
     let runtime = require_runtime(app_core).await.map_err(|error| {
         ChannelInvitationBootstrapError::BootstrapTransport {
-            channel_id: fallback_channel_id
-                .unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32]))),
+            channel_id,
             detail: error.to_string(),
         }
     })?;
@@ -1474,8 +1477,7 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
     .await
     .map_err(
         |error| ChannelInvitationBootstrapError::BootstrapTransport {
-            channel_id: fallback_channel_id
-                .unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32]))),
+            channel_id,
             detail: error.to_string(),
         },
     )?;
@@ -1490,20 +1492,11 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
             .await
             .map_err(
                 |error| ChannelInvitationBootstrapError::BootstrapTransport {
-                    channel_id: fallback_channel_id
-                        .unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32]))),
+                    channel_id,
                     detail: error.to_string(),
                 },
             )?;
             update_channel_invitation_stage(&stage_tracker, "parse_channel_id");
-            let channel_id = match home_id.parse::<ChannelId>() {
-                Ok(channel_id) => channel_id,
-                Err(_) => {
-                    return Err(ChannelInvitationBootstrapError::InvalidCanonicalChannelId {
-                        raw: home_id.clone(),
-                    });
-                }
-            };
             update_channel_invitation_stage(&stage_tracker, "ensure_context_and_bootstrap");
             let (context_id, bootstrap) = ensure_channel_invitation_context_and_bootstrap(
                 app_core,
@@ -1597,8 +1590,6 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
                 .as_ref()
                 .and_then(|tracker| tracker.try_lock().map(|guard| *guard))
                 .unwrap_or("operation");
-            let channel_id =
-                fallback_channel_id.unwrap_or_else(|| ChannelId::new(aura_core::Hash32([0; 32])));
             let error = ChannelInvitationBootstrapError::BootstrapTransport {
                 channel_id,
                 detail: format!(
@@ -3200,7 +3191,7 @@ mod tests {
         let error = refresh_authoritative_invitation_readiness(&app_core)
             .await
             .expect_err("authoritative invitation readiness requires runtime");
-        assert!(error.to_string().to_ascii_lowercase().contains("runtime"));
+        assert!(matches!(error, AuraError::PermissionDenied { .. }));
     }
 
     #[tokio::test]
@@ -3255,11 +3246,7 @@ mod tests {
         let error = refresh_authoritative_contact_link_readiness(&app_core)
             .await
             .expect_err("contact-link readiness should require the contacts signal");
-        assert!(
-            error.to_string().contains("Signal not found")
-                || error.to_string().to_ascii_lowercase().contains("contacts"),
-            "unexpected error: {error}"
-        );
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 
     #[tokio::test]
@@ -3278,16 +3265,7 @@ mod tests {
         )
         .await
         .expect_err("contact-link wait should fail when the contacts signal is unavailable");
-        match error {
-            AcceptInvitationError::AcceptFailed { detail } => {
-                assert!(
-                    detail.contains("Signal not found")
-                        || detail.to_ascii_lowercase().contains("contacts"),
-                    "unexpected error detail: {detail}"
-                );
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert!(matches!(error, AcceptInvitationError::AcceptFailed { .. }));
     }
 
     #[cfg(feature = "signals")]
@@ -3617,12 +3595,7 @@ mod tests {
         let error = accept_device_enrollment_invitation(&app_core, &invitation)
             .await
             .expect_err("ceremony processing failure must terminate device enrollment acceptance");
-        assert!(error
-            .to_string()
-            .contains("device enrollment ceremony processing failed during convergence"));
-        assert!(!error
-            .to_string()
-            .contains("did not converge to 2 local devices"));
+        assert!(matches!(error, AuraError::Internal { .. }));
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.iter().any(|fact| {

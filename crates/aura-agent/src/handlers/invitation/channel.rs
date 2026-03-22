@@ -10,6 +10,28 @@ pub(super) struct InvitationChannelHandler<'a> {
 }
 
 impl<'a> InvitationChannelHandler<'a> {
+    async fn channel_checkpoint_exists(
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        channel_id: ChannelId,
+    ) -> bool {
+        aura_protocol::amp::get_channel_state(effects, context_id, channel_id)
+            .await
+            .is_ok()
+    }
+
+    async fn channel_has_participant(
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        participant: AuthorityId,
+    ) -> bool {
+        aura_protocol::amp::list_channel_participants(effects, context_id, channel_id)
+            .await
+            .map(|participants| participants.contains(&participant))
+            .unwrap_or(false)
+    }
+
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
         Self { handler }
     }
@@ -216,8 +238,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 );
             }
             Err(TimeoutRunError::Operation(error)) => {
-                let lowered = error.to_string().to_ascii_lowercase();
-                if !lowered.contains("already") && !lowered.contains("exists") {
+                if !Self::channel_checkpoint_exists(effects, context_id, channel_id).await {
                     tracing::warn!(
                         context_id = %context_id,
                         channel_id = %channel_id,
@@ -291,13 +312,16 @@ impl<'a> InvitationChannelHandler<'a> {
                 );
             }
             Err(TimeoutRunError::Operation(error)) => {
-                tracing::debug!(
-                    context_id = %context_id,
-                    channel_id = %channel_id,
-                    participant = %participant,
-                    error = %error,
-                    "{log_message}"
-                );
+                if !Self::channel_has_participant(effects, context_id, channel_id, participant).await
+                {
+                    tracing::debug!(
+                        context_id = %context_id,
+                        channel_id = %channel_id,
+                        participant = %participant,
+                        error = %error,
+                        "{log_message}"
+                    );
+                }
             }
         }
     }
@@ -334,8 +358,8 @@ impl<'a> InvitationChannelHandler<'a> {
             Ok(()) => Ok(()),
             Err(TimeoutRunError::Timeout(error)) => Err(AgentError::effects(error.to_string())),
             Err(TimeoutRunError::Operation(error)) => {
-                let lowered = error.to_string().to_ascii_lowercase();
-                if lowered.contains("already") || lowered.contains("exists") {
+                if Self::channel_has_participant(effects, context_id, channel_id, participant).await
+                {
                     Ok(())
                 } else {
                     Err(AgentError::effects(error.to_string()))
@@ -376,8 +400,7 @@ impl<'a> InvitationChannelHandler<'a> {
             Ok(_) => Ok(()),
             Err(TimeoutRunError::Timeout(error)) => Err(AgentError::effects(error.to_string())),
             Err(TimeoutRunError::Operation(error)) => {
-                let lowered = error.to_string().to_ascii_lowercase();
-                if lowered.contains("already") || lowered.contains("exists") {
+                if Self::channel_checkpoint_exists(effects, context_id, channel_id).await {
                     Ok(())
                 } else {
                     Err(AgentError::effects(error.to_string()))

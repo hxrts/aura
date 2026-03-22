@@ -466,6 +466,14 @@ impl AppCore {
             core.init_signals().await?;
         }
 
+        let has_runtime = {
+            let core = app_core.read().await;
+            core.runtime().is_some()
+        };
+        if !has_runtime {
+            return Ok(());
+        }
+
         crate::workflows::system::install_contacts_refresh_hook(app_core)
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
