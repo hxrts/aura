@@ -11,13 +11,14 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use aura_app::scenario_contract::SettingsSection;
 use aura_app::scenario_contract::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
     SemanticSubmissionHandle, SubmissionState,
 };
 use aura_app::ui::contract::{
-    ControlId, FieldId, HarnessUiCommand, HarnessUiCommandReceipt, ListId, ModalId, ScreenId,
-    UiReadiness, UiSnapshot,
+    semantic_settings_section_item_id, ControlId, FieldId, HarnessUiCommand,
+    HarnessUiCommandReceipt, ListId, ModalId, ScreenId, UiReadiness, UiSnapshot,
 };
 use nix::errno::Errno;
 use nix::sys::signal;
@@ -1255,14 +1256,16 @@ impl RawUiBackend for LocalPtyBackend {
             | ControlId::SettingsRemoveDeviceButton => {
                 let snapshot = self.ui_snapshot()?;
                 if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
+                    let devices_item_id =
+                        semantic_settings_section_item_id(SettingsSection::Devices);
                     let needs_devices_section = snapshot
                         .selections
                         .iter()
                         .find(|selection| selection.list == ListId::SettingsSections)
-                        .map(|selection| selection.item_id.as_str() != "devices")
+                        .map(|selection| selection.item_id.as_str() != devices_item_id)
                         .unwrap_or(true);
                     if needs_devices_section {
-                        self.activate_list_item(ListId::SettingsSections, "devices")?;
+                        self.activate_list_item(ListId::SettingsSections, devices_item_id)?;
                     }
                 }
             }

@@ -411,6 +411,43 @@ pub const FRONTEND_SPECIFIC_SETTINGS_SECTIONS: &[FrontendSpecificSettingsSection
 ];
 
 #[must_use]
+pub const fn screen_item_id(screen: ScreenId) -> &'static str {
+    match screen {
+        ScreenId::Onboarding => "onboarding",
+        ScreenId::Neighborhood => "neighborhood",
+        ScreenId::Chat => "chat",
+        ScreenId::Contacts => "contacts",
+        ScreenId::Notifications => "notifications",
+        ScreenId::Settings => "settings",
+    }
+}
+
+#[must_use]
+pub fn classify_screen_item_id(item_id: &str) -> Option<ScreenId> {
+    match item_id.trim() {
+        "onboarding" => Some(ScreenId::Onboarding),
+        "neighborhood" => Some(ScreenId::Neighborhood),
+        "chat" => Some(ScreenId::Chat),
+        "contacts" => Some(ScreenId::Contacts),
+        "notifications" => Some(ScreenId::Notifications),
+        "settings" => Some(ScreenId::Settings),
+        _ => None,
+    }
+}
+
+#[must_use]
+pub const fn nav_control_id_for_screen(screen: ScreenId) -> ControlId {
+    match screen {
+        ScreenId::Onboarding => ControlId::OnboardingRoot,
+        ScreenId::Neighborhood => ControlId::NavNeighborhood,
+        ScreenId::Chat => ControlId::NavChat,
+        ScreenId::Contacts => ControlId::NavContacts,
+        ScreenId::Notifications => ControlId::NavNotifications,
+        ScreenId::Settings => ControlId::NavSettings,
+    }
+}
+
+#[must_use]
 pub const fn settings_section_item_id(surface: SettingsSectionSurfaceId) -> &'static str {
     match surface {
         SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Profile) => "profile",
@@ -461,6 +498,36 @@ pub fn classify_settings_section_item_id(item_id: &str) -> Option<SettingsSectio
         "observability" => Some(SettingsSectionSurfaceId::FrontendSpecific(
             FrontendSpecificSettingsSectionId::Observability,
         )),
+        _ => None,
+    }
+}
+
+#[must_use]
+pub const fn semantic_settings_section_surface_id(
+    section: crate::scenario_contract::SettingsSection,
+) -> SettingsSectionSurfaceId {
+    match section {
+        crate::scenario_contract::SettingsSection::Devices => {
+            SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Devices)
+        }
+    }
+}
+
+#[must_use]
+pub const fn semantic_settings_section_item_id(
+    section: crate::scenario_contract::SettingsSection,
+) -> &'static str {
+    settings_section_item_id(semantic_settings_section_surface_id(section))
+}
+
+#[must_use]
+pub fn classify_semantic_settings_section_item_id(
+    item_id: &str,
+) -> Option<crate::scenario_contract::SettingsSection> {
+    match classify_settings_section_item_id(item_id) {
+        Some(SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Devices)) => {
+            Some(crate::scenario_contract::SettingsSection::Devices)
+        }
         _ => None,
     }
 }
@@ -3292,25 +3359,28 @@ pub fn uncovered_ui_parity_mismatches(web: &UiSnapshot, tui: &UiSnapshot) -> Vec
 mod tests {
     use super::next_projection_revision;
     use super::{
+        classify_screen_item_id, classify_semantic_settings_section_item_id,
         classify_settings_section_item_id, compare_ui_snapshots_for_parity, list_item_dom_id,
-        list_item_selector, settings_section_item_id, shared_flow_scenarios,
-        shared_flow_source_areas, shared_list_support, shared_modal_support,
-        shared_screen_module_map, shared_screen_support, uncovered_ui_parity_mismatches,
-        validate_harness_shell_structure, validate_render_convergence, AuthoritativeSemanticFact,
-        AuthoritativeSemanticFactKind, BrowserHarnessBridgeMethodKind, ChannelFactKey,
-        ConfirmationState, ControlId, FieldId, FlowAvailability, FrontendExecutionBoundaryKind,
-        FrontendSpecificSettingsSectionId, HarnessModeChangeKind, HarnessShellMode,
-        HarnessShellStructureSnapshot, ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot,
-        ModalId, OperationId, OperationInstanceId, OperationSnapshot, OperationState,
-        ParityUiIdentity, ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId,
-        RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot,
-        SemanticFailureCode, SemanticFailureDomain, SemanticOperationCausality,
-        SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
-        SemanticOperationStatus, SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId,
-        ToastKind, ToastSnapshot, UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS,
-        BROWSER_CACHE_BOUNDARIES, BROWSER_HARNESS_BRIDGE_METHODS,
-        BROWSER_OBSERVATION_SURFACE_GLOBAL, BROWSER_OBSERVATION_SURFACE_METHODS,
-        FRONTEND_EXECUTION_BOUNDARIES, FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
+        list_item_selector, nav_control_id_for_screen, screen_item_id,
+        semantic_settings_section_item_id, semantic_settings_section_surface_id,
+        settings_section_item_id, shared_flow_scenarios, shared_flow_source_areas,
+        shared_list_support, shared_modal_support, shared_screen_module_map, shared_screen_support,
+        uncovered_ui_parity_mismatches, validate_harness_shell_structure,
+        validate_render_convergence, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
+        BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
+        FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
+        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, ListId,
+        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
+        OperationSnapshot, OperationState, ParityUiIdentity, ProjectionRevision,
+        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
+        RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot, SemanticFailureCode,
+        SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
+        SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
+        SettingsSectionSurfaceId, SharedSettingsSectionId, ToastId, ToastKind, ToastSnapshot,
+        UiParityMismatch, UiReadiness, UiSnapshot, ALL_SHARED_FLOW_IDS, BROWSER_CACHE_BOUNDARIES,
+        BROWSER_HARNESS_BRIDGE_METHODS, BROWSER_OBSERVATION_SURFACE_GLOBAL,
+        BROWSER_OBSERVATION_SURFACE_METHODS, FRONTEND_EXECUTION_BOUNDARIES,
+        FRONTEND_SPECIFIC_SETTINGS_SECTIONS, HARNESS_MODE_ALLOWLIST,
         PARITY_CRITICAL_SETTINGS_SECTIONS, PARITY_EXCEPTION_METADATA,
         SHARED_FLOW_SCENARIO_COVERAGE, SHARED_FLOW_SOURCE_AREAS, SHARED_FLOW_SUPPORT,
         SHARED_LIST_SUPPORT, SHARED_MODAL_SUPPORT, SHARED_SCREEN_MODULE_MAP, SHARED_SCREEN_SUPPORT,
@@ -4502,6 +4572,64 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn screen_surface_ids_are_explicit() {
+        for screen in [
+            ScreenId::Onboarding,
+            ScreenId::Neighborhood,
+            ScreenId::Chat,
+            ScreenId::Contacts,
+            ScreenId::Notifications,
+            ScreenId::Settings,
+        ] {
+            let item_id = screen_item_id(screen);
+            assert_eq!(classify_screen_item_id(item_id), Some(screen));
+        }
+
+        assert_eq!(
+            nav_control_id_for_screen(ScreenId::Onboarding),
+            ControlId::OnboardingRoot
+        );
+        assert_eq!(
+            nav_control_id_for_screen(ScreenId::Neighborhood),
+            ControlId::NavNeighborhood
+        );
+        assert_eq!(
+            nav_control_id_for_screen(ScreenId::Chat),
+            ControlId::NavChat
+        );
+        assert_eq!(
+            nav_control_id_for_screen(ScreenId::Contacts),
+            ControlId::NavContacts
+        );
+        assert_eq!(
+            nav_control_id_for_screen(ScreenId::Notifications),
+            ControlId::NavNotifications
+        );
+        assert_eq!(
+            nav_control_id_for_screen(ScreenId::Settings),
+            ControlId::NavSettings
+        );
+    }
+
+    #[test]
+    fn semantic_settings_sections_use_shared_surface_ids() {
+        let section = crate::scenario_contract::SettingsSection::Devices;
+        assert_eq!(
+            semantic_settings_section_surface_id(section),
+            SettingsSectionSurfaceId::Shared(SharedSettingsSectionId::Devices)
+        );
+        assert_eq!(semantic_settings_section_item_id(section), "devices");
+        assert_eq!(
+            classify_semantic_settings_section_item_id("devices"),
+            Some(section)
+        );
+        assert_eq!(
+            classify_semantic_settings_section_item_id("appearance"),
+            None
+        );
     }
 
     #[test]

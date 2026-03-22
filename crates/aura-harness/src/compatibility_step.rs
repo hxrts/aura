@@ -1,11 +1,15 @@
 //! Internal executor step model for frontend-conformance harness flows.
 //!
 //! Scenario files now load through the semantic contract in `aura-app::scenario_contract`.
-//! These types remain as an execution IR for the harness executor and targeted tests.
+//! These types remain as an execution IR for the harness executor and targeted
+//! tests. The only deliberate non-semantic dependents left are the synthetic
+//! compatibility fixtures in `tests/phases/phase3_state_machine.rs`; shared and
+//! inventory-backed harness scenarios are semantic-only. Inside the executor,
+//! this IR also still carries semantic metadata/wait shaping so semantic and
+//! compatibility lanes share one deterministic state-machine/report path.
 
 use std::fmt;
 
-use aura_app::scenario_contract::SettingsSection;
 use aura_app::ui::contract::{
     ConfirmationState, ControlId, ListId, ModalId, OperationId, OperationState, RuntimeEventKind,
     ScreenId, UiReadiness,
@@ -80,21 +84,4 @@ pub struct CompatibilityStep {
     pub value: Option<String>,
     pub contains: Option<String>,
     pub level: Option<String>,
-}
-
-pub(crate) fn nav_control_id_for_screen(screen_id: ScreenId) -> ControlId {
-    match screen_id {
-        ScreenId::Onboarding => ControlId::OnboardingRoot,
-        ScreenId::Neighborhood => ControlId::NavNeighborhood,
-        ScreenId::Chat => ControlId::NavChat,
-        ScreenId::Contacts => ControlId::NavContacts,
-        ScreenId::Notifications => ControlId::NavNotifications,
-        ScreenId::Settings => ControlId::NavSettings,
-    }
-}
-
-pub(crate) fn settings_section_item_id(section: SettingsSection) -> &'static str {
-    match section {
-        SettingsSection::Devices => "devices",
-    }
 }

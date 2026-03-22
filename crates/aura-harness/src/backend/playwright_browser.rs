@@ -8,7 +8,10 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use aura_app::ui::contract::{list_item_selector, ControlId, FieldId, ListId, UiSnapshot};
+use aura_app::ui::contract::{
+    classify_screen_item_id, list_item_selector, nav_control_id_for_screen, screen_item_id,
+    semantic_settings_section_item_id, ControlId, FieldId, ListId, UiSnapshot,
+};
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
 };
@@ -22,8 +25,8 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    DiagnosticBackend, InstanceBackend, ObservationBackend, RawUiBackend,
-    SharedSemanticBackend, UiSnapshotEvent,
+    DiagnosticBackend, InstanceBackend, ObservationBackend, RawUiBackend, SharedSemanticBackend,
+    UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::timeouts::blocking_sleep;
@@ -374,14 +377,7 @@ impl PlaywrightBrowserBackend {
     ) -> Result<SemanticCommandResponse> {
         match &request.intent {
             IntentAction::OpenScreen(screen) => {
-                let screen = match screen {
-                    aura_app::ui::contract::ScreenId::Onboarding => "onboarding",
-                    aura_app::ui::contract::ScreenId::Neighborhood => "neighborhood",
-                    aura_app::ui::contract::ScreenId::Chat => "chat",
-                    aura_app::ui::contract::ScreenId::Contacts => "contacts",
-                    aura_app::ui::contract::ScreenId::Notifications => "notifications",
-                    aura_app::ui::contract::ScreenId::Settings => "settings",
-                };
+                let screen = screen_item_id(*screen);
                 self.with_session(|session| {
                     session.rpc_call(
                         "navigate_screen",
@@ -395,9 +391,7 @@ impl PlaywrightBrowserBackend {
                 return Ok(SemanticCommandResponse::accepted_without_value());
             }
             IntentAction::OpenSettingsSection(section) => {
-                let section = match section {
-                    SettingsSection::Devices => "devices",
-                };
+                let section = semantic_settings_section_item_id(*section);
                 self.with_session(|session| {
                     session.rpc_call(
                         "open_settings_section",
@@ -563,202 +557,6 @@ impl InstanceBackend for PlaywrightBrowserBackend {
         self.stop_inner()
     }
 
-    fn diagnostic_screen_snapshot(&self) -> Result<String> {
-        let payload = self.with_session(|session| {
-            session.rpc_call(
-                "snapshot",
-                json!({
-                    "instance_id": self.config.id,
-                    "screenshot": self.capture_screenshots,
-                }),
-            )
-        })?;
-        let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
-            format!(
-                "failed to decode browser diagnostic snapshot payload for instance {}",
-                self.config.id
-            )
-        })?;
-        Ok(payload.authoritative_screen)
-    }
-
-    fn diagnostic_dom_snapshot(&self) -> Result<String> {
-        let payload = self.with_session(|session| {
-            session.rpc_call("dom_snapshot", json!({ "instance_id": self.config.id }))
-        })?;
-        let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
-            format!(
-                "failed to decode browser DOM diagnostic payload for instance {}",
-                self.config.id
-            )
-        })?;
-        Ok(payload.authoritative_screen)
-    }
-
-    fn ui_snapshot(&self) -> Result<UiSnapshot> {
-        let payload = self.with_session(|session| {
-            session.rpc_call("ui_state", json!({ "instance_id": self.config.id }))
-        })?;
-        serde_json::from_value(payload).with_context(|| {
-            format!(
-                "failed to decode browser UiSnapshot for instance {}",
-                self.config.id
-            )
-        })
-    }
-
-    fn wait_for_ui_snapshot_event(
-        &self,
-        timeout: Duration,
-        after_version: Option<u64>,
-    ) -> Option<Result<UiSnapshotEvent>> {
-        Some(self.with_session(|session| {
-            let payload = session.rpc_call_with_timeout(
-                "wait_for_ui_state",
-                json!({
-                    "instance_id": self.config.id,
-                    "timeout_ms": timeout.as_millis(),
-                    "after_version": after_version,
-                }),
-                timeout
-                    .as_millis()
-                    .clamp(1, u128::from(u64::MAX))
-                    .try_into()
-                    .unwrap_or(u64::MAX)
-                    .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
-            )?;
-            let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser ui event payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            Ok(UiSnapshotEvent {
-                snapshot: payload.snapshot,
-                version: payload.version,
-            })
-        }))
-    }
-
-    fn wait_for_diagnostic_dom_patterns(
-        &self,
-        patterns: &[String],
-        timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        Some(self.with_session(|session| {
-            let payload = session.rpc_call_with_timeout(
-                "wait_for_dom_patterns",
-                json!({
-                    "instance_id": self.config.id,
-                    "patterns": patterns,
-                    "timeout_ms": timeout_ms,
-                }),
-                timeout_ms.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
-            )?;
-            let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser diagnostic wait-for-dom payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            Ok(payload.authoritative_screen)
-        }))
-    }
-
-    fn wait_for_diagnostic_target(
-        &self,
-        selector: &str,
-        timeout_ms: u64,
-    ) -> Option<Result<String>> {
-        Some(self.with_session(|session| {
-            let payload = session.rpc_call_with_timeout(
-                "wait_for_selector",
-                json!({
-                    "instance_id": self.config.id,
-                    "selector": selector,
-                    "timeout_ms": timeout_ms,
-                }),
-                timeout_ms.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
-            )?;
-            let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser diagnostic wait-for-target payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            Ok(payload.authoritative_screen)
-        }))
-    }
-
-    fn send_keys(&mut self, keys: &str) -> Result<()> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "send_keys",
-                json!({
-                    "instance_id": self.config.id,
-                    "keys": keys,
-                }),
-            )?;
-            Ok(())
-        })
-    }
-
-    fn send_key(&mut self, key: ToolKey, repeat: u16) -> Result<()> {
-        self.with_session(|session| {
-            session.rpc_call(
-                "send_key",
-                json!({
-                    "instance_id": self.config.id,
-                    "key": tool_key_name(key),
-                    "repeat": repeat.max(1),
-                }),
-            )?;
-            Ok(())
-        })
-    }
-
-    fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
-        let payload = self.with_session(|session| {
-            session.rpc_call(
-                "tail_log",
-                json!({
-                    "instance_id": self.config.id,
-                    "lines": lines,
-                }),
-            )
-        })?;
-        let payload: BrowserTailLogPayload = decode_rpc_payload(payload, || {
-            format!(
-                "failed to decode browser tail_log payload for instance {}",
-                self.config.id
-            )
-        })?;
-        let mut merged = payload.lines;
-
-        let stderr_tail = self
-            .stderr_log
-            .blocking_lock()
-            .iter()
-            .rev()
-            .take(lines)
-            .cloned()
-            .collect::<Vec<_>>();
-        for line in stderr_tail.into_iter().rev() {
-            let noise = line.contains("[driver] request start")
-                || line.contains("[driver] request done")
-                || line.contains("method=ui_state")
-                || line.contains("method=snapshot")
-                || line.contains("method=tail_log");
-            if !noise {
-                merged.push(line);
-            }
-        }
-
-        if merged.len() > lines {
-            merged = merged.split_off(merged.len() - lines);
-        }
-        Ok(merged)
-    }
     fn inject_message(&mut self, message: &str) -> Result<()> {
         self.with_session(|session| {
             session.rpc_call(
@@ -771,27 +569,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             Ok(())
         })
     }
-    fn read_clipboard(&self) -> Result<String> {
-        self.with_session(|session| {
-            let payload = session.rpc_call(
-                "read_clipboard",
-                json!({
-                    "instance_id": self.config.id,
-                }),
-            )?;
-            let payload: BrowserClipboardPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser clipboard payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            let text = payload.text.trim_end_matches(['\n', '\r']).to_string();
-            if text.trim().is_empty() {
-                bail!("clipboard for browser instance {} is empty", self.config.id);
-            }
-            Ok(text)
-        })
-    }
+
     fn authority_id(&mut self) -> Result<Option<String>> {
         self.with_session(|session| {
             let payload = session.rpc_call(
@@ -806,10 +584,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     self.config.id
                 )
             })?;
-            let authority_id = payload
-                .authority_id
-                .trim()
-                .to_string();
+            let authority_id = payload.authority_id.trim().to_string();
             let authority_id = (!authority_id.is_empty()).then_some(authority_id);
             Ok(authority_id)
         })
@@ -1138,14 +913,15 @@ impl RawUiBackend for PlaywrightBrowserBackend {
         ) {
             let snapshot = self.ui_snapshot()?;
             if snapshot.screen == aura_app::ui::contract::ScreenId::Settings {
+                let devices_item_id = semantic_settings_section_item_id(SettingsSection::Devices);
                 let needs_devices_section = snapshot
                     .selections
                     .iter()
                     .find(|selection| selection.list == ListId::SettingsSections)
-                    .map(|selection| selection.item_id.as_str() != "devices")
+                    .map(|selection| selection.item_id.as_str() != devices_item_id)
                     .unwrap_or(true);
                 if needs_devices_section {
-                    self.activate_list_item(ListId::SettingsSections, "devices")?;
+                    self.activate_list_item(ListId::SettingsSections, devices_item_id)?;
                 }
             }
         }
@@ -1160,11 +936,19 @@ impl RawUiBackend for PlaywrightBrowserBackend {
         );
         if is_navigation_control {
             let target_screen = match control_id {
-                ControlId::NavNeighborhood => Some("neighborhood"),
-                ControlId::NavChat => Some("chat"),
-                ControlId::NavContacts => Some("contacts"),
-                ControlId::NavNotifications => Some("notifications"),
-                ControlId::NavSettings => Some("settings"),
+                ControlId::NavNeighborhood => Some(screen_item_id(
+                    aura_app::ui::contract::ScreenId::Neighborhood,
+                )),
+                ControlId::NavChat => Some(screen_item_id(aura_app::ui::contract::ScreenId::Chat)),
+                ControlId::NavContacts => {
+                    Some(screen_item_id(aura_app::ui::contract::ScreenId::Contacts))
+                }
+                ControlId::NavNotifications => Some(screen_item_id(
+                    aura_app::ui::contract::ScreenId::Notifications,
+                )),
+                ControlId::NavSettings => {
+                    Some(screen_item_id(aura_app::ui::contract::ScreenId::Settings))
+                }
                 _ => None,
             };
             if let Some(target_screen) = target_screen {
@@ -1415,14 +1199,10 @@ fn field_selector(field_id: FieldId) -> Result<String> {
 }
 
 fn navigation_control_id(item_id: &str) -> Result<ControlId> {
-    match item_id {
-        "neighborhood" => Ok(ControlId::NavNeighborhood),
-        "chat" => Ok(ControlId::NavChat),
-        "contacts" => Ok(ControlId::NavContacts),
-        "notifications" => Ok(ControlId::NavNotifications),
-        "settings" => Ok(ControlId::NavSettings),
-        _ => anyhow::bail!("item {item_id} not found in list {:?}", ListId::Navigation),
-    }
+    classify_screen_item_id(item_id)
+        .filter(|screen| *screen != aura_app::ui::contract::ScreenId::Onboarding)
+        .map(nav_control_id_for_screen)
+        .ok_or_else(|| anyhow!("item {item_id} not found in list {:?}", ListId::Navigation))
 }
 
 fn tool_key_name(key: ToolKey) -> &'static str {
@@ -1679,8 +1459,9 @@ mod tests {
             "browser harness bridge must not expose a generic bootstrap trigger"
         );
         assert!(
-            bridge_source.contains("unsupported screen"),
-            "browser bridge should preserve typed semantic rejection paths for invalid command payloads"
+            bridge_source.contains("classify_screen_item_id(&screen_name)")
+                && bridge_source.contains("classify_semantic_settings_section_item_id(&section_name)"),
+            "browser bridge should classify screen and settings item ids through the shared ui contract helpers"
         );
         assert!(
             !bridge_source.contains("unsupported semantic browser command"),

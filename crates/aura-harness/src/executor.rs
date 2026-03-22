@@ -19,8 +19,8 @@ use aura_app::scenario_contract::{
 #[cfg(test)]
 use aura_app::ui::contract::OperationId;
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, ModalId, OperationState, RuntimeEventKind, ScreenId, ToastKind,
-    UiSnapshot,
+    nav_control_id_for_screen, screen_item_id, semantic_settings_section_item_id, ControlId,
+    FieldId, ListId, ModalId, OperationState, RuntimeEventKind, ScreenId, ToastKind, UiSnapshot,
 };
 use aura_app::ui_contract::{uncovered_ui_parity_mismatches, ProjectionRevision, RuntimeFact};
 use regex::Regex;
@@ -28,10 +28,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use crate::backend::{observe_operation, ChannelBinding, UiOperationHandle};
-use crate::config::{
-    nav_control_id_for_screen, settings_section_item_id, CompatibilityAction, CompatibilityStep,
-    ScenarioConfig, ScreenSource,
-};
+use crate::config::{CompatibilityAction, CompatibilityStep, ScenarioConfig, ScreenSource};
 use crate::introspection::ToastLevel;
 use crate::timeouts::blocking_sleep;
 use crate::tool_api::{DiagnosticScreenCapture, ToolApi, ToolKey, ToolRequest, ToolResponse};
@@ -764,7 +761,7 @@ fn execute_semantic_step(
             let mut wait_step = semantic_wait_step(&metadata_step);
             wait_step.screen_id = Some(ScreenId::Settings);
             wait_step.list_id = Some(ListId::SettingsSections);
-            wait_step.item_id = Some(settings_section_item_id(*section).to_string());
+            wait_step.item_id = Some(semantic_settings_section_item_id(*section).to_string());
             clear_projection_baseline_if_semantic_state_already_visible(
                 tool_api,
                 context,
@@ -3143,14 +3140,7 @@ fn semantic_wait_description(step: &CompatibilityStep) -> String {
 }
 
 fn semantic_screen_name(screen: ScreenId) -> &'static str {
-    match screen {
-        ScreenId::Onboarding => "onboarding",
-        ScreenId::Neighborhood => "neighborhood",
-        ScreenId::Chat => "chat",
-        ScreenId::Contacts => "contacts",
-        ScreenId::Notifications => "notifications",
-        ScreenId::Settings => "settings",
-    }
+    screen_item_id(screen)
 }
 
 fn record_submission_handle(
