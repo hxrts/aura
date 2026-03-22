@@ -92,6 +92,19 @@ impl ChatServiceApi {
         ChoreographicRole::for_authority(authority_id, RoleIndex::new(0).expect("role index"))
     }
 
+    async fn commit_chat_fact_and_wait(
+        &self,
+        context_id: ContextId,
+        fact: &aura_chat::ChatFact,
+    ) -> AgentResult<()> {
+        self.effects
+            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), fact.to_bytes())
+            .await
+            .map_err(AgentError::from)?;
+        self.effects.await_next_view_update().await;
+        Ok(())
+    }
+
     async fn run_amp_transport_vm(
         &self,
         session_uuid: Uuid,
@@ -303,14 +316,8 @@ impl ChatServiceApi {
                     );
                 }
                 EffectCommand::JournalAppend { fact } => {
-                    self.effects
-                        .commit_generic_fact_bytes(
-                            fact.context_id(),
-                            CHAT_FACT_TYPE_ID.into(),
-                            fact.to_bytes(),
-                        )
-                        .await
-                        .map_err(AgentError::from)?;
+                    self.commit_chat_fact_and_wait(fact.context_id(), &fact)
+                        .await?;
                 }
             }
         }
@@ -1060,8 +1067,7 @@ impl ChatServiceApi {
             now.ts_ms,
         );
 
-        self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), edit_fact.to_bytes())
+        self.commit_chat_fact_and_wait(context_id, &edit_fact)
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit edit fact: {e}")))?;
 
@@ -1100,8 +1106,7 @@ impl ChatServiceApi {
             now.ts_ms,
         );
 
-        self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), delete_fact.to_bytes())
+        self.commit_chat_fact_and_wait(context_id, &delete_fact)
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit delete fact: {e}")))?;
 
@@ -1153,8 +1158,7 @@ impl ChatServiceApi {
             requester,
         );
 
-        self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), update_fact.to_bytes())
+        self.commit_chat_fact_and_wait(context_id, &update_fact)
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit update fact: {e}")))?;
 
@@ -1278,6 +1282,7 @@ mod tests {
             .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), fact.to_bytes())
             .await
             .unwrap();
+        effects.await_next_view_update().await;
     }
 
     #[tokio::test]

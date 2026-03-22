@@ -5,7 +5,6 @@
 
 #![allow(missing_docs)]
 
-use std::sync::Arc;
 use anyhow::Result;
 use async_lock::RwLock;
 use aura_agent::AgentBuilder;
@@ -15,6 +14,7 @@ use aura_core::context::EffectContext;
 use aura_core::effects::amp::{ChannelCreateParams, ChannelJoinParams};
 use aura_core::effects::ExecutionMode;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
+use std::sync::Arc;
 
 async fn register_runtime_context(
     agent: &Arc<aura_agent::AuraAgent>,

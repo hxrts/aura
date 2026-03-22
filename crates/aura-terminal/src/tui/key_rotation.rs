@@ -1,5 +1,4 @@
-use aura_app::runtime_bridge::KeyRotationCeremonyStatus;
-use aura_app::ui::types::CeremonyKind;
+use aura_app::ui::types::{CeremonyKind, KeyRotationCeremonyStatus};
 use aura_app::ui::workflows::ceremonies::CeremonyLifecycleState;
 
 use crate::tui::components::ToastMessage;

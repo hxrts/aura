@@ -483,9 +483,11 @@ async fn submit_semantic_command(
             account_workflows::initialize_runtime_account(&app_core, bootstrap_name)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            controller.set_account_setup_state(true, "", None);
-            controller.set_screen(ScreenId::Neighborhood);
-            let _ = publish_semantic_controller_snapshot(controller.as_ref());
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.set_account_setup_state(true, "", None);
+                controller.set_screen(ScreenId::Neighborhood);
+            })
+            .await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
@@ -1060,8 +1062,17 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
             return JsValue::FALSE;
         };
         if let Ok(controller) = current_controller() {
-            controller.set_screen(target);
-            let _ = publish_semantic_controller_snapshot(controller.as_ref());
+            shared_web_task_owner().spawn_local(async move {
+                if let Err(error) = schedule_browser_ui_mutation(controller, move |controller| {
+                    controller.set_screen(target);
+                })
+                .await
+                {
+                    web_sys::console::error_1(
+                        &format!("[web-harness] scheduled UI mutation failed: {error:?}").into(),
+                    );
+                }
+            });
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);
@@ -1080,9 +1091,18 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
             return JsValue::FALSE;
         };
         if let Ok(controller) = current_controller() {
-            controller.set_screen(ScreenId::Settings);
-            controller.set_settings_section(browser_settings_section(target));
-            let _ = publish_semantic_controller_snapshot(controller.as_ref());
+            shared_web_task_owner().spawn_local(async move {
+                if let Err(error) = schedule_browser_ui_mutation(controller, move |controller| {
+                    controller.set_screen(ScreenId::Settings);
+                    controller.set_settings_section(browser_settings_section(target));
+                })
+                .await
+                {
+                    web_sys::console::error_1(
+                        &format!("[web-harness] scheduled UI mutation failed: {error:?}").into(),
+                    );
+                }
+            });
         }
         JsValue::TRUE
     }) as Box<dyn FnMut(JsValue) -> JsValue>);

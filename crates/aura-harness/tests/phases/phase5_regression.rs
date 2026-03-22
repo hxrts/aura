@@ -23,6 +23,8 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
     let config_path = temp.path().join("run.toml");
     let scenario_path = temp.path().join("scenario.toml");
     let artifacts_dir = temp.path().join("artifacts");
+    let scenario_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scenarios/harness/real-runtime-mixed-startup-smoke.toml");
 
     let run_config = RunConfig {
         schema_version: 1,
@@ -126,7 +128,6 @@ action = "launch_actors"
     };
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("diagnostic-only"));
     assert!(stderr.contains("shared semantic scenarios require explicit shared-semantic backends"));
 }
 

@@ -174,7 +174,6 @@ impl Drop for MockRuntimeTaskOwner {
         self.inner.abort_all();
     }
 }
-
 /// Mock RuntimeBridge for testing
 ///
 /// This provides a functional mock of the RuntimeBridge trait that:

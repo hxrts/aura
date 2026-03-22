@@ -454,10 +454,13 @@ impl ToolApi {
                 .coordinator
                 .ui_snapshot(&instance_id)
                 .map(ToolPayload::UiSnapshot),
-            ToolRequest::SendKeys { instance_id, keys } => self
-                .coordinator
-                .send_keys(&instance_id, &keys)
-                .map(|_| ToolPayload::Status(ToolStatusPayload { status: ToolStatus::Sent })),
+            ToolRequest::SendKeys { instance_id, keys } => {
+                self.coordinator.send_keys(&instance_id, &keys).map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Sent,
+                    })
+                })
+            }
             ToolRequest::SendKey {
                 instance_id,
                 key,
@@ -465,7 +468,11 @@ impl ToolApi {
             } => self
                 .coordinator
                 .send_key(&instance_id, key, repeat)
-                .map(|_| ToolPayload::Status(ToolStatusPayload { status: ToolStatus::Sent })),
+                .map(|_| {
+                    ToolPayload::Status(ToolStatusPayload {
+                        status: ToolStatus::Sent,
+                    })
+                }),
             ToolRequest::ActivateControl {
                 instance_id,
                 control_id,
@@ -601,9 +608,9 @@ impl ToolApi {
                         authority_id,
                         source: AuthorityIdSource::Backend,
                     })),
-                    None => anyhow::bail!(
-                        "authoritative authority id is unavailable for {instance_id}"
-                    ),
+                    None => {
+                        anyhow::bail!("authoritative authority id is unavailable for {instance_id}")
+                    }
                 }),
             ToolRequest::DiagnosticListChannels { instance_id } => self
                 .coordinator
@@ -634,22 +641,18 @@ impl ToolApi {
                         diagnostic_toast: toast,
                     })
                 }),
-            ToolRequest::Restart { instance_id } => self
-                .coordinator
-                .restart(&instance_id)
-                .map(|_| {
+            ToolRequest::Restart { instance_id } => {
+                self.coordinator.restart(&instance_id).map(|_| {
                     ToolPayload::Status(ToolStatusPayload {
                         status: ToolStatus::Restarted,
                     })
-                }),
-            ToolRequest::Kill { instance_id } => self
-                .coordinator
-                .kill(&instance_id)
-                .map(|_| {
-                    ToolPayload::Status(ToolStatusPayload {
-                        status: ToolStatus::Killed,
-                    })
-                }),
+                })
+            }
+            ToolRequest::Kill { instance_id } => self.coordinator.kill(&instance_id).map(|_| {
+                ToolPayload::Status(ToolStatusPayload {
+                    status: ToolStatus::Killed,
+                })
+            }),
         };
 
         let response = match outcome {

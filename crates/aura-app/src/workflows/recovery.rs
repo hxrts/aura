@@ -96,7 +96,7 @@ pub async fn start_recovery(
         || runtime.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("start recovery", e))?;
+    .map_err(|e| super::error::runtime_call("start recovery", e))?;
 
     // Create recovery state with initial process
     let recovery_process = RecoveryProcess {
@@ -216,7 +216,7 @@ pub async fn toggle_guardian_contact(
             || runtime.create_guardian_invitation(contact, subject, None, None),
         )
         .await?
-            .map_err(|e| super::error::runtime_call("create guardian invitation", e))?;
+        .map_err(|e| super::error::runtime_call("create guardian invitation", e))?;
     }
 
     // OWNERSHIP: observed-display-update
@@ -298,7 +298,7 @@ pub async fn approve_recovery(
         || runtime.respond_to_guardian_ceremony(ceremony_id, true, None),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("approve recovery", e).into())
+    .map_err(|e| super::error::runtime_call("approve recovery", e).into())
 }
 
 /// Commit a GuardianBinding fact via the runtime bridge (demo/testing helper).
@@ -328,7 +328,7 @@ pub async fn commit_guardian_binding(
         },
     )
     .await?
-        .map_err(|e| super::error::runtime_call("commit guardian binding", e).into())
+    .map_err(|e| super::error::runtime_call("commit guardian binding", e).into())
 }
 
 /// Dispute a recovery request
@@ -351,7 +351,7 @@ pub async fn dispute_recovery(
         || runtime.respond_to_guardian_ceremony(ceremony_id, false, Some(reason)),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("dispute recovery", e).into())
+    .map_err(|e| super::error::runtime_call("dispute recovery", e).into())
 }
 
 /// Get current recovery status
@@ -388,7 +388,7 @@ pub async fn get_ceremony_status(
         || runtime.get_ceremony_status(ceremony_id),
     )
     .await?
-        .map_err(|e| super::error::runtime_call("get ceremony status", e).into())
+    .map_err(|e| super::error::runtime_call("get ceremony status", e).into())
 }
 
 impl CeremonyStatusLike for CeremonyStatus {

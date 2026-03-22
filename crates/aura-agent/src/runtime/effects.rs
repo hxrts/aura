@@ -1888,9 +1888,7 @@ impl AuraEffectSystem {
             .secure_storage()
             .secure_store(&location, &data, &caps)
             .await
-            .map_err(|e| {
-                AuraError::storage(format!("Failed to store threshold config: {}", e))
-            })?;
+            .map_err(|e| AuraError::storage(format!("Failed to store threshold config: {}", e)))?;
 
         tracing::debug!(
             ?authority,
