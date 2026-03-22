@@ -282,6 +282,9 @@ Runtime bridge lookup follows the same strong-ref rule:
   the runtime-owned `threshold_config` written by the current rotation path;
   they may not resurrect legacy `threshold_metadata` blobs as a compatibility
   upgrade
+- effect-backed threshold config/state queries must persist and read the same
+  `threshold_config` record; they may not keep a second legacy storage schema
+  alive behind the runtime-owned path
 - runtime-owned relational-fact pull must fail explicitly when rendezvous is
   unavailable or no websocket-capable descriptor exists for the target peer; it
   may not downgrade missing transport reachability into a zero-fact success
