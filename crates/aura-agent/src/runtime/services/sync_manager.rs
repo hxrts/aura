@@ -6,6 +6,7 @@
 use super::service_actor::{
     validate_actor_transition, ActorLifecyclePhase, ActorOwnedServiceRoot, ServiceActorHandle,
 };
+use super::config_profiles::impl_service_config_profiles;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use super::{ReconfigurationManager, ReconfigurationManagerError, SessionDelegationTransfer};
 use crate::core::default_context_id_for_authority;
@@ -76,7 +77,7 @@ impl Default for SyncManagerConfig {
     }
 }
 
-impl SyncManagerConfig {
+impl_service_config_profiles!(SyncManagerConfig {
     /// Create config for testing (shorter intervals)
     pub fn for_testing() -> Self {
         Self {
@@ -104,7 +105,7 @@ impl SyncManagerConfig {
             max_peer_states: 1024,
         }
     }
-}
+});
 
 /// State of the sync service manager
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

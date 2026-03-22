@@ -10,6 +10,7 @@ pub mod authority_manager;
 pub mod authority_state;
 pub mod ceremony_runner;
 pub mod ceremony_tracker;
+mod config_profiles;
 pub mod context_manager;
 pub mod flow_budget_manager;
 pub mod invariant;

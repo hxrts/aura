@@ -9,6 +9,7 @@
 //! will announce presence and discover peers on the local network.
 
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use super::config_profiles::impl_service_config_profiles;
 use crate::runtime::TaskGroup;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::DiscoveryTriggerOutcome;
@@ -78,7 +79,7 @@ impl Default for RendezvousManagerConfig {
     }
 }
 
-impl RendezvousManagerConfig {
+impl_service_config_profiles!(RendezvousManagerConfig {
     /// Create config for testing (shorter intervals)
     pub fn for_testing() -> Self {
         Self {
@@ -105,7 +106,9 @@ impl RendezvousManagerConfig {
             ..Default::default()
         }
     }
+});
 
+impl RendezvousManagerConfig {
     /// Set default transport hints
     pub fn with_transport_hints(mut self, hints: Vec<TransportHint>) -> Self {
         self.default_transport_hints = hints;
