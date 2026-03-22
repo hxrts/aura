@@ -572,8 +572,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         self.agent.runtime().effects().reactive_handler()
     }
 
-    fn task_spawner(&self) -> Option<OwnedTaskSpawner> {
-        Some(self.agent.runtime().task_spawner())
+    fn task_spawner(&self) -> OwnedTaskSpawner {
+        self.agent.runtime().task_spawner()
     }
 
     // =========================================================================

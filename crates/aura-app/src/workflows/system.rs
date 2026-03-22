@@ -471,7 +471,7 @@ pub async fn install_contacts_refresh_hook(
         let core = app_core.read().await;
         let already_installed = core.contacts_refresh_hook_installed();
         let reactive = core.reactive().clone();
-        let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
+        let spawner = core.runtime().map(|runtime| runtime.task_spawner());
         (reactive, spawner, !already_installed)
     };
 
@@ -545,7 +545,7 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
         let core = app_core.read().await;
         let already_installed = core.chat_refresh_hook_installed();
         let reactive = core.reactive().clone();
-        let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
+        let spawner = core.runtime().map(|runtime| runtime.task_spawner());
         (reactive, spawner, !already_installed)
     };
 
@@ -627,7 +627,7 @@ pub async fn install_authoritative_readiness_hook(
         let core = app_core.read().await;
         let already_installed = core.authoritative_readiness_hook_installed();
         let reactive = core.reactive().clone();
-        let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
+        let spawner = core.runtime().map(|runtime| runtime.task_spawner());
         (reactive, spawner, !already_installed)
     };
 

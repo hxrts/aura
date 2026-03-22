@@ -42,6 +42,7 @@ use aura_core::effects::amp::{
     AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
+use aura_core::effects::task::{CancellationToken, NeverCancel, TaskSpawner};
 use aura_core::threshold::{
     AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
@@ -416,18 +417,16 @@ pub trait RuntimeBridge: Send + Sync {
     /// this handler rather than maintaining parallel state.
     fn reactive_handler(&self) -> ReactiveHandler;
 
-    /// Optional runtime task spawner for background work.
+    /// Runtime task spawner for background work.
     ///
-    /// Runtime implementations can provide a portable task spawner so
-    /// `aura-app` can schedule background work without binding to tokio.
-    fn task_spawner(&self) -> Option<OwnedTaskSpawner> {
-        None
-    }
+    /// All runtime bridges must provide a portable spawner so `aura-app` can
+    /// schedule background work without binding to tokio or optional owner
+    /// fallbacks.
+    fn task_spawner(&self) -> OwnedTaskSpawner;
 
-    /// Optional runtime cancellation token for background work.
-    fn cancellation_token(&self) -> Option<OwnedShutdownToken> {
-        self.task_spawner()
-            .map(|spawner| spawner.shutdown_token().clone())
+    /// Runtime cancellation token for background work.
+    fn cancellation_token(&self) -> OwnedShutdownToken {
+        self.task_spawner().shutdown_token().clone()
     }
 
     // =========================================================================
@@ -1157,6 +1156,7 @@ pub type BoxedRuntimeBridge = Arc<dyn RuntimeBridge>;
 pub struct OfflineRuntimeBridge {
     authority_id: AuthorityId,
     reactive: ReactiveHandler,
+    task_spawner: OwnedTaskSpawner,
     pending_invitations: PendingInvitationsState,
     amp_channel_contexts: AmpChannelContexts,
     materialized_channel_name_matches: MaterializedChannelNameMatches,
@@ -1175,6 +1175,10 @@ impl OfflineRuntimeBridge {
         Self {
             authority_id,
             reactive: ReactiveHandler::new(),
+            task_spawner: OwnedTaskSpawner::new(
+                Arc::new(OfflineRuntimeTaskSpawner),
+                OwnedShutdownToken::detached(),
+            ),
             pending_invitations: Arc::new(Mutex::new(None)),
             amp_channel_contexts: Arc::new(Mutex::new(HashMap::new())),
             materialized_channel_name_matches: Arc::new(Mutex::new(HashMap::new())),
@@ -1308,6 +1312,39 @@ impl OfflineRuntimeBridge {
     }
 }
 
+#[derive(Debug)]
+struct OfflineRuntimeTaskSpawner;
+
+impl TaskSpawner for OfflineRuntimeTaskSpawner {
+    fn spawn(&self, fut: futures::future::BoxFuture<'static, ()>) {
+        drop(fut);
+    }
+
+    fn spawn_cancellable(
+        &self,
+        fut: futures::future::BoxFuture<'static, ()>,
+        _token: Arc<dyn CancellationToken>,
+    ) {
+        drop(fut);
+    }
+
+    fn spawn_local(&self, fut: futures::future::LocalBoxFuture<'static, ()>) {
+        drop(fut);
+    }
+
+    fn spawn_local_cancellable(
+        &self,
+        fut: futures::future::LocalBoxFuture<'static, ()>,
+        _token: Arc<dyn CancellationToken>,
+    ) {
+        drop(fut);
+    }
+
+    fn cancellation_token(&self) -> Arc<dyn CancellationToken> {
+        Arc::new(NeverCancel)
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeBridge for OfflineRuntimeBridge {
@@ -1317,6 +1354,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     fn reactive_handler(&self) -> ReactiveHandler {
         self.reactive.clone()
+    }
+
+    fn task_spawner(&self) -> OwnedTaskSpawner {
+        self.task_spawner.clone()
     }
 
     async fn commit_relational_facts(&self, _facts: &[RelationalFact]) -> Result<(), IntentError> {

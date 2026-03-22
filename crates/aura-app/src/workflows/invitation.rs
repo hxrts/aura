@@ -683,14 +683,16 @@ async fn fail_device_enrollment_accept<T>(
     })))
 }
 
-async fn fail_pending_invitation_accept_if_owned<T>(
-    owner: Option<&SemanticWorkflowOwner>,
+async fn fail_pending_invitation_accept_owned<T>(
+    owner: &SemanticWorkflowOwner,
     error: AcceptInvitationError,
 ) -> Result<T, AuraError> {
-    if let Some(owner) = owner {
-        return fail_invitation_accept(owner, error).await;
-    }
+    fail_invitation_accept(owner, error).await
+}
 
+async fn fail_pending_invitation_accept_unowned<T>(
+    error: AcceptInvitationError,
+) -> Result<T, AuraError> {
     Err(error.into())
 }
 
@@ -1800,7 +1802,7 @@ async fn accept_invitation_id_owned(
             Ok(invitation) => invitation,
             Err(error) => {
                 if accepted_invitation.is_none() {
-                    return fail_pending_invitation_accept_if_owned(Some(owner), error).await;
+                    return fail_pending_invitation_accept_owned(owner, error).await;
                 }
                 None
             }
@@ -1968,7 +1970,7 @@ pub async fn accept_invitation_with_instance(
             Ok(invitation) => invitation,
             Err(error) => {
                 if accepted_invitation.is_none() {
-                    return fail_pending_invitation_accept_if_owned(None, error).await;
+                    return fail_pending_invitation_accept_unowned(error).await;
                 }
                 None
             }
@@ -2668,8 +2670,8 @@ async fn accept_pending_home_invitation_id_owned(
     {
         Ok(invitation) => invitation,
         Err(error) => {
-            return fail_pending_invitation_accept_if_owned(
-                Some(owner),
+            return fail_pending_invitation_accept_owned(
+                owner,
                 AcceptInvitationError::AcceptFailed {
                     detail: error.to_string(),
                 },
@@ -2679,8 +2681,8 @@ async fn accept_pending_home_invitation_id_owned(
     };
 
     let Some(invitation) = pending_invitation else {
-        return fail_pending_invitation_accept_if_owned(
-            Some(owner),
+        return fail_pending_invitation_accept_owned(
+            owner,
             AcceptInvitationError::AcceptFailed {
                 detail: "No pending home invitation found".to_string(),
             },

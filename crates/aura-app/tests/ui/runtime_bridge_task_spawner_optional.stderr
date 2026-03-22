@@ -1,0 +1,14 @@
+error[E0308]: mismatched types
+ --> tests/ui/runtime_bridge_task_spawner_optional.rs:6:39
+  |
+6 |     let _: Option<OwnedTaskSpawner> = bridge.task_spawner();
+  |            ------------------------   ^^^^^^^^^^^^^^^^^^^^^ expected `Option<OwnedTaskSpawner>`, found `OwnedTaskSpawner`
+  |            |
+  |            expected due to this
+  |
+  = note: expected enum `Option<OwnedTaskSpawner>`
+           found struct `OwnedTaskSpawner`
+help: try wrapping the expression in `Some`
+  |
+6 |     let _: Option<OwnedTaskSpawner> = Some(bridge.task_spawner());
+  |                                       +++++                     +

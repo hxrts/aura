@@ -486,8 +486,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         self.reactive_handler.clone()
     }
 
-    fn task_spawner(&self) -> Option<OwnedTaskSpawner> {
-        Some(self.task_owner.owned_spawner())
+    fn task_spawner(&self) -> OwnedTaskSpawner {
+        self.task_owner.owned_spawner()
     }
 
     async fn is_peer_online(&self, _peer: AuthorityId) -> bool {

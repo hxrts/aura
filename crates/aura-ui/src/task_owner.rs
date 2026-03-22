@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::OnceCell;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -227,14 +227,11 @@ fn spawn_local_boxed(fut: LocalBoxFuture<'static, ()>) {
 }
 
 thread_local! {
-    static SHARED_UI_TASK_OWNER: RefCell<Option<FrontendTaskOwner>> = const { RefCell::new(None) };
+    static SHARED_UI_TASK_OWNER: OnceCell<FrontendTaskOwner> = const { OnceCell::new() };
 }
 
 fn shared_ui_task_owner() -> FrontendTaskOwner {
-    SHARED_UI_TASK_OWNER.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        slot.get_or_insert_with(FrontendTaskOwner::default).clone()
-    })
+    SHARED_UI_TASK_OWNER.with(|slot| slot.get_or_init(FrontendTaskOwner::default).clone())
 }
 
 pub(crate) fn spawn_ui<F>(fut: F)

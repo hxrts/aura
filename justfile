@@ -627,6 +627,7 @@ ci-harness-ownership-policy:
     bash scripts/check/ownership-category-declarations.sh
     bash scripts/check/harness-actor-vs-move-ownership.sh
     just _ownership-lint harness-readiness-ownership crates/aura-agent/src/reactive/app_signal_views.rs crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src
+    just _ownership-lint optional-owner-boundary crates/aura-app/src crates/aura-agent/src/runtime_bridge crates/aura-ui/src crates/aura-web/src crates/aura-testkit/src
     bash scripts/check/harness-typed-semantic-errors.sh
     bash scripts/check/harness-typed-json-boundary.sh
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
@@ -659,6 +660,7 @@ ci-ownership-policy:
     just ci-weak-to-strong-identifier-upgrade
     just ci-workflow-ownership-tag-ratchet
     just ci-parity-critical-ignored-results
+    just ci-optional-owner-boundary
     just ci-best-effort-side-effects
     just ci-observed-layer-boundaries
     just ci-frontend-handoff-boundary
@@ -731,6 +733,9 @@ ci-workflow-ownership-tag-ratchet:
 
 ci-parity-critical-ignored-results:
     just _ownership-lint parity-critical-ignored-results crates/aura-app/src/workflows crates/aura-agent/src/handlers
+
+ci-optional-owner-boundary:
+    just _ownership-lint optional-owner-boundary crates/aura-app/src crates/aura-agent/src/runtime_bridge crates/aura-ui/src crates/aura-web/src crates/aura-testkit/src
 
 ci-best-effort-side-effects:
     just _ownership-lint best-effort-side-effect-boundary crates
