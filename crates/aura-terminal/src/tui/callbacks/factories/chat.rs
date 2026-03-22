@@ -222,31 +222,32 @@ impl ChatCallbacks {
                             .await
                             {
                                 Ok(result) => {
-                                    let state_label = match result.consistency_state {
-                                        aura_app::ui::workflows::strong_command::ConsistencyState::Accepted => "accepted",
-                                        aura_app::ui::workflows::strong_command::ConsistencyState::Replicated => "replicated",
-                                        aura_app::ui::workflows::strong_command::ConsistencyState::Enforced => "enforced",
-                                        aura_app::ui::workflows::strong_command::ConsistencyState::TimedOutPartial => "partial-timeout",
-                                    };
+                                    let state_label = result.consistency_label();
 
-                                    if matches!(
-                                        result.consistency_state,
-                                        aura_app::ui::workflows::strong_command::ConsistencyState::TimedOutPartial
-                                    ) {
+                                    if let Some(classification) = result.terminal_classification() {
                                         let details = result
                                             .details
-                                            .unwrap_or_else(|| "consistency barrier timed out".to_string());
+                                            .as_deref()
+                                            .map(str::to_owned)
+                                            .or_else(|| {
+                                                result
+                                                    .default_terminal_detail()
+                                                    .map(ToOwned::to_owned)
+                                            })
+                                            .unwrap_or_else(|| {
+                                                "command did not reach the required lifecycle state"
+                                                    .to_string()
+                                            });
                                         let message = command_outcome_message(
                                             format!("/{irc_name}: {details} ({state_label})"),
-                                            CommandOutcomeStatus::Failed,
-                                            CommandReasonCode::OperationTimedOut,
+                                            classification.status,
+                                            classification.reason,
                                             Some(state_label),
                                         );
                                         send_ui_update_reliable(
                                             &tx,
                                             UiUpdate::ToastAdded(ToastMessage::error(
-                                                "command",
-                                                message,
+                                                "command", message,
                                             )),
                                         )
                                         .await;
@@ -260,8 +261,7 @@ impl ChatCallbacks {
                                         send_ui_update_reliable(
                                             &tx,
                                             UiUpdate::ToastAdded(ToastMessage::info(
-                                                "command",
-                                                message,
+                                                "command", message,
                                             )),
                                         )
                                         .await;
@@ -275,8 +275,7 @@ impl ChatCallbacks {
                                         send_ui_update_reliable(
                                             &tx,
                                             UiUpdate::ToastAdded(ToastMessage::success(
-                                                "command",
-                                                message,
+                                                "command", message,
                                             )),
                                         )
                                         .await;

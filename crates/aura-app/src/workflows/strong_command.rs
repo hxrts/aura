@@ -470,24 +470,107 @@ pub enum ConsistencyRequirement {
     Enforced,
 }
 
-/// Observed consistency state on command completion.
+/// Strongest completion witness observed for a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ConsistencyState {
+pub enum ConsistencyWitness {
     Accepted,
     Replicated,
     Enforced,
-    TimedOutPartial,
 }
 
-impl ConsistencyState {
+impl ConsistencyWitness {
     #[must_use]
-    pub fn satisfies(self, requirement: ConsistencyRequirement) -> bool {
+    pub const fn satisfies(self, requirement: ConsistencyRequirement) -> bool {
         match requirement {
             ConsistencyRequirement::Accepted => {
                 matches!(self, Self::Accepted | Self::Replicated | Self::Enforced)
             }
             ConsistencyRequirement::Replicated => matches!(self, Self::Replicated | Self::Enforced),
             ConsistencyRequirement::Enforced => matches!(self, Self::Enforced),
+        }
+    }
+}
+
+/// Explicit degraded completion reasons for strong-command consistency checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConsistencyDegradedReason {
+    RuntimeUnavailable,
+    OperationTimedOut,
+}
+
+impl ConsistencyDegradedReason {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RuntimeUnavailable => "runtime-unavailable",
+            Self::OperationTimedOut => "partial-timeout",
+        }
+    }
+
+    #[must_use]
+    pub const fn default_detail(self) -> &'static str {
+        match self {
+            Self::RuntimeUnavailable => {
+                "consistency barrier unavailable because no runtime bridge was registered"
+            }
+            Self::OperationTimedOut => "consistency barrier timed out",
+        }
+    }
+}
+
+/// Typed command completion outcome for strong-command execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommandCompletionOutcome {
+    Satisfied(ConsistencyWitness),
+    Degraded {
+        requirement: ConsistencyRequirement,
+        reason: ConsistencyDegradedReason,
+    },
+}
+
+impl CommandCompletionOutcome {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Satisfied(witness) => consistency_witness_label(witness),
+            Self::Degraded { reason, .. } => reason.as_str(),
+        }
+    }
+
+    #[must_use]
+    pub const fn satisfies(self, requirement: ConsistencyRequirement) -> bool {
+        match self {
+            Self::Satisfied(witness) => witness.satisfies(requirement),
+            Self::Degraded { .. } => false,
+        }
+    }
+
+    #[must_use]
+    pub const fn terminal_classification(self) -> Option<CommandTerminalClassification> {
+        match self {
+            Self::Satisfied(_) => None,
+            Self::Degraded {
+                reason: ConsistencyDegradedReason::RuntimeUnavailable,
+                ..
+            } => Some(CommandTerminalClassification::new(
+                CommandTerminalOutcomeStatus::Failed,
+                CommandTerminalReasonCode::Unavailable,
+            )),
+            Self::Degraded {
+                reason: ConsistencyDegradedReason::OperationTimedOut,
+                ..
+            } => Some(CommandTerminalClassification::new(
+                CommandTerminalOutcomeStatus::Failed,
+                CommandTerminalReasonCode::OperationTimedOut,
+            )),
+        }
+    }
+
+    #[must_use]
+    pub const fn default_detail(self) -> Option<&'static str> {
+        match self {
+            Self::Satisfied(_) => None,
+            Self::Degraded { reason, .. } => Some(reason.default_detail()),
         }
     }
 }
@@ -525,6 +608,7 @@ pub enum CommandTerminalReasonCode {
     InvalidState,
     Muted,
     Banned,
+    Unavailable,
     OperationTimedOut,
     Internal,
 }
@@ -542,6 +626,7 @@ impl CommandTerminalReasonCode {
             Self::InvalidState => "invalid_state",
             Self::Muted => "muted",
             Self::Banned => "banned",
+            Self::Unavailable => "unavailable",
             Self::OperationTimedOut => "operation_timed_out",
             Self::Internal => "internal",
         }
@@ -603,18 +688,9 @@ fn classify_invalid_terminal_command_message(message: &str) -> CommandTerminalCl
         )
     } else if message_contains_any(
         message,
-        &[
-            "consistency requirement",
-            "stale snapshot",
-            "invalid state",
-            "precondition failed",
-        ],
+        &["stale snapshot", "invalid state", "precondition failed"],
     ) {
-        let reason = if message_contains_any(message, &["consistency requirement", "not met"]) {
-            CommandTerminalReasonCode::OperationTimedOut
-        } else {
-            CommandTerminalReasonCode::InvalidState
-        };
+        let reason = CommandTerminalReasonCode::InvalidState;
         CommandTerminalClassification::new(CommandTerminalOutcomeStatus::Failed, reason)
     } else {
         CommandTerminalClassification::new(
@@ -693,8 +769,25 @@ impl PlannedCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandExecutionResult {
     pub consistency_requirement: ConsistencyRequirement,
-    pub consistency_state: ConsistencyState,
+    pub completion_outcome: CommandCompletionOutcome,
     pub details: Option<String>,
+}
+
+impl CommandExecutionResult {
+    #[must_use]
+    pub const fn consistency_label(&self) -> &'static str {
+        self.completion_outcome.label()
+    }
+
+    #[must_use]
+    pub const fn terminal_classification(&self) -> Option<CommandTerminalClassification> {
+        self.completion_outcome.terminal_classification()
+    }
+
+    #[must_use]
+    pub const fn default_terminal_detail(&self) -> Option<&'static str> {
+        self.completion_outcome.default_detail()
+    }
 }
 
 /// Static consistency mapping for slash command execution.
@@ -1429,18 +1522,11 @@ pub async fn execute_planned(
         PlannedCommand::General(plan) => execute_general(app_core, plan).await?,
     };
 
-    let consistency_state = wait_for_consistency(app_core, &plan, requirement).await;
-    if !consistency_state.satisfies(requirement) {
-        return Err(AuraError::invalid(format!(
-            "command consistency requirement '{}' not met (state='{}')",
-            consistency_requirement_label(requirement),
-            consistency_state_label(consistency_state)
-        )));
-    }
+    let completion_outcome = wait_for_consistency(app_core, &plan, requirement).await;
 
     Ok(CommandExecutionResult {
         consistency_requirement: requirement,
-        consistency_state,
+        completion_outcome,
         details,
     })
 }
@@ -1460,20 +1546,20 @@ async fn wait_for_consistency(
     app_core: &Arc<RwLock<AppCore>>,
     plan: &PlannedCommand,
     requirement: ConsistencyRequirement,
-) -> ConsistencyState {
+) -> CommandCompletionOutcome {
     if requirement == ConsistencyRequirement::Accepted {
-        return ConsistencyState::Accepted;
+        return CommandCompletionOutcome::Satisfied(ConsistencyWitness::Accepted);
     }
 
     const CONSISTENCY_MAX_PASSES: usize = 8;
     let mut runtime_available = false;
     for _pass in 0..CONSISTENCY_MAX_PASSES {
         if consistency_invariant_holds(app_core, plan).await {
-            return match requirement {
-                ConsistencyRequirement::Accepted => ConsistencyState::Accepted,
-                ConsistencyRequirement::Replicated => ConsistencyState::Replicated,
-                ConsistencyRequirement::Enforced => ConsistencyState::Enforced,
-            };
+            return CommandCompletionOutcome::Satisfied(match requirement {
+                ConsistencyRequirement::Accepted => ConsistencyWitness::Accepted,
+                ConsistencyRequirement::Replicated => ConsistencyWitness::Replicated,
+                ConsistencyRequirement::Enforced => ConsistencyWitness::Enforced,
+            });
         }
 
         if let Ok(runtime) = require_runtime(app_core).await {
@@ -1483,13 +1569,19 @@ async fn wait_for_consistency(
             // No runtime has been available for any pass.  Convergence
             // cannot make progress so bail early instead of spinning.
             #[cfg(feature = "instrumented")]
-            tracing::warn!("consistency wait: no runtime available, returning partial timeout");
-            return ConsistencyState::TimedOutPartial;
+            tracing::warn!("consistency wait: no runtime available, returning degraded outcome");
+            return CommandCompletionOutcome::Degraded {
+                requirement,
+                reason: ConsistencyDegradedReason::RuntimeUnavailable,
+            };
         }
         cooperative_yield().await;
     }
 
-    ConsistencyState::TimedOutPartial
+    CommandCompletionOutcome::Degraded {
+        requirement,
+        reason: ConsistencyDegradedReason::OperationTimedOut,
+    }
 }
 
 #[cfg(feature = "signals")]
@@ -1586,21 +1678,11 @@ fn consistency_for_resolved(command: &ResolvedCommand) -> ConsistencyRequirement
 }
 
 #[cfg(feature = "signals")]
-fn consistency_requirement_label(value: ConsistencyRequirement) -> &'static str {
+const fn consistency_witness_label(value: ConsistencyWitness) -> &'static str {
     match value {
-        ConsistencyRequirement::Accepted => "accepted",
-        ConsistencyRequirement::Replicated => "replicated",
-        ConsistencyRequirement::Enforced => "enforced",
-    }
-}
-
-#[cfg(feature = "signals")]
-fn consistency_state_label(value: ConsistencyState) -> &'static str {
-    match value {
-        ConsistencyState::Accepted => "accepted",
-        ConsistencyState::Replicated => "replicated",
-        ConsistencyState::Enforced => "enforced",
-        ConsistencyState::TimedOutPartial => "partial-timeout",
+        ConsistencyWitness::Accepted => "accepted",
+        ConsistencyWitness::Replicated => "replicated",
+        ConsistencyWitness::Enforced => "enforced",
     }
 }
 
@@ -2481,7 +2563,7 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
-    async fn consistency_barrier_reports_partial_timeout() {
+    async fn consistency_barrier_reports_runtime_unavailable_degraded_state() {
         let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([31u8; 32]));
         let plan = PlannedCommand::Moderator(CommandPlan {
@@ -2494,7 +2576,13 @@ mod tests {
         });
 
         let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
-        assert_eq!(state, ConsistencyState::TimedOutPartial);
+        assert_eq!(
+            state,
+            CommandCompletionOutcome::Degraded {
+                requirement: ConsistencyRequirement::Enforced,
+                reason: ConsistencyDegradedReason::RuntimeUnavailable,
+            }
+        );
     }
 
     #[cfg(feature = "signals")]
@@ -2545,7 +2633,10 @@ mod tests {
 
         let state =
             wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated).await;
-        assert_eq!(state, ConsistencyState::Replicated);
+        assert_eq!(
+            state,
+            CommandCompletionOutcome::Satisfied(ConsistencyWitness::Replicated)
+        );
     }
 
     #[cfg(feature = "signals")]
@@ -2568,13 +2659,21 @@ mod tests {
 
         let state =
             wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Replicated).await;
-        assert_eq!(state, ConsistencyState::Replicated);
+        assert_eq!(
+            state,
+            CommandCompletionOutcome::Satisfied(ConsistencyWitness::Replicated)
+        );
     }
 
     #[cfg(feature = "signals")]
     #[tokio::test]
-    async fn consistency_barrier_treats_missing_home_scope_as_partial_timeout() {
-        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+    async fn consistency_barrier_treats_missing_home_scope_as_timed_out_degraded_state() {
+        let authority = AuthorityId::new_from_entropy([90u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let runtime_bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+        ));
         let missing_channel = ChannelId::from_bytes([45u8; 32]);
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([46u8; 32]));
 
@@ -2594,7 +2693,13 @@ mod tests {
         });
 
         let state = wait_for_consistency(&app_core, &plan, ConsistencyRequirement::Enforced).await;
-        assert_eq!(state, ConsistencyState::TimedOutPartial);
+        assert_eq!(
+            state,
+            CommandCompletionOutcome::Degraded {
+                requirement: ConsistencyRequirement::Enforced,
+                reason: ConsistencyDegradedReason::OperationTimedOut,
+            }
+        );
     }
 
     #[tokio::test]
@@ -2770,15 +2875,34 @@ mod tests {
     }
 
     #[test]
-    fn classify_terminal_execution_error_maps_consistency_timeout() {
-        let classification = classify_terminal_execution_error(&AuraError::invalid(
-            "command consistency requirement 'enforced' not met (state='partial-timeout')",
-        ));
+    fn command_completion_outcome_maps_timeout_without_terminal_string_parsing() {
+        let classification = CommandCompletionOutcome::Degraded {
+            requirement: ConsistencyRequirement::Enforced,
+            reason: ConsistencyDegradedReason::OperationTimedOut,
+        }
+        .terminal_classification()
+        .expect("degraded timeout should classify");
 
         assert_eq!(classification.status, CommandTerminalOutcomeStatus::Failed);
         assert_eq!(
             classification.reason,
             CommandTerminalReasonCode::OperationTimedOut
+        );
+    }
+
+    #[test]
+    fn command_completion_outcome_maps_runtime_unavailable_without_terminal_string_parsing() {
+        let classification = CommandCompletionOutcome::Degraded {
+            requirement: ConsistencyRequirement::Replicated,
+            reason: ConsistencyDegradedReason::RuntimeUnavailable,
+        }
+        .terminal_classification()
+        .expect("runtime unavailable should classify");
+
+        assert_eq!(classification.status, CommandTerminalOutcomeStatus::Failed);
+        assert_eq!(
+            classification.reason,
+            CommandTerminalReasonCode::Unavailable
         );
     }
 

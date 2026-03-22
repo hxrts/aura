@@ -141,6 +141,10 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - authoritative semantic facts now live in one `AppCore`-owned store; signal
   emission mirrors that store for observers but is not the source of truth for
   parity-critical workflow reads or updates
+- strong-command completion barriers now return typed completion witnesses or
+  explicit degraded outcomes such as runtime-unavailable and timed-out; app or
+  frontend code may not encode those states as string-parsed `AuraError`
+  payloads
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership

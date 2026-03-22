@@ -688,13 +688,25 @@ mod tests {
     }
 
     #[test]
-    fn command_error_classification_uses_upstream_typed_reason_codes() {
-        let (status, reason) = classify_command_error(&aura_core::AuraError::invalid(
-            "command consistency requirement 'enforced' not met (state='partial-timeout')",
-        ));
+    fn command_result_classification_uses_upstream_typed_reason_codes() {
+        let result = aura_app::ui::workflows::strong_command::CommandExecutionResult {
+            consistency_requirement:
+                aura_app::ui::workflows::strong_command::ConsistencyRequirement::Enforced,
+            completion_outcome:
+                aura_app::ui::workflows::strong_command::CommandCompletionOutcome::Degraded {
+                    requirement:
+                        aura_app::ui::workflows::strong_command::ConsistencyRequirement::Enforced,
+                    reason:
+                        aura_app::ui::workflows::strong_command::ConsistencyDegradedReason::OperationTimedOut,
+                },
+            details: None,
+        };
+        let classification = result
+            .terminal_classification()
+            .expect("degraded result should classify");
 
-        assert_eq!(status.as_str(), "failed");
-        assert_eq!(reason.as_str(), "operation_timed_out");
+        assert_eq!(classification.status.as_str(), "failed");
+        assert_eq!(classification.reason.as_str(), "operation_timed_out");
     }
 
     #[test]
