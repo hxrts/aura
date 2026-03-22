@@ -80,28 +80,6 @@ impl SharedTransport {
         }
     }
 
-    /// Wrap an existing per-authority inbox (legacy simulation wiring).
-    pub fn from_inbox(
-        authority_id: AuthorityId,
-        inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
-    ) -> Self {
-        let mut inboxes = HashMap::new();
-        inboxes.insert(authority_id, inbox);
-        let mut inbox_notifiers = HashMap::new();
-        inbox_notifiers.insert(authority_id, Arc::new(Notify::new()));
-        let mut online = HashSet::new();
-        online.insert(authority_id);
-        Self {
-            shared: Arc::new(SharedTransportShared {
-                state: RwLock::new(SharedTransportState {
-                    inboxes,
-                    inbox_notifiers,
-                    online,
-                }),
-            }),
-        }
-    }
-
     fn with_state<R>(&self, op: impl FnOnce(&SharedTransportState) -> R) -> R {
         let guard = self.shared.state.read();
         op(&guard)

@@ -70,7 +70,6 @@ cfg_if::cfg_if! {
 }
 
 // Runtime utilities
-pub mod migration;
 pub mod storage_coordinator;
 pub mod time_handler;
 
