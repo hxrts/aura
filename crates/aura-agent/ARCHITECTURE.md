@@ -276,6 +276,9 @@ Runtime bridge lookup follows the same strong-ref rule:
 - runtime-owned relational-fact pull must fail explicitly when rendezvous is
   unavailable or no websocket-capable descriptor exists for the target peer; it
   may not downgrade missing transport reachability into a zero-fact success
+- post-ceremony reachability refresh must fail explicitly when no sync service
+  or no seeded sync peers are available; it may not report a successful refresh
+  without any reachable peer evidence
 
 ## Canonical Host/VM Boundary
 
