@@ -19,7 +19,7 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 | Direction | Crate | What is consumed / produced |
 |-----------|-------|-----------------------------|
-| Consumes | `aura-ui` | Shared Dioxus root, UI state, routing, snapshot rendering |
+| Consumes | `aura-ui` | Shared Dioxus root, UI state, routing, snapshot rendering, frontend operation labels |
 | Consumes | `aura-app` | `AppCore`, `ui_contract`, workflow types |
 | Consumes | `aura-core` | Types, identifiers |
 | Produces | — | Browser shell, harness bridge surface, semantic projections |

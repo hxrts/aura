@@ -59,6 +59,7 @@ proptest = []
 aura-app = { path = "../aura-app", features = ["native"] }
 aura-core = { path = "../aura-core" }
 aura-agent = { path = "../aura-agent" }
+aura-ui = { path = "../aura-ui" }
 
 # Workspace crates (Layer 5 features)
 aura-protocol = { path = "../aura-protocol" }

@@ -22,6 +22,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 | Consumes | `aura-app` | `AppCore`, `Intent`, `ViewState`, `ui_contract`, `workflows::semantic_facts` |
 | Consumes | `aura-agent` | `AuraAgent`, `EffectContext`, services |
 | Consumes | `aura-core` | Types only: errors, identifiers, execution modes |
+| Consumes | `aura-ui` | Shared Layer 7 frontend operation labels used for user-facing failure metadata |
 | Produces | — | CLI handlers, TUI screens, terminal rendering |
 
 ## Invariants
