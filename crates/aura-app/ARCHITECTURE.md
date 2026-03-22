@@ -140,6 +140,9 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership
+- converted ceremony-processing convergence in invitation/device-enrollment
+  workflows must fail immediately on runtime processing errors; owner code may
+  not log those errors and continue into later polling/count-based success tests
 - each converted semantic domain should have one publication helper and one
   ownership label; context/home/neighborhood workflows must not drift into
   mirrored `views_mut().set_*` plus ad hoc signal emission paths

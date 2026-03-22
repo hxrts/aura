@@ -165,7 +165,7 @@ use async_lock::{Mutex, RwLock};
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::{
-    AuraError, OperationContext, RetryBudgetPolicy, RetryRunError, TimeoutBudget,
+    AttemptBudget, AuraError, OperationContext, RetryBudgetPolicy, RetryRunError, TimeoutBudget,
     TimeoutBudgetError, TimeoutRunError, TraceContext,
 };
 use std::sync::Arc;
@@ -308,6 +308,11 @@ async fn invitation_accept_timeout_budget(
 fn device_enrollment_accept_retry_policy() -> Result<RetryBudgetPolicy, AuraError> {
     workflow_retry_policy(80, Duration::from_millis(250), Duration::from_millis(500))
         .map_err(AuraError::from)
+}
+
+enum DeviceEnrollmentAcceptConvergenceError {
+    Terminal(String),
+    Workflow(AuraError),
 }
 
 // OWNERSHIP: first-run-default
@@ -2221,13 +2226,21 @@ pub async fn accept_device_enrollment_invitation(
     let expected_min_devices = 2_usize;
     let policy = device_enrollment_accept_retry_policy()?;
     let invitation_id = invitation.invitation_id.clone();
-    let enrollment_result = execute_with_runtime_retry_budget(&runtime, &policy, |attempt| {
-        let runtime = Arc::clone(&runtime);
-        let invitation_id = invitation_id.clone();
-        async move {
+    let enrollment_result: Result<(), DeviceEnrollmentAcceptConvergenceError> = {
+        let mut attempts = AttemptBudget::new(policy.max_attempts());
+        loop {
+            let attempt = match attempts.record_attempt() {
+                Ok(attempt) => attempt,
+                Err(error) => {
+                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
+                        AuraError::from(error),
+                    ));
+                }
+            };
             #[cfg(not(feature = "instrumented"))]
-            let _ = (attempt, &invitation_id);
-            if let Err(_error) = timeout_runtime_call(
+            let _ = &invitation_id;
+
+            if let Err(error) = timeout_runtime_call(
                 &runtime,
                 "accept_device_enrollment_invitation",
                 "process_ceremony_messages",
@@ -2238,18 +2251,17 @@ pub async fn accept_device_enrollment_invitation(
             .unwrap_or_else(|error| {
                 Err(crate::core::IntentError::internal_error(error.to_string()))
             }) {
-                #[cfg(feature = "instrumented")]
-                tracing::info!(
-                    invitation_id = %invitation_id,
-                    attempt,
-                    error = %_error,
-                    "device enrollment process_ceremony_messages failed during convergence"
-                );
+                break Err(DeviceEnrollmentAcceptConvergenceError::Terminal(format!(
+                    "device enrollment ceremony processing failed during convergence: {error}"
+                )));
             }
-            converge_runtime(&runtime).await;
-            settings::refresh_settings_from_runtime(app_core).await?;
 
-            let runtime_device_count = timeout_runtime_call(
+            converge_runtime(&runtime).await;
+            if let Err(error) = settings::refresh_settings_from_runtime(app_core).await {
+                break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error));
+            }
+
+            let runtime_device_count = match timeout_runtime_call(
                 &runtime,
                 "accept_device_enrollment_invitation",
                 "try_list_devices",
@@ -2257,10 +2269,23 @@ pub async fn accept_device_enrollment_invitation(
                 || runtime.try_list_devices(),
             )
             .await
-            .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
-            .map_err(|e| AuraError::from(super::error::runtime_call("list devices", e)))?
-            .len();
-            let settings_device_count = settings::get_settings(app_core).await?.devices.len();
+            {
+                Ok(Ok(devices)) => devices.len(),
+                Ok(Err(error)) => {
+                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
+                        AuraError::from(super::error::runtime_call("list devices", error)),
+                    ));
+                }
+                Err(error) => {
+                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
+                        AuraError::from(super::error::runtime_call("list devices", error)),
+                    ));
+                }
+            };
+            let settings_device_count = match settings::get_settings(app_core).await {
+                Ok(settings) => settings.devices.len(),
+                Err(error) => break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error)),
+            };
             #[cfg(feature = "instrumented")]
             tracing::info!(
                 invitation_id = %invitation_id,
@@ -2284,14 +2309,28 @@ pub async fn accept_device_enrollment_invitation(
                         "device enrollment acceptance completed without reachable peers"
                     );
                 }
-                return Ok(());
+                break Ok(());
             }
-            Err(AuraError::from(super::error::WorkflowError::Precondition(
-                "device enrollment acceptance not yet converged",
-            )))
+
+            if !attempts.can_attempt() {
+                break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
+                    AuraError::from(super::error::WorkflowError::Precondition(
+                        "device enrollment acceptance not yet converged",
+                    )),
+                ));
+            }
+
+            let delay_ms = match u64::try_from(policy.delay_for_attempt(attempt).as_millis()) {
+                Ok(delay_ms) => delay_ms,
+                Err(_) => {
+                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
+                        AuraError::agent("device enrollment retry delay overflow"),
+                    ));
+                }
+            };
+            runtime.sleep_ms(delay_ms).await;
         }
-    })
-    .await;
+    };
     match enrollment_result {
         Ok(()) => {
             owner
@@ -2299,7 +2338,10 @@ pub async fn accept_device_enrollment_invitation(
                 .await?;
             Ok(())
         }
-        Err(error) => {
+        Err(DeviceEnrollmentAcceptConvergenceError::Terminal(detail)) => {
+            fail_device_enrollment_accept(app_core, detail).await
+        }
+        Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error)) => {
             #[cfg(feature = "instrumented")]
             tracing::warn!(
                 invitation_id = %invitation.invitation_id,
@@ -2735,6 +2777,7 @@ mod tests {
     };
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+    use aura_core::{CeremonyId, DeviceId, Epoch};
 
     // === Invitation Role Parsing Tests ===
 
@@ -3306,6 +3349,70 @@ mod tests {
             terminal,
             SemanticOperationKind::AcceptPendingChannelInvitation,
         );
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn accept_device_enrollment_invitation_fails_closed_on_ceremony_processing_error() {
+        let authority = AuthorityId::new_from_entropy([121u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        runtime.set_accept_invitation_result(Ok(()));
+        runtime.set_process_ceremony_result(Err(crate::core::IntentError::service_error(
+            "ceremony inbox unavailable",
+        )));
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let invitation = InvitationInfo {
+            invitation_id: InvitationId::new("device-enrollment-fail-closed"),
+            sender_id: AuthorityId::new_from_entropy([122u8; 32]),
+            receiver_id: authority,
+            invitation_type: InvitationBridgeType::DeviceEnrollment {
+                subject_authority: authority,
+                initiator_device_id: DeviceId::new_from_entropy([123u8; 32]),
+                device_id: DeviceId::new_from_entropy([124u8; 32]),
+                nickname_suggestion: Some("Laptop".to_string()),
+                ceremony_id: CeremonyId::new("device-enrollment-ceremony"),
+                pending_epoch: Epoch(1),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        };
+
+        let error = accept_device_enrollment_invitation(&app_core, &invitation)
+            .await
+            .expect_err("ceremony processing failure must terminate device enrollment acceptance");
+        assert!(error
+            .to_string()
+            .contains("device enrollment ceremony processing failed during convergence"));
+        assert!(!error
+            .to_string()
+            .contains("did not converge to 2 local devices"));
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::OperationStatus {
+                    operation_id,
+                    instance_id: None,
+                    status,
+                    ..
+                } if operation_id == &OperationId::device_enrollment()
+                    && status.kind == SemanticOperationKind::ImportDeviceEnrollmentCode
+                    && status.phase == SemanticOperationPhase::Failed
+            )
+        }));
     }
 
     #[tokio::test]

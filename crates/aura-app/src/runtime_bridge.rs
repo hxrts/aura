@@ -60,6 +60,10 @@ type AmpChannelStates = Arc<Mutex<HashMap<(ContextId, ChannelId), bool>>>;
 type AmpChannelParticipants = Arc<Mutex<HashMap<(ContextId, ChannelId), Vec<AuthorityId>>>>;
 type ModerationStatuses =
     Arc<Mutex<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>;
+#[cfg(test)]
+type OfflineAcceptInvitationResult = Arc<Mutex<Option<Result<(), IntentError>>>>;
+#[cfg(test)]
+type OfflineProcessCeremonyResult = Arc<Mutex<Option<Result<(), IntentError>>>>;
 
 /// Status of the runtime's sync service
 #[derive(Debug, Clone, Default)]
@@ -1159,6 +1163,10 @@ pub struct OfflineRuntimeBridge {
     amp_channel_states: AmpChannelStates,
     amp_channel_participants: AmpChannelParticipants,
     moderation_statuses: ModerationStatuses,
+    #[cfg(test)]
+    accept_invitation_result: OfflineAcceptInvitationResult,
+    #[cfg(test)]
+    process_ceremony_result: OfflineProcessCeremonyResult,
 }
 
 impl OfflineRuntimeBridge {
@@ -1173,6 +1181,10 @@ impl OfflineRuntimeBridge {
             amp_channel_states: Arc::new(Mutex::new(HashMap::new())),
             amp_channel_participants: Arc::new(Mutex::new(HashMap::new())),
             moderation_statuses: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            accept_invitation_result: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            process_ceremony_result: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -1273,6 +1285,26 @@ impl OfflineRuntimeBridge {
             .try_lock()
             .unwrap_or_else(|| panic!("amp channel states mutex already locked"))
             .insert((context_id, channel_id), exists);
+    }
+
+    #[cfg(test)]
+    /// Configure the result returned by `accept_invitation`.
+    pub fn set_accept_invitation_result(&self, result: Result<(), IntentError>) {
+        let mut guard = self
+            .accept_invitation_result
+            .try_lock()
+            .unwrap_or_else(|| panic!("accept invitation result mutex already locked"));
+        *guard = Some(result);
+    }
+
+    #[cfg(test)]
+    /// Configure the result returned by `process_ceremony_messages`.
+    pub fn set_process_ceremony_result(&self, result: Result<(), IntentError>) {
+        let mut guard = self
+            .process_ceremony_result
+            .try_lock()
+            .unwrap_or_else(|| panic!("process ceremony result mutex already locked"));
+        *guard = Some(result);
     }
 }
 
@@ -1554,6 +1586,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn process_ceremony_messages(&self) -> Result<(), IntentError> {
+        #[cfg(test)]
+        if let Some(result) = self.process_ceremony_result.lock().await.clone() {
+            return result;
+        }
         Err(IntentError::no_agent(
             "Ceremony processing not available in offline mode",
         ))
@@ -1782,6 +1818,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     }
 
     async fn accept_invitation(&self, _invitation_id: &str) -> Result<(), IntentError> {
+        #[cfg(test)]
+        if let Some(result) = self.accept_invitation_result.lock().await.clone() {
+            return result;
+        }
         Err(IntentError::no_agent(
             "Invitation acceptance not available in offline mode",
         ))
