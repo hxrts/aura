@@ -258,7 +258,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn participant_operation_serializes_as_legacy_strings() {
+    fn participant_operation_serializes_as_lowercase_strings() {
         let change = ParticipantChange {
             session_id: "session-123e4567-e89b-12d3-a456-426614174000"
                 .parse()

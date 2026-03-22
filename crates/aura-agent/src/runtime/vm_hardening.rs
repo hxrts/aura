@@ -16,8 +16,6 @@ use telltale_vm::{
 
 /// Default output predicate when no operation-specific hint is provided.
 pub const AURA_OUTPUT_PREDICATE_OBSERVABLE: &str = "aura.observable_output";
-/// Legacy VM default output predicate retained for compatibility.
-pub const AURA_OUTPUT_PREDICATE_VM_OBSERVABLE: &str = "vm.observable_output";
 /// Output predicate used for transport send visibility.
 pub const AURA_OUTPUT_PREDICATE_TRANSPORT_SEND: &str = "aura.transport.send";
 /// Output predicate used for transport receive visibility.
@@ -1087,7 +1085,6 @@ pub fn validate_determinism_profile(
 pub fn aura_output_predicate_allow_list() -> Vec<String> {
     [
         AURA_OUTPUT_PREDICATE_OBSERVABLE,
-        AURA_OUTPUT_PREDICATE_VM_OBSERVABLE,
         AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
         AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
         AURA_OUTPUT_PREDICATE_CHOICE,
