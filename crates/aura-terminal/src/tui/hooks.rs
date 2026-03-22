@@ -76,7 +76,7 @@ use crate::tui::tasks::UiTaskOwner;
 
 #[derive(Debug, Clone)]
 pub enum AppSnapshotAvailability {
-    Available(aura_app::ui::types::StateSnapshot),
+    Available(Box<aura_app::ui::types::StateSnapshot>),
     Contended,
 }
 
@@ -147,7 +147,7 @@ impl AppCoreContext {
     #[must_use]
     pub fn snapshot(&self) -> AppSnapshotAvailability {
         match self.app_core.raw().try_read() {
-            Some(guard) => AppSnapshotAvailability::Available(guard.snapshot()),
+            Some(guard) => AppSnapshotAvailability::Available(Box::new(guard.snapshot())),
             None => AppSnapshotAvailability::Contended,
         }
     }
@@ -731,7 +731,8 @@ impl CallbackContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, LazyLock, Mutex};
+    use async_lock::Mutex;
+    use std::sync::{Arc, LazyLock};
 
     use async_lock::RwLock;
     use aura_app::ui::types::AppConfig;
@@ -808,11 +809,12 @@ mod tests {
     #[tokio::test]
     async fn subscribe_signal_with_retry_report_invokes_terminal_failure_for_unregistered_signal() {
         let app_core = Arc::new(RwLock::new(
-            AppCore::new(AppConfig::default()).expect("Failed to create test AppCore"),
+            AppCore::new(AppConfig::default())
+                .unwrap_or_else(|error| panic!("Failed to create test AppCore: {error}")),
         ));
         let app_core = InitializedAppCore::new(app_core)
             .await
-            .expect("Failed to init signals");
+            .unwrap_or_else(|error| panic!("Failed to init signals: {error}"));
 
         let (tx, rx) = oneshot::channel();
         let sender = Arc::new(Mutex::new(Some(tx)));
@@ -821,16 +823,16 @@ mod tests {
             &UNREGISTERED_TEST_SIGNAL,
             |_| {},
             move |reason| {
-                if let Some(tx) = sender.lock().expect("poisoned sender mutex").take() {
+                if let Some(tx) = sender.lock_blocking().take() {
                     let _ = tx.send(reason);
                 }
             },
         )
         .await;
 
-        let reason = rx
-            .await
-            .expect("terminal failure callback should receive a reason");
+        let reason = rx.await.unwrap_or_else(|error| {
+            panic!("terminal failure callback should receive a reason: {error}")
+        });
         assert!(
             reason.contains("attempts exhausted")
                 || reason.contains("retry budget handling timed out"),

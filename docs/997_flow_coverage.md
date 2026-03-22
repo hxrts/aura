@@ -79,6 +79,15 @@ Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. All harness
 | Neighborhood keypath navigation | Scenario 7 | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
 | Semantic observation contract | `semantic-observation-browser-smoke.toml` | `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | Browser + TUI |
 
+Current parity-critical source changes touched the following shared-flow areas
+and continue to map to the same canonical coverage anchors:
+
+- Neighborhood navigation stays anchored by
+  `real-runtime-mixed-startup-smoke.toml`
+- Chat/contact navigation plus invitation, home creation, channel join, and
+  message-send flows stay anchored by
+  `scenario13-mixed-contact-channel-message-e2e.toml`
+
 ## Frontend-Conformance Coverage
 
 These scenarios are maintained outside the main shared semantic lane:

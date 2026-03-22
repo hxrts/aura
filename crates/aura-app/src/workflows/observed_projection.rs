@@ -350,6 +350,113 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
     Ok(())
 }
 
+/// Observed-only projection update helper for recovery state.
+///
+/// This helper updates both:
+/// 1. ViewState (for futures-signals subscribers)
+/// 2. RECOVERY_SIGNAL (for ReactiveEffects subscribers)
+///
+/// OWNERSHIP: observed-display-update
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn update_recovery_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut RecoveryState) -> T,
+) -> Result<T, AuraError> {
+    let (output, state) = {
+        let core = app_core.read().await;
+        let mut state = core.snapshot().recovery;
+        let output = update(&mut state);
+        (output, state)
+    };
+
+    replace_recovery_projection_observed(app_core, state).await?;
+
+    Ok(output)
+}
+
+/// Observed-only projection update helper for contacts state.
+///
+/// This helper updates both:
+/// 1. ViewState (for futures-signals subscribers)
+/// 2. CONTACTS_SIGNAL (for ReactiveEffects subscribers)
+///
+/// OWNERSHIP: observed-display-update
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn update_contacts_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut ContactsState) -> T,
+) -> Result<T, AuraError> {
+    let (output, state) = {
+        let mut core = app_core.write().await;
+        let mut state = core.snapshot().contacts;
+        let output = update(&mut state);
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_contacts(state.clone());
+        (output, state)
+    };
+
+    emit_signal(app_core, &*CONTACTS_SIGNAL, state, CONTACTS_SIGNAL_NAME).await?;
+
+    Ok(output)
+}
+
+/// Observed-only projection update helper for homes state.
+///
+/// This helper updates both:
+/// 1. ViewState (for futures-signals subscribers)
+/// 2. HOMES_SIGNAL (for ReactiveEffects subscribers)
+///
+/// OWNERSHIP: observed-display-update
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn update_homes_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut HomesState) -> T,
+) -> Result<T, AuraError> {
+    let (output, state) = {
+        let core = app_core.read().await;
+        let mut state = core.snapshot().homes;
+        let output = update(&mut state);
+        (output, state)
+    };
+
+    replace_homes_projection_observed(app_core, state).await?;
+
+    Ok(output)
+}
+
+/// Observed-only projection update helper for neighborhood state.
+///
+/// This helper updates both:
+/// 1. ViewState (for futures-signals subscribers)
+/// 2. NEIGHBORHOOD_SIGNAL (for ReactiveEffects subscribers)
+///
+/// OWNERSHIP: observed-display-update
+#[cfg_attr(not(feature = "signals"), allow(dead_code))]
+pub async fn update_neighborhood_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut NeighborhoodState) -> T,
+) -> Result<T, AuraError> {
+    let (output, state) = {
+        let mut core = app_core.write().await;
+        let mut state = core.snapshot().neighborhood;
+        let output = update(&mut state);
+        // OWNERSHIP: observed-display-update
+        core.views_mut().set_neighborhood(state.clone());
+        (output, state)
+    };
+
+    // Also emit to NEIGHBORHOOD_SIGNAL for ReactiveEffects subscribers
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await?;
+
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,111 +685,4 @@ mod tests {
         assert!(settings_source.contains("replace_homes_projection_observed"));
         assert!(settings_source.contains("replace_recovery_projection_observed"));
     }
-}
-
-/// Observed-only projection update helper for recovery state.
-///
-/// This helper updates both:
-/// 1. ViewState (for futures-signals subscribers)
-/// 2. RECOVERY_SIGNAL (for ReactiveEffects subscribers)
-///
-/// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
-pub async fn update_recovery_projection_observed<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    update: impl FnOnce(&mut RecoveryState) -> T,
-) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().recovery;
-        let output = update(&mut state);
-        (output, state)
-    };
-
-    replace_recovery_projection_observed(app_core, state).await?;
-
-    Ok(output)
-}
-
-/// Observed-only projection update helper for contacts state.
-///
-/// This helper updates both:
-/// 1. ViewState (for futures-signals subscribers)
-/// 2. CONTACTS_SIGNAL (for ReactiveEffects subscribers)
-///
-/// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
-pub async fn update_contacts_projection_observed<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    update: impl FnOnce(&mut ContactsState) -> T,
-) -> Result<T, AuraError> {
-    let (output, state) = {
-        let mut core = app_core.write().await;
-        let mut state = core.snapshot().contacts;
-        let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_contacts(state.clone());
-        (output, state)
-    };
-
-    emit_signal(app_core, &*CONTACTS_SIGNAL, state, CONTACTS_SIGNAL_NAME).await?;
-
-    Ok(output)
-}
-
-/// Observed-only projection update helper for homes state.
-///
-/// This helper updates both:
-/// 1. ViewState (for futures-signals subscribers)
-/// 2. HOMES_SIGNAL (for ReactiveEffects subscribers)
-///
-/// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
-pub async fn update_homes_projection_observed<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    update: impl FnOnce(&mut HomesState) -> T,
-) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().homes;
-        let output = update(&mut state);
-        (output, state)
-    };
-
-    replace_homes_projection_observed(app_core, state).await?;
-
-    Ok(output)
-}
-
-/// Observed-only projection update helper for neighborhood state.
-///
-/// This helper updates both:
-/// 1. ViewState (for futures-signals subscribers)
-/// 2. NEIGHBORHOOD_SIGNAL (for ReactiveEffects subscribers)
-///
-/// OWNERSHIP: observed-display-update
-#[cfg_attr(not(feature = "signals"), allow(dead_code))]
-pub async fn update_neighborhood_projection_observed<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    update: impl FnOnce(&mut NeighborhoodState) -> T,
-) -> Result<T, AuraError> {
-    let (output, state) = {
-        let mut core = app_core.write().await;
-        let mut state = core.snapshot().neighborhood;
-        let output = update(&mut state);
-        // OWNERSHIP: observed-display-update
-        core.views_mut().set_neighborhood(state.clone());
-        (output, state)
-    };
-
-    // Also emit to NEIGHBORHOOD_SIGNAL for ReactiveEffects subscribers
-    emit_signal(
-        app_core,
-        &*NEIGHBORHOOD_SIGNAL,
-        state,
-        NEIGHBORHOOD_SIGNAL_NAME,
-    )
-    .await?;
-
-    Ok(output)
 }

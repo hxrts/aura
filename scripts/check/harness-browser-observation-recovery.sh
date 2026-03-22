@@ -9,17 +9,18 @@ fail() {
   exit 1
 }
 
-driver="crates/aura-harness/playwright-driver/playwright_driver.mjs"
+driver="crates/aura-harness/playwright-driver/src/playwright_driver.ts"
+method_sets="crates/aura-harness/playwright-driver/src/method_sets.ts"
 observation_module="crates/aura-harness/playwright-driver/src/observation.ts"
 ui_state_body="$(awk '/async function uiState\\(params\\)/,/^}/ {print}' "$driver")"
 
 printf '%s\n' "$ui_state_body" | rg -q 'readStructuredUiStateWithNavigationRecovery|resetObservationState\(' \
   && fail "ui_state may not perform implicit browser recovery"
 
-rg -q 'const RECOVERY_METHODS = new Set' "$driver" \
+rg -q 'export const RECOVERY_METHODS: ReadonlySet<DriverMethod> = new Set' "$method_sets" \
   || fail "driver must declare explicit recovery methods"
 
-rg -q "case 'recover_ui_state'" "$driver" \
+rg -q "case \"recover_ui_state\"" "$driver" \
   || fail "driver must expose explicit recover_ui_state"
 
 if rg -q 'recover|retry|fallback' "$observation_module"; then

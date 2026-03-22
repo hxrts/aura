@@ -312,7 +312,8 @@ impl<'a> InvitationChannelHandler<'a> {
                 );
             }
             Err(TimeoutRunError::Operation(error)) => {
-                if !Self::channel_has_participant(effects, context_id, channel_id, participant).await
+                if !Self::channel_has_participant(effects, context_id, channel_id, participant)
+                    .await
                 {
                     tracing::debug!(
                         context_id = %context_id,

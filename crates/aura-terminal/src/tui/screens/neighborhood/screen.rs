@@ -580,9 +580,9 @@ pub fn NeighborhoodScreen(
                                 #(if show_detail_lists {
                                     vec![element! {
                                         View(flex_direction: FlexDirection::Column, gap: 0) {
-                                            ChannelList(channels: display_channels.clone(), selected_index: props.view.selected_channel)
+                                            ChannelList(channels: display_channels, selected_index: props.view.selected_channel)
                                             MemberList(
-                                                members: display_members.clone(),
+                                                members: display_members,
                                                 selected_index: props.view.selected_member,
                                                 moderator_actions_enabled: display_moderator_actions_enabled,
                                             )
@@ -612,7 +612,7 @@ pub fn NeighborhoodScreen(
                     } else {
                         vec![element! {
                             View {
-                                HomeMap(homes: homes.clone(), selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
+                                HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
                             }
                         }]
                     })

@@ -38,6 +38,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_terminal::tui::effects::EffectCommand;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 

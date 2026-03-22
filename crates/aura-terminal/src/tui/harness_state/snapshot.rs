@@ -293,14 +293,12 @@ fn build_authoritative_ui_snapshot(
 
     let settings_section_ids = SettingsSection::all()
         .iter()
-        .map(|section| {
-            aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string()
-        })
+        .map(|section| section.parity_item_id().to_string())
         .collect::<Vec<_>>();
     let settings_items = SettingsSection::all()
         .iter()
         .map(|section| ListItemSnapshot {
-            id: aura_app::ui_contract::settings_section_item_id(section.surface_id()).to_string(),
+            id: section.parity_item_id().to_string(),
             selected: *section == state.settings.section,
             confirmation: ConfirmationState::Confirmed,
             is_current: false,

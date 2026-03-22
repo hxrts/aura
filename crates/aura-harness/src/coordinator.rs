@@ -992,7 +992,7 @@ impl HarnessCoordinator {
                     Some(instance_id.to_string()),
                     event_details!({
                         "authority_id" => authority_id.clone(),
-                        "device_id" => provisional_device_id.clone(),
+                        "device_id" => provisional_device_id,
                         "timeout_ms" => BACKEND_READY_TIMEOUT.as_millis()
                     }),
                 );

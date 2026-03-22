@@ -478,8 +478,8 @@ impl InvitationHandler {
         };
 
         let own_id = self.context.authority.authority_id();
-        let envelopes = load_relational_fact_envelopes_by_type(effects, own_id, CHAT_FACT_TYPE_ID)
-            .await?;
+        let envelopes =
+            load_relational_fact_envelopes_by_type(effects, own_id, CHAT_FACT_TYPE_ID).await?;
 
         for envelope in envelopes {
             let Some(ChatFact::ChannelCreated {
@@ -2869,7 +2869,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        let message = error.to_string();
+        let message = error.clone();
         assert!(
             message.contains("requires registered homes signal"),
             "unexpected error: {message}"
@@ -2932,11 +2932,12 @@ mod tests {
         let shared_transport = crate::runtime::SharedTransport::new();
         let config = AgentConfig::default();
         let peer = AuthorityId::new_from_entropy([135u8; 32]);
-        let effects = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            authority.authority_id(),
-            shared_transport.clone(),
-        );
+        let effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                &config,
+                authority.authority_id(),
+                shared_transport.clone(),
+            );
         // Materialize a destination participant on the shared transport.
         let _peer_effects =
             crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
@@ -2986,11 +2987,12 @@ mod tests {
         let shared_transport = crate::runtime::SharedTransport::new();
         let config = AgentConfig::default();
         let peer = AuthorityId::new_from_entropy([139u8; 32]);
-        let effects = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            authority.authority_id(),
-            shared_transport.clone(),
-        );
+        let effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                &config,
+                authority.authority_id(),
+                shared_transport.clone(),
+            );
         // Materialize a destination participant on the shared transport.
         let _peer_effects =
             crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(

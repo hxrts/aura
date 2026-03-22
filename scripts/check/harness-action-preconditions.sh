@@ -16,11 +16,11 @@ rg -q 'ActionPrecondition::Quiescence' "$scenario_contract" \
   || fail "shared action contracts must declare quiescence preconditions"
 rg -q 'fn enforce_action_preconditions' "$executor" \
   || fail "executor is missing typed action precondition enforcement"
-rg -Fq 'enforce_action_preconditions(step, tool_api, context, &intent)' "$executor" \
+rg -Fq 'enforce_action_preconditions(step, tool_api, context, &intent' "$executor" \
   || fail "shared action execution does not enforce preconditions before issue"
-rg -q 'fn ensure_post_operation_convergence_satisfied' "$executor" \
+rg -q 'fn wait_for_contract_barriers' "$executor" \
   || fail "executor is missing typed post-operation convergence enforcement"
-rg -Fq 'ensure_post_operation_convergence_satisfied(step, context, &instance_id)' "$executor" \
+rg -Fq 'wait_for_contract_barriers(' "$executor" \
   || fail "shared action execution does not enforce post-operation convergence before the next intent"
 
 cargo test -p aura-harness action_preconditions_fail_diagnostically_before_issue --quiet

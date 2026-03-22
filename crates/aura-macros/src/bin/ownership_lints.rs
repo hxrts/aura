@@ -1005,15 +1005,12 @@ impl OwnershipVisitor<'_> {
                         | "fact-backed"
                 )
             }),
-            LintMode::WorkflowNoViewWrites => tags.iter().any(|tag| {
-                matches!(
-                    tag.as_str(),
-                    "observed-display-update" | "fact-backed"
-                )
-            }),
-            LintMode::WorkflowNoFallbackDefaults => {
-                tags.iter().any(|tag| matches!(tag.as_str(), "first-run-default"))
-            }
+            LintMode::WorkflowNoViewWrites => tags
+                .iter()
+                .any(|tag| matches!(tag.as_str(), "observed-display-update" | "fact-backed")),
+            LintMode::WorkflowNoFallbackDefaults => tags
+                .iter()
+                .any(|tag| matches!(tag.as_str(), "first-run-default")),
             LintMode::WorkflowNoViewDerivedReadiness
             | LintMode::WorkflowNoViewDerivedRecipientResolution => false,
             LintMode::WorkflowUnboundedRuntimeAwaits => false,

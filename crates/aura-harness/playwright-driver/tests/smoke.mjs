@@ -31,26 +31,37 @@ const fixtureHtml = `<!doctype html>
           }
         };
 
-        document.addEventListener('keydown', (event) => {
-          pushLog('keydown:' + event.key);
-          if (event.key === 'c') {
+        const applyHarnessKey = (key) => {
+          pushLog('keydown:' + key);
+          if (key === 'c') {
             state.clipboard = 'fixture-clipboard';
+            Promise.resolve(window.__AURA_DRIVER_PUSH_CLIPBOARD?.(state.clipboard)).catch(() => {});
           }
-          if (event.key === '2') {
+          if (key === '2') {
             state.screen = 'Neighborhood Chat Contacts Notifications Settings\\nChannels';
-          } else if (event.key.length === 1 && event.key !== 'c') {
-            state.screen += event.key;
+          } else if (key.length === 1 && key !== 'c') {
+            state.screen += key;
           }
           syncRoot();
+        };
+
+        document.addEventListener('keydown', (event) => {
+          applyHarnessKey(event.key);
         });
 
         window.__AURA_HARNESS__ = {
           send_keys(keys) {
             pushLog('send_keys:' + keys);
+            for (const key of String(keys ?? '')) {
+              applyHarnessKey(key);
+            }
             return true;
           },
           send_key(key, repeat) {
             pushLog('send_key:' + key + ':' + repeat);
+            for (let index = 0; index < Math.max(1, Number(repeat) || 1); index += 1) {
+              applyHarnessKey(String(key ?? ''));
+            }
             return true;
           },
           snapshot() {
@@ -65,6 +76,15 @@ const fixtureHtml = `<!doctype html>
           read_clipboard() {
             return state.clipboard;
           },
+          get_authority_id() {
+            return 'authority-00000000-0000-0000-0000-000000000000';
+          },
+          tail_log(lines) {
+            return state.logs.slice(-lines);
+          }
+        };
+
+        window.__AURA_HARNESS_OBSERVE__ = {
           get_authority_id() {
             return 'authority-00000000-0000-0000-0000-000000000000';
           },
@@ -153,7 +173,8 @@ async function main() {
       app_url: url,
       data_dir: path.join(tempRoot, 'data'),
       artifact_dir: path.join(tempRoot, 'artifacts'),
-      headless: true
+      headless: true,
+      require_semantic_ready: false
     });
 
     await driver.call('send_keys', { instance_id: 'smoke-a', keys: '2hello' });

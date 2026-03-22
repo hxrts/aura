@@ -901,26 +901,47 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(json) = json.as_string() else {
         return;
     };
-    if publish_ui_snapshot_now(
-        &window,
-        value,
-        json,
-        snapshot.screen,
-        snapshot.open_modal,
-        snapshot.operations.len(),
-    ) {
-        let render_seq = RENDER_SEQ.with(|slot| {
-            let mut seq = slot.borrow_mut();
-            *seq = seq.saturating_add(1);
-            *seq
-        });
-        publish_render_heartbeat(
+    let screen = snapshot.screen;
+    let open_modal = snapshot.open_modal;
+    let operation_count = snapshot.operations.len();
+    let callback_window = window.clone();
+    let callback = Closure::once_into_js(move || {
+        if publish_ui_snapshot_now(
+            &callback_window,
+            value,
+            json,
+            screen,
+            open_modal,
+            operation_count,
+        ) {
+            let render_seq = RENDER_SEQ.with(|slot| {
+                let mut seq = slot.borrow_mut();
+                *seq = seq.saturating_add(1);
+                *seq
+            });
+            publish_render_heartbeat(
+                &callback_window,
+                &RenderHeartbeat {
+                    screen,
+                    open_modal,
+                    render_seq,
+                },
+            );
+        }
+    });
+    let callback_fn: &js_sys::Function = callback.unchecked_ref();
+    if let Err(error) = window.request_animation_frame(callback_fn) {
+        log_js_callback_error("requestAnimationFrame publish_ui_snapshot", &error);
+        update_publication_state(
             &window,
-            &RenderHeartbeat {
-                screen: snapshot.screen,
-                open_modal: snapshot.open_modal,
-                render_seq,
-            },
+            UI_PUBLICATION_STATE_KEY,
+            "ui_state",
+            "unavailable",
+            &format!(
+                "request_animation_frame_failed: {}",
+                js_value_detail(&error)
+            ),
+            "window_cache_only",
         );
     }
 }

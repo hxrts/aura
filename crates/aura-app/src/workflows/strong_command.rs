@@ -2024,8 +2024,9 @@ macro_rules! strong_command_executor {
 #[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::AppConfig;
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
+    #[cfg(feature = "signals")]
+    use crate::AppConfig;
     #[cfg(feature = "signals")]
     use crate::{
         signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,

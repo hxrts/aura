@@ -60,6 +60,7 @@ use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_testkit::MockRuntimeBridge;
 
+#[allow(clippy::duplicate_mod)]
 mod support;
 
 use support::generate_demo_guardian_invite_code;

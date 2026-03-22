@@ -160,11 +160,11 @@ use crate::workflows::semantic_facts::{
 };
 use crate::workflows::settings;
 use crate::workflows::signals::{read_signal, read_signal_or_default};
+#[cfg(feature = "signals")]
+use crate::workflows::stage_tracker::update_workflow_stage_direct;
 use crate::workflows::stage_tracker::{
     new_workflow_stage_tracker, update_workflow_stage, WorkflowStageTracker,
 };
-#[cfg(feature = "signals")]
-use crate::workflows::stage_tracker::update_workflow_stage_direct;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
@@ -222,10 +222,7 @@ impl InvitationHandle {
     }
 }
 
-fn update_channel_invitation_stage(
-    tracker: &Option<WorkflowStageTracker>,
-    stage: &'static str,
-) {
+fn update_channel_invitation_stage(tracker: &Option<WorkflowStageTracker>, stage: &'static str) {
     update_workflow_stage(tracker, stage);
 }
 
@@ -1312,7 +1309,9 @@ async fn reconcile_accepted_channel_invitation_authoritative(
     )
     .await
     .map_err(|error| super::error::runtime_call("resolve channel context", error))
-    .map(|result| result.map_err(|error| super::error::runtime_call("resolve channel context", error)))
+    .map(|result| {
+        result.map_err(|error| super::error::runtime_call("resolve channel context", error))
+    })
     .unwrap_or_else(|_| Ok(None))
     {
         if resolved_context == authoritative_context {
@@ -1480,8 +1479,8 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
     ttl_ms: Option<u64>,
     publish_terminal: bool,
 ) -> Result<InvitationInfo, AuraError> {
-    let stage_tracker = external_stage_tracker
-        .or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
+    let stage_tracker =
+        external_stage_tracker.or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
     let channel_id = home_id.parse::<ChannelId>().map_err(|_| {
         AuraError::from(ChannelInvitationBootstrapError::InvalidCanonicalChannelId {
             raw: home_id.clone(),
@@ -2902,13 +2901,9 @@ mod tests {
     use crate::views::invitations::InvitationType;
     #[cfg(feature = "signals")]
     use crate::workflows::messaging::apply_authoritative_membership_projection;
-    use crate::workflows::semantic_facts::{
-        assert_succeeded_with_postcondition, assert_terminal_failure_or_cancelled,
-        assert_terminal_failure_status,
-    };
+    use crate::workflows::semantic_facts::assert_terminal_failure_status;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
-    use aura_core::{CeremonyId, DeviceId, Epoch};
 
     // === Invitation Role Parsing Tests ===
 
@@ -3322,7 +3317,7 @@ mod tests {
         assert!(result.is_err());
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert_terminal_failure_or_cancelled(
+        crate::workflows::semantic_facts::assert_terminal_failure_or_cancelled(
             &facts,
             &OperationId::invitation_accept(),
             &instance_id,
@@ -3398,7 +3393,7 @@ mod tests {
         .unwrap();
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-        assert_succeeded_with_postcondition(
+        crate::workflows::semantic_facts::assert_succeeded_with_postcondition(
             &facts,
             &OperationId::invitation_accept(),
             &instance_id,
@@ -3614,11 +3609,11 @@ mod tests {
             receiver_id: authority,
             invitation_type: InvitationBridgeType::DeviceEnrollment {
                 subject_authority: authority,
-                initiator_device_id: DeviceId::new_from_entropy([123u8; 32]),
-                device_id: DeviceId::new_from_entropy([124u8; 32]),
+                initiator_device_id: aura_core::DeviceId::new_from_entropy([123u8; 32]),
+                device_id: aura_core::DeviceId::new_from_entropy([124u8; 32]),
                 nickname_suggestion: Some("Laptop".to_string()),
-                ceremony_id: CeremonyId::new("device-enrollment-ceremony"),
-                pending_epoch: Epoch(1),
+                ceremony_id: aura_core::CeremonyId::new("device-enrollment-ceremony"),
+                pending_epoch: aura_core::Epoch(1),
             },
             status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
             created_at_ms: 1,

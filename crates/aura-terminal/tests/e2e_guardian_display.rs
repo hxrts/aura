@@ -11,6 +11,7 @@
 
 use aura_terminal::ids;
 
+#[allow(clippy::duplicate_mod)]
 mod support;
 
 #[tokio::test]

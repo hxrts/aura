@@ -96,6 +96,9 @@ For parity-critical observation:
 - `UiSnapshot` and render-convergence data are authoritative
 - observation surfaces must be side-effect free
 - recovery and retries must be explicit and separate from observation
+- browser `ui_state` remains observation-only and must not perform implicit
+  navigation/state recovery; explicit recovery goes through
+  `recover_ui_state` / `readStructuredUiStateWithNavigationRecovery(...)`
 - DOM/text fallback paths are diagnostics only and must not become success-path observation behavior
 - browser semantic observation must fail closed when the published snapshot is
   unavailable; it must not silently repair by reading a live controller/model
@@ -113,10 +116,10 @@ For parity-critical waits and assertions:
 - when a runtime bridge surface exposes typed lifecycle such as
   `DiscoveryTriggerOutcome`, `CeremonyProcessingOutcome`, or an explicit
   mutation outcome, tests should assert those variants directly instead of
-  treating `Ok(())` as sufficient proof of progress
+  treating a unit success result as sufficient proof of progress
 - executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers; do not keep a second harness-local convergence graph
 - projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation; runtime-event, toast, and exact operation-state waits still fail closed across restarts
-- semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or `Submitting`
+- semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or a frontend-local submitting phase
 - shared semantic harness core should decode typed `ToolPayload` and bridge structs directly; keep raw `serde_json::Value` plumbing at outer CLI/browser adapters only
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
 - harness mode may change instrumentation and render stability, but it must not change business-flow semantics
@@ -152,7 +155,7 @@ For failure analysis:
 
 - prefer canonical action/event/state traces and structured timeout diagnostics
 - treat final text or screenshot inspection as supporting evidence, not the primary oracle
-- replay bundles should compare typed tool-response payload meaning, not just top-level `Ok` vs `Error` shape
+- replay bundles should compare typed tool-response payload meaning, not just a binary success-versus-error shape
 
 For ownership cleanup discipline:
 
@@ -201,6 +204,17 @@ Testing/enforcement split:
   leaving both paths active
 
 The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). The bootstrap staging/handoff promise is completion-based: callers may treat it as confirmation that the owned bootstrap/rebootstrap transition finished, not merely that the request was queued. Channel-returning bridge responses now distinguish weak selected-channel ids from authoritative channel bindings; a payload that lacks context is not a binding. Browser harness failures also surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__` and `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`; those globals are diagnostic-only and do not replace the authoritative `UiSnapshot`/`RenderHeartbeat` payloads. Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`, and browser-owned maintenance polling should share one bounded helper for sleep/cancellation/pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
+
+The canonical shared-flow coverage anchors for the current parity-critical user
+flows remain:
+
+- `real-runtime-mixed-startup-smoke.toml` for startup/onboarding and shared
+  neighborhood navigation
+- `scenario13-mixed-contact-channel-message-e2e.toml` for chat/contacts plus
+  invitation, home creation, channel join, and message-send flows
+- `scenario12-mixed-device-enrollment-removal-e2e.toml` for device add/remove
+- `shared-notifications-and-authority.toml` and `shared-settings-parity.toml`
+  for the remaining shared settings/authority/navigation flows
 
 ### Shared Semantic Ownership Inventory
 

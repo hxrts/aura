@@ -336,8 +336,7 @@ fn collect_failure_diagnostics(
             } => capture,
             aura_harness::tool_api::ToolResponse::Ok { payload } => DiagnosticScreenCapture {
                 diagnostic_authoritative_screen: format!(
-                    "diagnostic_screen_unexpected_payload: {:?}",
-                    payload
+                    "diagnostic_screen_unexpected_payload: {payload:?}"
                 ),
                 diagnostic_raw_screen: String::new(),
                 diagnostic_normalized_screen: String::new(),
@@ -403,7 +402,7 @@ fn collect_failure_diagnostics(
 
         let render_convergence = match &ui_state_snapshot {
             Some(snapshot) => {
-                let semantic_screen = serde_json::to_value(&snapshot.screen)
+                let semantic_screen = serde_json::to_value(snapshot.screen)
                     .ok()
                     .and_then(|value| value.as_str().map(str::to_string))
                     .unwrap_or_else(|| format!("{:?}", snapshot.screen));

@@ -176,7 +176,7 @@ pub fn use_authority_id_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let authority_id = shared.clone();
-        let tasks = tasks.clone();
+        let tasks = tasks;
         let update_tx_for_report = update_tx.clone();
         async move {
             subscribe_signal_with_retry_report_to_ui(
@@ -293,7 +293,7 @@ pub fn use_nav_status_signals(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut transport_peers = transport_peers.clone();
-        let tasks = tasks.clone();
+        let tasks = tasks;
         async move {
             subscribe_signal_with_retry_report_to_ui(
                 app_core,
@@ -862,15 +862,15 @@ pub fn use_channels_subscription(
     let last_channel_signature = last_channel_signature_ref.read().clone();
     let coordinator = ChannelProjectionCoordinator {
         channels: shared_channels.clone(),
-        selected_channel_id: selected_channel_id.clone(),
-        active_scope: active_scope.clone(),
-        latest_chat_state: latest_chat_state.clone(),
-        shared_authority_id: shared_authority_id.clone(),
-        tasks: tasks.clone(),
-        update_tx: update_tx.clone(),
-        last_channel_count: last_channel_count.clone(),
-        last_message_count: last_message_count.clone(),
-        last_channel_signature: last_channel_signature.clone(),
+        selected_channel_id,
+        active_scope,
+        latest_chat_state,
+        shared_authority_id,
+        tasks,
+        update_tx,
+        last_channel_count,
+        last_message_count,
+        last_channel_signature,
         projection_version: projection_version.clone(),
     };
 
@@ -899,7 +899,7 @@ pub fn use_channels_subscription(
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let coordinator = coordinator.clone();
+        let coordinator = coordinator;
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 coordinator.update_active_scope(Some(active_home_scope_id(&neighborhood)));

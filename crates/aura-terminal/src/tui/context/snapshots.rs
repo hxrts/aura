@@ -18,7 +18,7 @@ use crate::tui::hooks::{
 
 #[derive(Debug, Clone)]
 pub enum StateSnapshotAvailability {
-    Available(aura_app::ui::types::StateSnapshot),
+    Available(Box<aura_app::ui::types::StateSnapshot>),
     Contended,
 }
 
@@ -44,7 +44,7 @@ impl SnapshotHelper {
     #[must_use]
     pub fn state_snapshot_availability(&self) -> StateSnapshotAvailability {
         match self.app_core.try_read() {
-            Some(core) => StateSnapshotAvailability::Available(core.snapshot()),
+            Some(core) => StateSnapshotAvailability::Available(Box::new(core.snapshot())),
             None => StateSnapshotAvailability::Contended,
         }
     }

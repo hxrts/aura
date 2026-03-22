@@ -45,6 +45,7 @@ use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::types::MfaPolicy;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 

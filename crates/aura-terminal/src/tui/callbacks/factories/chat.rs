@@ -311,7 +311,6 @@ impl ChatCallbacks {
                     )),
                 )
                 .await;
-                return;
             });
         })
     }
@@ -325,7 +324,7 @@ impl ChatCallbacks {
                 let channel_id_clone = channel_id;
                 let content_clone = content;
 
-                spawn_ctx(ctx.clone(), async move {
+                spawn_ctx(ctx, async move {
                     let operation_instance_id = operation.harness_handle().instance_id().clone();
                     let _ = operation
                         .handoff_to_app_workflow(SemanticOperationTransferScope::SendChatMessage);
@@ -440,16 +439,13 @@ impl ChatCallbacks {
                     "chat",
                     "Join channel failed",
                     "join_channel callback",
-                    move |app_core, operation_instance_id| {
-                        let channel_name = channel_name.clone();
-                        async move {
-                            aura_app::ui::workflows::messaging::join_channel_by_name_with_binding_terminal_status(
+                    move |app_core, operation_instance_id| async move {
+                        aura_app::ui::workflows::messaging::join_channel_by_name_with_binding_terminal_status(
                                 &app_core,
                                 &channel_name,
                                 operation_instance_id,
                             )
                             .await
-                        }
                     },
                     |tx, binding| async move {
                         send_ui_update_required(&tx, UiUpdate::ChannelSelected(binding)).await;

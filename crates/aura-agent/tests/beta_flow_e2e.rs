@@ -401,7 +401,8 @@ async fn test_channel_invitation() -> TestResult {
     let invitee = AuthorityId::new_from_entropy([61u8; 32]);
     let context_id = ContextId::new_from_entropy([62u8; 32]);
     let home_id = ChannelId::from_bytes([61u8; 32]);
-    agent.runtime()
+    agent
+        .runtime()
         .effects()
         .create_channel(ChannelCreateParams {
             context: context_id,

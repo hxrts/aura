@@ -203,12 +203,11 @@ impl ChannelReadinessState {
         authoritative_channel: Option<AuthoritativeChannelRef>,
         recipients: Vec<AuthorityId>,
     ) -> Self {
-        let delivery_supported = !fact_key
-            .name
-            .as_deref()
-            .unwrap_or_default()
-            .eq_ignore_ascii_case("note to self")
-            && !recipients.is_empty();
+        let is_note_to_self = matches!(
+            fact_key.name.as_deref(),
+            Some(name) if name.eq_ignore_ascii_case("note to self")
+        );
+        let delivery_supported = !is_note_to_self && !recipients.is_empty();
         Self {
             channel_id,
             fact_key,
@@ -1366,9 +1365,7 @@ async fn ensure_channel_visible_after_join(
             .all_channels()
             .find(|channel| {
                 channel.id != channel_id
-                    && channel
-                        .name
-                        .eq_ignore_ascii_case(normalized_name.as_str())
+                    && channel.name.eq_ignore_ascii_case(normalized_name.as_str())
             })
             .cloned();
         channel
@@ -4160,7 +4157,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn authoritative_context_id_for_channel_does_not_fallback_to_pending_channel_invitation() {
+    async fn authoritative_context_id_for_channel_does_not_fallback_to_pending_channel_invitation()
+    {
         let config = AppConfig::default();
         let owner = AuthorityId::new_from_entropy([94u8; 32]);
         let sender = AuthorityId::new_from_entropy([95u8; 32]);

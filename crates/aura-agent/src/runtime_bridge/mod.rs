@@ -4136,6 +4136,7 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::AgentBuilder;
+    use async_lock::Mutex;
     use aura_core::context::EffectContext;
     use aura_core::effects::ExecutionMode;
     use aura_core::effects::TransportEffects;
@@ -4145,7 +4146,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -4181,8 +4182,7 @@ mod tests {
     fn unique_test_path(label: &str) -> PathBuf {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         std::env::temp_dir().join(format!(
-            "aura-agent-runtime-bridge-{label}-{}-{}",
-            std::process::id(),
+            "aura-agent-runtime-bridge-{label}-{}",
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ))
     }
@@ -4206,7 +4206,7 @@ mod tests {
 
     #[test]
     fn harness_sync_policy_defaults_when_env_missing() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock_blocking();
         std::env::remove_var("AURA_HARNESS_MODE");
         std::env::remove_var("AURA_HARNESS_SYNC_ROUNDS");
         std::env::remove_var("AURA_HARNESS_SYNC_BACKOFF_MS");
@@ -4218,7 +4218,7 @@ mod tests {
 
     #[test]
     fn harness_sync_policy_honors_explicit_env_values() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock_blocking();
         std::env::set_var("AURA_HARNESS_MODE", "1");
         std::env::set_var("AURA_HARNESS_SYNC_ROUNDS", "5");
         std::env::set_var("AURA_HARNESS_SYNC_BACKOFF_MS", "125");
@@ -4302,7 +4302,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_peer_channel_rejects_default_context_descriptor_fallback() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().await;
         let _env_restore = EnvRestore::capture(&[
             "AURA_HARNESS_MODE",
             "AURA_HARNESS_SYNC_ROUNDS",

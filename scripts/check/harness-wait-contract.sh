@@ -16,8 +16,8 @@ rg -q 'fn ensure_wait_contract_declared' crates/aura-harness/src/executor.rs \
 rg -Fq 'waits.modal(' crates/aura-harness/src/executor.rs \
   || rg -q 'fn wait_for_modal\(' crates/aura-harness/src/executor.rs \
   || fail "shared semantic execution must route modal waits through the typed wait contract"
-rg -Fq 'waits.runtime_event(' crates/aura-harness/src/executor.rs \
-  || rg -q 'fn wait_for_runtime_event\(' crates/aura-harness/src/executor.rs \
+rg -Fq 'BarrierDeclaration::RuntimeEvent' crates/aura-harness/src/executor.rs \
+  || rg -q 'fn wait_for_runtime_event_snapshot\(' crates/aura-harness/src/executor.rs \
   || fail "shared semantic execution must route runtime-event waits through the typed wait contract"
 rg -Fq 'waits.semantic_state(' crates/aura-harness/src/executor.rs \
   || rg -q 'fn wait_for_semantic_state\(' crates/aura-harness/src/executor.rs \

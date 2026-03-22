@@ -1510,7 +1510,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             IntentAction::CreateAccount { account_name } => {
                 let handle = require_ui_operation_handle(
                     self.send_harness_command_receipt(&HarnessUiCommand::CreateAccount {
-                        account_name: account_name.to_string(),
+                        account_name,
                     })?,
                     "create_account",
                 )?;
@@ -1524,9 +1524,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
             }
             IntentAction::CreateHome { home_name } => {
                 let handle = require_ui_operation_handle(
-                    self.send_harness_command_receipt(&HarnessUiCommand::CreateHome {
-                        home_name: home_name.to_string(),
-                    })?,
+                    self.send_harness_command_receipt(&HarnessUiCommand::CreateHome { home_name })?,
                     "create_home",
                 )?;
                 Ok(SemanticCommandResponse {
@@ -1573,7 +1571,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 let (handle, code) = require_contact_invitation_submission(
                     self.send_harness_command_receipt(
                         &HarnessUiCommand::CreateContactInvitation {
-                            receiver_authority_id: receiver_authority_id.to_string(),
+                            receiver_authority_id,
                         },
                     )?,
                     "create_contact_invitation",
@@ -1649,7 +1647,7 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 }
                 let handle = require_ui_operation_handle(
                     self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
-                        content: message.to_string(),
+                        content: message,
                     })?,
                     "send_chat_message",
                 )?;

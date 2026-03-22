@@ -15,14 +15,16 @@ bridge_impl="crates/aura-web/src/harness_bridge.rs"
 extract_bridge_methods() {
   local surface="$1"
   awk -v wanted_surface="$surface" '
-    /pub fn install_window_harness_api/ { in_fn=1 }
-    in_fn && /^[[:space:]]*&harness,[[:space:]]*$/ { target="harness"; next }
-    in_fn && /^[[:space:]]*&observe,[[:space:]]*$/ { target="observe"; next }
-    in_fn && target==wanted_surface && match($0, /&JsValue::from_str\("([a-z_]+)"\)/, m) {
+    /Reflect::set\(/ { in_set=1; target=""; next }
+    in_set && /^[[:space:]]*&harness,[[:space:]]*$/ { target="harness"; next }
+    in_set && /^[[:space:]]*&observe,[[:space:]]*$/ { target="observe"; next }
+    in_set && target==wanted_surface && match($0, /&JsValue::from_str\("([a-z_]+)"\)/, m) {
       print m[1]
+      in_set=0
       target=""
+      next
     }
-    in_fn && /^}$/ { in_fn=0; target="" }
+    in_set && /^\s*\)\?;$/ { in_set=0; target="" }
   ' "$bridge_impl" | sort -u
 }
 
@@ -75,7 +77,7 @@ while IFS= read -r method; do
 done < <(
   printf '%s\n' "${exported_action_methods[@]}" "${exported_observation_methods[@]}" \
     | awk 'NF { print }' \
-    | rg '^(send_keys|send_key|navigate_screen|snapshot|ui_state|read_clipboard|submit_semantic_command|get_authority_id|tail_log|root_structure|inject_message)$' \
+    | rg '^(send_keys|send_key|navigate_screen|open_settings_section|snapshot|ui_state|read_clipboard|submit_semantic_command|get_authority_id|tail_log|root_structure|inject_message)$' \
     | sort -u
 )
 

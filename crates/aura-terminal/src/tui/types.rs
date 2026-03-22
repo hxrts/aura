@@ -674,6 +674,10 @@ impl SettingsSection {
         }
     }
 
+    pub fn parity_item_id(self) -> &'static str {
+        aura_app::ui_contract::settings_section_item_id(self.surface_id())
+    }
+
     pub fn next(self) -> Self {
         match self {
             Self::Profile => Self::Threshold,

@@ -30,6 +30,7 @@ use aura_terminal::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, Ec
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 

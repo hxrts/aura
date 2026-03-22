@@ -30,6 +30,7 @@ use aura_core::types::identifiers::AuthorityId;
 use aura_terminal::ids;
 use aura_terminal::tui::effects::EffectCommand;
 
+#[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 

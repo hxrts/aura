@@ -9,7 +9,7 @@ fail() {
   exit 1
 }
 
-driver="crates/aura-harness/playwright-driver/playwright_driver.mjs"
+driver="crates/aura-harness/playwright-driver/src/playwright_driver.ts"
 start_line="$(rg -n '^function resetObservationState' "$driver" | cut -d: -f1)"
 end_line="$(rg -n '^function markObservationMutation' "$driver" | cut -d: -f1)"
 

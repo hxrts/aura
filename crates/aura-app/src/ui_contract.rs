@@ -2614,6 +2614,10 @@ pub const SHARED_FLOW_SUPPORT: &[SharedFlowSupport] = &[
 /// Keep `docs/997_flow_coverage.md` aligned with this canonical shared-flow mapping.
 // Coverage metadata stays co-located with the shared flow contract so CI can
 // ratchet flow-relevant source changes against reviewed scenario coverage.
+// Current anchors:
+// - startup smoke owns shared neighborhood navigation and onboarding coverage
+// - scenario13 owns chat/contacts plus invitation, home-create, join, and send coverage
+// - scenario12 owns add/remove-device coverage
 pub const SHARED_FLOW_SCENARIO_COVERAGE: &[SharedFlowScenarioCoverage] = &[
     SharedFlowScenarioCoverage {
         flow: SharedFlowId::NavigateNeighborhood,
@@ -4710,7 +4714,9 @@ mod tests {
         );
 
         assert!(
-            tui_export.contains("settings_section_item_id(section.surface_id()).to_string()"),
+            tui_export.contains("section.parity_item_id().to_string()")
+                || tui_export
+                    .contains("settings_section_item_id(section.surface_id()).to_string()"),
             "tui settings export must use the canonical parity item id"
         );
         assert!(

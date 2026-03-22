@@ -540,7 +540,7 @@ impl NeighborhoodCallbacks {
                     }
                 };
                 spawn_observed_dispatch_callback(
-                    ctx.clone(),
+                    ctx,
                     tx.clone(),
                     cmd,
                     move |tx| async move {

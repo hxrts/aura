@@ -406,7 +406,7 @@ Contains:
 - Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`) in `aura-guards`
 - Multi-party protocol orchestration (consensus in `aura-consensus`, anti-entropy in `aura-anti-entropy`)
 - Quorum-driven DKG orchestration and transcript handling in `aura-consensus/src/dkg/`
-- Cross-handler coordination logic (`TransportCoordinator`, `StorageCoordinator`, etc.)
+- Cross-handler transport and storage coordination logic
 - Distributed state management
 - Stateful coordinators for multi-party protocols
 

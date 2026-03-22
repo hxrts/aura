@@ -46,6 +46,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   owned bootstrap transition, not merely on enqueue, so harness/browser callers
   do not mistake acceptance for success.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
+- Browser harness publication is render-aligned: semantic snapshot publication
+  and render heartbeat emission must be scheduled through
+  `requestAnimationFrame` so harness render-convergence contracts observe
+  post-render browser state instead of pre-paint intermediate state.
 - Browser/DOM fallback paths are diagnostic-only and must not become parity-critical success-path observation.
 - Browser semantic observation must fail closed when published semantic state is
   unavailable; it must not repair observation by reading a live controller
@@ -76,11 +80,15 @@ The browser shell exports structured observed semantic UI projections and render
 
 Enforcement locus:
 - `src/harness_bridge.rs` publishes `UiSnapshot` and `RenderHeartbeat`.
+- `src/harness_bridge.rs` schedules publication through
+  `requestAnimationFrame`.
 - `src/main.rs` wires harness-mode startup and publication hooks.
 
 Failure mode:
 - Browser harness runs must infer state from DOM text or ad hoc JS scraping.
 - Post-action hangs cannot be attributed to semantic state vs render convergence.
+- Harness may observe semantic state published ahead of the browser paint
+  boundary and misdiagnose render lag as workflow completion.
 - State reads silently repair stale state or hide observation side effects.
 - Publish failures disappear into logs while the bridge still appears healthy.
 

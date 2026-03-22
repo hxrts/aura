@@ -2797,6 +2797,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_snapshot.toast_queue.current().cloned();
+    let toast_messages = queued_toast.map(|toast| {
+        let level = match toast.level {
+            crate::tui::state::ToastLevel::Info => ToastLevel::Info,
+            crate::tui::state::ToastLevel::Success => ToastLevel::Success,
+            crate::tui::state::ToastLevel::Warning => ToastLevel::Warning,
+            crate::tui::state::ToastLevel::Error => ToastLevel::Error,
+        };
+        vec![ToastMessage {
+            id: toast.id.to_string(),
+            message: toast.message,
+            level,
+        }]
+    });
 
     // Global/screen hints come from one shared keybinding registry.
     let global_hints = global_footer_hints();
@@ -4659,7 +4672,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 on_retry_message: on_retry_message.clone(),
                                 on_create_channel: on_create_channel.clone(),
                                 on_set_topic: on_set_topic.clone(),
-                                update_tx: update_tx_holder.clone(),
+                                update_tx: update_tx_holder,
                             )
                         }
                     }],
@@ -4678,7 +4691,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         View(width: 100pct, height: 100pct) {
                             NeighborhoodScreen(
                                 view: neighborhood_props.clone(),
-                                update_tx: update_tx_holder.clone(),
+                                update_tx: update_tx_holder,
                             )
                         }
                     }],
@@ -4697,7 +4710,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Notifications => vec![element! {
                         View(width: 100pct, height: 100pct) {
                             NotificationsScreen(
-                                view: notifications_props.clone(),
+                                view: notifications_props,
                             )
                         }
                     }],
@@ -4706,10 +4719,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // Footer with key hints and status (3 rows)
             Footer(
-                hints: screen_hints.clone(),
-                global_hints: global_hints.clone(),
+                hints: screen_hints,
+                global_hints,
                 disabled: is_insert_mode,
-                network_status: network_status.clone(),
+                network_status,
                 now_ms: now_ms,
                 transport_peers: transport_peers,
                 known_online: known_online,
@@ -4758,18 +4771,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // === TOAST OVERLAY ===
             // Toast notifications overlay the footer when active
             // All toasts now go through the queue system (type-enforced single toast at a time)
-            #(if let Some(ref toast) = queued_toast {
+            #(if let Some(toasts) = toast_messages {
                 Some(element! {
-                    ToastContainer(toasts: vec![ToastMessage {
-                        id: toast.id.to_string(),
-                        message: toast.message.clone(),
-                        level: match toast.level {
-                            crate::tui::state::ToastLevel::Info => ToastLevel::Info,
-                            crate::tui::state::ToastLevel::Success => ToastLevel::Success,
-                            crate::tui::state::ToastLevel::Warning => ToastLevel::Warning,
-                            crate::tui::state::ToastLevel::Error => ToastLevel::Error,
-                        },
-                    }])
+                    ToastContainer(toasts: toasts)
                 })
             } else {
                 None

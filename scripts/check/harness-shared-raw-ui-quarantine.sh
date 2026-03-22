@@ -9,8 +9,8 @@ fail() {
   exit 1
 }
 
-semantic_fn="$(perl -0ne 'print $1 if /fn execute_semantic_shared_step\(.*?\) -> Result<\(\)> \{(.*?)\n\}\n\nfn unsatisfied_action_preconditions/s' crates/aura-harness/src/executor.rs)"
-[[ -n "$semantic_fn" ]] || fail "could not extract execute_semantic_shared_step"
+semantic_fn="$(perl -0ne 'print $1 if /fn execute_semantic_step\(.*?\) -> Result<\(\)> \{(.*?)\n\}\n\nfn execute_semantic_environment_action/s' crates/aura-harness/src/executor.rs)"
+[[ -n "$semantic_fn" ]] || fail "could not extract execute_semantic_step"
 
 for forbidden in 'ToolRequest::ClickButton' 'ToolRequest::FillInput' 'ToolRequest::FillField' '.click_button(' '.fill_input(' '.fill_field(' '.click_target('; do
   if grep -Fq "$forbidden" <<<"$semantic_fn"; then

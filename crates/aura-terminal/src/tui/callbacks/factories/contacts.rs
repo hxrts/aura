@@ -154,7 +154,7 @@ impl ContactsCallbacks {
             };
             spawn_observed_dispatch_callback(
                 ctx.clone(),
-                tx.clone(),
+                tx,
                 EffectCommand::InviteLanPeer {
                     authority_id: parsed_authority_id,
                     address,

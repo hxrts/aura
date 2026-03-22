@@ -948,10 +948,7 @@ impl UiModel {
 
     #[must_use]
     pub fn modal_text_value_or_empty(&self) -> String {
-        match self.modal_text_value() {
-            Some(value) => value,
-            None => String::new(),
-        }
+        self.modal_text_value().unwrap_or_default()
     }
 
     pub fn set_modal_text_value(&mut self, value: impl Into<String>) {

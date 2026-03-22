@@ -29,7 +29,6 @@ use crate::backend::{
     UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
-use crate::timeouts::blocking_sleep;
 use crate::tool_api::ToolKey;
 
 const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
@@ -627,16 +626,9 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn wait_until_ready(&self, timeout: Duration) -> Result<()> {
-        let deadline = Instant::now() + timeout;
-        let mut last_error: Option<String> = None;
-        loop {
-            match self.ui_snapshot() {
-                Ok(_) => return Ok(()),
-                Err(error) => {
-                    last_error.replace(error.to_string());
-                }
-            }
-            if Instant::now() >= deadline {
+        match self.wait_for_ui_snapshot_event(timeout, None) {
+            Some(Ok(_)) => Ok(()),
+            Some(Err(error)) => {
                 let stderr_tail = self
                     .stderr_log
                     .blocking_lock()
@@ -657,11 +649,14 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                     "browser instance {} did not reach semantic readiness within {:?} (last_error={}, stderr_tail=\n{})",
                     self.config.id,
                     timeout,
-                    last_error.as_deref().unwrap_or("none"),
+                    error,
                     stderr_block,
                 );
             }
-            blocking_sleep(Duration::from_millis(100));
+            None => bail!(
+                "browser instance {} does not expose a typed ui snapshot readiness event",
+                self.config.id
+            ),
         }
     }
 
@@ -1487,6 +1482,55 @@ mod tests {
         assert!(
             backend_source.contains("failed to decode browser semantic command response"),
             "browser backend should preserve semantic bridge decode failures diagnostically"
+        );
+    }
+
+    #[test]
+    fn playwright_backend_ready_wait_uses_typed_ui_snapshot_event() {
+        let source = include_str!("playwright_browser.rs");
+        let (_, tail) = source
+            .split_once("fn wait_until_ready(&self, timeout: Duration) -> Result<()> {")
+            .unwrap_or_else(|| panic!("missing wait_until_ready"));
+        let body = tail
+            .split_once("\n    }\n\n    fn is_healthy")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing wait_until_ready terminator"));
+        assert!(
+            body.contains("self.wait_for_ui_snapshot_event(timeout, None)"),
+            "browser backend readiness should use the typed ui snapshot event contract"
+        );
+        assert!(
+            !body.contains("blocking_sleep(Duration::from_millis(100))"),
+            "browser backend readiness should not poll with fixed sleeps"
+        );
+    }
+
+    #[test]
+    fn playwright_driver_startup_and_navigation_avoid_timer_loops() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or_else(|| panic!("workspace root"));
+        let driver_source = std::fs::read_to_string(
+            workspace_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts"),
+        )
+        .unwrap_or_else(|error| panic!("failed to read Playwright driver: {error}"));
+
+        assert!(
+            driver_source.contains("resetPersistentProfileDir(dataDir);"),
+            "driver startup should reset the persistent profile before launch instead of doing in-page storage scrubs"
+        );
+        assert!(
+            !driver_source.contains("storage_reset start"),
+            "driver startup should not keep the in-page storage reset loop"
+        );
+        assert!(
+            driver_source.contains("window.__AURA_DRIVER_WAKE_PENDING_NAV__?.();"),
+            "navigation should wake an explicit pending-nav runner"
+        );
+        assert!(
+            !driver_source.contains("window.setTimeout(drain, 16)"),
+            "driver should not keep a perpetual 16ms pending-nav timer loop"
         );
     }
 }
