@@ -24,7 +24,7 @@ use super::modal_overlays::{
 
 use crate::tui::components::copy_to_clipboard;
 use iocraft::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use aura_app::ceremonies::{
@@ -66,8 +66,10 @@ use crate::tui::components::{
 };
 use crate::tui::context::IoContext;
 use crate::tui::harness_state::{
-    apply_harness_command, clear_harness_command_sender, ensure_harness_command_listener,
-    maybe_export_ui_snapshot, register_harness_command_sender, TuiSemanticInputs,
+    accept_harness_command_submission, apply_harness_command, clear_harness_command_sender,
+    complete_pending_binding_submission, ensure_harness_command_listener,
+    fail_pending_binding_submission, maybe_export_ui_snapshot, register_harness_command_sender,
+    reject_harness_command_submission, track_pending_binding_submission, TuiSemanticInputs,
 };
 use crate::tui::hooks::{AppCoreContext, AppSnapshotAvailability, CallbackContext};
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
@@ -194,7 +196,6 @@ use crate::tui::state::InvitationKind;
 use crate::tui::types::{
     AccessLevel, Channel, Contact, Device, Guardian, HomeSummary, Invitation, Message, MfaPolicy,
 };
-
 // State machine integration
 use crate::tui::iocraft_adapter::convert_iocraft_event;
 use crate::tui::props::{
@@ -204,9 +205,9 @@ use crate::tui::props::{
 use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
 use crate::tui::updates::{
-    harness_command_channel, publish_ui_update, ui_update_channel, HarnessCommandReceiptHandle,
-    HarnessCommandReceiver, UiOperation, UiOperationFailure, UiUpdate, UiUpdatePublication,
-    UiUpdateReceiver, UiUpdateSender,
+    harness_command_channel, publish_ui_update, ui_update_channel, HarnessCommandReceiver,
+    UiOperation, UiOperationFailure, UiUpdate, UiUpdatePublication, UiUpdateReceiver,
+    UiUpdateSender,
 };
 use std::sync::Mutex;
 
@@ -226,33 +227,26 @@ enum NotificationSelection {
     RecoveryRequest(String),
 }
 
-fn complete_ready_channel_binding_receipts(
-    pending_receipts: &Arc<Mutex<HashMap<String, HarnessCommandReceiptHandle>>>,
-    ready_receipts: &Arc<Mutex<HashSet<String>>>,
-    operation_id: aura_app::ui_contract::OperationId,
+async fn complete_ready_join_binding_submissions(
+    ready_instances: &Arc<Mutex<HashSet<String>>>,
     binding: &ChannelBindingWitness,
 ) {
     let ready_instance_ids = {
-        let mut ready = ready_receipts.lock().unwrap();
+        let mut ready = ready_instances.lock().unwrap();
         ready.drain().collect::<Vec<_>>()
     };
-    if ready_instance_ids.is_empty() {
-        return;
-    }
-    let mut pending = pending_receipts.lock().unwrap();
     for instance_id in ready_instance_ids {
-        let Some(receipt) = pending.remove(&instance_id) else {
-            continue;
-        };
-        receipt.complete(
-            aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
-                operation: aura_app::ui_contract::HarnessUiOperationHandle::new(
-                    operation_id.clone(),
-                    aura_app::ui_contract::OperationInstanceId(instance_id),
-                ),
-                value: Some(binding.semantic_value()),
-            },
-        );
+        if let Err(error) = complete_pending_binding_submission(
+            aura_app::ui_contract::OperationInstanceId(instance_id),
+            binding.clone(),
+        )
+        .await
+        {
+            tracing::warn!(
+                error = %error,
+                "failed to settle pending join-channel binding submission"
+            );
+        }
     }
 }
 
@@ -811,6 +805,8 @@ pub struct IoAppProps {
     pub show_account_setup: bool,
     /// Whether startup runtime bootstrap is still converging.
     pub pending_runtime_bootstrap: bool,
+    /// Owner-issued harness command-plane generation for this shell session.
+    pub harness_command_plane_generation: Option<u64>,
     // Network status
     /// Unified network status (disconnected, no peers, syncing, synced)
     pub network_status: NetworkStatus,
@@ -850,7 +846,7 @@ pub struct IoAppProps {
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let screen = hooks.use_state(|| Screen::Neighborhood);
-    let mut should_exit = hooks.use_state(|| false);
+    let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
     // Shared shutdown flag for background tasks. Set to true when should_exit
@@ -862,6 +858,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // This is the source of truth; iocraft hooks sync FROM this state
     let show_setup = props.show_account_setup;
     let pending_runtime_bootstrap = props.pending_runtime_bootstrap;
+    let harness_command_plane_generation = props.harness_command_plane_generation;
     #[cfg(feature = "development")]
     let demo_alice = props.demo_alice_code.clone();
     #[cfg(feature = "development")]
@@ -879,6 +876,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 TuiState::new()
             };
             state.pending_runtime_bootstrap = pending_runtime_bootstrap;
+            state.harness_command_plane_generation = harness_command_plane_generation;
             // Set demo mode codes for import modal shortcuts (on contacts screen)
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
@@ -892,10 +890,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             if show_setup {
                 let mut state = TuiState::with_account_setup();
                 state.pending_runtime_bootstrap = pending_runtime_bootstrap;
+                state.harness_command_plane_generation = harness_command_plane_generation;
                 state
             } else {
                 let mut state = TuiState::new();
                 state.pending_runtime_bootstrap = pending_runtime_bootstrap;
+                state.harness_command_plane_generation = harness_command_plane_generation;
                 state
             }
         }
@@ -928,6 +928,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Get AppCoreContext for IoContext access
     let app_ctx = hooks.use_context::<AppCoreContext>();
+    let io_ctx = app_ctx.io_context();
     let tasks = app_ctx.tasks();
     let app_core_for_events = app_ctx.app_core.raw().clone();
 
@@ -981,21 +982,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(Vec::<Device>::new())));
     let last_exported_devices: std::sync::Arc<parking_lot::RwLock<Vec<Device>>> =
         last_exported_devices_ref.read().clone();
-    let pending_create_channel_receipts_ref = hooks.use_ref(|| {
-        Arc::new(Mutex::new(
-            HashMap::<String, HarnessCommandReceiptHandle>::new(),
-        ))
-    });
-    let pending_create_channel_receipts = pending_create_channel_receipts_ref.read().clone();
-    let pending_join_channel_receipts_ref = hooks.use_ref(|| {
-        Arc::new(Mutex::new(
-            HashMap::<String, HarnessCommandReceiptHandle>::new(),
-        ))
-    });
-    let pending_join_channel_receipts = pending_join_channel_receipts_ref.read().clone();
-    let ready_join_channel_receipts_ref =
+    let ready_join_channel_instances_ref =
         hooks.use_ref(|| Arc::new(Mutex::new(HashSet::<String>::new())));
-    let ready_join_channel_receipts = ready_join_channel_receipts_ref.read().clone();
+    let ready_join_channel_instances = ready_join_channel_instances_ref.read().clone();
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
@@ -1364,14 +1353,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 };
 
                 while let Some(submission) = rx.recv().await {
+                    let submission_id = submission.submission_id.clone();
                     let app_snapshot_for_command = match app_ctx_for_commands.snapshot() {
                         AppSnapshotAvailability::Available(snapshot) => snapshot,
                         AppSnapshotAvailability::Contended => {
-                            submission.receipt.complete(
-                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                    reason: "authoritative snapshot unavailable: state lock contended".to_string(),
-                                },
-                            );
+                            if let Err(error) = reject_harness_command_submission(
+                                submission_id,
+                                "authoritative snapshot unavailable: state lock contended"
+                                    .to_string(),
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    error = %error,
+                                    "failed to reject harness command after snapshot contention"
+                                );
+                            }
                             continue;
                         }
                     };
@@ -1429,11 +1426,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let (next_screen, operation_handle) = match apply_result {
                         Ok(result) => result,
                         Err(error) => {
-                            submission.receipt.complete(
-                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                    reason: error,
-                                },
-                            );
+                            if let Err(send_error) =
+                                reject_harness_command_submission(submission_id, error).await
+                            {
+                                tracing::warn!(
+                                    error = %send_error,
+                                    "failed to reject harness command after local apply failure"
+                                );
+                            }
                             continue;
                         }
                     };
@@ -1460,20 +1460,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     let harness_devices = shared_devices_for_commands.read().clone();
                     let harness_channels = shared_channels_for_commands.read().clone();
                     let harness_messages = shared_messages_for_commands.read().clone();
-                    let receipt = match operation_handle {
+                    let settlement = match operation_handle {
+                        Some(operation)
+                            if operation.operation_id()
+                                == &aura_app::ui_contract::OperationId::create_channel()
+                                || operation.operation_id()
+                                    == &aura_app::ui_contract::OperationId::join_channel() =>
+                        {
+                            track_pending_binding_submission(submission_id, operation).await
+                        }
                         Some(operation) => {
-                            aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
-                                operation,
-                                value: None,
-                            }
+                            accept_harness_command_submission(submission_id, Some(operation), None)
+                                .await
                         }
-                        None => {
-                            aura_app::ui::contract::HarnessUiCommandReceipt::Accepted {
-                                value: None,
-                            }
-                        }
+                        None => accept_harness_command_submission(submission_id, None, None).await,
                     };
-                    submission.receipt.complete(receipt);
+                    if let Err(error) = settlement {
+                        tracing::warn!(
+                            error = %error,
+                            "failed to settle harness command submission"
+                        );
+                    }
 
                     let export_result = maybe_export_ui_snapshot(
                         &updated_state,
@@ -1498,8 +1505,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
             let mut nickname_suggestion_state = nickname_suggestion_state.clone();
+            let mut should_exit = should_exit.clone();
             let app_core = app_ctx.app_core.clone();
             let app_ctx_for_updates = app_ctx.clone();
+            let io_ctx = io_ctx.clone();
+            let bg_shutdown = bg_shutdown.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
@@ -1509,9 +1519,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
             let selected_channel_binding_for_updates = selected_channel_binding;
-            let pending_create_channel_receipts_for_updates = pending_create_channel_receipts;
-            let pending_join_channel_receipts_for_updates = pending_join_channel_receipts;
-            let ready_join_channel_receipts_for_updates = ready_join_channel_receipts;
+            let ready_join_channel_instances_for_updates = ready_join_channel_instances;
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -1954,15 +1962,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.message_scroll = 0;
                                 });
                             }
-                            if let Some(binding) =
-                                selected_channel_binding_for_updates.read().clone()
-                            {
-                                complete_ready_channel_binding_receipts(
-                                    &pending_join_channel_receipts_for_updates,
-                                    &ready_join_channel_receipts_for_updates,
-                                    aura_app::ui_contract::OperationId::join_channel(),
+                            let selected_binding =
+                                { selected_channel_binding_for_updates.read().clone() };
+                            if let Some(binding) = selected_binding {
+                                complete_ready_join_binding_submissions(
+                                    &ready_join_channel_instances_for_updates,
                                     &binding,
-                                );
+                                )
+                                .await;
                             }
                         }
                         UiUpdate::ChannelCreated {
@@ -2007,23 +2014,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 crate::tui::state::ToastLevel::Success
                             );
                             if let Some(instance_id) = operation_instance_id {
-                                    if let Some(receipt) = pending_create_channel_receipts_for_updates
-                                        .lock()
-                                        .unwrap()
-                                        .remove(&instance_id.0)
-                                    {
-                                    receipt.complete(
-                                        aura_app::ui::contract::HarnessUiCommandReceipt::AcceptedWithOperation {
-                                            operation: aura_app::ui_contract::HarnessUiOperationHandle::new(
-                                                aura_app::ui_contract::OperationId::create_channel(),
-                                                instance_id,
-                                            ),
-                                            value: Some(ChannelBindingWitness::new(
-                                                channel_id,
-                                                context_id,
-                                            )
-                                            .semantic_value()),
-                                        },
+                                if let Err(error) = complete_pending_binding_submission(
+                                    instance_id,
+                                    ChannelBindingWitness::new(channel_id, context_id),
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        error = %error,
+                                        "failed to settle pending create-channel binding submission"
                                     );
                                 }
                             }
@@ -2089,15 +2088,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     state.chat.message_scroll = max_scroll;
                                 }
                             });
-                            if let Some(binding) =
-                                selected_channel_binding_for_updates.read().clone()
-                            {
-                                complete_ready_channel_binding_receipts(
-                                    &pending_join_channel_receipts_for_updates,
-                                    &ready_join_channel_receipts_for_updates,
-                                    aura_app::ui_contract::OperationId::join_channel(),
+                            let selected_binding =
+                                { selected_channel_binding_for_updates.read().clone() };
+                            if let Some(binding) = selected_binding {
+                                complete_ready_join_binding_submissions(
+                                    &ready_join_channel_instances_for_updates,
                                     &binding,
-                                );
+                                )
+                                .await;
                             }
                         }
                         UiUpdate::TopicSet {
@@ -2223,21 +2221,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 )
                             {
                                 if let Some(instance_id) = instance_id.clone() {
-                                    if let Some(receipt) =
-                                        pending_create_channel_receipts_for_updates
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&instance_id.0)
+                                    let reason = status
+                                        .error
+                                        .as_ref()
+                                        .and_then(|error| error.detail.clone())
+                                        .unwrap_or_else(|| "create channel failed".to_string());
+                                    if let Err(error) =
+                                        fail_pending_binding_submission(instance_id, reason).await
                                     {
-                                        let reason = status
-                                            .error
-                                            .as_ref()
-                                            .and_then(|error| error.detail.clone())
-                                            .unwrap_or_else(|| "create channel failed".to_string());
-                                        receipt.complete(
-                                            aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                                reason,
-                                            },
+                                        tracing::warn!(
+                                            error = %error,
+                                            "failed to reject pending create-channel binding submission"
                                         );
                                     }
                                 }
@@ -2258,40 +2252,39 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 );
                                 if is_join_channel {
                                     if is_failed_or_cancelled {
-                                        ready_join_channel_receipts_for_updates
+                                        ready_join_channel_instances_for_updates
                                             .lock()
                                             .unwrap()
                                             .remove(&instance_id.0);
-                                        if let Some(receipt) = pending_join_channel_receipts_for_updates
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&instance_id.0)
+                                        let reason = status
+                                            .error
+                                            .as_ref()
+                                            .and_then(|error| error.detail.clone())
+                                            .unwrap_or_else(|| "join channel failed".to_string());
+                                        if let Err(error) = fail_pending_binding_submission(
+                                            instance_id,
+                                            reason,
+                                        )
+                                        .await
                                         {
-                                            let reason = status
-                                                .error
-                                                .as_ref()
-                                                .and_then(|error| error.detail.clone())
-                                                .unwrap_or_else(|| "join channel failed".to_string());
-                                            receipt.complete(
-                                                aura_app::ui::contract::HarnessUiCommandReceipt::Rejected {
-                                                    reason,
-                                                },
+                                            tracing::warn!(
+                                                error = %error,
+                                                "failed to reject pending join-channel binding submission"
                                             );
                                         }
                                     } else if is_succeeded {
-                                        ready_join_channel_receipts_for_updates
+                                        ready_join_channel_instances_for_updates
                                             .lock()
                                             .unwrap()
                                             .insert(instance_id.0.clone());
-                                        if let Some(binding) =
-                                            selected_channel_binding_for_updates.read().clone()
-                                        {
-                                            complete_ready_channel_binding_receipts(
-                                                &pending_join_channel_receipts_for_updates,
-                                                &ready_join_channel_receipts_for_updates,
-                                                aura_app::ui_contract::OperationId::join_channel(),
+                                        let selected_binding =
+                                            { selected_channel_binding_for_updates.read().clone() };
+                                        if let Some(binding) = selected_binding {
+                                            complete_ready_join_binding_submissions(
+                                                &ready_join_channel_instances_for_updates,
                                                 &binding,
-                                            );
+                                            )
+                                            .await;
                                         }
                                     }
                                 }
@@ -2634,8 +2627,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::AccountCreated => {
                             tui.with_mut(|state| {
                                 state.account_created_queued();
+                                state.should_exit = true;
+                                state.harness_command_plane_generation = None;
                             });
                             if show_setup {
+                                if let Err(error) = io_ctx.mark_bootstrap_runtime_handoff_committed()
+                                {
+                                    enqueue_toast!(
+                                        error.to_string(),
+                                        crate::tui::state::ToastLevel::Error
+                                    );
+                                    continue;
+                                }
                                 should_exit.set(true);
                                 bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                             }
@@ -2687,6 +2690,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
 
                     }
+
+                    let updated_state = tui.read_clone();
+                    if updated_state.should_exit && !should_exit.get() {
+                        should_exit.set(true);
+                        bg_shutdown
+                            .read()
+                            .store(true, std::sync::atomic::Ordering::Release);
+                    }
                 }
             }
         });
@@ -2695,6 +2706,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Handle exit request
     if should_exit.get() {
         system.exit();
+        return element! { View {} };
     }
 
     // Note: Domain data (channels, messages, guardians, etc.) is no longer passed to screens.
@@ -4792,8 +4804,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let update_rx_holder = Arc::new(Mutex::new(Some(update_rx)));
     let (harness_command_tx, harness_command_rx) = harness_command_channel();
     let harness_command_rx_holder = Arc::new(Mutex::new(Some(harness_command_rx)));
-    ensure_harness_command_listener()?;
-    register_harness_command_sender(harness_command_tx);
+    ctx.clear_bootstrap_runtime_handoff_committed()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    ensure_harness_command_listener().await?;
+    let command_plane_generation = register_harness_command_sender(harness_command_tx).await?;
 
     // Create effect dispatch callbacks using CallbackRegistry
     let ctx_arc = Arc::new(ctx);
@@ -4890,6 +4904,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Account setup
                         show_account_setup: show_account_setup,
                         pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
+                        harness_command_plane_generation: Some(command_plane_generation),
                         // Network status
                         network_status: network_status.clone(),
                         transport_peers: transport_peers,
@@ -4938,6 +4953,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Account setup
                         show_account_setup: show_account_setup,
                         pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
+                        harness_command_plane_generation: Some(command_plane_generation),
                         // Network status
                         network_status: network_status,
                         transport_peers: transport_peers,
@@ -4952,9 +4968,23 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                 }
             }
         };
+        let bootstrap_handoff = async {
+            if !show_account_setup {
+                std::future::pending::<()>().await;
+            }
+            loop {
+                if ctx_arc.bootstrap_runtime_handoff_committed() {
+                    break;
+                }
+                effect_sleep(std::time::Duration::from_millis(50)).await;
+            }
+        };
 
-        let result = app.fullscreen().await;
-        clear_harness_command_sender();
+        let result = tokio::select! {
+            result = app.fullscreen() => result,
+            _ = bootstrap_handoff => Ok(()),
+        };
+        let _ = clear_harness_command_sender().await;
         result
     }
 }

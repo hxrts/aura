@@ -56,8 +56,7 @@ use aura_app::ui_contract::{
 };
 use aura_core::types::Epoch;
 pub use aura_ui::FrontendUiOperation as UiOperation;
-use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use std::sync::Arc;
 
 /// Channel sender type for UI updates
 pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
@@ -161,38 +160,10 @@ pub fn harness_command_channel() -> (HarnessCommandSender, HarnessCommandReceive
     tokio::sync::mpsc::channel(128)
 }
 
-#[derive(Clone)]
-pub struct HarnessCommandReceiptHandle {
-    sender: Arc<Mutex<Option<oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>>>>,
-}
-
-impl std::fmt::Debug for HarnessCommandReceiptHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HarnessCommandReceiptHandle").finish()
-    }
-}
-
-impl HarnessCommandReceiptHandle {
-    #[must_use]
-    pub fn new(sender: oneshot::Sender<aura_app::ui::contract::HarnessUiCommandReceipt>) -> Self {
-        Self {
-            sender: Arc::new(Mutex::new(Some(sender))),
-        }
-    }
-
-    pub fn complete(&self, receipt: aura_app::ui::contract::HarnessUiCommandReceipt) {
-        if let Ok(mut sender) = self.sender.lock() {
-            if let Some(sender) = sender.take() {
-                let _ = sender.send(receipt);
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct HarnessCommandSubmission {
+    pub submission_id: String,
     pub command: HarnessUiCommand,
-    pub receipt: HarnessCommandReceiptHandle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -601,17 +572,17 @@ mod tests {
     #[test]
     fn test_harness_command_channel() {
         let (tx, mut rx) = harness_command_channel();
-        let (receipt_tx, _receipt_rx) = oneshot::channel();
 
         tx.try_send(HarnessCommandSubmission {
+            submission_id: "submission-1".to_string(),
             command: HarnessUiCommand::NavigateScreen {
                 screen: aura_app::ui::contract::ScreenId::Settings,
             },
-            receipt: HarnessCommandReceiptHandle::new(receipt_tx),
         })
         .unwrap();
 
         let submission = rx.try_recv().unwrap();
+        assert_eq!(submission.submission_id, "submission-1");
         assert!(matches!(
             submission.command,
             HarnessUiCommand::NavigateScreen {

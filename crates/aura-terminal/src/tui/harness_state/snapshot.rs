@@ -3,12 +3,13 @@
 use super::commands::{
     map_modal, map_screen, map_toast_kind, push_list, selected_by_index, TuiSemanticInputs,
 };
+use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
-    ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
+    ScreenId, ToastId, ToastSnapshot, UiSnapshot,
 };
 use aura_app::ui_contract::{next_projection_revision, ProjectionRevision, QuiescenceSnapshot};
 use parking_lot::Mutex;
@@ -380,11 +381,14 @@ fn build_authoritative_ui_snapshot(
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
-    let readiness = if state.pending_runtime_bootstrap {
-        UiReadiness::Loading
-    } else {
-        UiReadiness::Ready
-    };
+    let harness_observation_enabled =
+        configured_ui_state_socket().is_some() || configured_ui_state_file().is_some();
+    let readiness = authoritative_harness_snapshot_readiness(
+        state.should_exit,
+        state.pending_runtime_bootstrap,
+        harness_observation_enabled,
+        state.harness_command_plane_generation.is_some(),
+    );
 
     let snapshot = UiSnapshot {
         screen,

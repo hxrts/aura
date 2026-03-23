@@ -36,6 +36,8 @@ enum LintMode {
     HarnessMoveOwnershipBoundary,
     HarnessReadinessOwnership,
     HarnessRecoveryOwnership,
+    MustSettleBoundary,
+    OwnerIssuedReadinessBoundary,
     OptionalOwnerBoundary,
     TimeoutPolicyBoundary,
     TimeDomainUsage,
@@ -68,6 +70,8 @@ impl LintMode {
             "harness-move-ownership-boundary" => Ok(Self::HarnessMoveOwnershipBoundary),
             "harness-readiness-ownership" => Ok(Self::HarnessReadinessOwnership),
             "harness-recovery-ownership" => Ok(Self::HarnessRecoveryOwnership),
+            "must-settle-boundary" => Ok(Self::MustSettleBoundary),
+            "owner-issued-readiness-boundary" => Ok(Self::OwnerIssuedReadinessBoundary),
             "optional-owner-boundary" => Ok(Self::OptionalOwnerBoundary),
             "timeout-policy-boundary" => Ok(Self::TimeoutPolicyBoundary),
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
@@ -101,6 +105,8 @@ impl LintMode {
             Self::HarnessMoveOwnershipBoundary => "harness-move-ownership-boundary",
             Self::HarnessReadinessOwnership => "harness-readiness-ownership",
             Self::HarnessRecoveryOwnership => "harness-recovery-ownership",
+            Self::MustSettleBoundary => "must-settle-boundary",
+            Self::OwnerIssuedReadinessBoundary => "owner-issued-readiness-boundary",
             Self::OptionalOwnerBoundary => "optional-owner-boundary",
             Self::TimeoutPolicyBoundary => "timeout-policy-boundary",
             Self::TimeDomainUsage => "time-domain-usage",
@@ -117,6 +123,9 @@ struct ParsedRustFile {
 }
 
 type StrongReferenceRegistry = HashMap<String, String>;
+
+const OWNERSHIP_MODEL_GUIDANCE: &str =
+    "See docs/122_ownership_model.md for owner-issued readiness, typed terminal settlement, and owner-drop failure best practices.";
 
 fn main() {
     if let Err(error) = run() {
@@ -246,6 +255,16 @@ fn run() -> Result<(), String> {
                 "parity-critical observation code may not introduce sleeps, retries, or recovery helpers outside approved owner modules"
                     .to_string()
             }
+            LintMode::MustSettleBoundary => {
+                format!(
+                    "typed terminal settlement still escapes sanctioned owner modules. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
+            LintMode::OwnerIssuedReadinessBoundary => {
+                format!(
+                    "readiness or command-acceptance truth is still authored outside sanctioned owner modules. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
             LintMode::OptionalOwnerBoundary => {
                 "parity-critical boundaries still expose optional owner or spawner shapes"
                     .to_string()
@@ -324,6 +343,12 @@ fn scan_file(
         }
         LintMode::HarnessRecoveryOwnership => {
             return scan_harness_recovery_ownership(file, source);
+        }
+        LintMode::MustSettleBoundary => {
+            return scan_must_settle_boundary(file, source);
+        }
+        LintMode::OwnerIssuedReadinessBoundary => {
+            return scan_owner_issued_readiness_boundary(file, source);
         }
         LintMode::OptionalOwnerBoundary => {
             return scan_optional_owner_boundary(file, source);
@@ -865,6 +890,8 @@ fn scan_function(
         | LintMode::HarnessMoveOwnershipBoundary
         | LintMode::HarnessReadinessOwnership
         | LintMode::HarnessRecoveryOwnership
+        | LintMode::MustSettleBoundary
+        | LintMode::OwnerIssuedReadinessBoundary
         | LintMode::OptionalOwnerBoundary
         | LintMode::TimeoutPolicyBoundary
         | LintMode::TimeDomainUsage => false,
@@ -1556,6 +1583,8 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::HarnessMoveOwnershipBoundary
             | LintMode::HarnessReadinessOwnership
             | LintMode::HarnessRecoveryOwnership
+            | LintMode::MustSettleBoundary
+            | LintMode::OwnerIssuedReadinessBoundary
             | LintMode::OptionalOwnerBoundary
             | LintMode::TimeoutPolicyBoundary
             | LintMode::TimeDomainUsage
@@ -1897,8 +1926,22 @@ const HARNESS_MOVE_APPROVED_SUFFIXES: &[&str] = &[
     "crates/aura-harness/src/executor.rs",
     "crates/aura-terminal/src/tui/harness_state.rs",
     "crates/aura-terminal/src/tui/harness_state/mod.rs",
+    "crates/aura-terminal/src/tui/harness_state/socket.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
+];
+const MUST_SETTLE_APPROVED_SUFFIXES: &[&str] = &[
+    "crates/aura-app/src/ui_contract.rs",
+    "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
+    "crates/aura-terminal/src/tui/harness_state/socket.rs",
+    "crates/aura-terminal/src/tui/updates.rs",
+];
+const OWNER_ISSUED_READINESS_APPROVED_SUFFIXES: &[&str] = &[
+    "crates/aura-app/src/ui_contract.rs",
+    "crates/aura-harness/src/backend/local_pty.rs",
+    "crates/aura-terminal/src/tui/harness_state/socket.rs",
+    "crates/aura-terminal/src/tui/updates.rs",
+    "crates/aura-ui/src/readiness_owner.rs",
 ];
 
 const FRONTEND_INTERNAL_OWNER_SUFFIXES: &[&str] =
@@ -2151,6 +2194,39 @@ fn scan_harness_recovery_ownership(file: &Path, source: &str) -> Vec<String> {
             "fallback",
         ],
         &[],
+    )
+}
+
+fn scan_must_settle_boundary(file: &Path, source: &str) -> Vec<String> {
+    source_line_violations(
+        file,
+        source,
+        &[
+            "HarnessCommandResponseHandle",
+            "oneshot::Sender<HarnessUiCommandReceipt>",
+            "pending_receipts",
+            "submission.response.complete(",
+            "receipt.complete(",
+            "response.complete(HarnessUiCommandReceipt",
+        ],
+        MUST_SETTLE_APPROVED_SUFFIXES,
+    )
+}
+
+fn scan_owner_issued_readiness_boundary(file: &Path, source: &str) -> Vec<String> {
+    source_line_violations(
+        file,
+        source,
+        &[
+            "fn screen_readiness(",
+            "snapshot.readiness = screen_readiness(",
+            "readiness: if self.account_ready",
+            "harness_command_plane_generation.is_none()",
+            "command plane temporarily unavailable",
+            "command plane not ready",
+            "command plane unavailable",
+        ],
+        OWNER_ISSUED_READINESS_APPROVED_SUFFIXES,
     )
 }
 

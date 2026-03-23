@@ -7,6 +7,7 @@
 
 use crate::clipboard::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
+use crate::readiness_owner;
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
@@ -19,7 +20,7 @@ use aura_app::{
         ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot, ListSnapshot,
         MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
         OperationState, RuntimeEventId, RuntimeEventSnapshot, SelectionSnapshot, ToastId,
-        ToastKind, ToastSnapshot, UiReadiness, UiSnapshot,
+        ToastKind, ToastSnapshot, UiSnapshot,
     },
     AppCore,
 };
@@ -1587,18 +1588,10 @@ impl UiModel {
             },
             focused_control,
             open_modal,
-            readiness: if self.account_ready {
-                UiReadiness::Ready
-            } else {
-                UiReadiness::Loading
-            },
+            readiness: readiness_owner::account_gate_readiness(self.account_ready),
             revision: next_projection_revision(None),
             quiescence: QuiescenceSnapshot::derive(
-                if self.account_ready {
-                    UiReadiness::Ready
-                } else {
-                    UiReadiness::Loading
-                },
+                readiness_owner::account_gate_readiness(self.account_ready),
                 open_modal,
                 &self.operations,
             ),

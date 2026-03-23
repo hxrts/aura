@@ -15,12 +15,13 @@ use crate::model::{
     UiController, UiModel, DEFAULT_CAPABILITY_FULL, DEFAULT_CAPABILITY_LIMITED,
     DEFAULT_CAPABILITY_PARTIAL,
 };
+use crate::readiness_owner;
 use crate::task_owner::spawn_ui;
 use aura_app::signal_defs::{DiscoveredPeersState, SettingsState};
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
     ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-    OperationState, SelectionSnapshot, UiReadiness, UiSnapshot,
+    OperationState, SelectionSnapshot, UiSnapshot,
 };
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL,
@@ -5539,24 +5540,6 @@ fn upsert_snapshot_operation(
     });
 }
 
-fn screen_readiness(
-    screen: ScreenId,
-    _neighborhood_runtime: &NeighborhoodRuntimeView,
-    _chat_runtime: &ChatRuntimeView,
-    _contacts_runtime: &ContactsRuntimeView,
-    _settings_runtime: &SettingsRuntimeView,
-    _notifications_runtime: &NotificationsRuntimeView,
-) -> UiReadiness {
-    match screen {
-        ScreenId::Onboarding => UiReadiness::Loading,
-        ScreenId::Neighborhood
-        | ScreenId::Chat
-        | ScreenId::Contacts
-        | ScreenId::Notifications
-        | ScreenId::Settings => UiReadiness::Ready,
-    }
-}
-
 fn runtime_semantic_snapshot(
     model: &UiModel,
     neighborhood_runtime: &NeighborhoodRuntimeView,
@@ -5566,14 +5549,14 @@ fn runtime_semantic_snapshot(
     notifications_runtime: &NotificationsRuntimeView,
 ) -> UiSnapshot {
     let mut snapshot = model.semantic_snapshot();
-    snapshot.readiness = screen_readiness(
-        model.screen,
+    let _ = (
         neighborhood_runtime,
         chat_runtime,
         contacts_runtime,
         settings_runtime,
         notifications_runtime,
     );
+    snapshot.readiness = readiness_owner::screen_readiness(model.screen);
 
     if let Some(add_device_state) = model.add_device_modal() {
         let operation_state = match add_device_state.step {

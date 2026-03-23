@@ -338,6 +338,26 @@ pub fn observed_only(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
 
+/// Marker attribute for values that must reach typed terminal settlement.
+#[proc_macro_attribute]
+pub fn must_settle(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<MustSettleAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    transform_must_settle(item, config)
+}
+
+/// Marker attribute for proofs minted only by an owning boundary.
+#[proc_macro_attribute]
+pub fn owner_issued_proof(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<OwnerIssuedProofAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    transform_owner_issued_proof(item, config)
+}
+
 #[proc_macro_attribute]
 pub fn actor_owned(attr: TokenStream, item: TokenStream) -> TokenStream {
     let config = match syn::parse::<ActorOwnedAttr>(attr) {
@@ -454,6 +474,14 @@ struct StrongReferenceAttr {
 }
 
 struct WeakIdentifierAttr {
+    domain: LitStr,
+}
+
+struct MustSettleAttr {
+    kind: LitStr,
+}
+
+struct OwnerIssuedProofAttr {
     domain: LitStr,
 }
 
@@ -767,6 +795,64 @@ impl Parse for WeakIdentifierAttr {
     }
 }
 
+impl Parse for MustSettleAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut kind = None;
+
+        for meta in metas {
+            if meta.path.is_ident("kind") {
+                kind = Some(expect_string_literal(&meta, "kind", "must_settle")?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported must_settle attribute key; expected `kind`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            kind: kind.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "must_settle requires `kind = \"...\"`",
+                )
+            })?,
+        })
+    }
+}
+
+impl Parse for OwnerIssuedProofAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut domain = None;
+
+        for meta in metas {
+            if meta.path.is_ident("domain") {
+                domain = Some(expect_string_literal(
+                    &meta,
+                    "domain",
+                    "owner_issued_proof",
+                )?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported owner_issued_proof attribute key; expected `domain`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            domain: domain.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "owner_issued_proof requires `domain = \"...\"`",
+                )
+            })?,
+        })
+    }
+}
+
 impl Parse for OwnershipLifecycleAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
         let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
@@ -944,6 +1030,57 @@ fn transform_weak_identifier(item: TokenStream, config: WeakIdentifierAttr) -> T
     Error::new(
         proc_macro2::Span::call_site(),
         "#[weak_identifier] may only be applied to structs or enums",
+    )
+    .to_compile_error()
+    .into()
+}
+
+fn transform_must_settle(item: TokenStream, config: MustSettleAttr) -> TokenStream {
+    let kind = config.kind;
+    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
+        return quote! {
+            #strukt
+            const _: &'static str = #kind;
+        }
+        .into();
+    }
+    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
+        return quote! {
+            #item_enum
+            const _: &'static str = #kind;
+        }
+        .into();
+    }
+    Error::new(
+        proc_macro2::Span::call_site(),
+        "#[must_settle] may only be applied to structs or enums",
+    )
+    .to_compile_error()
+    .into()
+}
+
+fn transform_owner_issued_proof(item: TokenStream, config: OwnerIssuedProofAttr) -> TokenStream {
+    if let Err(error) = validate_reference_domain(&config.domain, "owner_issued_proof") {
+        return error.to_compile_error().into();
+    }
+    let domain = config.domain;
+    if let Ok(strukt) = syn::parse::<ItemStruct>(item.clone()) {
+        return quote! {
+            #strukt
+            const _: &'static str = #domain;
+        }
+        .into();
+    }
+    if let Ok(item_enum) = syn::parse::<ItemEnum>(item.clone()) {
+        return quote! {
+            #item_enum
+            const _: &'static str = #domain;
+        }
+        .into();
+    }
+    Error::new(
+        proc_macro2::Span::call_site(),
+        "#[owner_issued_proof] may only be applied to structs or enums",
     )
     .to_compile_error()
     .into()

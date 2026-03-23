@@ -447,6 +447,19 @@ impl IoContext {
         self.account_files.has_account()
     }
 
+    #[must_use]
+    pub fn bootstrap_runtime_handoff_committed(&self) -> bool {
+        self.account_files.bootstrap_runtime_handoff_committed()
+    }
+
+    pub fn mark_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        self.account_files.mark_bootstrap_runtime_handoff_committed()
+    }
+
+    pub fn clear_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        self.account_files.clear_bootstrap_runtime_handoff_committed()
+    }
+
     pub fn set_account_created(&self) {
         self.account_files.set_account_created();
     }

@@ -224,6 +224,20 @@ impl AppCoreContext {
     pub fn tasks(&self) -> Arc<UiTaskOwner> {
         self.io_context.tasks()
     }
+
+    #[must_use]
+    pub fn io_context(&self) -> Arc<IoContext> {
+        self.io_context.clone()
+    }
+
+    #[must_use]
+    pub fn bootstrap_runtime_handoff_committed(&self) -> bool {
+        self.io_context.bootstrap_runtime_handoff_committed()
+    }
+
+    pub fn mark_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
+        self.io_context.mark_bootstrap_runtime_handoff_committed()
+    }
 }
 
 // =============================================================================

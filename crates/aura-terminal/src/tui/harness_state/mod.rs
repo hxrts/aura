@@ -8,7 +8,10 @@ pub(crate) use commands::apply_harness_command;
 pub use commands::TuiSemanticInputs;
 pub use snapshot::maybe_export_ui_snapshot;
 pub(crate) use socket::{
-    clear_harness_command_sender, ensure_harness_command_listener, register_harness_command_sender,
+    accept_harness_command_submission, clear_harness_command_sender,
+    complete_pending_binding_submission, ensure_harness_command_listener,
+    fail_pending_binding_submission, register_harness_command_sender,
+    reject_harness_command_submission, track_pending_binding_submission,
 };
 
 #[cfg(test)]
@@ -16,8 +19,8 @@ mod tests {
     use super::commands::{apply_harness_command, TuiSemanticInputs};
     use super::snapshot::authoritative_ui_snapshot;
     use super::socket::{
-        clear_harness_command_sender, forward_harness_commands_from_listener,
-        register_harness_command_sender,
+        accept_harness_command_submission, clear_harness_command_sender,
+        forward_test_harness_commands_from_listener, register_harness_command_sender,
     };
     use crate::tui::screens::Screen;
     use crate::tui::state::modal_queue::QueuedModal;
@@ -701,10 +704,12 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to convert listener: {error}"));
 
         let (command_tx, mut command_rx) = harness_command_channel();
-        register_harness_command_sender(command_tx);
+        register_harness_command_sender(command_tx)
+            .await
+            .unwrap_or_else(|error| panic!("failed to register harness command sender: {error}"));
         let bridge_tasks = UiTaskOwner::new();
         bridge_tasks.spawn(async move {
-            forward_harness_commands_from_listener(listener).await;
+            forward_test_harness_commands_from_listener(listener).await;
         });
 
         let apply_task = async move {
@@ -732,13 +737,21 @@ mod tests {
             };
             match observed_submission {
                 HarnessCommandSubmission {
+                    submission_id,
                     command:
                         HarnessUiCommand::NavigateScreen {
                             screen: ScreenId::Settings,
                         },
-                    receipt,
                 } => {
-                    receipt.complete(HarnessUiCommandReceipt::Accepted { value: None });
+                    accept_harness_command_submission(
+                        submission_id,
+                        None::<aura_app::ui_contract::HarnessUiOperationHandle>,
+                        None::<aura_app::scenario_contract::SemanticCommandValue>,
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("failed to accept harness command submission: {error}")
+                    });
                 }
                 other => panic!("unexpected harness command submission: {other:?}"),
             }
@@ -777,7 +790,9 @@ mod tests {
         let (_, ()) = tokio::join!(apply_task, client_task);
         bridge_tasks.shutdown();
 
-        clear_harness_command_sender();
+        clear_harness_command_sender()
+            .await
+            .unwrap_or_else(|error| panic!("failed to clear harness command sender: {error}"));
         let _ = std::fs::remove_file(&socket_path);
     }
 

@@ -663,6 +663,8 @@ ci-ownership-policy:
     just ci-parity-critical-ignored-results
     just ci-optional-owner-boundary
     just ci-best-effort-side-effects
+    just ci-must-settle-boundary
+    just ci-owner-issued-readiness-boundary
     just ci-observed-layer-boundaries
     just ci-frontend-handoff-boundary
     just ci-timeout-policy
@@ -743,6 +745,12 @@ ci-optional-owner-boundary:
 
 ci-best-effort-side-effects:
     just _ownership-lint best-effort-side-effect-boundary crates
+
+ci-must-settle-boundary:
+    just _ownership-lint must-settle-boundary crates/aura-agent/src crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
+
+ci-owner-issued-readiness-boundary:
+    just _ownership-lint owner-issued-readiness-boundary crates/aura-agent/src crates/aura-app/src crates/aura-terminal/src crates/aura-ui/src crates/aura-web/src crates/aura-harness/src
 
 ci-observed-layer-boundaries:
     bash scripts/check/observed-layer-authorship.sh

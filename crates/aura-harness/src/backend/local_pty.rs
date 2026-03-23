@@ -316,67 +316,6 @@ impl LocalPtyBackend {
             .join(format!("{:016x}.cmd.sock", hasher.finish()))
     }
 
-    fn command_plane_ready(&self) -> Result<bool> {
-        let socket_path = Self::absolutize_path(self.command_socket_path());
-        let mut stream = match UnixStream::connect(&socket_path) {
-            Ok(stream) => stream,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::NotFound | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset
-                ) =>
-            {
-                return Ok(false);
-            }
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "failed to connect TUI harness command socket {}",
-                        socket_path.display()
-                    )
-                });
-            }
-        };
-        stream
-            .set_read_timeout(Some(Duration::from_millis(250)))
-            .context("failed to set harness command socket read timeout")?;
-        stream
-            .set_write_timeout(Some(Duration::from_millis(250)))
-            .context("failed to set harness command socket write timeout")?;
-        let payload = serde_json::to_vec(&HarnessUiCommand::Ping)
-            .context("failed to encode harness ping command")?;
-        stream
-            .write_all(&payload)
-            .context("failed to write harness ping command")?;
-        stream
-            .flush()
-            .context("failed to flush harness ping command")?;
-        stream
-            .shutdown(Shutdown::Write)
-            .context("failed to half-close harness ping socket")?;
-        let mut receipt = Vec::new();
-        match stream.read_to_end(&mut receipt) {
-            Ok(_) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::UnexpectedEof
-                ) =>
-            {
-                return Ok(false);
-            }
-            Err(error) => {
-                return Err(error).context("failed to read harness ping receipt");
-            }
-        }
-        if receipt.is_empty() {
-            return Ok(false);
-        }
-        let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt)
-            .context("failed to decode harness ping receipt")?;
-        Ok(matches!(receipt, HarnessUiCommandReceipt::Accepted { .. }))
-    }
-
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
         Self {
             config,
@@ -959,7 +898,7 @@ impl InstanceBackend for LocalPtyBackend {
         let deadline = Instant::now() + timeout;
         loop {
             if let Ok(snapshot) = self.ui_snapshot() {
-                if snapshot.readiness == UiReadiness::Ready && self.command_plane_ready()? {
+                if snapshot.readiness == UiReadiness::Ready {
                     return Ok(());
                 }
             }
