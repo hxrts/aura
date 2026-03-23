@@ -295,7 +295,8 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
     };
 
     let response = initiator_task
-        .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
+        .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))
+        .await?;
 
     for result in join_all(guardian_tasks).await {
         result.map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;

@@ -24,7 +24,7 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::{EffectCommand, OpResponse};
 use crate::tui::semantic_lifecycle::{
-    apply_handed_off_terminal_status, authoritative_operation_status_update,
+    apply_handed_off_terminal_status,
     LocalTerminalOperationOwner, SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
 };
 use crate::tui::types::{AccessLevel, MfaPolicy};

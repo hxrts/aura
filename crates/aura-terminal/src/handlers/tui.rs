@@ -741,7 +741,13 @@ async fn seed_realistic_demo_world(
     peer_authorities.insert("Carol".to_string(), simulator.carol_authority());
 
     // Seed Bob-side contact relationships so the Contacts screen starts populated.
-    let now_ms = bob_agent.runtime().effects().current_timestamp_ms().await;
+    let now_ms = bob_agent
+        .runtime()
+        .effects()
+        .physical_time()
+        .await
+        .map(|t| t.ts_ms)
+        .unwrap_or(0);
     let contacts_to_add: Vec<(String, &str, u64)> = prelinked_contacts
         .iter()
         .enumerate()
