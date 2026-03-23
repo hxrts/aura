@@ -47,13 +47,23 @@ impl std::fmt::Display for DispatchError {
 
 impl std::error::Error for DispatchError {}
 
+/// Committed channel selection with a monotone generation counter for
+/// staleness detection.
+#[derive(Debug, Clone)]
+struct CommittedChannelSelection {
+    channel_id: String,
+    generation: u64,
+}
+
 /// Command dispatcher that maps IRC commands to effect commands
 ///
 /// The dispatcher converts IRC-style commands to effect commands with
 /// configurable capability checking.
 pub struct CommandDispatcher {
-    /// Current channel context
-    current_channel: Option<String>,
+    /// Committed channel selection (not a raw mutable string)
+    current_channel: Option<CommittedChannelSelection>,
+    /// Monotone generation counter for staleness detection
+    generation: u64,
 }
 
 impl CommandDispatcher {
@@ -62,12 +72,18 @@ impl CommandDispatcher {
     pub fn new() -> Self {
         Self {
             current_channel: None,
+            generation: 0,
         }
     }
 
-    /// Set the current channel context
+    /// Commit a channel selection. The generation counter increments on each
+    /// commit, providing a weak staleness boundary.
     pub fn set_current_channel(&mut self, channel: impl Into<String>) {
-        self.current_channel = Some(channel.into());
+        self.generation += 1;
+        self.current_channel = Some(CommittedChannelSelection {
+            channel_id: channel.into(),
+            generation: self.generation,
+        });
     }
 
     /// Clear the current channel context
@@ -78,7 +94,7 @@ impl CommandDispatcher {
     /// Get the current channel context
     #[must_use]
     pub fn current_channel(&self) -> Option<&str> {
-        self.current_channel.as_deref()
+        self.current_channel.as_ref().map(|s| s.channel_id.as_str())
     }
 
     /// Dispatch an IRC command to an effect command
@@ -92,6 +108,22 @@ impl CommandDispatcher {
         self.map_command(command)
     }
 
+    /// Require a committed channel selection, returning the channel ID string.
+    fn require_current_channel(&self) -> Result<String, DispatchError> {
+        self.current_channel
+            .as_ref()
+            .map(|s| s.channel_id.clone())
+            .ok_or_else(|| DispatchError::NotFound {
+                resource: "current channel".to_string(),
+            })
+    }
+
+    /// Get the current channel ID as an optional string (for commands that
+    /// accept an optional channel hint).
+    fn current_channel_id(&self) -> Option<String> {
+        self.current_channel.as_ref().map(|s| s.channel_id.clone())
+    }
+
     /// Internal mapping from command to effect
     fn map_command(&self, command: ChatCommand) -> Result<EffectCommand, DispatchError> {
         match command {
@@ -101,12 +133,7 @@ impl CommandDispatcher {
             }),
 
             ChatCommand::Me { action } => {
-                let channel =
-                    self.current_channel
-                        .clone()
-                        .ok_or_else(|| DispatchError::NotFound {
-                            resource: "current channel".to_string(),
-                        })?;
+                let channel = self.require_current_channel()?;
 
                 Ok(EffectCommand::SendAction { channel, action })
             }
@@ -114,12 +141,7 @@ impl CommandDispatcher {
             ChatCommand::Nick { name } => Ok(EffectCommand::UpdateNickname { name }),
 
             ChatCommand::Who => {
-                let channel =
-                    self.current_channel
-                        .clone()
-                        .ok_or_else(|| DispatchError::NotFound {
-                            resource: "current channel".to_string(),
-                        })?;
+                let channel = self.require_current_channel()?;
 
                 Ok(EffectCommand::ListParticipants { channel })
             }
@@ -127,12 +149,7 @@ impl CommandDispatcher {
             ChatCommand::Whois { target } => Ok(EffectCommand::GetUserInfo { target }),
 
             ChatCommand::Leave => {
-                let channel =
-                    self.current_channel
-                        .clone()
-                        .ok_or_else(|| DispatchError::NotFound {
-                            resource: "current channel".to_string(),
-                        })?;
+                let channel = self.require_current_channel()?;
 
                 Ok(EffectCommand::LeaveChannel { channel })
             }
@@ -159,12 +176,7 @@ impl CommandDispatcher {
             ChatCommand::Join { channel } => Ok(EffectCommand::JoinChannel { channel }),
 
             ChatCommand::Kick { target, reason } => {
-                let channel =
-                    self.current_channel
-                        .clone()
-                        .ok_or_else(|| DispatchError::NotFound {
-                            resource: "current channel".to_string(),
-                        })?;
+                let channel = self.require_current_channel()?;
 
                 Ok(EffectCommand::KickUser {
                     channel,
@@ -174,34 +186,29 @@ impl CommandDispatcher {
             }
 
             ChatCommand::Ban { target, reason } => Ok(EffectCommand::BanUser {
-                channel: self.current_channel.clone(),
+                channel: self.current_channel_id(),
                 target,
                 reason,
             }),
 
             ChatCommand::Unban { target } => Ok(EffectCommand::UnbanUser {
-                channel: self.current_channel.clone(),
+                channel: self.current_channel_id(),
                 target,
             }),
 
             ChatCommand::Mute { target, duration } => Ok(EffectCommand::MuteUser {
-                channel: self.current_channel.clone(),
+                channel: self.current_channel_id(),
                 target,
                 duration_secs: duration.map(|d| d.as_secs()),
             }),
 
             ChatCommand::Unmute { target } => Ok(EffectCommand::UnmuteUser {
-                channel: self.current_channel.clone(),
+                channel: self.current_channel_id(),
                 target,
             }),
 
             ChatCommand::Invite { target } => {
-                let channel =
-                    self.current_channel
-                        .clone()
-                        .ok_or_else(|| DispatchError::NotFound {
-                            resource: "current channel".to_string(),
-                        })?;
+                let channel = self.require_current_channel()?;
                 Ok(EffectCommand::InviteUser {
                     target,
                     channel,
@@ -211,12 +218,7 @@ impl CommandDispatcher {
             }
 
             ChatCommand::Topic { text } => {
-                let channel =
-                    self.current_channel
-                        .clone()
-                        .ok_or_else(|| DispatchError::NotFound {
-                            resource: "current channel".to_string(),
-                        })?;
+                let channel = self.require_current_channel()?;
 
                 Ok(EffectCommand::SetTopic { channel, text })
             }
@@ -226,12 +228,12 @@ impl CommandDispatcher {
             ChatCommand::Unpin { message_id } => Ok(EffectCommand::UnpinMessage { message_id }),
 
             ChatCommand::Op { target } => Ok(EffectCommand::GrantModerator {
-                channel: self.current_channel.clone(),
+                channel: self.current_channel_id(),
                 target,
             }),
 
             ChatCommand::Deop { target } => Ok(EffectCommand::RevokeModerator {
-                channel: self.current_channel.clone(),
+                channel: self.current_channel_id(),
                 target,
             }),
 

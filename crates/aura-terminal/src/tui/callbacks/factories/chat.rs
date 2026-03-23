@@ -437,6 +437,7 @@ impl ChatCallbacks {
         Arc::new(
             move |message_id: String, channel: String, content: String| {
                 let msg_id = message_id.clone();
+                let error_tx = tx.clone();
                 spawn_observed_dispatch_callback(
                     ctx.clone(),
                     tx.clone(),
@@ -452,8 +453,13 @@ impl ChatCallbacks {
                         )
                         .await;
                     },
-                    |error| async move {
-                        tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                    move |error| async move {
+                        emit_error_toast(
+                            &error_tx,
+                            "chat",
+                            format!("Retry message failed: {error}"),
+                        )
+                        .await;
                     },
                 );
             },
@@ -593,6 +599,7 @@ impl ChatCallbacks {
         Arc::new(move |channel_id: String, topic: String| {
             let ch = channel_id.clone();
             let t = topic.clone();
+            let error_tx = tx.clone();
             spawn_observed_dispatch_callback(
                 ctx.clone(),
                 tx.clone(),
@@ -610,8 +617,8 @@ impl ChatCallbacks {
                     )
                     .await;
                 },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                move |error| async move {
+                    emit_error_toast(&error_tx, "chat", format!("Set topic failed: {error}")).await;
                 },
             );
         })
@@ -619,6 +626,7 @@ impl ChatCallbacks {
 
     fn make_close_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
         Arc::new(move |channel_id: String| {
+            let error_tx = tx.clone();
             spawn_observed_dispatch_callback(
                 ctx.clone(),
                 tx.clone(),
@@ -626,8 +634,9 @@ impl ChatCallbacks {
                     channel: channel_id,
                 },
                 |_| async {},
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                move |error| async move {
+                    emit_error_toast(&error_tx, "chat", format!("Close channel failed: {error}"))
+                        .await;
                 },
             );
         })

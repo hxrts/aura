@@ -134,8 +134,9 @@ pub fn spawn_ordered_ui_updates(
 }
 
 /// Send a UI update, trying non-blocking first and falling back to async.
-pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
-    let _ = publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await;
+/// Returns `true` if delivered, `false` if the channel is closed.
+pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) -> bool {
+    publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await
 }
 
 fn required_ui_update_tasks() -> &'static UiTaskOwner {

@@ -233,18 +233,49 @@ impl OperationalHandler {
         let _ = aura_app::ui::workflows::sync::set_sync_status(&self.app_core, status).await;
     }
 
-    /// Emit an error to the error signal
+    /// Emit an error to the error signal.
+    ///
+    /// Uses a bounded read to avoid silently discarding errors when the
+    /// AppCore write lock is held. On contention timeout, logs a structured
+    /// warning so the failure is observable.
     pub async fn emit_error(&self, error: TerminalError) {
-        let error = map_terminal_error(&error);
-        if let Some(core) = self.app_core.try_read() {
-            let _ = core.emit(&*ERROR_SIGNAL, Some(error)).await;
+        let mapped = map_terminal_error(&error);
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            self.app_core.read(),
+        )
+        .await
+        {
+            Ok(core) => {
+                let _ = core.emit(&*ERROR_SIGNAL, Some(mapped)).await;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    error_code = "ERROR_SIGNAL_CONTENDED",
+                    original_error = %error,
+                    "failed to emit ERROR_SIGNAL: AppCore write-locked for >500ms"
+                );
+            }
         }
     }
 
-    /// Clear the error signal
+    /// Clear the error signal.
     pub async fn clear_error(&self) {
-        if let Some(core) = self.app_core.try_read() {
-            let _ = core.emit(&*ERROR_SIGNAL, None).await;
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            self.app_core.read(),
+        )
+        .await
+        {
+            Ok(core) => {
+                let _ = core.emit(&*ERROR_SIGNAL, None).await;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    error_code = "ERROR_SIGNAL_CONTENDED",
+                    "failed to clear ERROR_SIGNAL: AppCore write-locked for >500ms"
+                );
+            }
         }
     }
 

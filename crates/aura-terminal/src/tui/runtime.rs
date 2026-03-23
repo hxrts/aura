@@ -174,12 +174,28 @@ impl<T: TerminalEffects> TuiRuntime<T> {
         Ok(())
     }
 
+    /// Per-step timeout to keep the event loop responsive to shutdown signals.
+    const STEP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
     /// Run a single iteration: read event -> transition -> execute commands.
     ///
     /// Returns `Ok(true)` if should continue, `Ok(false)` if should exit.
+    /// Times out after `STEP_TIMEOUT` so the loop can re-check `should_exit`.
     pub async fn step(&mut self) -> Result<bool, TerminalError> {
-        // Read next event
-        let event = self.terminal.next_event().await?;
+        // Bounded wait for next event — prevents indefinite hang.
+        let event = match tokio::time::timeout(
+            Self::STEP_TIMEOUT,
+            self.terminal.next_event(),
+        )
+        .await
+        {
+            Ok(Ok(event)) => event,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                // No input within timeout — not an error, just re-check exit.
+                return Ok(!self.state.should_exit);
+            }
+        };
 
         // Transition
         let commands = self.process_event(event);

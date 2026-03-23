@@ -362,6 +362,14 @@ async fn drive_harness_command_plane(
                                         ),
                                     );
                                 }
+                                // Reject all remaining pending submissions
+                                // so their oneshot receivers don't hang.
+                                for (_, reply) in pending_submissions.drain(..) {
+                                    reject_reply(
+                                        reply,
+                                        "active sender disconnected during activation drain",
+                                    );
+                                }
                                 break;
                             }
                         }

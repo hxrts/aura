@@ -127,16 +127,23 @@ pub(crate) async fn apply_handed_off_terminal_status(
         return Err(detail);
     }
 
-    send_ui_update_required(
+    if !send_ui_update_required(
         tx,
         authoritative_operation_status_update(
-            operation_id,
-            Some(instance_id),
+            operation_id.clone(),
+            Some(instance_id.clone()),
             terminal.causality,
             terminal.status,
         ),
     )
-    .await;
+    .await
+    {
+        tracing::warn!(
+            operation_id = %operation_id.0,
+            instance_id = %instance_id.0,
+            "terminal status delivery failed: UI update channel closed"
+        );
+    }
     Ok(())
 }
 
@@ -177,13 +184,19 @@ impl SubmittedOperationOwner {
             None,
             SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
         );
-        if tx.try_send(submission.clone()).is_err() {
-            spawn_ui_update(
-                &tasks,
-                &tx,
-                submission,
-                UiUpdatePublication::OrderedRequired,
+        // Submission must be delivered before any subsequent lifecycle update.
+        // Use try_send first; fall back to blocking_send to preserve ordering.
+        if tx.try_send(submission).is_err() {
+            tracing::debug!(
+                operation_id = %operation_id.0,
+                "UI update channel full on submission; using blocking send"
             );
+            let _ = tx.blocking_send(authoritative_operation_status_update(
+                operation_id.clone(),
+                Some(instance_id.clone()),
+                None,
+                SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
+            ));
         }
 
         Self {
@@ -221,7 +234,7 @@ impl SubmittedOperationOwner {
     async fn succeed(mut self) {
         self.settled = true;
         let status = SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded);
-        publish_ui_update(
+        if !publish_ui_update(
             &self.tx,
             authoritative_operation_status_update(
                 self.operation_id.clone(),
@@ -231,7 +244,14 @@ impl SubmittedOperationOwner {
             ),
             UiUpdatePublication::RequiredUnordered,
         )
-        .await;
+        .await
+        {
+            tracing::warn!(
+                operation_id = %self.operation_id.0,
+                instance_id = %self.instance_id.0,
+                "terminal success delivery failed: UI update channel closed"
+            );
+        }
     }
 
     async fn fail(self, detail: impl Into<String>) {
@@ -246,7 +266,7 @@ impl SubmittedOperationOwner {
     async fn fail_with(mut self, error: SemanticOperationError) {
         self.settled = true;
         let status = SemanticOperationStatus::failed(self.kind, error.clone());
-        send_ui_update_required(
+        if !send_ui_update_required(
             &self.tx,
             authoritative_operation_status_update(
                 self.operation_id.clone(),
@@ -255,7 +275,14 @@ impl SubmittedOperationOwner {
                 status,
             ),
         )
-        .await;
+        .await
+        {
+            tracing::warn!(
+                operation_id = %self.operation_id.0,
+                instance_id = %self.instance_id.0,
+                "terminal failure delivery failed: UI update channel closed"
+            );
+        }
     }
 
     fn handoff_to_app_workflow(
@@ -377,17 +404,20 @@ impl Drop for SubmittedOperationOwner {
         .with_detail(detail);
         let status = SemanticOperationStatus::failed(self.kind, error);
 
-        spawn_ui_update(
-            &self.tasks,
-            &self.tx,
-            authoritative_operation_status_update(
-                self.operation_id.clone(),
-                Some(self.instance_id.clone()),
-                None,
-                status,
-            ),
-            UiUpdatePublication::RequiredUnordered,
+        // Synchronous try_send — works during teardown without a task spawner.
+        let update = authoritative_operation_status_update(
+            self.operation_id.clone(),
+            Some(self.instance_id.clone()),
+            None,
+            status,
         );
+        if self.tx.try_send(update).is_err() {
+            tracing::warn!(
+                operation_id = %self.operation_id.0,
+                instance_id = %self.instance_id.0,
+                "dropped-owner failure delivery failed: UI update channel full or closed"
+            );
+        }
     }
 }
 
