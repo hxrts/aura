@@ -43,7 +43,7 @@ enum LintMode {
     TimeDomainUsage,
     AuthoritativeRefNoReresolution,
     WeakToStrongIdentifierUpgrade,
-    HandoffTerminalSettlement,
+    ParityCriticalCallbackSettlement,
     TerminalShellExplicitExitIntent,
 }
 
@@ -79,7 +79,7 @@ impl LintMode {
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
             "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
             "weak-to-strong-identifier-upgrade" => Ok(Self::WeakToStrongIdentifierUpgrade),
-            "handoff-terminal-settlement" => Ok(Self::HandoffTerminalSettlement),
+            "parity-critical-callback-settlement" => Ok(Self::ParityCriticalCallbackSettlement),
             "terminal-shell-explicit-exit-intent" => Ok(Self::TerminalShellExplicitExitIntent),
             other => Err(format!("unknown lint mode: {other}")),
         }
@@ -116,7 +116,7 @@ impl LintMode {
             Self::TimeDomainUsage => "time-domain-usage",
             Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
             Self::WeakToStrongIdentifierUpgrade => "weak-to-strong-identifier-upgrade",
-            Self::HandoffTerminalSettlement => "handoff-terminal-settlement",
+            Self::ParityCriticalCallbackSettlement => "parity-critical-callback-settlement",
             Self::TerminalShellExplicitExitIntent => "terminal-shell-explicit-exit-intent",
         }
     }
@@ -290,9 +290,9 @@ fn run() -> Result<(), String> {
                 "weak identifiers still upgrade directly into canonical strong references or owned handles"
                     .to_string()
             }
-            LintMode::HandoffTerminalSettlement => {
+            LintMode::ParityCriticalCallbackSettlement => {
                 format!(
-                    "handoff_to_app_workflow calls without paired apply_handed_off_terminal_status in the same function body. {OWNERSHIP_MODEL_GUIDANCE}"
+                    "parity-critical callback settlement violation: handoff without terminal settlement, or fact-committing command dispatched through an observed (non-owned) callback helper. {OWNERSHIP_MODEL_GUIDANCE}"
                 )
             }
             LintMode::TerminalShellExplicitExitIntent => {
@@ -375,8 +375,8 @@ fn scan_file(
         LintMode::WeakToStrongIdentifierUpgrade => {
             return scan_weak_to_strong_identifier_upgrade(file, syntax, strong_references);
         }
-        LintMode::HandoffTerminalSettlement => {
-            return scan_handoff_terminal_settlement(file, syntax);
+        LintMode::ParityCriticalCallbackSettlement => {
+            return scan_parity_critical_callback_settlement(file, syntax);
         }
         LintMode::TerminalShellExplicitExitIntent => {
             return scan_terminal_shell_explicit_exit_intent(file, source);
@@ -917,7 +917,7 @@ fn scan_function(
         | LintMode::OptionalOwnerBoundary
         | LintMode::TimeoutPolicyBoundary
         | LintMode::TimeDomainUsage
-        | LintMode::HandoffTerminalSettlement
+        | LintMode::ParityCriticalCallbackSettlement
         | LintMode::TerminalShellExplicitExitIntent => false,
     };
     if !should_scan {
@@ -1614,7 +1614,7 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::TimeDomainUsage
             | LintMode::AuthoritativeRefNoReresolution
             | LintMode::WeakToStrongIdentifierUpgrade
-            | LintMode::HandoffTerminalSettlement
+            | LintMode::ParityCriticalCallbackSettlement
             | LintMode::TerminalShellExplicitExitIntent => {}
         }
 
@@ -2672,25 +2672,50 @@ fn scan_time_domain_usage(file: &Path, syntax: &File) -> Vec<String> {
     visitor.violations
 }
 
-// TODO(work/0.md#fix-1, work/0.md#fix-2): remove after terminal settlement is added
-const HANDOFF_TERMINAL_SETTLEMENT_ALLOWLIST: &[&str] = &[
-    "chat.rs",          // make_send_owned
-    "factories/mod.rs", // run_invitation_import_flow
+/// EffectCommand variants that commit facts or mutate authoritative state.
+/// Dispatching these through an observed (non-owned) callback is an ownership
+/// violation because the parity layer has no lifecycle record for the operation.
+const PARITY_CRITICAL_EFFECT_COMMANDS: &[&str] = &[
+    "AcceptInvitation",
+    "DeclineInvitation",
+    "CancelInvitation",
+    "ImportInvitation",
+    "AcceptPendingHomeInvitation",
+    "ToggleContactGuardian",
+    "RemoveContact",
+    "StartRecovery",
+    "SubmitGuardianApproval",
+    "CompleteRecovery",
+    "CancelRecovery",
 ];
 
-fn scan_handoff_terminal_settlement(file: &Path, syntax: &File) -> Vec<String> {
+/// Observed dispatch helpers that provide no terminal lifecycle tracking.
+const OBSERVED_DISPATCH_HELPERS: &[&str] = &[
+    "spawn_observed_dispatch_callback",
+    "spawn_observed_result_callback",
+];
+
+// TODO(work/0.md): remove entries as each fix lands
+const PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST: &[&str] = &[
+    "chat.rs",          // make_send_owned (Fix 1)
+    "factories/mod.rs", // run_invitation_import_flow (Fix 2)
+    "invitation.rs",    // make_decline, make_revoke (Fix 4)
+    "contacts.rs",      // make_remove_contact — parity-critical observed dispatch
+    "recovery.rs",      // make_start_recovery, make_submit_approval — parity-critical observed dispatch
+];
+
+fn scan_parity_critical_callback_settlement(file: &Path, syntax: &File) -> Vec<String> {
     let file_str = file.to_string_lossy();
 
-    // Only scan callback factory files
     if !file_str.contains("crates/") {
         return Vec::new();
     }
 
     let mut violations = Vec::new();
-    scan_handoff_terminal_settlement_items(file, &syntax.items, &mut violations);
+    scan_parity_critical_callback_settlement_items(file, &syntax.items, &mut violations);
 
-    // Filter out allowlisted files
-    if HANDOFF_TERMINAL_SETTLEMENT_ALLOWLIST
+    // Filter out allowlisted files for known violations under active remediation.
+    if PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST
         .iter()
         .any(|suffix| file_str.ends_with(suffix))
     {
@@ -2700,7 +2725,7 @@ fn scan_handoff_terminal_settlement(file: &Path, syntax: &File) -> Vec<String> {
     violations
 }
 
-fn scan_handoff_terminal_settlement_items(
+fn scan_parity_critical_callback_settlement_items(
     file: &Path,
     items: &[Item],
     violations: &mut Vec<String>,
@@ -2711,7 +2736,7 @@ fn scan_handoff_terminal_settlement_items(
                 if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
                     continue;
                 }
-                check_handoff_terminal_settlement_function(
+                check_parity_critical_callback_settlement(
                     file,
                     &item_fn.sig.ident.to_string(),
                     item_fn.sig.ident.span().start().line,
@@ -2725,7 +2750,7 @@ fn scan_handoff_terminal_settlement_items(
                         if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
                             continue;
                         }
-                        check_handoff_terminal_settlement_function(
+                        check_parity_critical_callback_settlement(
                             file,
                             &item_fn.sig.ident.to_string(),
                             item_fn.sig.ident.span().start().line,
@@ -2740,7 +2765,7 @@ fn scan_handoff_terminal_settlement_items(
                     continue;
                 }
                 if let Some((_, nested)) = &item_mod.content {
-                    scan_handoff_terminal_settlement_items(file, nested, violations);
+                    scan_parity_critical_callback_settlement_items(file, nested, violations);
                 }
             }
             _ => {}
@@ -2748,33 +2773,55 @@ fn scan_handoff_terminal_settlement_items(
     }
 }
 
-fn check_handoff_terminal_settlement_function(
+fn check_parity_critical_callback_settlement(
     file: &Path,
     function_name: &str,
     function_line: usize,
     block: &Block,
     violations: &mut Vec<String>,
 ) {
+    // --- Prong 1: handoff without terminal settlement ---
     let has_handoff = function_contains_call(block, "handoff_to_app_workflow");
-    if !has_handoff {
+    if has_handoff {
+        // Functions that delegate to spawn_handoff_workflow_callback_with_success
+        // are safe — that helper internally calls apply_handed_off_terminal_status.
+        let uses_canonical_helper =
+            function_contains_call(block, "spawn_handoff_workflow_callback_with_success");
+        let has_explicit_settlement =
+            function_contains_call(block, "apply_handed_off_terminal_status");
+
+        if !uses_canonical_helper && !has_explicit_settlement {
+            violations.push(format!(
+                "{}:{}: function `{}` calls handoff_to_app_workflow without a paired \
+                 apply_handed_off_terminal_status or spawn_handoff_workflow_callback_with_success",
+                file.display(),
+                function_line,
+                function_name
+            ));
+        }
+    }
+
+    // --- Prong 2: parity-critical command dispatched through observed helper ---
+    let uses_observed_helper = OBSERVED_DISPATCH_HELPERS
+        .iter()
+        .any(|helper| function_contains_call(block, helper));
+    if !uses_observed_helper {
         return;
     }
 
-    // Skip functions that delegate to spawn_handoff_workflow_callback_with_success,
-    // which internally calls apply_handed_off_terminal_status.
-    if function_contains_call(block, "spawn_handoff_workflow_callback_with_success") {
-        return;
+    // Check if the function body references any parity-critical EffectCommand variant.
+    let block_source = block.to_token_stream().to_string();
+    for command in PARITY_CRITICAL_EFFECT_COMMANDS {
+        if block_source.contains(command) {
+            violations.push(format!(
+                "{}:{}: function `{}` dispatches parity-critical command `{}` through an \
+                 observed (non-owned) callback helper; use spawn_local_terminal_result_callback \
+                 or spawn_handoff_workflow_callback_with_success instead",
+                file.display(),
+                function_line,
+                function_name,
+                command,
+            ));
+        }
     }
-
-    let has_settlement = function_contains_call(block, "apply_handed_off_terminal_status");
-    if has_settlement {
-        return;
-    }
-
-    violations.push(format!(
-        "{}:{}: function `{}` calls handoff_to_app_workflow without a paired apply_handed_off_terminal_status",
-        file.display(),
-        function_line,
-        function_name
-    ));
 }

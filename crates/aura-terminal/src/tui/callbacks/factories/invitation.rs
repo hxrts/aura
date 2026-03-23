@@ -5,7 +5,7 @@ use super::*;
 /// All callbacks for the invitations screen
 #[derive(Clone)]
 pub struct InvitationsCallbacks {
-    pub on_accept: InvitationCallback,
+    pub(crate) on_accept: IdHandoffCallback,
     pub on_decline: InvitationCallback,
     pub on_revoke: InvitationCallback,
     pub(crate) on_create: CreateInvitationCallback,
@@ -26,65 +26,65 @@ impl InvitationsCallbacks {
         }
     }
 
-    fn make_accept(ctx: Arc<IoContext>, tx: UiUpdateSender) -> InvitationCallback {
-        Arc::new(move |invitation_id: String| {
+    fn make_accept(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdHandoffCallback {
+        Arc::new(move |invitation_id: String, operation: WorkflowHandoffOperationOwner| {
             let inv_id = invitation_id.clone();
-            spawn_observed_result_callback(
-                ctx.clone(),
-                tx.clone(),
-                "accept invitation callback",
-                move |ctx| async move {
-                    match ctx
-                        .dispatch_with_response(EffectCommand::AcceptInvitation { invitation_id })
-                        .await?
-                    {
-                        OpResponse::InvitationAccepted {
-                            sender_id,
-                            invitation_type,
-                            ..
-                        } => Ok((sender_id, invitation_type)),
-                        _ => Err(crate::error::TerminalError::Operation(
-                            "Accept invitation returned unexpected response".to_string(),
-                        )),
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            spawn_ctx(ctx.clone(), async move {
+                let app_core = ctx.app_core_raw().clone();
+                let operation_instance_id = operation.workflow_instance_id();
+                let _ = operation.handoff_to_app_workflow(
+                    SemanticOperationTransferScope::AcceptInvitation,
+                );
+                match aura_app::ui::workflows::invitation::accept_invitation_by_str_with_instance(
+                    &app_core,
+                    &invitation_id,
+                    operation_instance_id,
+                )
+                .await
+                {
+                    Ok(accepted) => {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationAccepted {
+                                invitation_id: inv_id.clone(),
+                            },
+                        )
+                        .await;
+                        let invitation_kind = match accepted.invitation_type {
+                            aura_app::ui::types::InvitationBridgeType::Contact { .. }
+                            | aura_app::ui::types::InvitationBridgeType::Channel { .. } => {
+                                InvitationFactKind::Contact
+                            }
+                            aura_app::ui::types::InvitationBridgeType::Guardian { .. }
+                            | aura_app::ui::types::InvitationBridgeType::DeviceEnrollment { .. } => {
+                                InvitationFactKind::Generic
+                            }
+                        };
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::RuntimeFactsUpdated {
+                                replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
+                                facts: vec![RuntimeFact::InvitationAccepted {
+                                    invitation_kind,
+                                    authority_id: Some(accepted.sender_id.to_string()),
+                                    operation_state: Some(OperationState::Succeeded),
+                                }],
+                            },
+                        )
+                        .await;
                     }
-                },
-                move |tx, (sender_id, invitation_type)| async move {
-                    send_ui_update_reliable(
-                        &tx,
-                        UiUpdate::InvitationAccepted {
-                            invitation_id: inv_id.clone(),
-                        },
-                    )
-                    .await;
-                    let invitation_kind = if invitation_type.starts_with("contact")
-                        || invitation_type.starts_with("channel:")
-                    {
-                        InvitationFactKind::Contact
-                    } else {
-                        InvitationFactKind::Generic
-                    };
-                    send_ui_update_reliable(
-                        &tx,
-                        UiUpdate::RuntimeFactsUpdated {
-                            replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
-                            facts: vec![RuntimeFact::InvitationAccepted {
-                                invitation_kind,
-                                authority_id: Some(sender_id),
-                                operation_state: Some(OperationState::Succeeded),
-                            }],
-                        },
-                    )
-                    .await;
-                },
-                |tx, error| async move {
-                    emit_error_toast(
-                        &tx,
-                        "invitation",
-                        format!("Accept invitation failed: {error}"),
-                    )
-                    .await;
-                },
-            );
+                    Err(error) => {
+                        emit_error_toast(
+                            &tx,
+                            "invitation",
+                            format!("Accept invitation failed: {error}"),
+                        )
+                        .await;
+                    }
+                }
+            });
         })
     }
 
@@ -132,14 +132,21 @@ impl InvitationsCallbacks {
                   message: Option<String>,
                   ttl_secs: Option<u64>,
                   operation: LocalTerminalOperationOwner| {
+                let operation_instance_id = operation.harness_handle().instance_id().clone();
                 spawn_local_terminal_result_callback(
                     ctx.clone(),
                     tx.clone(),
                     operation,
                     "CreateInvitation callback",
                     move |ctx| async move {
-                        ctx.create_invitation_code(receiver_id, &invitation_type, message, ttl_secs)
-                            .await
+                        ctx.create_invitation_code(
+                            receiver_id,
+                            &invitation_type,
+                            message,
+                            ttl_secs,
+                            Some(operation_instance_id),
+                        )
+                        .await
                     },
                     |tx, code| async move {
                         if let Err(e) = copy_to_clipboard(&code) {

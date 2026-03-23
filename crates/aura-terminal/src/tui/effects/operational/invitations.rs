@@ -45,8 +45,9 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::invitation::{
-    create_channel_invitation, create_contact_invitation, create_guardian_invitation,
-    export_invitation, export_invitation_by_str, import_invitation_details,
+    create_channel_invitation, create_contact_invitation_with_instance,
+    create_guardian_invitation_with_instance, export_invitation, export_invitation_by_str,
+    import_invitation_details,
 };
 
 async fn resolve_contact_authority_id(
@@ -83,6 +84,7 @@ pub async fn handle_invitations(
             invitation_type,
             message,
             ttl_secs,
+            operation_instance_id,
         } => {
             let receiver = *receiver_id;
 
@@ -114,12 +116,13 @@ pub async fn handle_invitations(
                             .filter(|name| !name.is_empty())
                     };
 
-                    match create_contact_invitation(
+                    match create_contact_invitation_with_instance(
                         app_core,
                         receiver,
                         contact_nickname,
                         message.clone(),
                         ttl_ms,
+                        operation_instance_id.clone(),
                     )
                     .await
                     {
@@ -146,12 +149,13 @@ pub async fn handle_invitations(
                         }
                     };
 
-                    match create_guardian_invitation(
+                    match create_guardian_invitation_with_instance(
                         app_core,
                         receiver,
                         subject,
                         message.clone(),
                         ttl_ms,
+                        operation_instance_id.clone(),
                     )
                     .await
                     {
@@ -190,7 +194,7 @@ pub async fn handle_invitations(
                         None,
                         None,
                         None,
-                        None,
+                        operation_instance_id.clone(),
                         None,
                         None,
                         message.clone(),

@@ -717,14 +717,22 @@ fn test_effect_commands() {
         invitation_type: "Guardian".to_string(),
         message: Some("Be my guardian".to_string()),
         ttl_secs: Some(3600),
+        operation_instance_id: None,
     };
     assert_matches!(
         cmd,
-        EffectCommand::CreateInvitation { receiver_id, invitation_type, message, ttl_secs }
+        EffectCommand::CreateInvitation {
+            receiver_id,
+            invitation_type,
+            message,
+            ttl_secs,
+            operation_instance_id,
+        }
             if receiver_id == aura_core::AuthorityId::new_from_entropy([21u8; 32])
                 && invitation_type == "Guardian"
                 && message == Some("Be my guardian".to_string())
                 && ttl_secs == Some(3600)
+                && operation_instance_id.is_none()
     );
 
     println!("✓ Effect commands structure is correct");

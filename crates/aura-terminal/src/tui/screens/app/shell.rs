@@ -84,7 +84,8 @@ use crate::tui::screens::app::subscriptions::{
     use_nav_status_signals, use_neighborhood_home_meta_subscription,
     use_neighborhood_homes_subscription, use_notifications_subscription,
     use_pending_requests_subscription, use_threshold_subscription, SharedChannels, SharedContacts,
-    SharedDevices, SharedMessages, SharedNeighborhoodHomeMeta,
+    SharedDevices, SharedInvitations, SharedMessages, SharedNeighborhoodHomeMeta,
+    SharedPendingRequests,
 };
 
 async fn effect_sleep(duration: std::time::Duration) {
@@ -323,12 +324,36 @@ fn read_selected_notification(
         .map(|(_, selection)| selection.clone())
 }
 
+fn semantic_accept_kind_for_invitation(
+    invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
+    invitation_id: &str,
+) -> SemanticOperationKind {
+    invitations
+        .read()
+        .iter()
+        .find(|invitation| invitation.id == invitation_id)
+        .map_or(
+            SemanticOperationKind::AcceptContactInvitation,
+            |invitation| match invitation.invitation_type {
+                crate::tui::types::InvitationType::Contact => {
+                    SemanticOperationKind::AcceptContactInvitation
+                }
+                crate::tui::types::InvitationType::Guardian
+                | crate::tui::types::InvitationType::Channel => {
+                    SemanticOperationKind::AcceptPendingChannelInvitation
+                }
+            },
+        )
+}
+
 fn execute_harness_followup_command(
     state: &mut TuiState,
     command: TuiCommand,
     callbacks: &Option<CallbackRegistry>,
     app_ctx: &AppCoreContext,
     update_tx: &Option<UiUpdateSender>,
+    shared_invitations: &SharedInvitations,
+    shared_pending_requests: &SharedPendingRequests,
     shared_contacts: &SharedContacts,
     shared_channels: &SharedChannels,
     shared_devices: &SharedDevices,
@@ -478,6 +503,33 @@ fn execute_harness_followup_command(
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_import)(code, operation);
+            Ok(Some(handle))
+        }
+        TuiCommand::Dispatch(DispatchCommand::AcceptInvitation) => {
+            let Some(cb) = callbacks.as_ref() else {
+                return Err("Invitation callbacks are unavailable".to_string());
+            };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let selected = read_selected_notification(
+                state.notifications.selected_index,
+                shared_invitations,
+                shared_pending_requests,
+            );
+            let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
+                return Err("Select a received invitation to accept".to_string());
+            };
+            let operation = WorkflowHandoffOperationOwner::submit(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::invitation_accept(),
+                semantic_accept_kind_for_invitation(shared_invitations, &invitation_id),
+            );
+            let handle = operation.harness_handle();
+            state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
+            (cb.invitations.on_accept)(invitation_id, operation);
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::JoinChannel { channel_name }) => {
@@ -1336,6 +1388,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_callbacks_for_commands = shared_callbacks;
             let mut tui = tui.clone();
             let shared_contacts_for_commands = shared_contacts.clone();
+            let shared_invitations_for_commands = shared_invitations.clone();
+            let shared_pending_requests_for_commands = shared_pending_requests.clone();
             let shared_channels_for_commands = shared_channels.clone();
             let shared_devices_for_commands = shared_devices.clone();
             let shared_messages_for_commands = shared_messages.clone();
@@ -1421,6 +1475,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 &callbacks_for_commands,
                                 &app_ctx_for_commands,
                                 &update_tx_for_commands,
+                                &shared_invitations_for_commands,
+                                &shared_pending_requests_for_commands,
                                 &shared_contacts_for_commands,
                                 &shared_channels_for_commands,
                                 &shared_devices_for_commands,
@@ -2890,6 +2946,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let _tasks_for_dispatch = tasks;
         // Clone update channel sender for ceremony UI updates
         let update_tx_for_ceremony = props.update_tx.clone();
+        let update_tx_for_dispatch = update_tx_for_events.clone();
         // Clone callbacks registry for command dispatch
         let callbacks = callbacks.clone();
         // Clone shared contacts Arc for guardian setup dispatch
@@ -3610,7 +3667,33 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             invitation_id,
                                         )) = selected
                                         {
-                                            (cb.invitations.on_accept)(invitation_id);
+                                            if let Some(update_tx) = update_tx_for_dispatch.clone() {
+                                                let operation =
+                                                    WorkflowHandoffOperationOwner::submit(
+                                                        app_ctx_for_dispatch
+                                                            .app_core
+                                                            .raw()
+                                                            .clone(),
+                                                        app_ctx_for_dispatch.tasks(),
+                                                        update_tx,
+                                                        OperationId::invitation_accept(),
+                                                        semantic_accept_kind_for_invitation(
+                                                            &shared_invitations_for_dispatch,
+                                                            &invitation_id,
+                                                        ),
+                                                    );
+                                                new_state.clear_runtime_fact_kind(
+                                                    RuntimeEventKind::ContactLinkReady,
+                                                );
+                                                (cb.invitations.on_accept)(
+                                                    invitation_id,
+                                                    operation,
+                                                );
+                                            } else {
+                                                new_state.toast_error(
+                                                    "UI update sender is unavailable",
+                                                );
+                                            }
                                         } else {
                                             new_state.toast_error(
                                                 "Select a received invitation to accept",

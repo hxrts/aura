@@ -1355,10 +1355,24 @@ pub async fn create_contact_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationHandle, AuraError> {
+    create_contact_invitation_with_instance(app_core, receiver, nickname, message, ttl_ms, None)
+        .await
+}
+
+/// Create a contact invitation while preserving a caller-owned semantic
+/// operation instance identity.
+pub async fn create_contact_invitation_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    nickname: Option<String>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    operation_instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationHandle, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
-        None,
+        operation_instance_id,
         SemanticOperationKind::CreateContactInvitation,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
@@ -1395,10 +1409,26 @@ pub async fn create_guardian_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationHandle, AuraError> {
+    create_guardian_invitation_with_instance(
+        app_core, receiver, subject, message, ttl_ms, None,
+    )
+    .await
+}
+
+/// Create a guardian invitation while preserving a caller-owned semantic
+/// operation instance identity.
+pub async fn create_guardian_invitation_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    subject: AuthorityId,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    operation_instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationHandle, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
         OperationId::invitation_create(),
-        None,
+        operation_instance_id,
         SemanticOperationKind::CreateContactInvitation,
     );
     publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
@@ -2393,8 +2423,19 @@ pub async fn accept_invitation_by_str(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<InvitationInfo, AuraError> {
+    accept_invitation_by_str_with_instance(app_core, invitation_id, None).await
+}
+
+/// Accept an invitation by string ID while preserving a caller-owned semantic
+/// operation instance identity.
+pub async fn accept_invitation_by_str_with_instance(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> Result<InvitationInfo, AuraError> {
     let invitation = pending_invitation_info_by_id(app_core, invitation_id).await?;
-    accept_invitation(app_core, InvitationHandle::new(invitation.clone())).await?;
+    accept_invitation_with_instance(app_core, InvitationHandle::new(invitation.clone()), instance_id)
+        .await?;
     Ok(invitation)
 }
 
@@ -2897,7 +2938,10 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
 mod tests {
     use super::*;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
-    use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain};
+    use crate::ui_contract::{
+        SemanticFailureCode, SemanticFailureDomain, SemanticOperationKind,
+        SemanticOperationPhase,
+    };
     use crate::views::invitations::InvitationType;
     #[cfg(feature = "signals")]
     use crate::workflows::messaging::apply_authoritative_membership_projection;

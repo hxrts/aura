@@ -210,6 +210,11 @@ pub struct AcceptedPendingChannelBinding {
 
 impl ModalId {
     #[must_use]
+    pub const fn blocks_quiescence(self) -> bool {
+        !matches!(self, Self::InvitationCode)
+    }
+
+    #[must_use]
     pub const fn web_dom_id(self) -> &'static str {
         match self {
             Self::Help => "aura-modal-help",
@@ -1807,7 +1812,9 @@ impl QuiescenceSnapshot {
             reason_codes.push("readiness_loading".to_string());
         }
         if let Some(modal_id) = open_modal {
-            reason_codes.push(format!("modal_open:{modal_id:?}").to_ascii_lowercase());
+            if modal_id.blocks_quiescence() {
+                reason_codes.push(format!("modal_open:{modal_id:?}").to_ascii_lowercase());
+            }
         }
         for operation in operations {
             if operation.state == OperationState::Submitting {

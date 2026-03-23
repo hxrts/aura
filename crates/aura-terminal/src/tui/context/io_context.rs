@@ -31,6 +31,7 @@ cfg_if! {
 }
 use aura_agent::handlers::{InvitationType as AgentInvitationType, ShareableInvitation};
 use aura_app::ui::prelude::*;
+use aura_app::ui_contract::OperationInstanceId;
 use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
@@ -787,6 +788,7 @@ impl IoContext {
         invitation_type: &str,
         message: Option<String>,
         ttl_secs: Option<u64>,
+        operation_instance_id: Option<OperationInstanceId>,
     ) -> TerminalResult<String> {
         match self
             .operational
@@ -795,6 +797,7 @@ impl IoContext {
                 invitation_type: invitation_type.to_string(),
                 message,
                 ttl_secs,
+                operation_instance_id,
             })
             .await
         {

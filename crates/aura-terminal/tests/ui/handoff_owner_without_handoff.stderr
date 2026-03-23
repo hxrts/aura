@@ -1,8 +1,8 @@
-error[E0593]: closure is expected to take 2 arguments, but it takes 1 argument
- --> tests/ui/handoff_owner_without_handoff.rs:6:53
+error[E0432]: unresolved import `aura_terminal::tui::callbacks::ImportInvitationOwnedCallback`
+ --> tests/ui/handoff_owner_without_handoff.rs:3:5
   |
-6 |     let _: ImportInvitationOwnedCallback = Arc::new(|_code: String| {});
-  |                                                     ^^^^^^^^^^^^^^^
-  |                                                     |
-  |                                                     expected closure that takes 2 arguments
-  |                                                     takes 1 argument
+3 | use aura_terminal::tui::callbacks::ImportInvitationOwnedCallback;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------------------
+  |     |                              |
+  |     |                              help: a similar name exists in the module: `ExportInvitationCallback`
+  |     no `ImportInvitationOwnedCallback` in `tui::callbacks`

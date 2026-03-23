@@ -668,7 +668,7 @@ ci-ownership-policy:
     just ci-owner-issued-readiness-boundary
     just ci-observed-layer-boundaries
     just ci-frontend-handoff-boundary
-    just ci-handoff-terminal-settlement
+    just ci-parity-critical-callback-settlement
     just ci-timeout-policy
     just ci-timeout-time-domains
     just ci-harness-ownership-policy
@@ -760,8 +760,8 @@ ci-observed-layer-boundaries:
 ci-frontend-handoff-boundary:
     just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
 
-ci-handoff-terminal-settlement:
-    just _ownership-lint handoff-terminal-settlement crates/aura-terminal/src/tui/callbacks
+ci-parity-critical-callback-settlement:
+    just _ownership-lint parity-critical-callback-settlement crates/aura-terminal/src/tui/callbacks
 
 ci-timeout-policy:
     just _ownership-lint timeout-policy-boundary crates/aura-app/src/workflows crates/aura-agent/src/handlers/invitation crates/aura-agent/src/runtime_bridge crates/aura-agent/src/runtime/effects crates/aura-terminal/src/tui crates/aura-harness/src
