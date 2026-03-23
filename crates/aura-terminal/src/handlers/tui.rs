@@ -26,7 +26,7 @@ use aura_app::ui::types::{
 };
 use aura_app::ui::workflows::account::{
     derive_recovered_context_id, initialize_runtime_account, parse_backup_code,
-    prepare_pending_account_bootstrap, reconcile_pending_runtime_account_bootstrap,
+    prepare_pending_account_bootstrap,
 };
 use aura_app::ui::workflows::context as context_workflows;
 // Import agent types from aura-agent (runtime layer)
@@ -883,8 +883,6 @@ async fn handle_tui_launch(
 
         #[cfg(feature = "development")]
         let mut simulator: Option<DemoSimulator> = None;
-        #[cfg(feature = "development")]
-        let mut runtime_agent: Option<Arc<aura_agent::AuraAgent>> = None;
         let mut pending_runtime_bootstrap = false;
         let startup_tasks = Arc::new(UiTaskOwner::new());
 
@@ -894,6 +892,7 @@ async fn handle_tui_launch(
                 context,
                 nickname_suggestion,
             } => {
+                let _ = std::fs::write(base_path.join(".debug-phase-loaded-account"), b"loaded");
                 stdio.println(format_args!("Authority: {authority}"));
                 stdio.println(format_args!("Context: {context}"));
 
@@ -999,22 +998,52 @@ async fn handle_tui_launch(
                 };
 
                 let agent = Arc::new(agent);
+                let _ = std::fs::write(base_path.join(".debug-phase-agent-built"), b"agent");
                 let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
                     .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {e}")))?;
                 let app_core = Arc::new(RwLock::new(app_core));
                 let app_core = InitializedAppCore::new(app_core).await?;
+                let _ = std::fs::write(base_path.join(".debug-phase-appcore-ready"), b"appcore");
                 let mut pending_device_enrollment_code = None;
 
                 let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
                 if let Some(pending_bootstrap) = pending_bootstrap {
+                    let _ = std::fs::write(base_path.join(".debug-phase-before-reconcile"), b"before-reconcile");
                     pending_device_enrollment_code =
                         pending_bootstrap.device_enrollment_code.clone();
                     pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
-                    let resolution = reconcile_pending_runtime_account_bootstrap(
+                    let _ = std::fs::write(base_path.join(".debug-phase-before-account-ready"), b"before-account-ready");
+                    let account_ready = aura_app::ui::workflows::account::has_runtime_bootstrapped_account(
                         app_core.raw(),
-                        Some(pending_bootstrap),
                     )
                     .await?;
+                    let _ = std::fs::write(base_path.join(".debug-phase-after-account-ready"), b"after-account-ready");
+                    let resolution = if !account_ready {
+                        let _ = std::fs::write(base_path.join(".debug-phase-before-initialize-runtime-account"), b"before-initialize-runtime-account");
+                        if let Err(error) = aura_app::ui::workflows::account::initialize_runtime_account(
+                            app_core.raw(),
+                            pending_bootstrap.nickname_suggestion.clone(),
+                        )
+                        .await
+                        {
+                            let _ = std::fs::write(
+                                base_path.join(".debug-phase-initialize-runtime-account-error"),
+                                error.to_string(),
+                            );
+                            return Err(error.into());
+                        }
+                        let _ = std::fs::write(base_path.join(".debug-phase-after-initialize-runtime-account"), b"after-initialize-runtime-account");
+                        aura_app::ui::workflows::account::PendingRuntimeBootstrapResolution {
+                            account_ready: true,
+                            action: aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::InitializedFromPending,
+                        }
+                    } else {
+                        aura_app::ui::workflows::account::PendingRuntimeBootstrapResolution {
+                            account_ready: true,
+                            action: aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending,
+                        }
+                    };
+                    let _ = std::fs::write(base_path.join(".debug-phase-after-reconcile"), b"after-reconcile");
                     let clear_pending_bootstrap = matches!(
                         resolution.action,
                         aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending
@@ -1038,30 +1067,44 @@ async fn handle_tui_launch(
                         );
                         tracing::info!(event = %finalized_event, path = %base_path.display());
                     }
-                } else if context_workflows::current_home_context(app_core.raw())
-                    .await
-                    .is_err()
-                {
+                } else {
+                    let _ = std::fs::write(base_path.join(".debug-phase-before-home-context"), b"before-home-context");
+                    let missing_home_context =
+                        context_workflows::current_home_context(app_core.raw()).await.is_err();
+                    let _ = std::fs::write(base_path.join(".debug-phase-after-home-context"), b"after-home-context");
+                    if missing_home_context {
                     let nickname_suggestion = nickname_suggestion.clone().ok_or_else(|| {
                         AuraError::internal(
                             "Loaded account is missing bootstrap nickname for runtime initialization"
                                 .to_string(),
                         )
                     })?;
-                    initialize_runtime_account(app_core.raw(), nickname_suggestion).await?;
+                    let _ = std::fs::write(base_path.join(".debug-phase-before-init-runtime"), b"before-init-runtime");
+                    if let Err(error) = initialize_runtime_account(app_core.raw(), nickname_suggestion).await {
+                        let _ = std::fs::write(
+                            base_path.join(".debug-phase-initialize-runtime-account-error"),
+                            error.to_string(),
+                        );
+                        return Err(error.into());
+                    }
+                    let _ = std::fs::write(base_path.join(".debug-phase-after-init-runtime"), b"after-init-runtime");
                     let finalized_event = BootstrapEvent::new(
                         BootstrapSurface::Tui,
                         BootstrapEventKind::RuntimeBootstrapFinalized,
                     );
                     tracing::info!(event = %finalized_event, path = %base_path.display());
                 }
+                }
 
+                let _ = std::fs::write(base_path.join(".debug-phase-before-refresh"), b"before-refresh");
                 if let Err(e) =
                     aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw())
                         .await
                 {
                     stdio.eprintln(format_args!("Warning: Failed to refresh settings: {e}"));
                 }
+                let _ = std::fs::write(base_path.join(".debug-phase-after-refresh"), b"after-refresh");
+                let _ = std::fs::write(base_path.join(".debug-phase-before-launch"), b"launch");
 
                 stdio.println(format_args!(
                     "AppCore initialized (with runtime bridge and reactive signals)"
@@ -1149,7 +1192,6 @@ async fn handle_tui_launch(
 
                 #[cfg(feature = "development")]
                 {
-                    runtime_agent = Some(agent.clone());
                     simulator = match mode {
                         TuiMode::Demo { .. } => {
                             stdio.println(format_args!("Starting demo simulator..."));
@@ -1197,7 +1239,7 @@ async fn handle_tui_launch(
 
                 #[cfg(feature = "development")]
                 if let TuiMode::Demo { .. } = mode {
-                    if let (Some(sim), Some(agent)) = (&simulator, &runtime_agent) {
+                    if let Some(sim) = &simulator {
                         let effects = agent.runtime().effects();
                         let peers = vec![
                             EchoPeer {
@@ -1423,6 +1465,12 @@ async fn handle_tui_launch(
         }
 
         result?;
+        let _ = std::fs::write(base_path.join(".debug-after-fullscreen"), b"after-fullscreen");
+        stdio.println(format_args!(
+            "DEBUG after fullscreen has_existing_account={} handoff_marker={}",
+            has_existing_account,
+            base_path.join(".bootstrap-runtime-handoff-ready").exists()
+        ));
 
         let switch_request = authority_switch_handle
             .lock()
@@ -1445,6 +1493,8 @@ async fn handle_tui_launch(
         if !has_existing_account
             && base_path.join(".bootstrap-runtime-handoff-ready").exists()
         {
+            let _ = std::fs::write(base_path.join(".debug-bootstrap-continue"), b"continue");
+            stdio.println(format_args!("DEBUG continuing bootstrap reload"));
             stdio.println(format_args!(
                 "Reloading TUI with newly created bootstrap identity"
             ));

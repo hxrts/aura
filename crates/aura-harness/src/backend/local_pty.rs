@@ -1064,6 +1064,7 @@ impl ObservationBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
+        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
         let guard = session
             .ui_snapshot_feed
             .state
@@ -1073,7 +1074,6 @@ impl ObservationBackend for LocalPtyBackend {
             return Ok(snapshot);
         }
         drop(guard);
-        self.ensure_session_alive(session, "reading authoritative UI snapshot")?;
         let guard = session
             .ui_snapshot_feed
             .state

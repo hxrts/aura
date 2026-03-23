@@ -1629,9 +1629,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 let peers = sync.peers().await;
 
                 if peers.is_empty() && authority_peers.is_empty() {
-                    last_sync_error = Some(IntentError::validation_failed(
-                        "No sync peers are available for synchronization",
-                    ));
+                    tracing::debug!(
+                        "trigger_sync skipped because no sync or authority peers are available"
+                    );
+                    return Ok(());
                 }
 
                 let sync_result = if peers.is_empty() {

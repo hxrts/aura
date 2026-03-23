@@ -9,7 +9,7 @@ use aura_agent::SharedTransport;
 use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
-use futures::future::join_all;
+use futures::{future::join_all, TryFutureExt};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;

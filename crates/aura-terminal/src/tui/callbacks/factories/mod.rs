@@ -118,21 +118,12 @@ fn spawn_local_terminal_result_callback<
             .await
         {
             Ok(Ok(value)) => {
-                match std::panic::AssertUnwindSafe(on_success(tx.clone(), value))
+                operation.succeed().await;
+                if let Err(panic) = std::panic::AssertUnwindSafe(on_success(tx.clone(), value))
                     .catch_unwind()
                     .await
                 {
-                    Ok(()) => {
-                        operation.succeed().await;
-                    }
-                    Err(panic) => {
-                        let error = crate::error::TerminalError::Operation(panic_detail(
-                            panic_context,
-                            panic.as_ref(),
-                        ));
-                        operation.fail(error.to_string()).await;
-                        on_failure(tx, error).await;
-                    }
+                    tracing::error!("{}", panic_detail(panic_context, panic.as_ref()));
                 }
             }
             Ok(Err(error)) => {

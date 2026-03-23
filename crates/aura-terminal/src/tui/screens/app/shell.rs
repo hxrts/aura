@@ -68,8 +68,9 @@ use crate::tui::context::IoContext;
 use crate::tui::harness_state::{
     accept_harness_command_submission, apply_harness_command, clear_harness_command_sender,
     complete_pending_binding_submission, ensure_harness_command_listener,
-    fail_pending_binding_submission, maybe_export_ui_snapshot, register_harness_command_sender,
-    reject_harness_command_submission, track_pending_binding_submission, TuiSemanticInputs,
+    fail_pending_binding_submission, maybe_export_ui_snapshot, publish_loading_ui_snapshot,
+    register_harness_command_sender, reject_harness_command_submission,
+    track_pending_binding_submission, TuiSemanticInputs,
 };
 use crate::tui::hooks::{AppCoreContext, AppSnapshotAvailability, CallbackContext};
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
@@ -833,6 +834,9 @@ pub struct IoAppProps {
     pub update_rx: Option<Arc<Mutex<Option<UiUpdateReceiver>>>>,
     /// Dedicated harness command receiver for semantic command ingress.
     pub harness_command_rx: Option<Arc<Mutex<Option<HarnessCommandReceiver>>>>,
+    /// Bootstrap handoff notification for terminating the pre-runtime shell generation.
+    pub bootstrap_handoff_tx:
+        Option<Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>>,
     /// UI update sender for sending updates from event handlers
     pub update_tx: Option<UiUpdateSender>,
     /// Callback registry for all domain actions
@@ -856,6 +860,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // This is the source of truth; iocraft hooks sync FROM this state
     let show_setup = props.show_account_setup;
     let pending_runtime_bootstrap = props.pending_runtime_bootstrap;
+    let bootstrap_handoff_tx = props.bootstrap_handoff_tx.clone();
     #[cfg(feature = "development")]
     let demo_alice = props.demo_alice_code.clone();
     #[cfg(feature = "development")]
@@ -1503,6 +1508,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut should_exit = should_exit.clone();
             let app_core = app_ctx.app_core.clone();
             let app_ctx_for_updates = app_ctx.clone();
+            let bootstrap_handoff_tx = bootstrap_handoff_tx.clone();
             let io_ctx = io_ctx.clone();
             let bg_shutdown = bg_shutdown.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
@@ -2620,10 +2626,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Account
                         // =========================================================================
                         UiUpdate::AccountCreated => {
-                            tui.with_mut(|state| {
+                            let export_state = tui.with_mut(|state| {
                                 state.account_created_queued();
                                 state.should_exit = true;
+                                state.clone()
                             });
+                            if let Err(error) = publish_loading_ui_snapshot(&export_state) {
+                                tracing::warn!(
+                                    error = %error,
+                                    "failed to publish loading snapshot for bootstrap handoff"
+                                );
+                            }
                             if show_setup {
                                 if let Err(error) = io_ctx.mark_bootstrap_runtime_handoff_committed()
                                 {
@@ -2633,9 +2646,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     );
                                     continue;
                                 }
+                                if let Some(tx) = bootstrap_handoff_tx
+                                    .as_ref()
+                                    .and_then(|holder| {
+                                        holder
+                                            .lock()
+                                            .ok()
+                                            .and_then(|mut guard| guard.take())
+                                    })
+                                {
+                                    let _ = tx.send(());
+                                }
                                 should_exit.set(true);
                                 bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
-                                break;
                             }
                         }
 
@@ -2699,8 +2722,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         });
     }
 
-    // Handle exit request
-    if should_exit.get() {
+    // Read TUI state for rendering via type-safe handle.
+    // This MUST be used for all render-time state access - it reads the version to establish
+    // reactivity, ensuring the component re-renders when state changes via tui.replace().
+    // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
+    let tui_snapshot = tui.read_for_render();
+
+    // Handle exit request. The owned TuiState is the authoritative source here; relying only on
+    // the hook-local flag can miss async update paths like bootstrap handoff.
+    if should_exit.get() || tui_snapshot.should_exit {
         system.exit();
         return element! { View {} };
     }
@@ -2709,11 +2739,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Each screen subscribes to signals directly via AppCoreContext.
     // See scripts/check/arch.sh --reactive for architectural enforcement.
 
-    // Read TUI state for rendering via type-safe handle.
-    // This MUST be used for all render-time state access - it reads the version to establish
-    // reactivity, ensuring the component re-renders when state changes via tui.replace().
-    // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
-    let tui_snapshot = tui.read_for_render();
     let _projection_export_version = projection_export_version.get();
     let app_snapshot = match app_ctx.snapshot() {
         AppSnapshotAvailability::Available(snapshot) => snapshot,
@@ -4800,6 +4825,8 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let update_rx_holder = Arc::new(Mutex::new(Some(update_rx)));
     let (harness_command_tx, harness_command_rx) = harness_command_channel();
     let harness_command_rx_holder = Arc::new(Mutex::new(Some(harness_command_rx)));
+    let (bootstrap_handoff_tx, bootstrap_handoff_rx) = tokio::sync::oneshot::channel();
+    let bootstrap_handoff_tx_holder = Arc::new(Mutex::new(Some(bootstrap_handoff_tx)));
     ctx.clear_bootstrap_runtime_handoff_committed()
         .map_err(|error| std::io::Error::other(error.to_string()))?;
     ensure_harness_command_listener().await?;
@@ -4913,6 +4940,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
                         harness_command_rx: Some(harness_command_rx_holder),
+                        bootstrap_handoff_tx: Some(bootstrap_handoff_tx_holder.clone()),
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
@@ -4955,6 +4983,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
                         harness_command_rx: Some(harness_command_rx_holder),
+                        bootstrap_handoff_tx: Some(bootstrap_handoff_tx_holder.clone()),
                         update_tx: Some(update_tx.clone()),
                         // Callbacks registry
                         callbacks: Some(callbacks),
@@ -4962,23 +4991,37 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                 }
             }
         };
-        let bootstrap_handoff = async {
+        let bootstrap_handoff_deadline = async {
             if !show_account_setup {
-                std::future::pending::<()>().await;
-            }
-            loop {
-                if ctx_arc.bootstrap_runtime_handoff_committed() {
-                    break;
+                std::future::pending::<std::io::Result<()>>().await
+            } else {
+                bootstrap_handoff_rx.await.map_err(|error| {
+                    std::io::Error::other(format!(
+                        "bootstrap runtime handoff notification dropped before shell exit: {error}"
+                    ))
+                })?;
+                if !ctx_arc.bootstrap_runtime_handoff_committed() {
+                    return Err(std::io::Error::other(
+                        "bootstrap runtime handoff notified without committed marker",
+                    ));
                 }
-                effect_sleep(std::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                Err(std::io::Error::other(
+                    "bootstrap runtime handoff committed but fullscreen generation did not exit within 5s",
+                ))
             }
         };
 
         let result = tokio::select! {
             result = app.fullscreen() => result,
-            _ = bootstrap_handoff => Ok(()),
+            result = bootstrap_handoff_deadline => result,
         };
+        let handoff_committed = show_account_setup && ctx_arc.bootstrap_runtime_handoff_committed();
         let _ = clear_harness_command_sender().await;
-        result
+        if handoff_committed {
+            Ok(())
+        } else {
+            result
+        }
     }
 }

@@ -9,9 +9,11 @@ use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
 use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
-    ScreenId, ToastId, ToastSnapshot, UiSnapshot,
+    ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
 };
-use aura_app::ui_contract::{next_projection_revision, ProjectionRevision, QuiescenceSnapshot};
+use aura_app::ui_contract::{
+    next_projection_revision, ProjectionRevision, QuiescenceSnapshot, QuiescenceState,
+};
 use parking_lot::Mutex;
 use std::fs;
 use std::io;
@@ -61,15 +63,8 @@ fn build_authoritative_ui_snapshot(
     revision: ProjectionRevision,
 ) -> Result<UiSnapshot, String> {
     let app_snapshot = semantic_inputs.app_snapshot;
-    let onboarding_active = matches!(
-        state.modal_queue.current(),
-        Some(QueuedModal::AccountSetup(_))
-    );
-    let screen = if onboarding_active {
-        ScreenId::Onboarding
-    } else {
-        map_screen(state.screen())
-    };
+    let screen = authoritative_screen_id(state);
+    let onboarding_active = screen == ScreenId::Onboarding;
     let open_modal = state.modal_queue.current().and_then(map_modal);
 
     let focused_control = if onboarding_active {
@@ -418,39 +413,40 @@ pub fn authoritative_ui_snapshot(
         .unwrap_or_else(|error| panic!("invalid TUI semantic snapshot export: {error}"))
 }
 
-pub fn maybe_export_ui_snapshot(
-    state: &TuiState,
-    semantic_inputs: TuiSemanticInputs<'_>,
-) -> Result<(), String> {
+fn authoritative_screen_id(state: &TuiState) -> ScreenId {
+    if matches!(
+        state.modal_queue.current(),
+        Some(QueuedModal::AccountSetup(_))
+    ) {
+        ScreenId::Onboarding
+    } else {
+        map_screen(state.screen())
+    }
+}
+
+fn publish_snapshot(snapshot: &UiSnapshot) -> Result<(), String> {
     let socket_path = configured_ui_state_socket();
     let file_path = configured_ui_state_file();
     if socket_path.is_none() && file_path.is_none() {
         return Ok(());
     }
 
-    // Build a canonical snapshot with a stable placeholder revision so identical
-    // semantic state deduplicates cleanly instead of generating a fresh revision
-    // and flooding the harness bridge on every render.
-    let canonical_snapshot = build_authoritative_ui_snapshot(
-        state,
-        semantic_inputs,
-        ProjectionRevision {
+    let canonical_snapshot = UiSnapshot {
+        revision: ProjectionRevision {
             semantic_seq: 0,
             render_seq: None,
         },
-    )?;
+        ..snapshot.clone()
+    };
     let canonical_json = serde_json::to_vec(&canonical_snapshot)
         .map_err(|error| format!("failed to encode canonical TUI semantic snapshot: {error}"))?;
+    let snapshot_json = serde_json::to_vec(snapshot)
+        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
 
     let mut last_written = last_written_snapshot().lock();
     if last_written.as_deref() == Some(canonical_json.as_slice()) {
         return Ok(());
     }
-
-    let snapshot =
-        build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
-    let snapshot_json = serde_json::to_vec(&snapshot)
-        .map_err(|error| format!("failed to encode TUI semantic snapshot: {error}"))?;
 
     let socket_write_result = socket_path.map(|path| {
         StdUnixStream::connect(path).and_then(|mut stream| stream.write_all(&snapshot_json))
@@ -473,4 +469,43 @@ pub fn maybe_export_ui_snapshot(
         ));
     }
     Ok(())
+}
+
+pub fn publish_loading_ui_snapshot(state: &TuiState) -> Result<(), String> {
+    let screen = authoritative_screen_id(state);
+    let mut snapshot = UiSnapshot::loading(screen);
+    snapshot.operations = state.exported_operation_snapshots();
+    snapshot.runtime_events = state.exported_runtime_events();
+    snapshot.toasts = state
+        .toast_queue
+        .current()
+        .map(|toast| {
+            vec![ToastSnapshot {
+                id: ToastId(toast.id.to_string()),
+                message: toast.message.clone(),
+                kind: map_toast_kind(toast.level),
+            }]
+        })
+        .unwrap_or_default();
+    snapshot.quiescence = QuiescenceSnapshot {
+        state: QuiescenceState::Busy,
+        reason_codes: vec!["owner_transition_reloading".to_string()],
+    };
+    snapshot.readiness = UiReadiness::Loading;
+    publish_snapshot(&snapshot)
+}
+
+pub fn maybe_export_ui_snapshot(
+    state: &TuiState,
+    semantic_inputs: TuiSemanticInputs<'_>,
+) -> Result<(), String> {
+    // Build a canonical snapshot with a stable placeholder revision so identical
+    // semantic state deduplicates cleanly instead of generating a fresh revision
+    // and flooding the harness bridge on every render.
+    let snapshot = build_authoritative_ui_snapshot(
+        state,
+        semantic_inputs,
+        next_projection_revision(None),
+    )?;
+    publish_snapshot(&snapshot)
 }

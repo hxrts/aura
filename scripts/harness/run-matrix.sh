@@ -97,6 +97,43 @@ scenario_id_requested() {
   return 1
 }
 
+ensure_built_artifact() {
+  local package="$1"
+  local bin_name="$2"
+  local artifact_path="$repo_root/target/debug/$bin_name"
+
+  echo "[harness-matrix] building package=$package bin=$bin_name" >&2
+  (
+    cd "$repo_root"
+    cargo build -q -p "$package" --bin "$bin_name"
+  )
+  [[ -x "$artifact_path" ]] || fail "missing built artifact: $artifact_path"
+  printf '%s\n' "$artifact_path"
+}
+
+prepare_lane_artifacts() {
+  local selected_lane="$1"
+
+  if [[ -z "${AURA_HARNESS_BIN:-}" ]]; then
+    export AURA_HARNESS_BIN
+    AURA_HARNESS_BIN="$(ensure_built_artifact aura-harness aura-harness)"
+  fi
+
+  case "$selected_lane" in
+    tui)
+      if [[ -z "${AURA_HARNESS_AURA_BIN:-}" ]]; then
+        export AURA_HARNESS_AURA_BIN
+        AURA_HARNESS_AURA_BIN="$(ensure_built_artifact aura-terminal aura)"
+      fi
+      ;;
+    web)
+      ;;
+    *)
+      fail "unknown lane for artifact preparation: $selected_lane"
+      ;;
+  esac
+}
+
 run_scenario() {
   local config="$1"
   local scenario_path="$2"
@@ -143,6 +180,10 @@ run_lane() {
   local count=0
 
   echo "[harness-matrix] lane=$selected_lane suite=$suite begin"
+
+  if [[ $dry_run -eq 0 ]]; then
+    prepare_lane_artifacts "$selected_lane"
+  fi
 
   while IFS='|' read -r scenario_id scenario_path scenario_class; do
     [[ -n "$scenario_id" ]] || continue

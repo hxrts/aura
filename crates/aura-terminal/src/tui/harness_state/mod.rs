@@ -6,7 +6,7 @@ mod socket;
 
 pub(crate) use commands::apply_harness_command;
 pub use commands::TuiSemanticInputs;
-pub use snapshot::maybe_export_ui_snapshot;
+pub use snapshot::{maybe_export_ui_snapshot, publish_loading_ui_snapshot};
 pub(crate) use socket::{
     accept_harness_command_submission, clear_harness_command_sender,
     complete_pending_binding_submission, ensure_harness_command_listener,
