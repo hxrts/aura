@@ -56,7 +56,7 @@ use aura_app::ui_contract::{
 };
 use aura_core::types::Epoch;
 pub use aura_ui::FrontendUiOperation as UiOperation;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// Channel sender type for UI updates
 pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
@@ -138,9 +138,25 @@ pub async fn send_ui_update_required(tx: &UiUpdateSender, update: UiUpdate) {
     let _ = publish_ui_update(tx, update, UiUpdatePublication::RequiredUnordered).await;
 }
 
+fn required_ui_update_tasks() -> &'static UiTaskOwner {
+    static REQUIRED_UI_UPDATE_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
+    REQUIRED_UI_UPDATE_TASKS.get_or_init(UiTaskOwner::new)
+}
+
 /// Send a required UI update from a synchronous callback context.
 pub fn send_ui_update_required_blocking(tx: &UiUpdateSender, update: UiUpdate) -> bool {
-    tx.blocking_send(update).is_ok()
+    match tx.try_send(update) {
+        Ok(()) => true,
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(update)) => {
+            let tx = tx.clone();
+            required_ui_update_tasks().spawn(async move {
+                let _ = publish_ui_update(&tx, update, UiUpdatePublication::RequiredUnordered)
+                    .await;
+            });
+            true
+        }
+    }
 }
 
 /// Send a UI update without blocking. Returns `true` if sent.

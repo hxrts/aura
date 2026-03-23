@@ -43,6 +43,7 @@ enum LintMode {
     TimeDomainUsage,
     AuthoritativeRefNoReresolution,
     WeakToStrongIdentifierUpgrade,
+    HandoffTerminalSettlement,
 }
 
 impl LintMode {
@@ -77,6 +78,7 @@ impl LintMode {
             "time-domain-usage" => Ok(Self::TimeDomainUsage),
             "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
             "weak-to-strong-identifier-upgrade" => Ok(Self::WeakToStrongIdentifierUpgrade),
+            "handoff-terminal-settlement" => Ok(Self::HandoffTerminalSettlement),
             other => Err(format!("unknown lint mode: {other}")),
         }
     }
@@ -112,6 +114,7 @@ impl LintMode {
             Self::TimeDomainUsage => "time-domain-usage",
             Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
             Self::WeakToStrongIdentifierUpgrade => "weak-to-strong-identifier-upgrade",
+            Self::HandoffTerminalSettlement => "handoff-terminal-settlement",
         }
     }
 }
@@ -284,6 +287,11 @@ fn run() -> Result<(), String> {
                 "weak identifiers still upgrade directly into canonical strong references or owned handles"
                     .to_string()
             }
+            LintMode::HandoffTerminalSettlement => {
+                format!(
+                    "handoff_to_app_workflow calls without paired apply_handed_off_terminal_status in the same function body. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
         });
     }
 
@@ -358,6 +366,9 @@ fn scan_file(
         LintMode::AuthoritativeRefNoReresolution => {}
         LintMode::WeakToStrongIdentifierUpgrade => {
             return scan_weak_to_strong_identifier_upgrade(file, syntax, strong_references);
+        }
+        LintMode::HandoffTerminalSettlement => {
+            return scan_handoff_terminal_settlement(file, syntax);
         }
         LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
@@ -894,7 +905,8 @@ fn scan_function(
         | LintMode::OwnerIssuedReadinessBoundary
         | LintMode::OptionalOwnerBoundary
         | LintMode::TimeoutPolicyBoundary
-        | LintMode::TimeDomainUsage => false,
+        | LintMode::TimeDomainUsage
+        | LintMode::HandoffTerminalSettlement => false,
     };
     if !should_scan {
         return;
@@ -1589,7 +1601,8 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::TimeoutPolicyBoundary
             | LintMode::TimeDomainUsage
             | LintMode::AuthoritativeRefNoReresolution
-            | LintMode::WeakToStrongIdentifierUpgrade => {}
+            | LintMode::WeakToStrongIdentifierUpgrade
+            | LintMode::HandoffTerminalSettlement => {}
         }
 
         visit::visit_expr_await(self, node);
@@ -2521,4 +2534,111 @@ fn scan_time_domain_usage(file: &Path, syntax: &File) -> Vec<String> {
     };
     visitor.visit_file(syntax);
     visitor.violations
+}
+
+// TODO(work/0.md#fix-1, work/0.md#fix-2): remove after terminal settlement is added
+const HANDOFF_TERMINAL_SETTLEMENT_ALLOWLIST: &[&str] = &[
+    "chat.rs",          // make_send_owned
+    "factories/mod.rs", // run_invitation_import_flow
+];
+
+fn scan_handoff_terminal_settlement(file: &Path, syntax: &File) -> Vec<String> {
+    let file_str = file.to_string_lossy();
+
+    // Only scan callback factory files
+    if !file_str.contains("crates/") {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    scan_handoff_terminal_settlement_items(file, &syntax.items, &mut violations);
+
+    // Filter out allowlisted files
+    if HANDOFF_TERMINAL_SETTLEMENT_ALLOWLIST
+        .iter()
+        .any(|suffix| file_str.ends_with(suffix))
+    {
+        return Vec::new();
+    }
+
+    violations
+}
+
+fn scan_handoff_terminal_settlement_items(
+    file: &Path,
+    items: &[Item],
+    violations: &mut Vec<String>,
+) {
+    for item in items {
+        match item {
+            Item::Fn(item_fn) => {
+                if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
+                    continue;
+                }
+                check_handoff_terminal_settlement_function(
+                    file,
+                    &item_fn.sig.ident.to_string(),
+                    item_fn.sig.ident.span().start().line,
+                    &item_fn.block,
+                    violations,
+                );
+            }
+            Item::Impl(item_impl) => {
+                for impl_item in &item_impl.items {
+                    if let ImplItem::Fn(item_fn) = impl_item {
+                        if has_cfg_test_attr(&item_fn.attrs) || has_test_attr(&item_fn.attrs) {
+                            continue;
+                        }
+                        check_handoff_terminal_settlement_function(
+                            file,
+                            &item_fn.sig.ident.to_string(),
+                            item_fn.sig.ident.span().start().line,
+                            &item_fn.block,
+                            violations,
+                        );
+                    }
+                }
+            }
+            Item::Mod(item_mod) => {
+                if has_cfg_test_attr(&item_mod.attrs) {
+                    continue;
+                }
+                if let Some((_, nested)) = &item_mod.content {
+                    scan_handoff_terminal_settlement_items(file, nested, violations);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_handoff_terminal_settlement_function(
+    file: &Path,
+    function_name: &str,
+    function_line: usize,
+    block: &Block,
+    violations: &mut Vec<String>,
+) {
+    let has_handoff = function_contains_call(block, "handoff_to_app_workflow");
+    if !has_handoff {
+        return;
+    }
+
+    // Skip functions that delegate to spawn_handoff_workflow_callback_with_success,
+    // which internally calls apply_handed_off_terminal_status.
+    if function_contains_call(block, "spawn_handoff_workflow_callback_with_success") {
+        return;
+    }
+
+    let has_settlement = function_contains_call(block, "apply_handed_off_terminal_status");
+    if has_settlement {
+        return;
+    }
+
+    violations.push(format!(
+        "{}:{}: function `{}` calls handoff_to_app_workflow without a paired apply_handed_off_terminal_status",
+        file.display(),
+        function_line,
+        function_name
+    ));
 }

@@ -26,7 +26,8 @@ mod types;
 pub(crate) use types::SendCallback;
 #[doc(hidden)]
 pub use types::{
-    AddDeviceCallback, CreateAccountCallback, CreateChannelCallback, SendOwnedCallback,
+    AddDeviceCallback, CreateAccountCallback, CreateChannelCallback,
+    ImportInvitationOwnedCallback, SendOwnedCallback,
 };
 pub use types::{
     ApprovalCallback, ChannelSelectCallback, CreateHomeCallback, CreateNeighborhoodCallback,

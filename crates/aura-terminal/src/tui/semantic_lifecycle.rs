@@ -671,6 +671,197 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn best_effort_failure_after_terminal_does_not_regress() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        init_signals_for_test(&app_core).await;
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, mut rx) = mpsc::channel(8);
+        let tx_best_effort = tx.clone();
+
+        let owner = SubmittedOperationOwner::submit_local_terminal(
+            app_core,
+            tasks.clone(),
+            tx,
+            OperationId::account_create(),
+            SemanticOperationKind::CreateAccount,
+        );
+
+        // Publish terminal success.
+        owner.succeed().await;
+
+        // Drain the submission and success updates.
+        let submitted = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing submission update"));
+        let terminal = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing success update"));
+
+        match &submitted {
+            UiUpdate::AuthoritativeOperationStatus { status, .. } => {
+                assert_eq!(status.phase, SemanticOperationPhase::WorkflowDispatched);
+                assert_eq!(status.kind, SemanticOperationKind::CreateAccount);
+            }
+            other => panic!("unexpected submission update: {other:?}"),
+        }
+        match &terminal {
+            UiUpdate::AuthoritativeOperationStatus { status, .. } => {
+                assert_eq!(status.phase, SemanticOperationPhase::Succeeded);
+                assert_eq!(status.kind, SemanticOperationKind::CreateAccount);
+            }
+            other => panic!("unexpected terminal update: {other:?}"),
+        }
+
+        // No additional updates should have arrived yet.
+        assert!(
+            rx.try_recv().is_err(),
+            "no extra updates expected before best-effort send"
+        );
+
+        // Simulate a best-effort update (e.g. a toast) sent on the same
+        // channel after the terminal status has already been published.
+        let best_effort = UiUpdate::AuthoritativeOperationStatus {
+            operation_id: OperationId::account_create(),
+            instance_id: None,
+            causality: None,
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::CreateAccount,
+                SemanticOperationPhase::WorkflowDispatched,
+            ),
+        };
+        let _ = tx_best_effort.try_send(best_effort);
+
+        // Even though an extra message arrived on the channel, the two
+        // authoritative updates we already drained are unmodified: the
+        // terminal Succeeded status was not regressed.
+        match &terminal {
+            UiUpdate::AuthoritativeOperationStatus { status, .. } => {
+                assert_eq!(
+                    status.phase,
+                    SemanticOperationPhase::Succeeded,
+                    "terminal status must not be regressed by later best-effort sends"
+                );
+            }
+            other => panic!("terminal update changed unexpectedly: {other:?}"),
+        }
+
+        tasks.shutdown();
+    }
+
+    #[tokio::test]
+    async fn terminal_status_not_regressed_by_later_submission() {
+        let app_core = Arc::new(RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+        ));
+        init_signals_for_test(&app_core).await;
+        let tasks = Arc::new(UiTaskOwner::new());
+        let (tx, mut rx) = mpsc::channel(16);
+
+        let operation_id = OperationId::invitation_accept();
+
+        // First owner: submit and handoff to app workflow.
+        let first_owner = SubmittedOperationOwner::submit_for_app_handoff(
+            app_core.clone(),
+            tasks.clone(),
+            tx.clone(),
+            operation_id.clone(),
+            SemanticOperationKind::AcceptPendingChannelInvitation,
+        );
+        let first_instance_id = first_owner.instance_id.clone();
+        let _transfer = first_owner
+            .handoff_to_app_workflow(SemanticOperationTransferScope::AcceptPendingChannelInvitation);
+
+        // Drain the first submission update.
+        let first_submitted = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing first submission update"));
+        match &first_submitted {
+            UiUpdate::AuthoritativeOperationStatus {
+                instance_id,
+                status,
+                ..
+            } => {
+                assert_eq!(instance_id.as_ref(), Some(&first_instance_id));
+                assert_eq!(status.phase, SemanticOperationPhase::WorkflowDispatched);
+            }
+            other => panic!("unexpected first submission update: {other:?}"),
+        }
+
+        // Second owner: same operation_id but gets a different instance_id.
+        let second_owner = SubmittedOperationOwner::submit_for_app_handoff(
+            app_core,
+            tasks.clone(),
+            tx,
+            operation_id,
+            SemanticOperationKind::AcceptPendingChannelInvitation,
+        );
+        let second_instance_id = second_owner.instance_id.clone();
+
+        // The two submissions must have distinct instance_ids.
+        assert_ne!(
+            first_instance_id, second_instance_id,
+            "each submission must mint a unique instance_id even for the same operation_id"
+        );
+
+        // Drop the second owner without settling; it will publish a Failed
+        // terminal status for the *second* instance only.
+        drop(second_owner);
+
+        // Drain the second owner's submission and drop-failure updates.
+        let second_submitted = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing second submission update"));
+        let second_failure = rx
+            .recv()
+            .await
+            .unwrap_or_else(|| panic!("missing second dropped-owner failure"));
+
+        match &second_submitted {
+            UiUpdate::AuthoritativeOperationStatus {
+                instance_id,
+                status,
+                ..
+            } => {
+                assert_eq!(instance_id.as_ref(), Some(&second_instance_id));
+                assert_eq!(status.phase, SemanticOperationPhase::WorkflowDispatched);
+            }
+            other => panic!("unexpected second submission update: {other:?}"),
+        }
+
+        match &second_failure {
+            UiUpdate::AuthoritativeOperationStatus {
+                instance_id,
+                status,
+                ..
+            } => {
+                assert_eq!(
+                    instance_id.as_ref(),
+                    Some(&second_instance_id),
+                    "failure must target the second instance, not the first"
+                );
+                assert_eq!(status.phase, SemanticOperationPhase::Failed);
+            }
+            other => panic!("unexpected second failure update: {other:?}"),
+        }
+
+        // Confirm no collision: the first instance's terminal state is
+        // unaffected because the second owner's failure carries its own
+        // distinct instance_id.
+        assert_ne!(
+            first_instance_id, second_instance_id,
+            "instance_id isolation prevents regression of the first terminal status"
+        );
+
+        tasks.shutdown();
+    }
+
+    #[tokio::test]
     async fn relinquish_to_workflow_returns_typed_transfer_record_without_failure() {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),

@@ -1341,14 +1341,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let selected_channel_binding_for_commands =
                 selected_channel_binding_for_chat_screen.clone();
             async move {
-                #[allow(clippy::expect_used)]
                 let mut rx = {
-                    let mut guard = command_rx_holder
-                        .lock()
-                        .expect("Failed to lock harness_command_rx");
-                    guard
-                        .take()
-                        .expect("Harness command receiver already taken")
+                    let Ok(mut guard) = command_rx_holder.lock() else {
+                        tracing::warn!(
+                            "failed to lock harness command receiver holder during shell setup"
+                        );
+                        return;
+                    };
+                    let Some(rx) = guard.take() else {
+                        tracing::warn!(
+                            "harness command receiver already owned by an earlier shell generation"
+                        );
+                        return;
+                    };
+                    rx
                 };
 
                 while let Some(submission) = rx.recv().await {
@@ -1540,11 +1546,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 }
 
                 // Take the receiver from the holder (only happens once)
-                #[allow(clippy::expect_used)]
-                // TUI initialization - panic is appropriate if channel setup failed
                 let mut rx = {
-                    let mut guard = rx_holder.lock().expect("Failed to lock update_rx");
-                    guard.take().expect("UI update receiver already taken")
+                    let Ok(mut guard) = rx_holder.lock() else {
+                        tracing::warn!(
+                            "failed to lock UI update receiver holder during shell setup"
+                        );
+                        return;
+                    };
+                    let Some(rx) = guard.take() else {
+                        tracing::warn!(
+                            "UI update receiver already owned by an earlier shell generation"
+                        );
+                        return;
+                    };
+                    rx
                 };
 
                 // Process updates as they arrive
@@ -2628,7 +2643,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::AccountCreated => {
                             let export_state = tui.with_mut(|state| {
                                 state.account_created_queued();
-                                state.should_exit = true;
+                                if show_setup {
+                                    state.should_exit = true;
+                                }
                                 state.clone()
                             });
                             if let Err(error) = publish_loading_ui_snapshot(&export_state) {

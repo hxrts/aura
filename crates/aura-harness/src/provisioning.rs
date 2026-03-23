@@ -35,6 +35,9 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
         if !instance.data_dir.is_absolute() {
             instance.data_dir = instance_root.join("state");
         }
+        if instance.log_path.is_none() {
+            instance.log_path = Some(instance_root.join("instance.log"));
+        }
 
         if matches!(instance.mode, InstanceMode::Local | InstanceMode::Browser) {
             ensure_env_value(&mut instance.env, "AURA_HARNESS_MODE", "1");

@@ -794,12 +794,27 @@ impl InstanceBackend for LocalPtyBackend {
         let parse_generation = Arc::new(AtomicU64::new(0));
         let parser_for_thread = Arc::clone(&parser);
         let generation_for_thread = Arc::clone(&parse_generation);
+        let log_path_for_thread = self.config.log_path.clone();
         let reader_thread = thread::spawn(move || {
+            let mut log_file = log_path_for_thread.and_then(|path| {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .ok()
+            });
             let mut buffer = [0u8; 4096];
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(read) => {
+                        if let Some(file) = log_file.as_mut() {
+                            let _ = file.write_all(&buffer[..read]);
+                            let _ = file.flush();
+                        }
                         parser_for_thread.blocking_lock().process(&buffer[..read]);
                         generation_for_thread.fetch_add(1, Ordering::Release);
                     }

@@ -1519,10 +1519,8 @@ impl io::Write for StorageLogWriter {
                 // Drop log chunks when the queue is saturated to avoid unbounded memory growth.
             }
             Err(mpsc::error::TrySendError::Closed(_)) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::BrokenPipe,
-                    "log channel closed",
-                ));
+                // Logging persistence is best-effort. A stale generation may have dropped the
+                // receiver task during bootstrap reload; that must not terminate the live shell.
             }
         }
         Ok(buf.len())
