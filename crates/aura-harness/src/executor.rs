@@ -3371,8 +3371,11 @@ fn wait_for_semantic_state_snapshot(
     let restart_handling = semantic_wait_restart_handling(step);
     let mut snapshot_version = None;
     let mut last_snapshot = loop {
-        match fetch_ui_snapshot(tool_api, instance_id) {
-            Ok(snapshot) => break snapshot,
+        match fetch_current_ui_snapshot_event(tool_api, instance_id, supports_ui_snapshot) {
+            Ok((snapshot, version)) => {
+                snapshot_version = version;
+                break snapshot;
+            }
             Err(error)
                 if matches!(
                     classify_browser_ui_snapshot_issue(&error),
@@ -3407,7 +3410,6 @@ fn wait_for_semantic_state_snapshot(
             Err(error) => return Err(error),
         }
     };
-    snapshot_version = Some(last_snapshot.revision.semantic_seq);
     match classify_projection_freshness(required_newer_than, &last_snapshot) {
         ProjectionFreshness::Satisfied => {
             if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
@@ -3550,6 +3552,22 @@ fn wait_for_semantic_state_snapshot(
         Some(last_snapshot),
         diagnostic_screen
     )
+}
+
+fn fetch_current_ui_snapshot_event(
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    supports_ui_snapshot: bool,
+) -> Result<(UiSnapshot, Option<u64>)> {
+    if supports_ui_snapshot {
+        match tool_api.wait_for_ui_snapshot_event(instance_id, Duration::from_millis(1), None) {
+            Ok(Some(event)) => return Ok((event.snapshot, Some(event.version))),
+            Ok(None) => {}
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok((fetch_ui_snapshot(tool_api, instance_id)?, None))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
