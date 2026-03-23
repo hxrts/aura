@@ -1733,8 +1733,9 @@ fn action_precondition_failures(
             ),
             ActionPrecondition::Quiescence(expected) if snapshot.quiescence.state != *expected => {
                 Some(format!(
-                    "quiescence={:?} expected={expected:?}",
-                    snapshot.quiescence.state
+                    "quiescence={:?} expected={expected:?} reasons={:?}",
+                    snapshot.quiescence.state,
+                    snapshot.quiescence.reason_codes
                 ))
             }
             ActionPrecondition::Screen(expected) if snapshot.screen != *expected => Some(format!(

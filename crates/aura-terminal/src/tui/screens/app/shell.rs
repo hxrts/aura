@@ -1259,62 +1259,64 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // the UI is idle on a screen. Shared-flow receive steps otherwise depend too
     // heavily on incidental user actions to drive runtime convergence.
     // =========================================================================
-    if harness_mode_enabled() {
-        hooks.use_future({
-            let app_core = app_ctx.app_core.raw().clone();
-            let shutdown = bg_shutdown.read().clone();
-            async move {
-                loop {
-                    if shutdown.load(std::sync::atomic::Ordering::Acquire) {
-                        break;
-                    }
-                    let runtime = {
-                        let core = app_core.read().await;
-                        core.runtime().cloned()
-                    };
-
-                    if let Some(runtime) = runtime {
-                        let _ = runtime_workflows::timeout_runtime_call(
-                            &runtime,
-                            "terminal_harness_runtime_maintenance",
-                            "trigger_discovery",
-                            std::time::Duration::from_secs(3),
-                            || runtime.trigger_discovery(),
-                        )
-                        .await;
-                        let _ = runtime_workflows::timeout_runtime_call(
-                            &runtime,
-                            "terminal_harness_runtime_maintenance",
-                            "process_ceremony_messages_before_sync",
-                            std::time::Duration::from_secs(3),
-                            || runtime.process_ceremony_messages(),
-                        )
-                        .await;
-                        let _ = runtime_workflows::timeout_runtime_call(
-                            &runtime,
-                            "terminal_harness_runtime_maintenance",
-                            "trigger_sync",
-                            std::time::Duration::from_secs(3),
-                            || runtime.trigger_sync(),
-                        )
-                        .await;
-                        let _ = runtime_workflows::timeout_runtime_call(
-                            &runtime,
-                            "terminal_harness_runtime_maintenance",
-                            "process_ceremony_messages_after_sync",
-                            std::time::Duration::from_secs(3),
-                            || runtime.process_ceremony_messages(),
-                        )
-                        .await;
-                    }
-
-                    let _ = system_workflows::refresh_account(&app_core).await;
-
-                    effect_sleep(tokio::time::Duration::from_secs(1)).await;
-                }
+    hooks.use_future({
+        let app_core = app_ctx.app_core.raw().clone();
+        let shutdown = bg_shutdown.read().clone();
+        let harness_mode = harness_mode_enabled();
+        async move {
+            if !harness_mode {
+                return;
             }
-        });
-    }
+            loop {
+                if shutdown.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
+                let runtime = {
+                    let core = app_core.read().await;
+                    core.runtime().cloned()
+                };
+
+                if let Some(runtime) = runtime {
+                    let _ = runtime_workflows::timeout_runtime_call(
+                        &runtime,
+                        "terminal_harness_runtime_maintenance",
+                        "trigger_discovery",
+                        std::time::Duration::from_secs(3),
+                        || runtime.trigger_discovery(),
+                    )
+                    .await;
+                    let _ = runtime_workflows::timeout_runtime_call(
+                        &runtime,
+                        "terminal_harness_runtime_maintenance",
+                        "process_ceremony_messages_before_sync",
+                        std::time::Duration::from_secs(3),
+                        || runtime.process_ceremony_messages(),
+                    )
+                    .await;
+                    let _ = runtime_workflows::timeout_runtime_call(
+                        &runtime,
+                        "terminal_harness_runtime_maintenance",
+                        "trigger_sync",
+                        std::time::Duration::from_secs(3),
+                        || runtime.trigger_sync(),
+                    )
+                    .await;
+                    let _ = runtime_workflows::timeout_runtime_call(
+                        &runtime,
+                        "terminal_harness_runtime_maintenance",
+                        "process_ceremony_messages_after_sync",
+                        std::time::Duration::from_secs(3),
+                        || runtime.process_ceremony_messages(),
+                    )
+                    .await;
+                }
+
+                let _ = system_workflows::refresh_account(&app_core).await;
+
+                effect_sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        }
+    });
 
     // =========================================================================
     // UI Update Processor - Central handler for all async callback results
@@ -1325,8 +1327,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Only runs if update_rx was provided via props.
     // =========================================================================
     let tasks_for_updates = tasks.clone();
-    if let Some(command_rx_holder) = harness_command_rx_holder {
-        hooks.use_future({
+    hooks.use_future({
+        let command_rx_holder = harness_command_rx_holder.clone();
+        {
             let mut screen = screen.clone();
             let mut should_exit = should_exit.clone();
             let app_ctx_for_commands = app_ctx.clone();
@@ -1341,6 +1344,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let selected_channel_binding_for_commands =
                 selected_channel_binding_for_chat_screen.clone();
             async move {
+                let Some(command_rx_holder) = command_rx_holder else {
+                    return;
+                };
                 let mut rx = {
                     let Ok(mut guard) = command_rx_holder.lock() else {
                         tracing::warn!(
@@ -1507,10 +1513,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
                 }
             }
-        });
-    }
-    if let Some(rx_holder) = update_rx_holder {
-        hooks.use_future({
+        }
+    });
+    hooks.use_future({
+        let rx_holder = update_rx_holder.clone();
+        {
             let mut nickname_suggestion_state = nickname_suggestion_state.clone();
             let mut should_exit = should_exit.clone();
             let app_core = app_ctx.app_core.clone();
@@ -1529,6 +1536,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let selected_channel_binding_for_updates = selected_channel_binding;
             let ready_join_channel_instances_for_updates = ready_join_channel_instances;
             async move {
+                let Some(rx_holder) = rx_holder else {
+                    return;
+                };
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
                 macro_rules! enqueue_toast {
@@ -2738,8 +2748,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
                 }
             }
-        });
-    }
+        }
+    });
 
     // Read TUI state for rendering via type-safe handle.
     // This MUST be used for all render-time state access - it reads the version to establish
@@ -4713,8 +4723,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
             ) {
-                #(match current_screen {
-                    Screen::Chat => vec![element! {
+                #(if current_screen == Screen::Chat {
+                    Some(element! {
                         View(width: 100pct, height: 100pct) {
                             ChatScreen(
                                 view: chat_props.clone(),
@@ -4725,11 +4735,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 on_retry_message: on_retry_message.clone(),
                                 on_create_channel: on_create_channel.clone(),
                                 on_set_topic: on_set_topic.clone(),
-                                update_tx: update_tx_holder,
+                                update_tx: update_tx_holder.clone(),
                             )
                         }
-                    }],
-                    Screen::Contacts => vec![element! {
+                    })
+                } else {
+                    None
+                })
+                #(if current_screen == Screen::Contacts {
+                    Some(element! {
                         View(width: 100pct, height: 100pct) {
                             ContactsScreen(
                                 view: contacts_props.clone(),
@@ -4739,16 +4753,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 on_invite_lan_peer: on_invite_lan_peer.clone(),
                             )
                         }
-                    }],
-                    Screen::Neighborhood => vec![element! {
+                    })
+                } else {
+                    None
+                })
+                #(if current_screen == Screen::Neighborhood {
+                    Some(element! {
                         View(width: 100pct, height: 100pct) {
                             NeighborhoodScreen(
                                 view: neighborhood_props.clone(),
-                                update_tx: update_tx_holder,
+                                update_tx: update_tx_holder.clone(),
                             )
                         }
-                    }],
-                    Screen::Settings => vec![element! {
+                    })
+                } else {
+                    None
+                })
+                #(if current_screen == Screen::Settings {
+                    Some(element! {
                         View(width: 100pct, height: 100pct) {
                             SettingsScreen(
                                 view: settings_props.clone(),
@@ -4759,14 +4781,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 on_remove_device: on_remove_device.clone(),
                             )
                         }
-                    }],
-                    Screen::Notifications => vec![element! {
+                    })
+                } else {
+                    None
+                })
+                #(if current_screen == Screen::Notifications {
+                    Some(element! {
                         View(width: 100pct, height: 100pct) {
                             NotificationsScreen(
                                 view: notifications_props,
                             )
                         }
-                    }],
+                    })
+                } else {
+                    None
                 })
             }
 
