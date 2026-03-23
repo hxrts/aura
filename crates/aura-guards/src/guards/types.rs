@@ -10,14 +10,24 @@ use aura_core::FlowCost;
 use serde::{Deserialize, Serialize};
 
 /// Typed identifier for guard capabilities.
+///
+/// Capability names use a restricted character set: lowercase ASCII letters,
+/// digits, `_`, `-`, `:`. Names are normalized to lowercase on construction
+/// so comparison is case-insensitive.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CapabilityId(String);
 
 impl CapabilityId {
-    /// Create a new capability identifier.
+    /// Create a new capability identifier, normalizing to lowercase.
+    ///
+    /// Prefer [`CapabilityId::from`] for string literals that are already
+    /// lowercase. This constructor normalizes but does not reject invalid
+    /// characters — use capability name validation at the Biscuit evaluation
+    /// boundary for defense-in-depth.
     pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+        let normalized = value.into().to_ascii_lowercase();
+        Self(normalized)
     }
 
     /// Get the underlying string.

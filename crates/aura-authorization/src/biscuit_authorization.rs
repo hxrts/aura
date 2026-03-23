@@ -317,7 +317,12 @@ impl BiscuitAuthorizationBridge {
     }
 }
 
-fn validate_capability_name(capability: &str) -> Result<(), BiscuitError> {
+/// Validate that a capability name uses only the sanctioned character set.
+///
+/// Allowed characters: lowercase ASCII letters, digits, `_`, `-`, `:`.
+/// This is the canonical validator — all Biscuit-facing capability checks
+/// should pass through this function before reaching Datalog evaluation.
+pub fn validate_capability_name(capability: &str) -> Result<(), BiscuitError> {
     if capability.is_empty() {
         return Err(BiscuitError::InvalidCapability(
             "capability cannot be empty".to_string(),
@@ -325,7 +330,7 @@ fn validate_capability_name(capability: &str) -> Result<(), BiscuitError> {
     }
     if !capability
         .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-' || c == ':')
     {
         return Err(BiscuitError::InvalidCapability(format!(
             "invalid capability token: {capability}"
