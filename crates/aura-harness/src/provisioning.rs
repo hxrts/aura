@@ -30,6 +30,7 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
 
     for instance in &mut config.instances {
         let instance_root = root.join("instances").join(&instance.id);
+        let transient_root = instance_root.join("transient");
         if !instance.data_dir.is_absolute() {
             instance.data_dir = instance_root.join("state");
         }
@@ -46,6 +47,21 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
             if let Some(run_token) = run_token.as_deref() {
                 ensure_env_value(&mut instance.env, "AURA_HARNESS_RUN_TOKEN", run_token);
             }
+            ensure_env_path(
+                &mut instance.env,
+                "AURA_HARNESS_RUN_ROOT",
+                root.clone(),
+            );
+            ensure_env_path(
+                &mut instance.env,
+                "AURA_HARNESS_INSTANCE_ROOT",
+                instance_root.clone(),
+            );
+            ensure_env_path(
+                &mut instance.env,
+                "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT",
+                transient_root,
+            );
         }
 
         if matches!(instance.mode, InstanceMode::Browser) {
@@ -76,16 +92,16 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
 }
 
 fn run_root(config: &RunConfig) -> PathBuf {
+    if let Some(explicit) = std::env::var_os("AURA_HARNESS_RUN_ROOT") {
+        return absolutize_path(PathBuf::from(explicit));
+    }
+
     let explicit = config
         .run
         .artifact_dir
         .clone()
         .unwrap_or_else(|| default_run_root(config));
-    let explicit = if explicit.is_absolute() {
-        explicit
-    } else {
-        workspace_root().join(explicit)
-    };
+    let explicit = absolutize_path(explicit);
 
     isolate_run_root(explicit, run_token().as_deref())
 }
@@ -139,6 +155,13 @@ fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {
         Some(token) if !token.is_empty() => base.join("runs").join(token),
         _ => base,
     }
+}
+
+fn absolutize_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    workspace_root().join(path)
 }
 
 fn namespaced_port_offset(token: &str) -> u16 {

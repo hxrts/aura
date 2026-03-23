@@ -1,5 +1,4 @@
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -35,7 +34,6 @@ use crate::backend::{
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
 use crate::timeouts::blocking_sleep;
-use crate::workspace_root;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -217,7 +215,11 @@ struct RunningSession {
     ui_snapshot_feed: Arc<UiSnapshotFeed>,
     ui_snapshot_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_stop: Arc<AtomicU64>,
+    transient_root: PathBuf,
     ui_snapshot_socket_path: PathBuf,
+    command_socket_path: PathBuf,
+    clipboard_file_path: PathBuf,
+    child_pid_path: PathBuf,
 }
 
 #[derive(Default)]
@@ -237,6 +239,7 @@ pub struct LocalPtyBackend {
     config: InstanceConfig,
     state: BackendState,
     session: Option<RunningSession>,
+    session_generation: u64,
     pty_rows: u16,
     pty_cols: u16,
     last_authoritative_screen: Arc<Mutex<Option<String>>>,
@@ -291,29 +294,35 @@ impl LocalPtyBackend {
             .unwrap_or(false)
     }
 
-    fn ui_state_socket_path(&self) -> PathBuf {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.config.data_dir.hash(&mut hasher);
-        self.config.id.hash(&mut hasher);
-        workspace_root()
-            .join(".tmp")
-            .join("harness-ui")
-            .join(format!("{:016x}.sock", hasher.finish()))
+    fn transient_root(&self) -> PathBuf {
+        Self::env_value("AURA_HARNESS_INSTANCE_TRANSIENT_ROOT", &self.config.env)
+            .map(PathBuf::from)
+            .map(Self::absolutize_path)
+            .unwrap_or_else(|| Self::absolutize_path(self.config.data_dir.join(".harness-transient")))
     }
 
-    fn ui_state_file_path(&self) -> PathBuf {
-        Self::absolutize_path(self.config.data_dir.join(".harness-ui-state.json"))
+    fn ui_state_socket_path(&self, session_generation: u64) -> PathBuf {
+        self.transient_root()
+            .join(format!("ui-state-gen{session_generation}.sock"))
     }
 
-    fn command_socket_path(&self) -> PathBuf {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.config.data_dir.hash(&mut hasher);
-        self.config.id.hash(&mut hasher);
-        "command".hash(&mut hasher);
-        workspace_root()
-            .join(".tmp")
-            .join("harness-ui")
-            .join(format!("{:016x}.cmd.sock", hasher.finish()))
+    fn ui_state_file_path(&self, session_generation: u64) -> PathBuf {
+        self.transient_root()
+            .join(format!("ui-state-gen{session_generation}.json"))
+    }
+
+    fn command_socket_path(&self, session_generation: u64) -> PathBuf {
+        self.transient_root()
+            .join(format!("command-gen{session_generation}.sock"))
+    }
+
+    fn clipboard_file_path(&self) -> PathBuf {
+        self.transient_root().join("clipboard.txt")
+    }
+
+    fn child_pid_path(&self, session_generation: u64) -> PathBuf {
+        self.transient_root()
+            .join(format!("child-gen{session_generation}.pid"))
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
@@ -321,6 +330,7 @@ impl LocalPtyBackend {
             config,
             state: BackendState::Stopped,
             session: None,
+            session_generation: 0,
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
             last_authoritative_screen: Arc::new(Mutex::new(None)),
@@ -502,7 +512,11 @@ impl LocalPtyBackend {
     }
 
     fn send_harness_command_receipt(&self, command: &HarnessUiCommand) -> Result<HarnessUiCommandReceipt> {
-        let socket_path = Self::absolutize_path(self.command_socket_path());
+        let socket_path = self
+            .session
+            .as_ref()
+            .map(|session| session.command_socket_path.clone())
+            .unwrap_or_else(|| Self::absolutize_path(self.command_socket_path(self.session_generation)));
         let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
         let deadline = Instant::now() + Duration::from_secs(10);
 
@@ -636,6 +650,8 @@ impl InstanceBackend for LocalPtyBackend {
             return Ok(());
         }
         *self.last_authoritative_screen.blocking_lock() = None;
+        self.session_generation = self.session_generation.saturating_add(1);
+        let session_generation = self.session_generation;
 
         let (rows, cols) = self.parser_size();
         let pty_system = native_pty_system();
@@ -669,30 +685,36 @@ impl InstanceBackend for LocalPtyBackend {
         if Self::env_value("AURA_CLIPBOARD_MODE", &self.config.env).is_none() {
             command.env("AURA_CLIPBOARD_MODE", "file_only");
         }
+        let transient_root = self.transient_root();
+        fs::create_dir_all(&transient_root).with_context(|| {
+            format!(
+                "failed to create instance transient root {}",
+                transient_root.display()
+            )
+        })?;
         if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
-            let clipboard_file =
-                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"));
+            let clipboard_file = Self::absolutize_path(self.clipboard_file_path());
             command.env(
                 "AURA_CLIPBOARD_FILE",
                 clipboard_file.to_string_lossy().to_string(),
             );
         }
         if Self::env_value("AURA_TUI_UI_STATE_SOCKET", &self.config.env).is_none() {
-            let ui_state_socket = Self::absolutize_path(self.ui_state_socket_path());
+            let ui_state_socket = Self::absolutize_path(self.ui_state_socket_path(session_generation));
             command.env(
                 "AURA_TUI_UI_STATE_SOCKET",
                 ui_state_socket.to_string_lossy().to_string(),
             );
         }
         if Self::env_value("AURA_TUI_UI_STATE_FILE", &self.config.env).is_none() {
-            let ui_state_file = self.ui_state_file_path();
+            let ui_state_file = self.ui_state_file_path(session_generation);
             command.env(
                 "AURA_TUI_UI_STATE_FILE",
                 ui_state_file.to_string_lossy().to_string(),
             );
         }
         if Self::env_value("AURA_TUI_COMMAND_SOCKET", &self.config.env).is_none() {
-            let command_socket = Self::absolutize_path(self.command_socket_path());
+            let command_socket = Self::absolutize_path(self.command_socket_path(session_generation));
             command.env(
                 "AURA_TUI_COMMAND_SOCKET",
                 command_socket.to_string_lossy().to_string(),
@@ -734,7 +756,12 @@ impl InstanceBackend for LocalPtyBackend {
         })?;
         let ui_snapshot_feed = Arc::new(UiSnapshotFeed::default());
         let ui_snapshot_stop = Arc::new(AtomicU64::new(0));
-        let ui_snapshot_socket_path = Self::absolutize_path(self.ui_state_socket_path());
+        let ui_snapshot_socket_path =
+            Self::absolutize_path(self.ui_state_socket_path(session_generation));
+        let command_socket_path =
+            Self::absolutize_path(self.command_socket_path(session_generation));
+        let clipboard_file_path = Self::absolutize_path(self.clipboard_file_path());
+        let child_pid_path = Self::absolutize_path(self.child_pid_path(session_generation));
         let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
             &ui_snapshot_socket_path,
             &ui_snapshot_feed,
@@ -781,6 +808,15 @@ impl InstanceBackend for LocalPtyBackend {
             }
         });
 
+        if let Some(pid) = child.process_id() {
+            fs::write(&child_pid_path, pid.to_string()).with_context(|| {
+                format!(
+                    "failed to persist local PTY child pid at {}",
+                    child_pid_path.display()
+                )
+            })?;
+        }
+
         self.session = Some(RunningSession {
             child: Mutex::new(child),
             writer: Arc::new(Mutex::new(writer)),
@@ -790,7 +826,11 @@ impl InstanceBackend for LocalPtyBackend {
             ui_snapshot_feed,
             ui_snapshot_thread: Some(ui_snapshot_thread),
             ui_snapshot_stop,
+            transient_root,
             ui_snapshot_socket_path,
+            command_socket_path,
+            clipboard_file_path,
+            child_pid_path,
         });
         self.state = BackendState::Running;
         Ok(())
@@ -821,6 +861,11 @@ impl InstanceBackend for LocalPtyBackend {
             if let Some(handle) = session.ui_snapshot_thread.take() {
                 let _ = handle.join();
             }
+            let _ = fs::remove_file(&session.child_pid_path);
+            let _ = fs::remove_file(&session.command_socket_path);
+            let _ = fs::remove_file(&session.ui_snapshot_socket_path);
+            let _ = fs::remove_file(&session.clipboard_file_path);
+            let _ = fs::remove_dir_all(&session.transient_root);
         }
 
         self.state = BackendState::Stopped;
@@ -1039,7 +1084,7 @@ impl DiagnosticBackend for LocalPtyBackend {
             .map(PathBuf::from)
             .map(Self::absolutize_path)
             .unwrap_or_else(|| {
-                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"))
+                Self::absolutize_path(self.clipboard_file_path())
             });
         let mut text = fs::read_to_string(&path).map_err(|error| {
             anyhow::anyhow!(

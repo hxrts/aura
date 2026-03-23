@@ -283,6 +283,19 @@ fn run_with_artifacts(
     let events = tool_api.event_snapshot();
     let action_log = tool_api.action_log();
     tool_api.stop_all()?;
+    let post_run_residue_report = check_run_residue(config);
+    if !post_run_residue_report.clean {
+        artifact_bundle.write_json("post_run_residue_report.json", &post_run_residue_report)?;
+        return Err(anyhow!(
+            "run residue detected after shutdown: {}",
+            post_run_residue_report
+                .issues
+                .iter()
+                .map(|issue| format!("{}:{}:{}", issue.instance_id, issue.kind, issue.detail))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+    }
     resource_guard.sample("run_stop");
 
     let routing_metadata: Vec<_> = config
@@ -311,6 +324,7 @@ fn run_with_artifacts(
     artifact_bundle.write_json("seed_bundle.json", &seed_bundle)?;
     artifact_bundle.write_json("resource_report.json", &resource_report)?;
     artifact_bundle.write_json("remote_artifact_sync.json", &remote_sync_report)?;
+    artifact_bundle.write_json("post_run_residue_report.json", &post_run_residue_report)?;
     if let Some(report) = &scenario_report {
         artifact_bundle.write_json("scenario_report.json", report)?;
     }

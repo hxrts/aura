@@ -9,6 +9,44 @@ fail() {
   exit 1
 }
 
+cleanup_run_scope() {
+  local run_root="${1:-}"
+  local harness_pid="${2:-}"
+
+  kill_process_tree() {
+    local pid="${1:-}"
+    [[ -n "$pid" ]] || return 0
+    local child_pid=""
+    while IFS= read -r child_pid; do
+      [[ -n "$child_pid" ]] || continue
+      kill_process_tree "$child_pid"
+    done < <(pgrep -P "$pid" 2>/dev/null || true)
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+    fi
+  }
+
+  kill_process_tree "$harness_pid"
+
+  if [[ -z "$run_root" || ! -d "$run_root" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r pid_file; do
+    [[ -n "$pid_file" ]] || continue
+    if [[ -f "$pid_file" ]]; then
+      local child_pid=""
+      child_pid="$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)"
+      kill_process_tree "$child_pid"
+    fi
+  done < <(find "$run_root" -type f -name '*.pid' 2>/dev/null)
+
+  find "$run_root" -type s -delete 2>/dev/null || true
+  find "$run_root" -type f \( -name '*.pid' -o -name 'clipboard.txt' -o -name '.bootstrap-runtime-handoff-ready' \) -delete 2>/dev/null || true
+  find "$run_root" -type d -name transient -prune -exec rm -rf {} + 2>/dev/null || true
+}
+
 lane=""
 suite="all"
 dry_run=0
@@ -197,11 +235,19 @@ run_lane() {
     echo "[harness-matrix] lane=$selected_lane suite=$suite scenario=$scenario_id class=$scenario_class config=$config"
     if [[ $dry_run -eq 0 ]]; then
       local run_token=""
+      local run_root=""
+      local harness_pid=""
       run_token="$(run_token_for_scenario "$selected_lane" "$scenario_id")"
+      run_root="$repo_root/.tmp/harness/matrix/$selected_lane/$scenario_id/$run_token"
       (
         cd "$repo_root"
         export AURA_HARNESS_RUN_TOKEN="$run_token"
-        run_scenario "$config" "$scenario_path"
+        export AURA_HARNESS_RUN_ROOT="$run_root"
+        trap 'cleanup_run_scope "$AURA_HARNESS_RUN_ROOT" "${harness_pid:-}"' EXIT INT TERM
+        mkdir -p "$AURA_HARNESS_RUN_ROOT"
+        run_scenario "$config" "$scenario_path" &
+        harness_pid=$!
+        wait "$harness_pid"
       )
     fi
   done < <(
