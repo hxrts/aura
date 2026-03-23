@@ -6,8 +6,8 @@ use super::*;
 #[derive(Clone)]
 pub struct InvitationsCallbacks {
     pub(crate) on_accept: IdHandoffCallback,
-    pub on_decline: IdLocalOwnedCallback,
-    pub on_revoke: IdLocalOwnedCallback,
+    pub(crate) on_decline: IdLocalOwnedCallback,
+    pub(crate) on_revoke: IdLocalOwnedCallback,
     pub(crate) on_create: CreateInvitationCallback,
     pub on_export: ExportInvitationCallback,
     pub(crate) on_import: ImportInvitationOwnedCallback,

@@ -5,10 +5,10 @@ use super::*;
 /// All callbacks for the recovery screen
 #[derive(Clone)]
 pub struct RecoveryCallbacks {
-    pub on_start_recovery: NoArgLocalOwnedCallback,
+    pub(crate) on_start_recovery: NoArgLocalOwnedCallback,
     pub on_add_guardian: RecoveryCallback,
     pub on_select_guardian: GuardianSelectCallback,
-    pub on_submit_approval: IdLocalOwnedCallback,
+    pub(crate) on_submit_approval: IdLocalOwnedCallback,
 }
 
 impl RecoveryCallbacks {

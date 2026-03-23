@@ -52,6 +52,7 @@ impl std::error::Error for DispatchError {}
 #[derive(Debug, Clone)]
 struct CommittedChannelSelection {
     channel_id: String,
+    #[allow(dead_code)] // retained for future staleness checks
     generation: u64,
 }
 

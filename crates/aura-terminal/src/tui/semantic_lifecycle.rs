@@ -48,7 +48,8 @@ pub(crate) struct SemanticOperationTransfer {
 }
 
 use super::updates::{
-    publish_ui_update, send_ui_update_required, spawn_ui_update, UiUpdatePublication,
+    publish_ui_update, send_ui_update_required, send_ui_update_required_blocking,
+    UiUpdatePublication,
 };
 
 #[must_use]
@@ -154,7 +155,6 @@ fn next_owned_operation_instance_id(operation_id: &OperationId) -> OperationInst
 
 struct SubmittedOperationOwner {
     _app_core: Arc<RwLock<AppCore>>,
-    tasks: Arc<UiTaskOwner>,
     tx: UiUpdateSender,
     operation_id: OperationId,
     instance_id: OperationInstanceId,
@@ -172,7 +172,7 @@ pub(crate) struct WorkflowHandoffOperationOwner(SubmittedOperationOwner);
 impl SubmittedOperationOwner {
     fn submit(
         app_core: Arc<RwLock<AppCore>>,
-        tasks: Arc<UiTaskOwner>,
+        _tasks: Arc<UiTaskOwner>,
         tx: UiUpdateSender,
         operation_id: OperationId,
         kind: SemanticOperationKind,
@@ -184,24 +184,16 @@ impl SubmittedOperationOwner {
             None,
             SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
         );
-        // Submission must be delivered before any subsequent lifecycle update.
-        // Use try_send first; fall back to blocking_send to preserve ordering.
-        if tx.try_send(submission).is_err() {
-            tracing::debug!(
+        if !send_ui_update_required_blocking(&tx, submission) {
+            tracing::warn!(
                 operation_id = %operation_id.0,
-                "UI update channel full on submission; using blocking send"
+                instance_id = %instance_id.0,
+                "terminal submission delivery failed: UI update channel closed"
             );
-            let _ = tx.blocking_send(authoritative_operation_status_update(
-                operation_id.clone(),
-                Some(instance_id.clone()),
-                None,
-                SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
-            ));
         }
 
         Self {
             _app_core: app_core,
-            tasks,
             tx,
             operation_id,
             instance_id,
@@ -379,6 +371,7 @@ impl SemanticOperationTransfer {
         &self.operation_id
     }
 
+    #[cfg(test)]
     pub(crate) fn instance_id(&self) -> &OperationInstanceId {
         &self.instance_id
     }

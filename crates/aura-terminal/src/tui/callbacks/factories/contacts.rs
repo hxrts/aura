@@ -10,7 +10,7 @@ pub struct ContactsCallbacks {
     pub on_start_chat: StartChatCallback,
     pub(crate) on_invite_to_channel: TwoStringContextHandoffCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
-    pub on_remove_contact: IdLocalOwnedCallback,
+    pub(crate) on_remove_contact: IdLocalOwnedCallback,
 }
 
 impl ContactsCallbacks {
