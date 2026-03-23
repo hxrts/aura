@@ -38,7 +38,7 @@ use aura_app::ui::workflows::strong_command::{
 use aura_app::ui_contract::{
     ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
     SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
-    SemanticOperationStatus, WorkflowTerminalOutcome,
+    SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalOutcome,
 };
 use aura_core::AuthorityId;
 use futures::FutureExt;
@@ -352,6 +352,7 @@ async fn run_invitation_import_flow(
     code: String,
     operation: WorkflowHandoffOperationOwner,
 ) {
+    let operation_instance_id = operation.harness_handle().instance_id().clone();
     let transfer =
         operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
@@ -362,6 +363,25 @@ async fn run_invitation_import_flow(
         .await
     {
         Ok(_) => {
+            // Terminal settlement first (§Semantic Owner Protocol step 4).
+            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                causality: None,
+                status: SemanticOperationStatus::new(
+                    transfer.kind(),
+                    SemanticOperationPhase::Succeeded,
+                ),
+            };
+            let _ = apply_handed_off_terminal_status(
+                &app_core,
+                &tx,
+                transfer.operation_id().clone(),
+                operation_instance_id,
+                transfer.kind(),
+                Some(terminal),
+            )
+            .await;
+
+            // Best-effort UI enrichment after terminal settlement.
             for update in invitation_import_success_updates(
                 &code,
                 invitation.as_ref().map(|handle| handle.info()),
@@ -371,21 +391,24 @@ async fn run_invitation_import_flow(
         }
         Err(error) => {
             tracing::error!(error = %error, "ImportInvitation dispatch failed");
-            send_ui_update_required(
-                &tx,
-                authoritative_operation_status_update(
-                    transfer.operation_id().clone(),
-                    Some(transfer.instance_id().clone()),
-                    None,
-                    SemanticOperationStatus::failed(
-                        transfer.kind(),
-                        SemanticOperationError::new(
-                            SemanticFailureDomain::Command,
-                            SemanticFailureCode::InternalError,
-                        )
-                        .with_detail(error.to_string()),
-                    ),
+            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                causality: None,
+                status: SemanticOperationStatus::failed(
+                    transfer.kind(),
+                    SemanticOperationError::new(
+                        SemanticFailureDomain::Command,
+                        SemanticFailureCode::InternalError,
+                    )
+                    .with_detail(error.to_string()),
                 ),
+            };
+            let _ = apply_handed_off_terminal_status(
+                &app_core,
+                &tx,
+                transfer.operation_id().clone(),
+                operation_instance_id.clone(),
+                transfer.kind(),
+                Some(terminal),
             )
             .await;
             send_ui_update_required(

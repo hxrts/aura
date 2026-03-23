@@ -10,7 +10,7 @@ pub struct ContactsCallbacks {
     pub on_start_chat: StartChatCallback,
     pub(crate) on_invite_to_channel: TwoStringContextHandoffCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
-    pub on_remove_contact: IdCallback,
+    pub on_remove_contact: IdLocalOwnedCallback,
 }
 
 impl ContactsCallbacks {
@@ -123,18 +123,29 @@ impl ContactsCallbacks {
         )
     }
 
-    fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
-        Arc::new(move |contact_id: String| {
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::RemoveContact { contact_id },
-                |_| async {},
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+    fn make_remove_contact(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |contact_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "RemoveContact callback",
+                    move |ctx| async move {
+                        ctx.dispatch(EffectCommand::RemoveContact { contact_id }).await
+                    },
+                    |_tx, ()| async {},
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "contacts",
+                            format!("Remove contact failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_invite_lan_peer(

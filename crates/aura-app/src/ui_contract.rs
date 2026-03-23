@@ -854,10 +854,15 @@ pub enum SemanticOperationKind {
     ImportDeviceEnrollmentCode,
     CreateContactInvitation,
     AcceptContactInvitation,
+    DeclineInvitation,
+    RevokeInvitation,
     InviteActorToChannel,
     AcceptPendingChannelInvitation,
     JoinChannel,
     SendChatMessage,
+    RemoveContact,
+    StartRecovery,
+    SubmitGuardianApproval,
 }
 
 #[aura_macros::ownership_lifecycle(
@@ -1302,6 +1307,31 @@ impl OperationId {
     #[must_use]
     pub fn join_channel() -> Self {
         Self("join_channel".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_decline() -> Self {
+        Self("invitation_decline".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_revoke() -> Self {
+        Self("invitation_revoke".to_string())
+    }
+
+    #[must_use]
+    pub fn remove_contact() -> Self {
+        Self("remove_contact".to_string())
+    }
+
+    #[must_use]
+    pub fn start_recovery() -> Self {
+        Self("start_recovery".to_string())
+    }
+
+    #[must_use]
+    pub fn submit_guardian_approval() -> Self {
+        Self("submit_guardian_approval".to_string())
     }
 }
 

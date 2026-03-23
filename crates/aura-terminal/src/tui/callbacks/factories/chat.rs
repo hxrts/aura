@@ -326,18 +326,14 @@ impl ChatCallbacks {
 
                 spawn_ctx(ctx, async move {
                     let operation_instance_id = operation.harness_handle().instance_id().clone();
-                    let _ = operation
+                    let transfer = operation
                         .handoff_to_app_workflow(SemanticOperationTransferScope::SendChatMessage);
 
-                    // Normal message dispatch owns authoritative lifecycle via app workflow.
-                    send_ui_update_reliable(
-                        &tx,
-                        UiUpdate::MessageSent {
-                            channel: channel_id_clone.clone(),
-                            content: content_clone.clone(),
-                        },
-                    )
-                    .await;
+                    // Pre-settlement optimistic UI hint (best-effort).
+                    let _ = tx.try_send(UiUpdate::MessageSent {
+                        channel: channel_id_clone.clone(),
+                        content: content_clone.clone(),
+                    });
 
                     let result = match channel_id_clone.parse() {
                         Ok(channel_id) => {
@@ -345,7 +341,7 @@ impl ChatCallbacks {
                                 &app_core,
                                 channel_id,
                                 &content_clone,
-                                Some(operation_instance_id),
+                                Some(operation_instance_id.clone()),
                             )
                             .await
                         }
@@ -354,7 +350,7 @@ impl ChatCallbacks {
                                 &app_core,
                                 &channel_id_clone,
                                 &content_clone,
-                                Some(operation_instance_id),
+                                Some(operation_instance_id.clone()),
                             )
                             .await
                         }
@@ -362,6 +358,25 @@ impl ChatCallbacks {
 
                     match result {
                         Ok(_) => {
+                            // Terminal settlement first.
+                            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                                causality: None,
+                                status: SemanticOperationStatus::new(
+                                    transfer.kind(),
+                                    SemanticOperationPhase::Succeeded,
+                                ),
+                            };
+                            let _ = apply_handed_off_terminal_status(
+                                &app_core,
+                                &tx,
+                                transfer.operation_id().clone(),
+                                operation_instance_id,
+                                transfer.kind(),
+                                Some(terminal),
+                            )
+                            .await;
+
+                            // Best-effort runtime fact after terminal settlement.
                             let channel_fact =
                                 match channel_id_clone.parse::<aura_core::ChannelId>() {
                                     Ok(channel_id) => {
@@ -382,6 +397,27 @@ impl ChatCallbacks {
                             .await;
                         }
                         Err(e) => {
+                            // Terminal failure settlement.
+                            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                                causality: None,
+                                status: SemanticOperationStatus::failed(
+                                    transfer.kind(),
+                                    SemanticOperationError::new(
+                                        SemanticFailureDomain::Command,
+                                        SemanticFailureCode::InternalError,
+                                    )
+                                    .with_detail(e.to_string()),
+                                ),
+                            };
+                            let _ = apply_handed_off_terminal_status(
+                                &app_core,
+                                &tx,
+                                transfer.operation_id().clone(),
+                                operation_instance_id,
+                                transfer.kind(),
+                                Some(terminal),
+                            )
+                            .await;
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::ToastAdded(ToastMessage::error(

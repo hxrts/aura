@@ -6,8 +6,8 @@ use super::*;
 #[derive(Clone)]
 pub struct InvitationsCallbacks {
     pub(crate) on_accept: IdHandoffCallback,
-    pub on_decline: InvitationCallback,
-    pub on_revoke: InvitationCallback,
+    pub on_decline: IdLocalOwnedCallback,
+    pub on_revoke: IdLocalOwnedCallback,
     pub(crate) on_create: CreateInvitationCallback,
     pub on_export: ExportInvitationCallback,
     pub(crate) on_import: ImportInvitationOwnedCallback,
@@ -33,18 +33,37 @@ impl InvitationsCallbacks {
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
                 let app_core = ctx.app_core_raw().clone();
-                let operation_instance_id = operation.workflow_instance_id();
-                let _ = operation.handoff_to_app_workflow(
+                let operation_instance_id = operation.harness_handle().instance_id().clone();
+                let transfer = operation.handoff_to_app_workflow(
                     SemanticOperationTransferScope::AcceptInvitation,
                 );
                 match aura_app::ui::workflows::invitation::accept_invitation_by_str_with_instance(
                     &app_core,
                     &invitation_id,
-                    operation_instance_id,
+                    Some(operation_instance_id.clone()),
                 )
                 .await
                 {
                     Ok(accepted) => {
+                        // Terminal settlement first.
+                        let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::new(
+                                transfer.kind(),
+                                SemanticOperationPhase::Succeeded,
+                            ),
+                        };
+                        let _ = apply_handed_off_terminal_status(
+                            &app_core,
+                            &tx,
+                            transfer.operation_id().clone(),
+                            operation_instance_id,
+                            transfer.kind(),
+                            Some(terminal),
+                        )
+                        .await;
+
+                        // Best-effort UI enrichment after terminal settlement.
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::InvitationAccepted {
@@ -76,6 +95,27 @@ impl InvitationsCallbacks {
                         .await;
                     }
                     Err(error) => {
+                        // Terminal failure settlement.
+                        let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::failed(
+                                transfer.kind(),
+                                SemanticOperationError::new(
+                                    SemanticFailureDomain::Command,
+                                    SemanticFailureCode::InternalError,
+                                )
+                                .with_detail(error.to_string()),
+                            ),
+                        };
+                        let _ = apply_handed_off_terminal_status(
+                            &app_core,
+                            &tx,
+                            transfer.operation_id().clone(),
+                            operation_instance_id,
+                            transfer.kind(),
+                            Some(terminal),
+                        )
+                        .await;
                         emit_error_toast(
                             &tx,
                             "invitation",
@@ -88,41 +128,65 @@ impl InvitationsCallbacks {
         })
     }
 
-    fn make_decline(ctx: Arc<IoContext>, tx: UiUpdateSender) -> InvitationCallback {
-        Arc::new(move |invitation_id: String| {
-            let inv_id = invitation_id.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::DeclineInvitation { invitation_id },
-                move |tx| async move {
-                    send_ui_update_reliable(
-                        &tx,
-                        UiUpdate::InvitationDeclined {
-                            invitation_id: inv_id,
-                        },
-                    )
-                    .await;
-                },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+    fn make_decline(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |invitation_id: String, operation: LocalTerminalOperationOwner| {
+                let inv_id = invitation_id.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "DeclineInvitation callback",
+                    move |ctx| async move {
+                        ctx.dispatch(EffectCommand::DeclineInvitation { invitation_id })
+                            .await
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationDeclined {
+                                invitation_id: inv_id,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "invitation",
+                            format!("Decline invitation failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
-    fn make_revoke(ctx: Arc<IoContext>, tx: UiUpdateSender) -> InvitationCallback {
-        Arc::new(move |invitation_id: String| {
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::CancelInvitation { invitation_id },
-                |_| async {},
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+    fn make_revoke(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |invitation_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "CancelInvitation callback",
+                    move |ctx| async move {
+                        ctx.dispatch(EffectCommand::CancelInvitation { invitation_id })
+                            .await
+                    },
+                    |_tx, ()| async {},
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "invitation",
+                            format!("Revoke invitation failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_create(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateInvitationCallback {

@@ -2695,14 +2695,8 @@ const OBSERVED_DISPATCH_HELPERS: &[&str] = &[
     "spawn_observed_result_callback",
 ];
 
-// TODO(work/0.md): remove entries as each fix lands
-const PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST: &[&str] = &[
-    "chat.rs",          // make_send_owned (Fix 1)
-    "factories/mod.rs", // run_invitation_import_flow (Fix 2)
-    "invitation.rs",    // make_decline, make_revoke (Fix 4)
-    "contacts.rs",      // make_remove_contact — parity-critical observed dispatch
-    "recovery.rs",      // make_start_recovery, make_submit_approval — parity-critical observed dispatch
-];
+// All known violations remediated. Empty allowlist retained as documentation anchor.
+const PARITY_CRITICAL_CALLBACK_SETTLEMENT_ALLOWLIST: &[&str] = &[];
 
 fn scan_parity_critical_callback_settlement(file: &Path, syntax: &File) -> Vec<String> {
     let file_str = file.to_string_lossy();

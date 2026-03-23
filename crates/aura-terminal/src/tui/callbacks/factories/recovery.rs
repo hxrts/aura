@@ -5,10 +5,10 @@ use super::*;
 /// All callbacks for the recovery screen
 #[derive(Clone)]
 pub struct RecoveryCallbacks {
-    pub on_start_recovery: RecoveryCallback,
+    pub on_start_recovery: NoArgLocalOwnedCallback,
     pub on_add_guardian: RecoveryCallback,
     pub on_select_guardian: GuardianSelectCallback,
-    pub on_submit_approval: ApprovalCallback,
+    pub on_submit_approval: IdLocalOwnedCallback,
 }
 
 impl RecoveryCallbacks {
@@ -22,17 +22,24 @@ impl RecoveryCallbacks {
         }
     }
 
-    fn make_start_recovery(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RecoveryCallback {
-        Arc::new(move || {
-            spawn_observed_dispatch_callback(
+    fn make_start_recovery(ctx: Arc<IoContext>, tx: UiUpdateSender) -> NoArgLocalOwnedCallback {
+        Arc::new(move |operation: LocalTerminalOperationOwner| {
+            spawn_local_terminal_result_callback(
                 ctx.clone(),
                 tx.clone(),
-                EffectCommand::StartRecovery,
-                |tx| async move {
+                operation,
+                "StartRecovery callback",
+                move |ctx| async move { ctx.dispatch(EffectCommand::StartRecovery).await },
+                |tx, ()| async move {
                     send_ui_update_required(&tx, UiUpdate::RecoveryStarted).await;
                 },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
+                |tx, error| async move {
+                    emit_error_toast(
+                        &tx,
+                        "recovery",
+                        format!("Start recovery failed: {error}"),
+                    )
+                    .await;
                 },
             );
         })
@@ -85,28 +92,40 @@ impl RecoveryCallbacks {
         })
     }
 
-    fn make_submit_approval(ctx: Arc<IoContext>, tx: UiUpdateSender) -> ApprovalCallback {
-        Arc::new(move |request_id: String| {
-            let request_id_clone = request_id.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::SubmitGuardianApproval {
-                    guardian_id: request_id,
-                },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ApprovalSubmitted {
-                            request_id: request_id_clone,
-                        },
-                    )
-                    .await;
-                },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+    fn make_submit_approval(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |request_id: String, operation: LocalTerminalOperationOwner| {
+                let request_id_clone = request_id.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "SubmitGuardianApproval callback",
+                    move |ctx| async move {
+                        ctx.dispatch(EffectCommand::SubmitGuardianApproval {
+                            guardian_id: request_id,
+                        })
+                        .await
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ApprovalSubmitted {
+                                request_id: request_id_clone,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "recovery",
+                            format!("Submit approval failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 }

@@ -15,10 +15,12 @@ use aura_core::AuthorityId;
 /// Callback that takes no arguments.
 pub type NoArgCallback = Arc<dyn Fn() + Send + Sync>;
 pub type NoArgOwnedCallback = Arc<dyn Fn(WorkflowHandoffOperationOwner) + Send + Sync>;
+pub type NoArgLocalOwnedCallback = Arc<dyn Fn(LocalTerminalOperationOwner) + Send + Sync>;
 
 /// Callback that takes a single string ID.
 pub type IdCallback = Arc<dyn Fn(String) + Send + Sync>;
 pub type IdHandoffCallback = Arc<dyn Fn(String, WorkflowHandoffOperationOwner) + Send + Sync>;
+pub type IdLocalOwnedCallback = Arc<dyn Fn(String, LocalTerminalOperationOwner) + Send + Sync>;
 
 /// Callback that takes two string arguments.
 pub type TwoStringCallback = Arc<dyn Fn(String, String) + Send + Sync>;

@@ -3612,7 +3612,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         );
                                     }
                                     DispatchCommand::RemoveContact { contact_id } => {
-                                        (cb.contacts.on_remove_contact)(contact_id.to_string());
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error("UI update sender is unavailable");
+                                            continue;
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::remove_contact(),
+                                            SemanticOperationKind::RemoveContact,
+                                        );
+                                        (cb.contacts.on_remove_contact)(contact_id.to_string(), operation);
                                     }
                                     DispatchCommand::OpenRemoveContactModal => {
                                         let idx = new_state.contacts.selected_index;
@@ -3710,7 +3721,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             invitation_id,
                                         )) = selected
                                         {
-                                            (cb.invitations.on_decline)(invitation_id);
+                                            let Some(update_tx) = update_tx_for_events.clone() else {
+                                                new_state.toast_error("UI update sender is unavailable");
+                                                continue;
+                                            };
+                                            let operation = LocalTerminalOperationOwner::submit(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::invitation_decline(),
+                                                SemanticOperationKind::DeclineInvitation,
+                                            );
+                                            (cb.invitations.on_decline)(invitation_id, operation);
                                         } else {
                                             new_state.toast_error(
                                                 "Select a received invitation to decline",
@@ -3796,7 +3818,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::RevokeInvitation { invitation_id } => {
-                                        (cb.invitations.on_revoke)(invitation_id.to_string());
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error("UI update sender is unavailable");
+                                            continue;
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::invitation_revoke(),
+                                            SemanticOperationKind::RevokeInvitation,
+                                        );
+                                        (cb.invitations.on_revoke)(invitation_id.to_string(), operation);
                                     }
 
                                     // === Recovery Commands ===
@@ -3830,24 +3863,47 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             continue;
                                         }
 
-                                        (cb.recovery.on_start_recovery)();
+                                        let Some(update_tx) = update_tx_for_events.clone() else {
+                                            new_state.toast_error("UI update sender is unavailable");
+                                            continue;
+                                        };
+                                        let operation = LocalTerminalOperationOwner::submit(
+                                            app_core_for_events.clone(),
+                                            tasks_for_events.clone(),
+                                            update_tx,
+                                            OperationId::start_recovery(),
+                                            SemanticOperationKind::StartRecovery,
+                                        );
+                                        (cb.recovery.on_start_recovery)(operation);
                                     }
                                     DispatchCommand::ApproveRecovery => {
-                                        if let Some(NotificationSelection::RecoveryRequest(req_id)) =
-                                            read_selected_notification(
-                                                new_state.notifications.selected_index,
-                                                &shared_invitations_for_dispatch,
-                                                &shared_pending_requests_for_dispatch,
-                                            )
-                                        {
-                                            (cb.recovery.on_submit_approval)(req_id);
-                                        } else {
-                                            let guard = shared_pending_requests_for_dispatch.read();
-                                            if let Some(req) = guard.first() {
-                                                (cb.recovery.on_submit_approval)(req.id.clone());
-                                            } else {
-                                                new_state.toast_error("No pending recovery requests");
+                                        let selected = read_selected_notification(
+                                            new_state.notifications.selected_index,
+                                            &shared_invitations_for_dispatch,
+                                            &shared_pending_requests_for_dispatch,
+                                        );
+                                        let approval_target = match selected {
+                                            Some(NotificationSelection::RecoveryRequest(req_id)) => Some(req_id),
+                                            _ => {
+                                                let guard = shared_pending_requests_for_dispatch.read();
+                                                guard.first().map(|req| req.id.clone())
                                             }
+                                        };
+                                        if let Some(req_id) = approval_target {
+                                            let Some(update_tx) = update_tx_for_events.clone() else {
+                                                new_state.toast_error("UI update sender is unavailable");
+                                                continue;
+                                            };
+                                            let operation = LocalTerminalOperationOwner::submit(
+                                                app_core_for_events.clone(),
+                                                tasks_for_events.clone(),
+                                                update_tx,
+                                                OperationId::submit_guardian_approval(),
+                                                SemanticOperationKind::SubmitGuardianApproval,
+                                            );
+                                            (cb.recovery.on_submit_approval)(req_id, operation);
+                                        } else {
+                                            new_state.toast_error("No pending recovery requests");
                                         }
                                     }
 
