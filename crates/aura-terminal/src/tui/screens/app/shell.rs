@@ -32,6 +32,8 @@ use aura_app::ceremonies::{
     MIN_MFA_DEVICES,
 };
 use aura_app::harness_mode_enabled;
+use aura_app::scenario_contract::SemanticCommandValue;
+use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui::contract::OperationState;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
@@ -113,6 +115,25 @@ fn shell_retry_policy() -> RetryBudgetPolicy {
     profile
         .apply_retry_policy(&base)
         .expect("shell retry policy must scale")
+}
+
+async fn authoritative_app_snapshot_with_retry(
+    app_ctx: &AppCoreContext,
+    context: &'static str,
+) -> Result<Box<aura_app::ui::types::StateSnapshot>, String> {
+    let retry_policy = shell_retry_policy();
+    let time = PhysicalTimeHandler::new();
+    execute_with_retry_budget(&time, &retry_policy, |_attempt| {
+        let app_ctx = app_ctx.clone();
+        async move {
+            match app_ctx.snapshot() {
+                AppSnapshotAvailability::Available(snapshot) => Ok(snapshot),
+                AppSnapshotAvailability::Contended => Err("state lock contended".to_string()),
+            }
+        }
+    })
+    .await
+    .map_err(|error| format!("{context}: {error}"))
 }
 
 async fn authoritative_settings_devices_for_command(
@@ -252,6 +273,49 @@ async fn complete_ready_join_binding_submissions(
     }
 }
 
+fn normalized_channel_name_for_harness(value: &str) -> &str {
+    value.trim().trim_start_matches('#').trim()
+}
+
+fn authoritative_binding_for_requested_join(
+    command: &HarnessUiCommand,
+    channels: &[Channel],
+    selected_index: Option<usize>,
+    selected_binding: Option<&ChannelBindingWitness>,
+) -> Option<SemanticCommandValue> {
+    let HarnessUiCommand::JoinChannel { channel_name } = command else {
+        return None;
+    };
+    let requested = normalized_channel_name_for_harness(channel_name);
+    if requested.is_empty() {
+        return None;
+    }
+
+    if let (Some(binding), Some(selected_index)) = (selected_binding, selected_index) {
+        if let Some(selected_channel) = channels.get(selected_index) {
+            let selected_name = normalized_channel_name_for_harness(&selected_channel.name);
+            if selected_channel.id == binding.channel_id
+                && selected_name.eq_ignore_ascii_case(requested)
+            {
+                return Some(binding.clone().semantic_value());
+            }
+        }
+    }
+
+    let mut matching_channels = channels.iter().filter(|channel| {
+        normalized_channel_name_for_harness(&channel.name).eq_ignore_ascii_case(requested)
+    });
+    let matched_channel = matching_channels.next()?;
+    if matching_channels.next().is_some() {
+        return None;
+    }
+    let context_id = matched_channel.context_id.clone()?;
+    Some(
+        ChannelBindingWitness::new(matched_channel.id.to_string(), Some(context_id.to_string()))
+            .semantic_value(),
+    )
+}
+
 fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state::ToastLevel {
     match error.category().toast_severity() {
         aura_app::errors::ToastLevel::Info => crate::tui::state::ToastLevel::Info,
@@ -378,6 +442,12 @@ fn execute_harness_followup_command(
                 SemanticOperationKind::CreateAccount,
             );
             let handle = operation.harness_handle();
+            state.set_authoritative_operation_state(
+                handle.operation_id().clone(),
+                Some(handle.instance_id().clone()),
+                None,
+                OperationState::Submitting,
+            );
             (cb.app.on_create_account)(name, operation);
             Ok(Some(handle))
         }
@@ -887,8 +957,7 @@ pub struct IoAppProps {
     /// Dedicated harness command receiver for semantic command ingress.
     pub harness_command_rx: Option<Arc<Mutex<Option<HarnessCommandReceiver>>>>,
     /// Bootstrap handoff notification for terminating the pre-runtime shell generation.
-    pub bootstrap_handoff_tx:
-        Option<Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>>,
+    pub bootstrap_handoff_tx: Option<Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>>,
     /// UI update sender for sending updates from event handlers
     pub update_tx: Option<UiUpdateSender>,
     /// Callback registry for all domain actions
@@ -1419,18 +1488,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 while let Some(submission) = rx.recv().await {
                     let submission_id = submission.submission_id.clone();
-                    let app_snapshot_for_command = match app_ctx_for_commands.snapshot() {
-                        AppSnapshotAvailability::Available(snapshot) => snapshot,
-                        AppSnapshotAvailability::Contended => {
-                            if let Err(error) = reject_harness_command_submission(
-                                submission_id,
-                                "authoritative snapshot unavailable: state lock contended"
-                                    .to_string(),
-                            )
-                            .await
+                    let app_snapshot_for_command = match authoritative_app_snapshot_with_retry(
+                        &app_ctx_for_commands,
+                        "authoritative snapshot unavailable",
+                    )
+                    .await
+                    {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            if let Err(reject_error) =
+                                reject_harness_command_submission(submission_id, error).await
                             {
                                 tracing::warn!(
-                                    error = %error,
+                                    error = %reject_error,
                                     "failed to reject harness command after snapshot contention"
                                 );
                             }
@@ -1509,6 +1579,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
 
                     let updated_state = tui.read_clone();
+                    let immediate_join_binding = authoritative_binding_for_requested_join(
+                        &submission.command,
+                        &harness_channels_for_command,
+                        Some(updated_state.chat.selected_channel),
+                        selected_channel_binding_for_commands.read().as_ref(),
+                    );
                     let settlement = match operation_handle {
                         Some(operation)
                             if operation.operation_id()
@@ -1516,7 +1592,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 || operation.operation_id()
                                     == &aura_app::ui_contract::OperationId::join_channel() =>
                         {
-                            track_pending_binding_submission(submission_id, operation).await
+                            if operation.operation_id()
+                                == &aura_app::ui_contract::OperationId::join_channel()
+                            {
+                                if let Some(binding) = immediate_join_binding {
+                                    accept_harness_command_submission(
+                                        submission_id,
+                                        Some(operation),
+                                        Some(binding),
+                                    )
+                                    .await
+                                } else {
+                                    track_pending_binding_submission(submission_id, operation)
+                                        .await
+                                }
+                            } else {
+                                track_pending_binding_submission(submission_id, operation).await
+                            }
                         }
                         Some(operation) => {
                             accept_harness_command_submission(submission_id, Some(operation), None)
@@ -1537,12 +1629,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         break;
                     }
 
-                    let app_snapshot = match app_ctx_for_commands.snapshot() {
-                        AppSnapshotAvailability::Available(snapshot) => snapshot,
-                        AppSnapshotAvailability::Contended => {
-                            tracing::warn!(
-                                "failed to export authoritative TUI projection after applying harness command: state lock contended"
-                            );
+                    let app_snapshot = match authoritative_app_snapshot_with_retry(
+                        &app_ctx_for_commands,
+                        "failed to export authoritative TUI projection after applying harness command",
+                    )
+                    .await
+                    {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            tracing::warn!(error = %error);
                             continue;
                         }
                     };
@@ -2137,9 +2232,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                 if let Some(idx) = committed_index {
                                     state.chat.selected_channel = idx;
-                                } else if committed_selection.is_none()
-                                    && state.chat.selected_channel >= channel_count
-                                {
+                                } else if state.chat.selected_channel >= channel_count {
                                     let idx =
                                         clamp_list_index(selected_index.unwrap_or(0), channel_count);
                                     state.chat.selected_channel = idx;
@@ -2425,12 +2518,25 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 );
                             }
                             let export_state = tui.read_clone();
-                            let app_snapshot = match app_ctx_for_updates.snapshot() {
-                                AppSnapshotAvailability::Available(snapshot) => snapshot,
-                                AppSnapshotAvailability::Contended => {
-                                    tracing::warn!(
-                                        "failed to publish TUI harness snapshot after authoritative operation status update: state lock contended"
-                                    );
+                            let app_snapshot = match authoritative_app_snapshot_with_retry(
+                                &app_ctx_for_updates,
+                                "failed to publish TUI harness snapshot after authoritative operation status update",
+                            )
+                            .await
+                            {
+                                Ok(snapshot) => snapshot,
+                                Err(error) => {
+                                    tracing::warn!(error = %error);
+                                    if show_setup {
+                                        if let Err(export_error) =
+                                            publish_loading_ui_snapshot(&export_state)
+                                        {
+                                            tracing::warn!(
+                                                error = %export_error,
+                                                "failed to publish bootstrap loading snapshot after authoritative operation status update"
+                                            );
+                                        }
+                                    }
                                     continue;
                                 }
                             };
@@ -2626,16 +2732,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             }
                         }
                         UiUpdate::RuntimeFactsUpdated {
+                            revision,
                             replace_kinds,
                             facts,
                         } => {
                             tui.with_mut(|state| {
-                                for kind in replace_kinds {
-                                    state.clear_runtime_fact_kind(kind);
-                                }
-                                for fact in facts {
-                                    state.upsert_runtime_fact(fact);
-                                }
+                                state.apply_runtime_facts_update(revision, replace_kinds, facts);
                             });
                         }
                         UiUpdate::NicknameUpdated {
@@ -2709,6 +2811,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         UiUpdate::AccountCreated => {
                             let export_state = tui.with_mut(|state| {
+                                if state.operation_state(&OperationId::account_create()).is_some() {
+                                    state.set_authoritative_operation_state(
+                                        OperationId::account_create(),
+                                        None,
+                                        None,
+                                        OperationState::Succeeded,
+                                    );
+                                }
                                 state.account_created_queued();
                                 if show_setup {
                                     state.should_exit = true;
@@ -2813,12 +2923,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // See TuiStateHandle and TuiStateSnapshot docs for the reactivity model.
     let tui_snapshot = tui.read_for_render();
 
-    // Handle exit request. The owned TuiState is the authoritative source here; relying only on
-    // the hook-local flag can miss async update paths like bootstrap handoff.
-    if should_exit.get() || tui_snapshot.should_exit {
-        system.exit();
-        return element! { View {} };
-    }
+    // Handle exit request after hooks below so hook order remains stable across renders.
+    // The owned TuiState is the authoritative source here; relying only on the hook-local
+    // flag can miss async update paths like bootstrap handoff.
+    let render_should_exit = should_exit.get() || tui_snapshot.should_exit;
 
     // Note: Domain data (channels, messages, guardians, etc.) is no longer passed to screens.
     // Each screen subscribes to signals directly via AppCoreContext.
@@ -2826,14 +2934,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     let _projection_export_version = projection_export_version.get();
     let app_snapshot = match app_ctx.snapshot() {
-        AppSnapshotAvailability::Available(snapshot) => snapshot,
+        AppSnapshotAvailability::Available(snapshot) => Some(snapshot),
         AppSnapshotAvailability::Contended => {
             tracing::warn!(
                 "failed to publish TUI harness snapshot during render: state lock contended"
             );
-            return element! { View {} };
+            None
         }
     };
+    let render_short_circuit = render_should_exit || app_snapshot.is_none();
     let harness_devices = shared_devices.read().clone();
     let harness_contacts = shared_contacts.read().clone();
     let harness_channels = shared_channels.read().clone();
@@ -2841,20 +2950,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     if !harness_devices.is_empty() {
         *last_exported_devices.write() = harness_devices.clone();
     }
-    if let Err(error) = maybe_export_ui_snapshot(
-        &tui_snapshot,
-        TuiSemanticInputs {
-            app_snapshot: &app_snapshot,
-            contacts: &harness_contacts,
-            settings_devices: &harness_devices,
-            chat_channels: &harness_channels,
-            chat_messages: &harness_messages,
-        },
-    ) {
-        tracing::warn!(
-            error = %error,
-            "failed to publish TUI harness snapshot during render"
-        );
+    if let Some(app_snapshot) = app_snapshot.as_ref() {
+        if let Err(error) = maybe_export_ui_snapshot(
+            &tui_snapshot,
+            TuiSemanticInputs {
+                app_snapshot,
+                contacts: &harness_contacts,
+                settings_devices: &harness_devices,
+                chat_channels: &harness_channels,
+                chat_messages: &harness_messages,
+            },
+        ) {
+            tracing::warn!(
+                error = %error,
+                "failed to publish TUI harness snapshot during render"
+            );
+        }
     }
     // Callbacks registry and individual callback extraction for screen props
     let callbacks = props.callbacks.clone();
@@ -3038,6 +3149,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             update_tx,
                                             OperationId::account_create(),
                                             SemanticOperationKind::CreateAccount,
+                                        );
+                                        let handle = operation.harness_handle();
+                                        new_state.set_authoritative_operation_state(
+                                            handle.operation_id().clone(),
+                                            Some(handle.instance_id().clone()),
+                                            None,
+                                            OperationState::Submitting,
                                         );
                                         (cb.app.on_create_account)(name, operation);
                                     }
@@ -4831,6 +4949,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Modal handling goes through transition() -> command execution.
         }
     });
+
+    if render_should_exit {
+        system.exit();
+        return element! { View {} };
+    }
+    if render_short_circuit {
+        return element! { View {} };
+    }
 
     // Nav bar status is updated reactively from signals.
     let network_status = nav_signals.network_status.get();

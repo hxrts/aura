@@ -582,7 +582,7 @@ impl InvitationServiceApi {
     pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         let result = self
             .handler
-            .cancel_invitation(&self.effects, invitation_id)
+            .cancel_invitation(self.effects.clone(), invitation_id)
             .await?;
 
         if let Some(invitation) = self
@@ -681,7 +681,7 @@ impl InvitationServiceApi {
             .unwrap_or_else(|| URL_SAFE_NO_PAD.encode("".as_bytes()));
         let encoded_device_id =
             URL_SAFE_NO_PAD.encode(self.effects.device_id().to_string().as_bytes());
-        if sender_hint.is_some() || std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        if sender_hint.is_some() || self.effects.harness_mode_enabled() {
             code = format!("{code}:{sender_hint_segment}:{encoded_device_id}");
         }
 
@@ -691,14 +691,13 @@ impl InvitationServiceApi {
     /// Export an invitation as a shareable code string (compile-time safe)
     ///
     /// This is the preferred method when you already have the `Invitation` object.
-    /// It cannot fail since no lookup is required.
     ///
     /// # Arguments
     /// * `invitation` - The invitation to export
     ///
     /// # Returns
     /// A shareable code string (format: `aura:v1:<base64>`)
-    pub fn export_invitation(invitation: &Invitation) -> String {
+    pub fn export_invitation(invitation: &Invitation) -> Result<String, ShareableInvitationError> {
         let shareable = ShareableInvitation::from(invitation);
         shareable.to_code()
     }
@@ -707,8 +706,11 @@ impl InvitationServiceApi {
     ///
     /// This should be used for codes that will be imported by another runtime
     /// and may need a direct sender websocket hint for the first return path.
-    pub fn export_invitation_with_sender_hint(&self, invitation: &Invitation) -> String {
-        self.append_sender_hint(Self::export_invitation(invitation))
+    pub fn export_invitation_with_sender_hint(
+        &self,
+        invitation: &Invitation,
+    ) -> Result<String, ShareableInvitationError> {
+        Self::export_invitation(invitation).map(|code| self.append_sender_hint(code))
     }
 
     /// Export an invitation by ID as a shareable code string
@@ -739,7 +741,8 @@ impl InvitationServiceApi {
             invitation_id = %invitation_id,
             "export invitation sender websocket hint"
         );
-        Ok(self.export_invitation_with_sender_hint(&invitation))
+        self.export_invitation_with_sender_hint(&invitation)
+            .map_err(|error| AgentError::invalid(error.to_string()))
     }
 
     /// Import an invitation from a shareable code string
@@ -969,13 +972,11 @@ mod tests {
 
         // Accept one
         let accept_result = service.accept(&inv1.invitation_id).await.unwrap();
-        assert!(accept_result.success);
-        assert_eq!(accept_result.new_status, Some(InvitationStatus::Accepted));
+        assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
 
         // Decline the other
         let decline_result = service.decline(&inv2.invitation_id).await.unwrap();
-        assert!(decline_result.success);
-        assert_eq!(decline_result.new_status, Some(InvitationStatus::Declined));
+        assert_eq!(decline_result.new_status, InvitationStatus::Declined);
 
         // Check pending is empty
         let pending = service.list_pending().await;

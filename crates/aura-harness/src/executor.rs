@@ -1149,11 +1149,21 @@ fn execute_semantic_intent(
                 &instance_id,
                 intent.clone(),
             )?;
-            record_submission_handle(
+            let handle = require_semantic_unit_submission(&metadata_step, operation, response)?;
+            record_submission_handle(context, &instance_id, handle.clone());
+            wait_for_contract_barriers(
+                &metadata_step,
+                tool_api,
                 context,
                 &instance_id,
-                require_semantic_unit_submission(&metadata_step, operation, response)?,
-            );
+                timeout_ms,
+                &contract,
+                &SubmissionEvidence {
+                    handle,
+                    channel_binding: None,
+                    runtime_event_detail: None,
+                },
+            )?;
             Ok(())
         }
         IntentAction::CreateChannel { channel_name } => {
@@ -1734,8 +1744,7 @@ fn action_precondition_failures(
             ActionPrecondition::Quiescence(expected) if snapshot.quiescence.state != *expected => {
                 Some(format!(
                     "quiescence={:?} expected={expected:?} reasons={:?}",
-                    snapshot.quiescence.state,
-                    snapshot.quiescence.reason_codes
+                    snapshot.quiescence.state, snapshot.quiescence.reason_codes
                 ))
             }
             ActionPrecondition::Screen(expected) if snapshot.screen != *expected => Some(format!(
@@ -5485,6 +5494,29 @@ mod tests {
         assert!(
             !production_source.contains(".get(\"authority_id\")"),
             "shared semantic executor must not field-peek authority_id out of raw JSON payloads"
+        );
+    }
+
+    #[test]
+    fn create_account_and_home_wait_for_declared_contract_barriers() {
+        let source = include_str!("executor.rs");
+        let production_source = source
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap_or(source);
+
+        let create_branch = production_source
+            .split("IntentAction::CreateAccount { .. } | IntentAction::CreateHome { .. } => {")
+            .nth(1)
+            .unwrap_or_else(|| panic!("create_account/create_home branch missing"));
+        let create_branch = create_branch
+            .split("IntentAction::CreateChannel { channel_name } => {")
+            .next()
+            .unwrap_or(create_branch);
+
+        assert!(
+            create_branch.contains("wait_for_contract_barriers("),
+            "create_account/create_home branch must converge on shared contract barriers"
         );
     }
 

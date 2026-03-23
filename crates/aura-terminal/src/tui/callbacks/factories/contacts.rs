@@ -132,7 +132,8 @@ impl ContactsCallbacks {
                     operation,
                     "RemoveContact callback",
                     move |ctx| async move {
-                        ctx.dispatch(EffectCommand::RemoveContact { contact_id }).await
+                        ctx.dispatch(EffectCommand::RemoveContact { contact_id })
+                            .await
                     },
                     |_tx, ()| async {},
                     |tx, error| async move {

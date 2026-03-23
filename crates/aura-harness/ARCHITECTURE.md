@@ -175,6 +175,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 - If a cleanup removes an old harness path, delete it. Do not preserve it behind compatibility branches, migration helpers, or fallback adapters.
 - Do not add new inventory-backed or shared-flow dependents to `compatibility_step.rs`. If you touch that IR, keep the retention surface limited to `tests/phases/phase3_state_machine.rs` and executor-internal metadata/wait shaping, or delete it instead.
 - The patchbay VM backend uses only its explicit harness work/artifact directories. Do not reintroduce `.qemu-vm` migration or symlink-redirect compatibility paths.
+- Matrix-run temp cleanup stays the default, but diagnostics may retain the per-run temp and transient roots by setting `AURA_HARNESS_KEEP_TMP=1`; this changes artifact retention only and must not change scenario semantics.
 
 ## Testing
 

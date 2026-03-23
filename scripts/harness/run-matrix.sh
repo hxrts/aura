@@ -13,6 +13,16 @@ cleanup_run_scope() {
   local run_root="${1:-}"
   local transient_root="${2:-}"
   local harness_pid="${3:-}"
+  local keep_tmp="${AURA_HARNESS_KEEP_TMP:-}"
+
+  keep_tmp_enabled() {
+    case "$keep_tmp" in
+      1|true|TRUE|yes|YES|on|ON|True|Yes)
+        return 0
+        ;;
+      *) return 1 ;;
+    esac
+  }
 
   kill_process_tree() {
     local pid="${1:-}"
@@ -29,6 +39,12 @@ cleanup_run_scope() {
   }
 
   kill_process_tree "$harness_pid"
+
+  if keep_tmp_enabled; then
+    [[ -n "$run_root" ]] && echo "[harness-matrix] retained run_root=$run_root" >&2
+    [[ -n "$transient_root" ]] && echo "[harness-matrix] retained transient_root=$transient_root" >&2
+    return 0
+  fi
 
   cleanup_root_tree() {
     local root="${1:-}"
@@ -251,6 +267,9 @@ run_lane() {
         export AURA_HARNESS_RUN_TOKEN="$run_token"
         export AURA_HARNESS_RUN_ROOT="$run_root"
         export AURA_HARNESS_TRANSIENT_ROOT="$transient_root"
+        if [[ -n "${AURA_HARNESS_KEEP_TMP:-}" ]]; then
+          echo "[harness-matrix] keep_tmp=$AURA_HARNESS_KEEP_TMP run_root=$AURA_HARNESS_RUN_ROOT transient_root=$AURA_HARNESS_TRANSIENT_ROOT" >&2
+        fi
         trap 'cleanup_run_scope "$AURA_HARNESS_RUN_ROOT" "$AURA_HARNESS_TRANSIENT_ROOT" "${harness_pid:-}"' EXIT INT TERM
         mkdir -p "$AURA_HARNESS_RUN_ROOT"
         mkdir -p "$AURA_HARNESS_TRANSIENT_ROOT"

@@ -54,7 +54,7 @@ use aura_app::ui::contract::{
     OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
     RuntimeEventKind, RuntimeEventSnapshot,
 };
-use aura_app::ui_contract::{RuntimeFact, SemanticOperationCausality};
+use aura_app::ui_contract::{ProjectionRevision, RuntimeFact, SemanticOperationCausality};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -294,6 +294,9 @@ pub struct TuiState {
 
     /// Runtime facts exported from owned TUI transitions.
     pub runtime_facts: Vec<RuntimeFact>,
+
+    /// Latest authoritative runtime-fact revision applied to state.
+    pub last_authoritative_runtime_facts_revision: ProjectionRevision,
 }
 
 impl TuiState {
@@ -441,6 +444,27 @@ impl TuiState {
     pub fn clear_runtime_fact_kind(&mut self, kind: RuntimeEventKind) {
         self.runtime_facts
             .retain(|existing| existing.kind() != kind);
+    }
+
+    pub fn apply_runtime_facts_update(
+        &mut self,
+        revision: Option<ProjectionRevision>,
+        replace_kinds: Vec<RuntimeEventKind>,
+        facts: Vec<RuntimeFact>,
+    ) -> bool {
+        if let Some(revision) = revision {
+            if revision.is_stale_against(self.last_authoritative_runtime_facts_revision) {
+                return false;
+            }
+            self.last_authoritative_runtime_facts_revision = revision;
+        }
+        for kind in replace_kinds {
+            self.clear_runtime_fact_kind(kind);
+        }
+        for fact in facts {
+            self.upsert_runtime_fact(fact);
+        }
+        true
     }
 
     #[must_use]
@@ -723,6 +747,86 @@ mod tests {
         let third = state.exported_operation_snapshots();
         assert_eq!(third[0].state, OperationState::Submitting);
         assert_ne!(third[0].instance_id, first_instance);
+    }
+
+    #[test]
+    fn stale_authoritative_runtime_fact_updates_are_rejected() {
+        let mut state = TuiState::new();
+        let channel = aura_app::ui_contract::ChannelFactKey {
+            id: Some("channel-alpha".to_string()),
+            name: Some("alpha".to_string()),
+        };
+
+        assert!(state.apply_runtime_facts_update(
+            Some(ProjectionRevision {
+                semantic_seq: 2,
+                render_seq: None,
+            }),
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(2),
+            }],
+        ));
+        assert!(!state.apply_runtime_facts_update(
+            Some(ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: None,
+            }),
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(1),
+            }],
+        ));
+
+        assert_eq!(
+            state.runtime_facts,
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(2),
+            }]
+        );
+    }
+
+    #[test]
+    fn newer_authoritative_runtime_fact_updates_replace_fact_kinds() {
+        let mut state = TuiState::new();
+        let channel = aura_app::ui_contract::ChannelFactKey {
+            id: Some("channel-alpha".to_string()),
+            name: Some("alpha".to_string()),
+        };
+
+        assert!(state.apply_runtime_facts_update(
+            Some(ProjectionRevision {
+                semantic_seq: 1,
+                render_seq: None,
+            }),
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(1),
+            }],
+        ));
+        assert!(state.apply_runtime_facts_update(
+            Some(ProjectionRevision {
+                semantic_seq: 2,
+                render_seq: None,
+            }),
+            vec![RuntimeEventKind::ChannelMembershipReady],
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel: channel.clone(),
+                member_count: Some(3),
+            }],
+        ));
+
+        assert_eq!(
+            state.runtime_facts,
+            vec![RuntimeFact::ChannelMembershipReady {
+                channel,
+                member_count: Some(3),
+            }]
+        );
     }
 
     #[test]

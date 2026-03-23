@@ -29,8 +29,8 @@ use crate::workflows::runtime_error_classification::{
 use crate::workflows::semantic_facts::{
     authoritative_semantic_facts_snapshot, issue_channel_invitation_created_proof,
     issue_message_committed_proof, prove_channel_membership_ready,
-    publish_authoritative_semantic_fact, replace_authoritative_semantic_facts_of_kind,
-    semantic_readiness_publication_capability, update_authoritative_semantic_facts,
+    publish_authoritative_semantic_fact, semantic_readiness_publication_capability,
+    update_authoritative_semantic_facts,
     SemanticWorkflowOwner,
 };
 use crate::workflows::signals::read_signal;
@@ -64,6 +64,7 @@ use aura_core::{
 use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -193,6 +194,7 @@ struct ChannelReadinessState {
     member_count: u32,
     recipients: Vec<AuthorityId>,
     delivery_supported: bool,
+    had_membership_fact: bool,
 }
 
 impl ChannelReadinessState {
@@ -202,11 +204,13 @@ impl ChannelReadinessState {
         member_count: u32,
         authoritative_channel: Option<AuthoritativeChannelRef>,
         recipients: Vec<AuthorityId>,
+        had_membership_fact: bool,
     ) -> Self {
         let is_note_to_self = matches!(
             fact_key.name.as_deref(),
             Some(name) if name.eq_ignore_ascii_case("note to self")
         );
+        let member_count = member_count.max((recipients.len() as u32).saturating_add(1));
         let delivery_supported = !is_note_to_self && !recipients.is_empty();
         Self {
             channel_id,
@@ -215,6 +219,7 @@ impl ChannelReadinessState {
             member_count,
             recipients,
             delivery_supported,
+            had_membership_fact,
         }
     }
 
@@ -228,7 +233,7 @@ impl ChannelReadinessState {
     fn recipient_resolution_fact(&self) -> Option<AuthoritativeSemanticFact> {
         (self.delivery_supported).then(|| AuthoritativeSemanticFact::RecipientPeersResolved {
             channel: self.fact_key.clone(),
-            member_count: self.member_count.max(self.recipients.len() as u32),
+            member_count: self.member_count,
         })
     }
 
@@ -262,16 +267,66 @@ struct ChannelReadinessCoordinator {
     states: Vec<ChannelReadinessState>,
 }
 
+#[derive(Debug, Clone)]
+struct ChannelReadinessSeed {
+    fact_key: ChannelFactKey,
+    member_count: u32,
+    authoritative_context: Option<ContextId>,
+    had_membership_fact: bool,
+}
+
+impl ChannelReadinessSeed {
+    fn from_fact(channel: ChannelFactKey, member_count: u32) -> Self {
+        Self {
+            fact_key: channel,
+            member_count,
+            authoritative_context: None,
+            had_membership_fact: true,
+        }
+    }
+
+    fn merge_fact(&mut self, channel: ChannelFactKey, member_count: u32) {
+        if self
+            .fact_key
+            .name
+            .as_deref()
+            .is_none_or(|name| name.trim().is_empty())
+        {
+            self.fact_key.name = channel.name;
+        }
+        self.member_count = self.member_count.max(member_count);
+    }
+
+    fn merge_observed_channel(&mut self, channel: &Channel) {
+        if self
+            .fact_key
+            .name
+            .as_deref()
+            .is_none_or(|name| name.trim().is_empty())
+            && !channel.name.trim().is_empty()
+        {
+            self.fact_key.name = Some(channel.name.clone());
+        }
+        self.member_count = self.member_count.max(
+            channel
+                .member_count
+                .max(channel.member_ids.len() as u32 + 1),
+        );
+        self.authoritative_context = self.authoritative_context.or(channel.context_id);
+    }
+}
+
 impl ChannelReadinessCoordinator {
     async fn load(app_core: &Arc<RwLock<AppCore>>) -> Result<Self, AuraError> {
         let facts = authoritative_semantic_facts_snapshot(app_core).await?;
+        let observed_chat = observed_chat_snapshot(app_core).await;
         let (runtime, self_authority) = {
             let core = app_core.read().await;
             (core.runtime().cloned(), core.authority().copied())
         };
         let self_authority =
             self_authority.or_else(|| runtime.as_ref().map(|runtime| runtime.authority_id()));
-        let mut states = Vec::new();
+        let mut seeds = BTreeMap::<ChannelId, ChannelReadinessSeed>::new();
         for fact in facts {
             let AuthoritativeSemanticFact::ChannelMembershipReady {
                 channel,
@@ -294,13 +349,47 @@ impl ChannelReadinessCoordinator {
                         "ChannelMembershipReady fact carried an invalid channel id: {error}"
                     ))
                 })?;
-            let authoritative_channel = match runtime.as_ref() {
-                Some(runtime) => {
-                    resolve_authoritative_context_id_for_channel_with_runtime(runtime, channel_id)
-                        .await?
-                        .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
+            match seeds.get_mut(&channel_id) {
+                Some(seed) => seed.merge_fact(channel, member_count),
+                None => {
+                    seeds.insert(
+                        channel_id,
+                        ChannelReadinessSeed::from_fact(channel, member_count),
+                    );
                 }
-                None => None,
+            }
+        }
+
+        for channel in observed_chat.all_channels() {
+            let Some(context_id) = channel.context_id else {
+                continue;
+            };
+            let seed = seeds
+                .entry(channel.id)
+                .or_insert_with(|| ChannelReadinessSeed {
+                    fact_key: ChannelFactKey {
+                        id: Some(channel.id.to_string()),
+                        name: Some(channel.name.clone()),
+                    },
+                    member_count: channel
+                        .member_count
+                        .max(channel.member_ids.len() as u32 + 1),
+                    authoritative_context: Some(context_id),
+                    had_membership_fact: false,
+                });
+            seed.merge_observed_channel(channel);
+        }
+
+        let mut states = Vec::new();
+        for (channel_id, seed) in seeds {
+            let authoritative_channel = if runtime.is_some() {
+                resolve_authoritative_context_id_for_channel(app_core, channel_id)
+                    .await
+                    .or(seed.authoritative_context)
+                    .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
+            } else {
+                seed.authoritative_context
+                    .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
             };
             let recipients = match (&runtime, self_authority, authoritative_channel) {
                 (Some(runtime), Some(authority_id), Some(authoritative_channel)) => {
@@ -315,10 +404,11 @@ impl ChannelReadinessCoordinator {
             };
             states.push(ChannelReadinessState::new(
                 channel_id,
-                channel,
-                member_count,
+                seed.fact_key,
+                seed.member_count,
                 authoritative_channel,
                 recipients,
+                seed.had_membership_fact,
             ));
         }
 
@@ -334,22 +424,6 @@ impl ChannelReadinessCoordinator {
             .iter()
             .find(|state| state.channel_id == channel_id)
     }
-}
-
-async fn resolve_authoritative_context_id_for_channel_with_runtime(
-    runtime: &Arc<dyn RuntimeBridge>,
-    channel_id: ChannelId,
-) -> Result<Option<ContextId>, AuraError> {
-    timeout_runtime_call(
-        runtime,
-        "resolve_authoritative_context_id_for_channel_with_runtime",
-        "resolve_amp_channel_context",
-        MESSAGING_RUNTIME_QUERY_TIMEOUT,
-        || runtime.resolve_amp_channel_context(channel_id),
-    )
-    .await
-    .map_err(|error| AuraError::from(super::error::runtime_call("resolve channel context", error)))?
-    .map_err(|error| AuraError::from(super::error::runtime_call("resolve channel context", error)))
 }
 
 fn channel_membership_fact(
@@ -979,7 +1053,26 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
     for state in coordinator.states() {
         let membership_ready = if let Some(runtime) = runtime.as_ref() {
             if let Some(channel) = state.authoritative_channel {
-                runtime_channel_state_exists(runtime, channel).await?
+                match runtime_channel_state_exists(runtime, channel).await {
+                    Ok(true) => true,
+                    Ok(false) if state.had_membership_fact => {
+                        messaging_warn!(
+                            "Retaining ChannelMembershipReady for {} after transient runtime-state miss; authoritative leave/close owns revocation",
+                            state.channel_id
+                        );
+                        true
+                    }
+                    Ok(false) => false,
+                    Err(error) if state.had_membership_fact => {
+                        messaging_warn!(
+                            "Retaining ChannelMembershipReady for {} after runtime-state probe error: {}",
+                            state.channel_id,
+                            error
+                        );
+                        true
+                    }
+                    Err(error) => return Err(error),
+                }
             } else {
                 messaging_warn!(
                     "Retaining ChannelMembershipReady for {} without a re-resolved authoritative context; see docs/122_ownership_model.md",
@@ -994,16 +1087,20 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
             replacements.push(state.membership_fact());
         }
     }
-    replace_authoritative_semantic_facts_of_kind(
-        app_core,
-        aura_core::AuthorizedReadinessPublication::authorize(
-            semantic_readiness_publication_capability(),
-            (
-                AuthoritativeSemanticFactKind::ChannelMembershipReady,
-                replacements,
-            ),
-        ),
-    )
+    let kind = AuthoritativeSemanticFactKind::ChannelMembershipReady;
+    let mut merged = BTreeMap::new();
+    for replacement in replacements {
+        merged.insert(replacement.key(), replacement);
+    }
+    update_authoritative_semantic_facts(app_core, move |facts| {
+        for existing in facts.iter().filter(|existing| existing.kind() == kind) {
+            merged
+                .entry(existing.key())
+                .or_insert_with(|| existing.clone());
+        }
+        facts.retain(|existing| existing.kind() != kind);
+        facts.extend(merged.values().cloned());
+    })
     .await
 }
 
@@ -1016,16 +1113,20 @@ pub(in crate::workflows) async fn refresh_authoritative_recipient_resolution_rea
         .iter()
         .filter_map(ChannelReadinessState::recipient_resolution_fact)
         .collect::<Vec<_>>();
-    replace_authoritative_semantic_facts_of_kind(
-        app_core,
-        aura_core::AuthorizedReadinessPublication::authorize(
-            semantic_readiness_publication_capability(),
-            (
-                AuthoritativeSemanticFactKind::RecipientPeersResolved,
-                replacements,
-            ),
-        ),
-    )
+    let kind = AuthoritativeSemanticFactKind::RecipientPeersResolved;
+    let mut merged = BTreeMap::new();
+    for replacement in replacements {
+        merged.insert(replacement.key(), replacement);
+    }
+    update_authoritative_semantic_facts(app_core, move |facts| {
+        for existing in facts.iter().filter(|existing| existing.kind() == kind) {
+            merged
+                .entry(existing.key())
+                .or_insert_with(|| existing.clone());
+        }
+        facts.retain(|existing| existing.kind() != kind);
+        facts.extend(merged.values().cloned());
+    })
     .await
 }
 
@@ -1042,6 +1143,7 @@ fn fact_matches_channel(fact: &AuthoritativeSemanticFact, channel_id: ChannelId)
             channel.id.as_deref() == Some(channel_id.as_str())
         }
         AuthoritativeSemanticFact::OperationStatus { .. }
+        | AuthoritativeSemanticFact::InvitationAccepted { .. }
         | AuthoritativeSemanticFact::ContactLinkReady { .. }
         | AuthoritativeSemanticFact::PendingHomeInvitationReady => false,
     }
@@ -1495,7 +1597,10 @@ pub async fn resolve_authoritative_context_id_for_channel(
             return Some(context_id);
         }
     }
-    None
+    observed_chat_snapshot(app_core)
+        .await
+        .channel(&channel_id)
+        .and_then(|channel| channel.context_id)
 }
 
 /// Construct an authoritative channel reference once the canonical context is already known.
@@ -1568,8 +1673,26 @@ async fn resolve_authoritative_channel_binding_from_input(
             })
         }
         _ => {
-            let runtime = require_runtime(app_core).await?;
             let normalized_name = channel_input.trim().trim_start_matches('#').trim();
+            let observed_chat = observed_chat_snapshot(app_core).await;
+            let mut observed_matches = observed_chat
+                .all_channels()
+                .filter(|channel| channel.name.eq_ignore_ascii_case(normalized_name))
+                .filter_map(|channel| {
+                    channel.context_id.map(|context_id| {
+                        crate::runtime_bridge::AuthoritativeChannelBinding {
+                            channel_id: channel.id,
+                            context_id,
+                        }
+                    })
+                });
+            if let Some(binding) = observed_matches.next() {
+                if observed_matches.next().is_none() {
+                    return Ok(binding);
+                }
+            }
+
+            let runtime = require_runtime(app_core).await?;
             timeout_runtime_call(
                 &runtime,
                 "resolve_authoritative_channel_binding_from_input",
@@ -2259,43 +2382,49 @@ async fn join_channel_with_name_hint(
     let context_id = channel.context_id();
     enforce_home_join_allowed(app_core, context_id, channel_id, runtime.authority_id()).await?;
 
-    if let Err(error) = timeout_runtime_call(
-        &runtime,
-        "join_channel_with_name_hint",
-        "amp_join_channel",
-        MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || {
-            runtime.amp_join_channel(ChannelJoinParams {
-                context: context_id,
-                channel: channel_id,
-                participant: runtime.authority_id(),
-            })
-        },
-    )
-    .await
-    .map_err(|error| AuraError::internal(error.to_string()))?
-    {
-        let canonical_state_exists = runtime_channel_state_exists(&runtime, channel)
-            .await
-            .unwrap_or(false);
-        if intent_error_is_not_found(&error) && !canonical_state_exists {
-            return Err(
-                JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
-            );
-        }
-        if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists
-            && !canonical_state_exists
+    let canonical_state_exists = runtime_channel_state_exists(&runtime, channel)
+        .await
+        .unwrap_or(false);
+    if !canonical_state_exists {
+        if let Err(error) = timeout_runtime_call(
+            &runtime,
+            "join_channel_with_name_hint",
+            "amp_join_channel",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || {
+                runtime.amp_join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant: runtime.authority_id(),
+                })
+            },
+        )
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?
         {
-            return Err(JoinChannelError::Transport {
-                channel_id,
-                detail: error.to_string(),
+            let canonical_state_exists = runtime_channel_state_exists(&runtime, channel)
+                .await
+                .unwrap_or(false);
+            if intent_error_is_not_found(&error) && !canonical_state_exists {
+                return Err(
+                    JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
+                );
             }
-            .into_aura_error());
+            if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists
+                && !canonical_state_exists
+            {
+                return Err(JoinChannelError::Transport {
+                    channel_id,
+                    detail: error.to_string(),
+                }
+                .into_aura_error());
+            }
         }
     }
 
     apply_authoritative_membership_projection(app_core, channel_id, context_id, true, name_hint)
         .await?;
+    publish_authoritative_channel_membership_ready(app_core, channel_id, name_hint, 1).await?;
     wait_for_runtime_channel_state(app_core, &runtime, channel).await?;
     warm_channel_connectivity(app_core, &runtime, channel).await;
     timeout_runtime_call(
@@ -2328,6 +2457,42 @@ async fn fail_join_channel<T>(
 ) -> Result<T, AuraError> {
     owner.publish_failure(error.semantic_error()).await?;
     Err(error.into_aura_error())
+}
+
+async fn stabilize_authoritative_join_readiness(
+    app_core: &Arc<RwLock<AppCore>>,
+    authoritative_channel: AuthoritativeChannelRef,
+    channel_name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let channel_id = authoritative_channel.channel_id();
+
+    converge_runtime(&runtime).await;
+    if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await {
+        messaging_warn!(
+            "Channel {} joined before connectivity fully warmed: {}",
+            channel_id,
+            _error
+        );
+    }
+
+    let member_count = authoritative_recipient_peers_for_channel(
+        &runtime,
+        authoritative_channel,
+        runtime.authority_id(),
+    )
+    .await
+    .map(|recipients| (recipients.len() as u32).saturating_add(1))?;
+
+    publish_authoritative_channel_membership_ready(
+        app_core,
+        channel_id,
+        channel_name_hint,
+        member_count,
+    )
+    .await?;
+    refresh_authoritative_channel_membership_readiness(app_core).await?;
+    refresh_authoritative_recipient_resolution_readiness(app_core).await
 }
 
 /// Join an existing channel by name for callers that only carry channel names.
@@ -2527,11 +2692,18 @@ async fn join_channel_by_name_owned(
         };
     let channel_id = binding.channel_id;
     let authoritative_channel = authoritative_channel_ref(binding.channel_id, binding.context_id);
-    if let Ok(proof) = prove_channel_membership_ready(app_core, channel_id).await {
-        owner.publish_success_with(proof).await?;
-        return Ok(channel_id.to_string());
-    }
-    if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
+    let membership_ready_before_join = prove_channel_membership_ready(app_core, channel_id)
+        .await
+        .is_ok();
+    if !membership_ready_before_join
+        && try_join_via_pending_channel_invitation(app_core, channel_id).await?
+    {
+        stabilize_authoritative_join_readiness(
+            app_core,
+            authoritative_channel,
+            Some(channel_name),
+        )
+        .await?;
         owner
             .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
             .await?;
@@ -2552,29 +2724,8 @@ async fn join_channel_by_name_owned(
         };
         return fail_join_channel(owner, join_error).await;
     }
-    let runtime = require_runtime(app_core).await?;
-    converge_runtime(&runtime).await;
-    if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await {
-        messaging_warn!(
-            "Channel {} joined before connectivity fully warmed: {}",
-            channel_id,
-            _error
-        );
-    }
-    let member_count = authoritative_recipient_peers_for_channel(
-        &runtime,
-        authoritative_channel,
-        runtime.authority_id(),
-    )
-    .await
-    .map(|recipients| (recipients.len() as u32).saturating_add(1))?;
-    publish_authoritative_channel_membership_ready(
-        app_core,
-        channel_id,
-        Some(channel_name),
-        member_count,
-    )
-    .await?;
+    stabilize_authoritative_join_readiness(app_core, authoritative_channel, Some(channel_name))
+        .await?;
     owner
         .publish_success_with(prove_channel_membership_ready(app_core, channel_id).await?)
         .await?;
@@ -2997,7 +3148,18 @@ async fn send_message_ref_owned(
                 let readiness =
                     match require_send_message_readiness(app_core, authoritative_channel).await {
                         Ok(readiness) => readiness,
-                        Err(SendMessageError::DeliveryNotReady { .. }) => {
+                        Err(
+                            SendMessageError::RecipientResolutionNotReady { .. }
+                            | SendMessageError::DeliveryNotReady { .. },
+                        ) => {
+                            let _ = refresh_authoritative_recipient_resolution_readiness(app_core)
+                                .await;
+                            let _ = refresh_authoritative_delivery_readiness_for_channel(
+                                app_core,
+                                &runtime,
+                                authoritative_channel,
+                            )
+                            .await;
                             let _ = warm_channel_connectivity(
                                 app_core,
                                 &runtime,
@@ -3193,6 +3355,19 @@ async fn send_message_ref_owned(
                 .await
                 .map_err(|e| super::error::runtime_call("persist message", e))?
                 .map_err(|e| super::error::runtime_call("persist message", e))?;
+
+                let message_committed = AuthoritativeSemanticFact::MessageCommitted {
+                    channel: ChannelFactKey {
+                        id: Some(channel_id.to_string()),
+                        name: Some(channel_label.clone()),
+                    },
+                    content: content.to_string(),
+                };
+                update_authoritative_semantic_facts(app_core, |facts| {
+                    facts.retain(|existing| existing.key() != message_committed.key());
+                    facts.push(message_committed);
+                })
+                .await?;
 
                 if let Err(error) = deliver_message_fact_remotely(
                     app_core,
@@ -4003,6 +4178,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_refresh_authoritative_channel_membership_readiness_recreates_fact_from_authoritative_channel_binding(
+    ) {
+        let config = AppConfig::default();
+        let local = AuthorityId::new_from_entropy([63u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+
+        let channel_id = ChannelId::from_bytes(hash(b"recreated-membership-ready"));
+        let context_id = ContextId::new_from_entropy([64u8; 32]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_participants(context_id, channel_id, Vec::new());
+        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        refresh_authoritative_channel_membership_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && channel.name.as_deref() == Some("shared-parity-lab")
+                        && *member_count == 1
+            )
+        }));
+    }
+
+    #[tokio::test]
     async fn test_refresh_authoritative_channel_membership_readiness_revalidates_existing_membership_facts(
     ) {
         let config = AppConfig::default();
@@ -4042,6 +4272,132 @@ mod tests {
                     if channel.id.as_deref() == Some(channel_id_string.as_str())
                         && channel.name.as_deref() == Some("shared-parity-lab")
                         && *member_count == 1
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_refresh_authoritative_channel_membership_readiness_retains_existing_fact_on_transient_runtime_miss(
+    ) {
+        let config = AppConfig::default();
+        let local = AuthorityId::new_from_entropy([121u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+
+        let channel_id = ChannelId::from_bytes(hash(b"membership-ready-transient-miss"));
+        let context_id = ContextId::new_from_entropy([122u8; 32]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_state_exists(context_id, channel_id, false);
+
+        publish_authoritative_channel_membership_ready(
+            &app_core,
+            channel_id,
+            Some("shared-parity-lab"),
+            1,
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_channel_membership_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && channel.name.as_deref() == Some("shared-parity-lab")
+                        && *member_count == 1
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_refresh_authoritative_channel_membership_readiness_preserves_existing_fact_when_refresh_snapshot_is_empty(
+    ) {
+        let config = AppConfig::default();
+        let local = AuthorityId::new_from_entropy([123u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+
+        let channel_id = ChannelId::from_bytes(hash(b"membership-ready-empty-refresh"));
+        publish_authoritative_channel_membership_ready(
+            &app_core,
+            channel_id,
+            Some("shared-parity-lab"),
+            1,
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_channel_membership_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 1
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_refresh_authoritative_recipient_resolution_readiness_preserves_existing_fact_when_refresh_snapshot_is_empty(
+    ) {
+        let config = AppConfig::default();
+        let local = AuthorityId::new_from_entropy([124u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(config, runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+
+        let channel_id = ChannelId::from_bytes(hash(b"recipient-ready-empty-refresh"));
+        publish_authoritative_semantic_fact(
+            &app_core,
+            aura_core::AuthorizedReadinessPublication::authorize(
+                semantic_readiness_publication_capability(),
+                AuthoritativeSemanticFact::RecipientPeersResolved {
+                    channel: ChannelFactKey {
+                        id: Some(channel_id.to_string()),
+                        name: Some("shared-parity-lab".to_string()),
+                    },
+                    member_count: 2,
+                },
+            ),
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_recipient_resolution_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
             )
         }));
     }
@@ -4278,6 +4634,68 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_refresh_authoritative_recipient_resolution_uses_observed_context_fallback() {
+        let local = AuthorityId::new_from_entropy([113u8; 32]);
+        let peer = AuthorityId::new_from_entropy([114u8; 32]);
+        let context_id = ContextId::new_from_entropy([115u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"recipient-resolution-observed-context"));
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        runtime.set_amp_channel_participants(context_id, channel_id, vec![local, peer]);
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(local);
+        }
+
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+        publish_authoritative_channel_membership_ready(
+            &app_core,
+            channel_id,
+            Some("shared-parity-lab"),
+            1,
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_recipient_resolution_readiness(&app_core)
+            .await
+            .unwrap();
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count >= 1
+            )
+        }));
+    }
+
     #[test]
     fn test_delivery_readiness_facts_emit_peer_and_channel_facts() {
         let peer = AuthorityId::new_from_entropy([59u8; 32]);
@@ -4292,6 +4710,7 @@ mod tests {
             2,
             Some(AuthoritativeChannelRef::new(channel_id, context_id)),
             vec![peer],
+            false,
         );
 
         let (peer_facts, delivery_fact) = state.delivery_facts(context_id, &[peer]);
@@ -4605,6 +5024,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_join_channel_by_name_reuses_observed_authoritative_binding() {
+        let local = AuthorityId::new_from_entropy([110u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime;
+        let config = AppConfig::default();
+        let core = AppCore::with_runtime(config, runtime_bridge).expect("runtime-backed app core");
+        let app_core = Arc::new(RwLock::new(core));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        let channel_id = ChannelId::from_bytes(hash(b"observed-authoritative-join"));
+        let context_id = ContextId::new_from_entropy([111u8; 32]);
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+        publish_authoritative_channel_membership_ready(
+            &app_core,
+            channel_id,
+            Some("shared-parity-lab"),
+            2,
+        )
+        .await
+        .expect("membership readiness should publish");
+
+        let outcome = join_channel_by_name_with_binding_terminal_status(
+            &app_core,
+            "shared-parity-lab",
+            Some(OperationInstanceId(
+                "join-channel-observed-authoritative-binding".to_string(),
+            )),
+        )
+        .await;
+
+        let binding = outcome
+            .result
+            .expect("join should reuse observed authoritative binding");
+        let context_id_string = context_id.to_string();
+        assert_eq!(binding.channel_id, channel_id.to_string());
+        assert_eq!(
+            binding.context_id.as_deref(),
+            Some(context_id_string.as_str())
+        );
+        assert!(matches!(
+            outcome.terminal,
+            Some(WorkflowTerminalStatus {
+                status: SemanticOperationStatus {
+                    kind: SemanticOperationKind::JoinChannel,
+                    phase: SemanticOperationPhase::Succeeded,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
     async fn test_join_channel_by_name_with_instance_publishes_terminal_success() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
@@ -4684,6 +5179,183 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn join_channel_revalidates_membership_and_recipient_readiness_when_membership_was_already_visible(
+    ) {
+        let owner = AuthorityId::new_from_entropy([116u8; 32]);
+        let peer = AuthorityId::new_from_entropy([117u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+
+        let channel_id = ChannelId::from_bytes(hash(b"join-channel-revalidate-membership"));
+        let context_id = ContextId::new_from_entropy([118u8; 32]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
+        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+        publish_authoritative_channel_membership_ready(
+            &app_core,
+            channel_id,
+            Some("shared-parity-lab"),
+            1,
+        )
+        .await
+        .unwrap();
+
+        let outcome = join_channel_by_name_with_binding_terminal_status(
+            &app_core,
+            "shared-parity-lab",
+            Some(OperationInstanceId(
+                "join-channel-revalidate-membership-1".to_string(),
+            )),
+        )
+        .await;
+
+        let binding = outcome
+            .result
+            .expect("join should succeed with a materialized authoritative binding");
+        assert_eq!(binding.channel_id, channel_id.to_string());
+        assert_eq!(
+            binding.context_id.as_deref(),
+            Some(context_id.to_string().as_str())
+        );
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
+            )
+        }));
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
+            )
+        }));
+    }
+
+    #[tokio::test]
+    async fn join_channel_via_pending_invitation_stabilizes_membership_and_recipient_readiness() {
+        let owner = AuthorityId::new_from_entropy([140u8; 32]);
+        let peer = AuthorityId::new_from_entropy([141u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(owner));
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+        ));
+        register_signals_only(&app_core).await;
+
+        let channel_id = ChannelId::from_bytes(hash(b"join-channel-pending-invitation"));
+        let context_id = ContextId::new_from_entropy([142u8; 32]);
+        runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
+        runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+        runtime.set_pending_invitations(vec![crate::runtime_bridge::InvitationInfo {
+            invitation_id: InvitationId::new("inv-pending-join-stabilization"),
+            sender_id: peer,
+            receiver_id: owner,
+            invitation_type: crate::runtime_bridge::InvitationBridgeType::Channel {
+                home_id: channel_id.to_string(),
+                context_id: Some(context_id),
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+            },
+            status: InvitationBridgeStatus::Pending,
+            created_at_ms: 0,
+            expires_at_ms: None,
+            message: None,
+        }]);
+        runtime.set_accept_invitation_result(Ok(crate::runtime_bridge::InvitationMutationOutcome {
+            invitation_id: InvitationId::new("inv-pending-join-stabilization"),
+            new_status: InvitationBridgeStatus::Accepted,
+        }));
+
+        update_chat_projection_observed(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "shared-parity-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![peer],
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        let outcome = join_channel_by_name_with_binding_terminal_status(
+            &app_core,
+            "shared-parity-lab",
+            Some(OperationInstanceId(
+                "join-channel-pending-invitation-1".to_string(),
+            )),
+        )
+        .await;
+
+        let binding = outcome
+            .result
+            .expect("pending invitation join should produce a canonical binding");
+        assert_eq!(binding.channel_id, channel_id.to_string());
+        assert_eq!(
+            binding.context_id.as_deref(),
+            Some(context_id.to_string().as_str())
+        );
+
+        let channel_id_string = channel_id.to_string();
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
+            )
+        }));
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::RecipientPeersResolved { channel, member_count }
+                    if channel.id.as_deref() == Some(channel_id_string.as_str())
+                        && *member_count == 2
+            )
+        }));
     }
 
     #[tokio::test]

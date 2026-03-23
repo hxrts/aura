@@ -517,7 +517,10 @@ impl HarnessCoordinator {
 
     fn write_run_manifest(&self) -> Result<()> {
         fs::create_dir_all(&self.run_root).with_context(|| {
-            format!("failed to create harness run root {}", self.run_root.display())
+            format!(
+                "failed to create harness run root {}",
+                self.run_root.display()
+            )
         })?;
         let manifest = RunOwnershipManifest {
             run_token: self.run_token.clone(),
@@ -617,9 +620,9 @@ impl HarnessCoordinator {
                     return Ok(());
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let existing = fs::read(claim_path).ok().and_then(|bytes| {
-                        serde_json::from_slice::<InstanceClaim>(&bytes).ok()
-                    });
+                    let existing = fs::read(claim_path)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<InstanceClaim>(&bytes).ok());
                     if existing
                         .as_ref()
                         .is_some_and(|existing| process_alive(existing.coordinator_pid))
@@ -664,10 +667,7 @@ impl HarnessCoordinator {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
                     return Err(error).with_context(|| {
-                        format!(
-                            "failed to remove harness claim {}",
-                            claim_path.display()
-                        )
+                        format!("failed to remove harness claim {}", claim_path.display())
                     });
                 }
             }

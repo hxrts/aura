@@ -51,11 +51,7 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
             if let Some(run_token) = run_token.as_deref() {
                 ensure_env_value(&mut instance.env, "AURA_HARNESS_RUN_TOKEN", run_token);
             }
-            ensure_env_path(
-                &mut instance.env,
-                "AURA_HARNESS_RUN_ROOT",
-                root.clone(),
-            );
+            ensure_env_path(&mut instance.env, "AURA_HARNESS_RUN_ROOT", root.clone());
             ensure_env_path(
                 &mut instance.env,
                 "AURA_HARNESS_INSTANCE_ROOT",

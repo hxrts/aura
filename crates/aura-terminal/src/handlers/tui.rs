@@ -14,8 +14,8 @@ use std::env;
 use std::fs;
 use std::io;
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
 use std::panic::AssertUnwindSafe;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -49,9 +49,9 @@ use aura_effects::{
     EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
     RealSecureStorageHandler,
 };
+use futures::FutureExt;
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
-use futures::FutureExt;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
@@ -1060,23 +1060,37 @@ async fn handle_tui_launch(
 
                 let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
                 if let Some(pending_bootstrap) = pending_bootstrap {
-                    let _ = std::fs::write(base_path.join(".debug-phase-before-reconcile"), b"before-reconcile");
+                    let _ = std::fs::write(
+                        base_path.join(".debug-phase-before-reconcile"),
+                        b"before-reconcile",
+                    );
                     pending_device_enrollment_code =
                         pending_bootstrap.device_enrollment_code.clone();
                     pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
-                    let _ = std::fs::write(base_path.join(".debug-phase-before-account-ready"), b"before-account-ready");
-                    let account_ready = aura_app::ui::workflows::account::has_runtime_bootstrapped_account(
-                        app_core.raw(),
-                    )
-                    .await?;
-                    let _ = std::fs::write(base_path.join(".debug-phase-after-account-ready"), b"after-account-ready");
-                    let resolution = if !account_ready {
-                        let _ = std::fs::write(base_path.join(".debug-phase-before-initialize-runtime-account"), b"before-initialize-runtime-account");
-                        if let Err(error) = aura_app::ui::workflows::account::initialize_runtime_account(
+                    let _ = std::fs::write(
+                        base_path.join(".debug-phase-before-account-ready"),
+                        b"before-account-ready",
+                    );
+                    let account_ready =
+                        aura_app::ui::workflows::account::has_runtime_bootstrapped_account(
                             app_core.raw(),
-                            pending_bootstrap.nickname_suggestion.clone(),
                         )
-                        .await
+                        .await?;
+                    let _ = std::fs::write(
+                        base_path.join(".debug-phase-after-account-ready"),
+                        b"after-account-ready",
+                    );
+                    let resolution = if !account_ready {
+                        let _ = std::fs::write(
+                            base_path.join(".debug-phase-before-initialize-runtime-account"),
+                            b"before-initialize-runtime-account",
+                        );
+                        if let Err(error) =
+                            aura_app::ui::workflows::account::initialize_runtime_account(
+                                app_core.raw(),
+                                pending_bootstrap.nickname_suggestion.clone(),
+                            )
+                            .await
                         {
                             let _ = std::fs::write(
                                 base_path.join(".debug-phase-initialize-runtime-account-error"),
@@ -1084,7 +1098,10 @@ async fn handle_tui_launch(
                             );
                             return Err(error.into());
                         }
-                        let _ = std::fs::write(base_path.join(".debug-phase-after-initialize-runtime-account"), b"after-initialize-runtime-account");
+                        let _ = std::fs::write(
+                            base_path.join(".debug-phase-after-initialize-runtime-account"),
+                            b"after-initialize-runtime-account",
+                        );
                         aura_app::ui::workflows::account::PendingRuntimeBootstrapResolution {
                             account_ready: true,
                             action: aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::InitializedFromPending,
@@ -1095,7 +1112,10 @@ async fn handle_tui_launch(
                             action: aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending,
                         }
                     };
-                    let _ = std::fs::write(base_path.join(".debug-phase-after-reconcile"), b"after-reconcile");
+                    let _ = std::fs::write(
+                        base_path.join(".debug-phase-after-reconcile"),
+                        b"after-reconcile",
+                    );
                     let clear_pending_bootstrap = matches!(
                         resolution.action,
                         aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending
@@ -1120,42 +1140,64 @@ async fn handle_tui_launch(
                         tracing::info!(event = %finalized_event, path = %base_path.display());
                     }
                 } else {
-                    let _ = std::fs::write(base_path.join(".debug-phase-before-home-context"), b"before-home-context");
+                    let _ = std::fs::write(
+                        base_path.join(".debug-phase-before-home-context"),
+                        b"before-home-context",
+                    );
                     let missing_home_context =
-                        context_workflows::current_home_context(app_core.raw()).await.is_err();
-                    let _ = std::fs::write(base_path.join(".debug-phase-after-home-context"), b"after-home-context");
+                        context_workflows::current_home_context(app_core.raw())
+                            .await
+                            .is_err();
+                    let _ = std::fs::write(
+                        base_path.join(".debug-phase-after-home-context"),
+                        b"after-home-context",
+                    );
                     if missing_home_context {
-                    let nickname_suggestion = nickname_suggestion.clone().ok_or_else(|| {
+                        let nickname_suggestion = nickname_suggestion.clone().ok_or_else(|| {
                         AuraError::internal(
                             "Loaded account is missing bootstrap nickname for runtime initialization"
                                 .to_string(),
                         )
                     })?;
-                    let _ = std::fs::write(base_path.join(".debug-phase-before-init-runtime"), b"before-init-runtime");
-                    if let Err(error) = initialize_runtime_account(app_core.raw(), nickname_suggestion).await {
                         let _ = std::fs::write(
-                            base_path.join(".debug-phase-initialize-runtime-account-error"),
-                            error.to_string(),
+                            base_path.join(".debug-phase-before-init-runtime"),
+                            b"before-init-runtime",
                         );
-                        return Err(error.into());
+                        if let Err(error) =
+                            initialize_runtime_account(app_core.raw(), nickname_suggestion).await
+                        {
+                            let _ = std::fs::write(
+                                base_path.join(".debug-phase-initialize-runtime-account-error"),
+                                error.to_string(),
+                            );
+                            return Err(error.into());
+                        }
+                        let _ = std::fs::write(
+                            base_path.join(".debug-phase-after-init-runtime"),
+                            b"after-init-runtime",
+                        );
+                        let finalized_event = BootstrapEvent::new(
+                            BootstrapSurface::Tui,
+                            BootstrapEventKind::RuntimeBootstrapFinalized,
+                        );
+                        tracing::info!(event = %finalized_event, path = %base_path.display());
                     }
-                    let _ = std::fs::write(base_path.join(".debug-phase-after-init-runtime"), b"after-init-runtime");
-                    let finalized_event = BootstrapEvent::new(
-                        BootstrapSurface::Tui,
-                        BootstrapEventKind::RuntimeBootstrapFinalized,
-                    );
-                    tracing::info!(event = %finalized_event, path = %base_path.display());
-                }
                 }
 
-                let _ = std::fs::write(base_path.join(".debug-phase-before-refresh"), b"before-refresh");
+                let _ = std::fs::write(
+                    base_path.join(".debug-phase-before-refresh"),
+                    b"before-refresh",
+                );
                 if let Err(e) =
                     aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw())
                         .await
                 {
                     stdio.eprintln(format_args!("Warning: Failed to refresh settings: {e}"));
                 }
-                let _ = std::fs::write(base_path.join(".debug-phase-after-refresh"), b"after-refresh");
+                let _ = std::fs::write(
+                    base_path.join(".debug-phase-after-refresh"),
+                    b"after-refresh",
+                );
                 let _ = std::fs::write(base_path.join(".debug-phase-before-launch"), b"launch");
 
                 stdio.println(format_args!(
@@ -1564,10 +1606,12 @@ async fn handle_tui_launch(
                 authority_id,
                 nickname_suggestion,
             } => {
-                let _ =
-                    persist_selected_authority(&base_path, authority_id, nickname_suggestion)
-                        .await?;
-                stdio.println(format_args!("Reloading TUI for authority: {}", authority_id));
+                let _ = persist_selected_authority(&base_path, authority_id, nickname_suggestion)
+                    .await?;
+                stdio.println(format_args!(
+                    "Reloading TUI for authority: {}",
+                    authority_id
+                ));
                 return reexec_current_tui_process("authority switch").map_err(Into::into);
             }
         }

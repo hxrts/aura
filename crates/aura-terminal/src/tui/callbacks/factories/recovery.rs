@@ -34,12 +34,8 @@ impl RecoveryCallbacks {
                     send_ui_update_required(&tx, UiUpdate::RecoveryStarted).await;
                 },
                 |tx, error| async move {
-                    emit_error_toast(
-                        &tx,
-                        "recovery",
-                        format!("Start recovery failed: {error}"),
-                    )
-                    .await;
+                    emit_error_toast(&tx, "recovery", format!("Start recovery failed: {error}"))
+                        .await;
                 },
             );
         })

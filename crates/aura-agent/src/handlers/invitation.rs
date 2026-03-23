@@ -41,7 +41,10 @@ use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
 use aura_core::Receipt;
-use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
+use aura_core::{
+    execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
+};
 use aura_guards::types::CapabilityId;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
@@ -74,11 +77,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
-use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+use base64::Engine;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(test)]
 use std::str::FromStr;
@@ -107,6 +110,90 @@ const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const INVITATION_CONTENT_TYPE: &str = "application/aura-invitation";
 const INVITATION_PREPARE_STAGE_TIMEOUT_MS: u64 = 4_000;
 const INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS: u64 = 2_000;
+const INVITATION_ACCEPT_OPERATION_TIMEOUT_MS: u64 = 60_000;
+const INVITATION_ACCEPT_VALIDATE_STAGE_TIMEOUT_MS: u64 = 5_000;
+const INVITATION_ACCEPT_PREPARE_STAGE_TIMEOUT_MS: u64 = 5_000;
+const INVITATION_ACCEPT_GUARD_STAGE_TIMEOUT_MS: u64 = 5_000;
+const INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS: u64 = 15_000;
+const INVITATION_ACCEPT_CHOREOGRAPHY_STAGE_TIMEOUT_MS: u64 = 30_000;
+const INVITATION_VM_LOOP_TIMEOUT_MS: u64 = 30_000;
+const DESCRIPTOR_VALIDITY_WINDOW_MS: u64 = 86_400_000; // 24h
+
+const INVITATION_CAPABILITY_NAMES: [&str; 7] = [
+    "invitation:send",
+    "invitation:accept",
+    "invitation:decline",
+    "invitation:cancel",
+    "invitation:guardian",
+    "invitation:channel",
+    "invitation:device",
+];
+
+fn invitation_timeout_profile(effects: &AuraEffectSystem) -> TimeoutExecutionProfile {
+    if effects.is_testing() {
+        TimeoutExecutionProfile::simulation_test()
+    } else if effects.harness_mode_enabled() {
+        TimeoutExecutionProfile::harness()
+    } else {
+        TimeoutExecutionProfile::production()
+    }
+}
+
+async fn invitation_timeout_budget(
+    effects: &AuraEffectSystem,
+    stage: &'static str,
+    timeout_ms: u64,
+) -> AgentResult<TimeoutBudget> {
+    let started_at = effects.physical_time().await.map_err(|error| {
+        AgentError::runtime(format!(
+            "invitation stage `{stage}` could not read physical time: {error}"
+        ))
+    })?;
+    let scaled_timeout = invitation_timeout_profile(effects)
+        .scale_duration(Duration::from_millis(timeout_ms))
+        .map_err(|error| {
+            AgentError::runtime(format!(
+                "invitation stage `{stage}` could not scale timeout budget: {error}"
+            ))
+        })?;
+    TimeoutBudget::from_start_and_timeout(&started_at, scaled_timeout)
+        .map_err(|error| AgentError::runtime(error.to_string()))
+}
+
+async fn timeout_invitation_stage_with_budget<T>(
+    effects: &AuraEffectSystem,
+    budget: &TimeoutBudget,
+    stage: &'static str,
+    timeout_ms: u64,
+    future: impl Future<Output = AgentResult<T>>,
+) -> AgentResult<T> {
+    let now = effects.physical_time().await.map_err(|error| {
+        AgentError::runtime(format!(
+            "invitation stage `{stage}` could not read physical time: {error}"
+        ))
+    })?;
+    let scaled_timeout = invitation_timeout_profile(effects)
+        .scale_duration(Duration::from_millis(timeout_ms))
+        .map_err(|error| {
+            AgentError::runtime(format!(
+                "invitation stage `{stage}` could not scale timeout budget: {error}"
+            ))
+        })?;
+    let child_budget = budget.child_budget(&now, scaled_timeout).map_err(|error| {
+        AgentError::timeout(format!(
+            "invitation stage `{stage}` could not allocate remaining timeout budget: {error}"
+        ))
+    })?;
+    execute_with_timeout_budget(effects, &child_budget, || future)
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                "invitation stage `{stage}` timed out after {}ms",
+                child_budget.timeout_ms()
+            )),
+            TimeoutRunError::Operation(error) => error,
+        })
+}
 
 async fn timeout_prepare_invitation_stage<T>(
     effects: &AuraEffectSystem,
@@ -188,19 +275,28 @@ struct ChannelInvitationAcceptance {
 
 /// Result of an invitation action
 ///
-/// This type is specific to the agent handler layer, providing a simplified
-/// result type for handler operations.
+/// The outer `AgentResult<_>` owns terminal success or failure; this inner
+/// value only carries the authoritative postcondition on success.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InvitationResult {
-    /// Whether the action succeeded
-    pub success: bool,
     /// Invitation ID affected
     pub invitation_id: InvitationId,
     /// New status after the action
-    pub new_status: Option<InvitationStatus>,
-    /// Error message if action failed
-    pub error: Option<String>,
+    pub new_status: InvitationStatus,
 }
+
+impl InvitationResult {
+    fn new(invitation_id: InvitationId, new_status: InvitationStatus) -> Self {
+        Self {
+            invitation_id,
+            new_status,
+        }
+    }
+}
+
+/// Count of sender-side contact invitation acceptances that were fully
+/// materialized into local sender state.
+pub type ProcessedContactInvitationAcceptanceCount = usize;
 
 #[derive(Debug)]
 pub(crate) struct DeferredInvitationNetworkEffects {
@@ -291,6 +387,8 @@ pub struct InvitationHandler {
 
 impl Clone for InvitationHandler {
     fn clone(&self) -> Self {
+        // `CoreInvitationService` is stateless: it only stores the authority id
+        // and immutable config used to derive guard outcomes.
         let service =
             CoreInvitationService::new(self.service.authority_id(), self.service.config().clone());
         Self {
@@ -328,7 +426,7 @@ impl InvitationHandler {
     }
 
     async fn best_effort_current_timestamp_ms(effects: &AuraEffectSystem) -> u64 {
-        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        if effects.harness_mode_enabled() {
             let Ok(started_at) = effects.physical_time().await else {
                 return 0;
             };
@@ -338,17 +436,107 @@ impl InvitationHandler {
                 return 0;
             };
 
-            return match execute_with_timeout_budget(effects, &budget, || {
-                effects.current_timestamp()
-            })
-            .await
+            return match execute_with_timeout_budget(effects, &budget, || effects.physical_time())
+                .await
             {
-                Ok(value) => value,
+                Ok(value) => value.ts_ms,
                 Err(TimeoutRunError::Operation(_)) | Err(TimeoutRunError::Timeout(_)) => 0,
             };
         }
 
-        effects.current_timestamp().await.unwrap_or(0)
+        effects
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .unwrap_or(0)
+    }
+
+    fn full_invitation_capabilities() -> Vec<CapabilityId> {
+        INVITATION_CAPABILITY_NAMES
+            .iter()
+            .map(|capability| CapabilityId::from(*capability))
+            .collect()
+    }
+
+    fn decode_invitation_biscuit_frontier(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<
+        Option<(
+            aura_authorization::Biscuit,
+            aura_authorization::BiscuitAuthorizationBridge,
+        )>,
+    > {
+        let Some(cache) = effects.biscuit_cache() else {
+            return Ok(None);
+        };
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        let token_bytes = engine
+            .decode(cache.token_b64)
+            .map_err(|error| AgentError::effects(format!("decode biscuit token cache: {error}")))?;
+        let root_pk_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
+            AgentError::effects(format!("decode biscuit root public key cache: {error}"))
+        })?;
+        let root_public_key =
+            aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
+                AgentError::effects(format!("parse biscuit root public key cache: {error}"))
+            })?;
+        let biscuit = aura_authorization::Biscuit::from(&token_bytes, root_public_key)
+            .map_err(|error| AgentError::effects(format!("parse biscuit token cache: {error}")))?;
+        let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
+            root_public_key,
+            self.context.authority.authority_id(),
+        );
+        Ok(Some((biscuit, bridge)))
+    }
+
+    fn invitation_capability_check_timestamp_seconds(now_ms: u64) -> Option<u64> {
+        if now_ms == 0 {
+            None
+        } else {
+            Some(now_ms / 1_000)
+        }
+    }
+
+    async fn build_invitation_capabilities(
+        &self,
+        effects: &AuraEffectSystem,
+        now_ms: u64,
+    ) -> Vec<CapabilityId> {
+        let Some((token, bridge)) = (match self.decode_invitation_biscuit_frontier(effects) {
+            Ok(frontier) => frontier,
+            Err(error) => {
+                tracing::warn!(
+                    authority = %self.context.authority.authority_id(),
+                    error = %error,
+                    "failed to decode Biscuit frontier for invitation guard snapshot"
+                );
+                return Vec::new();
+            }
+        }) else {
+            return Self::full_invitation_capabilities();
+        };
+
+        let current_time_seconds = Self::invitation_capability_check_timestamp_seconds(now_ms);
+        INVITATION_CAPABILITY_NAMES
+            .iter()
+            .filter_map(|capability| {
+                match bridge.has_capability_with_time(&token, capability, current_time_seconds) {
+                    Ok(true) => Some(CapabilityId::from(*capability)),
+                    Ok(false) => None,
+                    Err(error) => {
+                        tracing::warn!(
+                            authority = %self.context.authority.authority_id(),
+                            capability,
+                            error = %error,
+                            "failed to evaluate invitation Biscuit capability"
+                        );
+                        None
+                    }
+                }
+            })
+            .collect()
     }
 
     pub(crate) async fn load_created_invitation(
@@ -362,55 +550,107 @@ impl InvitationHandler {
     async fn persist_imported_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
-        shareable: &ShareableInvitation,
+        invitation: &StoredImportedInvitation,
     ) -> AgentResult<()> {
-        InvitationCacheHandler::persist_imported_invitation(effects, authority_id, shareable).await
+        InvitationCacheHandler::persist_imported_invitation(effects, authority_id, invitation).await
     }
 
     async fn load_imported_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
         invitation_id: &InvitationId,
-    ) -> Option<ShareableInvitation> {
-        InvitationCacheHandler::load_imported_invitation(effects, authority_id, invitation_id).await
+        preserved: Option<&Invitation>,
+    ) -> Option<StoredImportedInvitation> {
+        InvitationCacheHandler::load_imported_invitation(
+            effects,
+            authority_id,
+            invitation_id,
+            preserved,
+        )
+        .await
     }
 
-    async fn sender_contact_exists(
+    async fn update_imported_invitation_status_if_present(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+        status: InvitationStatus,
+        created_at: u64,
+    ) -> AgentResult<()> {
+        let own_id = self.context.authority.authority_id();
+        let Some(mut invitation) =
+            Self::load_imported_invitation(effects, own_id, invitation_id, None).await
+        else {
+            return Ok(());
+        };
+        invitation.status = status;
+        if invitation.created_at == 0 {
+            invitation.created_at = created_at;
+        }
+        Self::persist_imported_invitation(effects, own_id, &invitation).await
+    }
+
+    fn validate_importable_shareable_invitation(
+        &self,
+        shareable: &ShareableInvitation,
+    ) -> AgentResult<()> {
+        // `from_code` already guarantees a well-formed `sender_id` and a
+        // recognized `InvitationType`. Validate the remaining authoritative
+        // invariants before persisting any imported payload.
+        if matches!(shareable.invitation_type, InvitationType::Channel { .. }) {
+            let _ = require_channel_invitation_context(
+                &shareable.invitation_id,
+                shareable.sender_id,
+                shareable.context_id,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    async fn refresh_contact_index(
+        &self,
         effects: &AuraEffectSystem,
         owner_id: AuthorityId,
-        contact_id: AuthorityId,
-    ) -> bool {
-        let Ok(envelopes) =
-            load_relational_fact_envelopes_by_type(effects, owner_id, CONTACT_FACT_TYPE_ID).await
-        else {
-            return false;
-        };
-
+    ) -> AgentResult<()> {
+        let envelopes =
+            load_relational_fact_envelopes_by_type(effects, owner_id, CONTACT_FACT_TYPE_ID).await?;
+        let mut index = aura_relational::ContactExistenceIndex::new();
         for envelope in envelopes {
             let Some(contact_fact) = ContactFact::from_envelope(&envelope) else {
                 continue;
             };
+            index.apply_fact(&contact_fact);
+        }
+        self.invitation_cache.replace_contact_index(index).await;
+        Ok(())
+    }
 
-            match contact_fact {
-                ContactFact::Added {
-                    owner_id: seen_owner,
-                    contact_id: seen_contact,
-                    ..
-                } if seen_owner == owner_id && seen_contact == contact_id => {
-                    return true;
-                }
-                ContactFact::Removed {
-                    owner_id: seen_owner,
-                    contact_id: seen_contact,
-                    ..
-                } if seen_owner == owner_id && seen_contact == contact_id => {
-                    return false;
-                }
-                _ => {}
-            }
+    async fn sender_contact_exists(
+        &self,
+        effects: &AuraEffectSystem,
+        owner_id: AuthorityId,
+        contact_id: AuthorityId,
+    ) -> bool {
+        if !self.invitation_cache.contact_index_seeded().await
+            && self.refresh_contact_index(effects, owner_id).await.is_err()
+        {
+            return false;
         }
 
-        false
+        if self
+            .invitation_cache
+            .contact_exists(owner_id, contact_id)
+            .await
+        {
+            return true;
+        }
+
+        self.refresh_contact_index(effects, owner_id).await.is_ok()
+            && self
+                .invitation_cache
+                .contact_exists(owner_id, contact_id)
+                .await
     }
 
     /// Get the authority context
@@ -425,38 +665,33 @@ impl InvitationHandler {
         context_id: ContextId,
     ) -> GuardSnapshot {
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
-
-        // Build capabilities list - in testing mode, grant all capabilities
-        let capabilities = if effects.is_testing() {
-            vec![
-                CapabilityId::from("invitation:send"),
-                CapabilityId::from("invitation:accept"),
-                CapabilityId::from("invitation:decline"),
-                CapabilityId::from("invitation:cancel"),
-                CapabilityId::from("invitation:guardian"),
-                CapabilityId::from("invitation:channel"),
-                CapabilityId::from("invitation:device"),
-            ]
-        } else {
-            // Capabilities will be derived from Biscuit token when integrated.
-            // Currently uses default set for non-testing mode.
-            vec![
-                CapabilityId::from("invitation:send"),
-                CapabilityId::from("invitation:accept"),
-                CapabilityId::from("invitation:decline"),
-                CapabilityId::from("invitation:cancel"),
-                CapabilityId::from("invitation:guardian"),
-                CapabilityId::from("invitation:channel"),
-                CapabilityId::from("invitation:device"),
-            ]
-        };
+        let capabilities = self.build_invitation_capabilities(effects, now_ms).await;
+        let budget = aura_core::effects::JournalEffects::get_flow_budget(
+            effects,
+            &context_id,
+            &self.context.authority.authority_id(),
+        )
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                authority = %self.context.authority.authority_id(),
+                context_id = %context_id,
+                error = %error,
+                "failed to read authoritative invitation flow budget; using bootstrap fallback"
+            );
+            aura_core::FlowBudget {
+                limit: 100,
+                spent: 0,
+                epoch: aura_core::Epoch::new(1),
+            }
+        });
 
         GuardSnapshot::new(
             self.context.authority.authority_id(),
             context_id,
-            FlowCost::new(100), // Default flow budget
+            FlowCost::new(u32::try_from(budget.remaining()).unwrap_or(u32::MAX)),
             capabilities,
-            1, // Default epoch
+            u64::from(budget.epoch),
             now_ms,
         )
     }
@@ -465,6 +700,24 @@ impl InvitationHandler {
     async fn build_snapshot(&self, effects: &AuraEffectSystem) -> GuardSnapshot {
         self.build_snapshot_for_context(effects, self.context.effect_context.context_id())
             .await
+    }
+
+    async fn refresh_channel_context_index(
+        &self,
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+    ) -> AgentResult<()> {
+        let envelopes =
+            load_relational_fact_envelopes_by_type(effects, authority_id, CHAT_FACT_TYPE_ID).await?;
+        let mut index = aura_chat::ChannelContextIndex::new();
+        for envelope in envelopes {
+            let Some(chat_fact) = ChatFact::from_envelope(&envelope) else {
+                continue;
+            };
+            index.apply_fact(&chat_fact);
+        }
+        self.invitation_cache.replace_channel_context_index(index).await;
+        Ok(())
     }
 
     /// Resolve the effective invitation context for the outgoing invitation type.
@@ -478,23 +731,17 @@ impl InvitationHandler {
         };
 
         let own_id = self.context.authority.authority_id();
-        let envelopes =
-            load_relational_fact_envelopes_by_type(effects, own_id, CHAT_FACT_TYPE_ID).await?;
+        if !self.invitation_cache.channel_context_index_seeded().await {
+            self.refresh_channel_context_index(effects, own_id).await?;
+        }
 
-        for envelope in envelopes {
-            let Some(ChatFact::ChannelCreated {
-                context_id,
-                channel_id,
-                creator_id,
-                ..
-            }) = ChatFact::from_envelope(&envelope)
-            else {
-                continue;
-            };
+        if let Some(context_id) = self.invitation_cache.channel_context(*home_id, own_id).await {
+            return Ok(context_id);
+        }
 
-            if channel_id == *home_id && creator_id == own_id {
-                return Ok(context_id);
-            }
+        self.refresh_channel_context_index(effects, own_id).await?;
+        if let Some(context_id) = self.invitation_cache.channel_context(*home_id, own_id).await {
+            return Ok(context_id);
         }
 
         Err(AgentError::context(format!(
@@ -665,12 +912,13 @@ impl InvitationHandler {
         };
 
         if let InvitationType::Contact { .. } = invitation.invitation_type {
-            let sender_contact_exists = Self::sender_contact_exists(
+            let sender_contact_exists = self
+                .sender_contact_exists(
                 effects.as_ref(),
                 invitation.sender_id,
                 invitation.receiver_id,
             )
-            .await;
+                .await;
             if !sender_contact_exists {
                 let contact_fact = ContactFact::Added {
                     context_id: invitation.context_id,
@@ -683,14 +931,22 @@ impl InvitationHandler {
                     },
                 };
 
-                effects
-                    .commit_generic_fact_bytes(
-                        invitation.context_id,
-                        CONTACT_FACT_TYPE_ID.into(),
-                        contact_fact.to_bytes(),
-                    )
-                    .await
-                    .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+                timeout_prepare_invitation_stage(
+                    effects.as_ref(),
+                    "commit_sender_contact_fact",
+                    async {
+                        effects
+                            .commit_generic_fact_bytes(
+                                invitation.context_id,
+                                CONTACT_FACT_TYPE_ID.into(),
+                                contact_fact.to_bytes(),
+                            )
+                            .await
+                            .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))
+                    },
+                )
+                .await?;
+                self.invitation_cache.record_contact_fact(&contact_fact).await;
             }
         }
 
@@ -746,15 +1002,48 @@ impl InvitationHandler {
 
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        let now_ms = Self::best_effort_current_timestamp_ms(&effects).await;
-        self.validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
-            .await?;
+        self.accept_invitation_owned(effects, invitation_id).await
+    }
+
+    async fn accept_invitation_owned(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<InvitationResult> {
+        let operation_budget = invitation_timeout_budget(
+            effects.as_ref(),
+            "accept_invitation",
+            INVITATION_ACCEPT_OPERATION_TIMEOUT_MS,
+        )
+        .await?;
+        let now_ms = timeout_invitation_stage_with_budget(
+            effects.as_ref(),
+            &operation_budget,
+            "accept_invitation_validate",
+            INVITATION_ACCEPT_VALIDATE_STAGE_TIMEOUT_MS,
+            async {
+                let now_ms = Self::best_effort_current_timestamp_ms(&effects).await;
+                self.validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
+                    .await?;
+                Ok(now_ms)
+            },
+        )
+        .await?;
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects.as_ref()).await;
-        let outcome = self
-            .service
-            .prepare_accept_invitation(&snapshot, invitation_id);
+        let outcome = timeout_invitation_stage_with_budget(
+            effects.as_ref(),
+            &operation_budget,
+            "accept_invitation_prepare",
+            INVITATION_ACCEPT_PREPARE_STAGE_TIMEOUT_MS,
+            async {
+                let snapshot = self.build_snapshot(effects.as_ref()).await;
+                Ok(self
+                    .service
+                    .prepare_accept_invitation(&snapshot, invitation_id))
+            },
+        )
+        .await?;
 
         tracing::debug!(
             invitation_id = %invitation_id,
@@ -764,18 +1053,106 @@ impl InvitationHandler {
         );
 
         // Accept should not be blocked by best-effort budget/notify side effects.
-        execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref())
-            .await?;
+        timeout_invitation_stage_with_budget(
+            effects.as_ref(),
+            &operation_budget,
+            "accept_invitation_guard_outcome",
+            INVITATION_ACCEPT_GUARD_STAGE_TIMEOUT_MS,
+            execute_guard_outcome_for_accept(outcome, &self.context.authority, effects.as_ref()),
+        )
+        .await?;
 
-        // Best-effort: accepting a contact invitation should add the sender as a contact.
-        //
-        // This needs to be fact-backed so the Contacts reactive view (CONTACTS_SIGNAL)
-        // can converge from journal state rather than UI-local mutations.
+        timeout_invitation_stage_with_budget(
+            effects.as_ref(),
+            &operation_budget,
+            "accept_invitation_materialize",
+            INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS,
+            self.materialize_accept_invitation_state(effects.clone(), invitation_id, now_ms),
+        )
+        .await?;
+
+        self.update_imported_invitation_status_if_present(
+            effects.as_ref(),
+            invitation_id,
+            InvitationStatus::Accepted,
+            now_ms,
+        )
+        .await?;
+
+        // Update cache if we have this invitation
+        let _ = self
+            .invitation_cache
+            .update_invitation(invitation_id, |inv| {
+                inv.status = InvitationStatus::Accepted;
+            })
+            .await;
+
+        let choreography_invitation = self
+            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+            .await;
+
+        if let Some(invitation) = choreography_invitation.as_ref() {
+            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                tracing::debug!(
+                    invitation_id = %invitation_id,
+                    "Returning immediately after local contact invitation acceptance"
+                );
+                return Ok(InvitationResult::new(
+                    invitation_id.clone(),
+                    InvitationStatus::Accepted,
+                ));
+            }
+        }
+
+        timeout_invitation_stage_with_budget(
+            effects.as_ref(),
+            &operation_budget,
+            "accept_invitation_choreography",
+            INVITATION_ACCEPT_CHOREOGRAPHY_STAGE_TIMEOUT_MS,
+            self.execute_accept_invitation_follow_up(
+                effects.clone(),
+                invitation_id,
+                choreography_invitation.as_ref(),
+            ),
+        )
+        .await?;
+
+        Ok(InvitationResult::new(
+            invitation_id.clone(),
+            InvitationStatus::Accepted,
+        ))
+    }
+
+    async fn materialize_accept_invitation_state(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation_id: &InvitationId,
+        accepted_at_ms: u64,
+    ) -> AgentResult<()> {
+        self.materialize_contact_acceptance_if_needed(
+            effects.as_ref(),
+            invitation_id,
+            accepted_at_ms,
+        )
+        .await?;
+        self.materialize_channel_acceptance_if_needed(effects.as_ref(), invitation_id)
+            .await?;
+        self.materialize_device_enrollment_acceptance_if_needed(effects.as_ref(), invitation_id)
+            .await
+    }
+
+    async fn materialize_contact_acceptance_if_needed(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+        accepted_at_ms: u64,
+    ) -> AgentResult<()> {
+        // Accepting a contact invitation must materialize sender contact state so
+        // CONTACTS_SIGNAL converges from facts rather than UI-local mutation.
         if let Some((contact_id, nickname)) = self
-            .resolve_contact_invitation(effects.as_ref(), invitation_id)
+            .resolve_contact_invitation(effects, invitation_id)
             .await?
         {
-            let now_ms = Self::best_effort_current_timestamp_ms(&effects).await;
             let context_id = self.context.effect_context.context_id();
             let fact = ContactFact::Added {
                 context_id,
@@ -783,7 +1160,7 @@ impl InvitationHandler {
                 contact_id,
                 nickname: nickname.clone(),
                 added_at: PhysicalTime {
-                    ts_ms: now_ms,
+                    ts_ms: accepted_at_ms,
                     uncertainty: None,
                 },
             };
@@ -802,6 +1179,7 @@ impl InvitationHandler {
                 .map_err(|e| {
                     crate::core::AgentError::effects(format!("commit contact fact: {e}"))
                 })?;
+            self.invitation_cache.record_contact_fact(&fact).await;
 
             // Promote LAN-discovered descriptor into the local context so that
             // is_peer_online() / resolve_peer_addr() can find it immediately.
@@ -828,12 +1206,20 @@ impl InvitationHandler {
             );
         }
 
+        Ok(())
+    }
+
+    async fn materialize_channel_acceptance_if_needed(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<()> {
         if let Some(mut channel_invite) = self
-            .resolve_channel_invitation(effects.as_ref(), invitation_id)
+            .resolve_channel_invitation(effects, invitation_id)
             .await?
         {
             channel_invite.context_id = self
-                .resolve_channel_context_from_chat_facts(effects.as_ref(), &channel_invite)
+                .resolve_channel_context_from_chat_facts(effects, &channel_invite)
                 .await;
 
             if let Some(package) = channel_invite.bootstrap.clone() {
@@ -867,20 +1253,29 @@ impl InvitationHandler {
                     })?;
 
                 self.materialize_channel_bootstrap_acceptance(
-                    effects.as_ref(),
+                    effects,
                     &channel_invite,
                     bootstrap_id,
                 )
                 .await?;
             }
 
-            self.materialize_channel_invitation_acceptance(effects.as_ref(), &channel_invite)
+            self.materialize_channel_invitation_acceptance(effects, &channel_invite)
                 .await?;
         }
 
-        // Device enrollment: install share + notify initiator device runtime.
+        Ok(())
+    }
+
+    async fn materialize_device_enrollment_acceptance_if_needed(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<()> {
+        // Device enrollment acceptance installs the issued share before the
+        // invitee notifies the initiator runtime.
         if let Some(enrollment) = self
-            .resolve_device_enrollment_invitation(effects.as_ref(), invitation_id)
+            .resolve_device_enrollment_invitation(effects, invitation_id)
             .await?
         {
             if !enrollment.baseline_tree_ops.is_empty() {
@@ -971,76 +1366,58 @@ impl InvitationHandler {
                         ))
                     })?;
             }
-
-            let _ = self
-                .load_invitation_for_choreography(effects.as_ref(), invitation_id)
-                .await;
         }
 
-        // Update cache if we have this invitation
-        let _ = self
-            .invitation_cache
-            .update_invitation(invitation_id, |inv| {
-                inv.status = InvitationStatus::Accepted;
-            })
-            .await;
+        Ok(())
+    }
 
-        if let Some(invitation) = self
-            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
-            .await
-        {
-            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+    async fn execute_accept_invitation_follow_up(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation_id: &InvitationId,
+        invitation: Option<&Invitation>,
+    ) -> AgentResult<()> {
+        let Some(invitation) = invitation else {
+            return Ok(());
+        };
+
+        match invitation.invitation_type {
+            InvitationType::Contact { .. } => {
                 tracing::debug!(
                     invitation_id = %invitation_id,
-                    "Returning immediately after local contact invitation acceptance"
+                    "Skipping synchronous invitation exchange receiver for accepted contact invitation"
                 );
-                return Ok(InvitationResult {
-                    success: true,
-                    invitation_id: invitation_id.clone(),
-                    new_status: Some(InvitationStatus::Accepted),
-                    error: None,
-                });
+            }
+            InvitationType::Guardian { .. } => {
+                self
+                    .execute_guardian_invitation_guardian(effects.clone(), invitation)
+                    .await
+                    .map_err(|error| {
+                        AgentError::choreography(format!(
+                            "guardian invitation accept follow-up failed for {invitation_id}: {error}"
+                        ))
+                    })?;
+            }
+            InvitationType::DeviceEnrollment { .. } => {
+                self.execute_device_enrollment_invitee(effects.clone(), invitation)
+                    .await
+                    .map_err(|error| {
+                        AgentError::choreography(format!(
+                            "device enrollment accept follow-up failed for {invitation_id}: {error}"
+                        ))
+                    })?;
+            }
+            InvitationType::Channel { .. } => {
+                self.notify_channel_invitation_acceptance(effects.as_ref(), invitation_id)
+                    .await?;
+                tracing::debug!(
+                    invitation_id = %invitation_id,
+                    "Skipping synchronous invitation exchange receiver for accepted channel invitation"
+                );
             }
         }
 
-        if let Some(invitation) = self
-            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
-            .await
-        {
-            match invitation.invitation_type {
-                InvitationType::Contact { .. } => {
-                    tracing::debug!(
-                        invitation_id = %invitation_id,
-                        "Skipping synchronous invitation exchange receiver for accepted contact invitation"
-                    );
-                }
-                InvitationType::Guardian { .. } => {
-                    let _ = self
-                        .execute_guardian_invitation_guardian(effects.clone(), &invitation)
-                        .await;
-                }
-                InvitationType::DeviceEnrollment { .. } => {
-                    let _ = self
-                        .execute_device_enrollment_invitee(effects.clone(), &invitation)
-                        .await;
-                }
-                InvitationType::Channel { .. } => {
-                    self.notify_channel_invitation_acceptance(effects.as_ref(), invitation_id)
-                        .await?;
-                    tracing::debug!(
-                        invitation_id = %invitation_id,
-                        "Skipping synchronous invitation exchange receiver for accepted channel invitation"
-                    );
-                }
-            }
-        }
-
-        Ok(InvitationResult {
-            success: true,
-            invitation_id: invitation_id.clone(),
-            new_status: Some(InvitationStatus::Accepted),
-            error: None,
-        })
+        Ok(())
     }
 
     pub(crate) async fn notify_contact_invitation_acceptance(
@@ -1063,11 +1440,14 @@ impl InvitationHandler {
             .await
     }
 
-    /// Process incoming invitation-related envelopes.
+    /// Process sender-side contact invitation acceptances.
+    ///
+    /// "Processed" means the acceptance envelope was decoded, validated, and
+    /// materialized into the sender's authoritative contact/invitation state.
     pub async fn process_contact_invitation_acceptances(
         &self,
         effects: Arc<AuraEffectSystem>,
-    ) -> AgentResult<usize> {
+    ) -> AgentResult<ProcessedContactInvitationAcceptanceCount> {
         InvitationContactHandler::new(self)
             .process_contact_invitation_acceptances(effects)
             .await
@@ -1198,15 +1578,6 @@ impl InvitationHandler {
             shareable.context_id
         );
 
-        // Persist the shareable invitation so later operations (accept/decline) can resolve it
-        // even if AuraAgent constructs a fresh InvitationService/InvitationHandler.
-        Self::persist_imported_invitation(
-            effects,
-            self.context.authority.authority_id(),
-            &shareable,
-        )
-        .await?;
-
         let invitation_id = shareable.invitation_id.clone();
 
         // Fast path: already cached.
@@ -1219,7 +1590,17 @@ impl InvitationHandler {
             return Ok(existing);
         }
 
+        self.validate_importable_shareable_invitation(&shareable)?;
+
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        // Persist the imported invitation with local status so later
+        // storage-backed reads do not downgrade accepted/declined state.
+        Self::persist_imported_invitation(
+            effects,
+            self.context.authority.authority_id(),
+            &StoredImportedInvitation::pending(shareable.clone(), now_ms),
+        )
+        .await?;
         if let Some(addr) = sender_hint_addr.as_deref() {
             self.cache_peer_descriptor_for_peer(
                 effects,
@@ -1303,6 +1684,8 @@ impl InvitationHandler {
             message: shareable.message,
         };
 
+        // Known limitation: imported invitations are cached eagerly and the
+        // cache is currently unbounded until a proper TTL/LRU policy lands.
         self.invitation_cache
             .cache_invitation(invitation.clone())
             .await;
@@ -1340,6 +1723,9 @@ impl InvitationHandler {
             return;
         };
         let peer_context_id = default_context_id_for_authority(peer);
+        // Placeholder descriptors are transport-hint carriers only. Their
+        // cryptographic fields remain zero-filled until a real rendezvous
+        // descriptor arrives from the peer or is materialized from invite data.
         let descriptor = if let Some(existing) = manager.get_descriptor(peer_context_id, peer).await
         {
             let mut transport_hints = existing.transport_hints.clone();
@@ -1356,7 +1742,9 @@ impl InvitationHandler {
                 handshake_psk_commitment: existing.handshake_psk_commitment,
                 public_key: existing.public_key,
                 valid_from: existing.valid_from.min(now_ms.saturating_sub(1)),
-                valid_until: existing.valid_until.max(now_ms.saturating_add(86_400_000)),
+                valid_until: existing
+                    .valid_until
+                    .max(now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS)),
                 nonce: existing.nonce,
                 nickname_suggestion: existing.nickname_suggestion.clone(),
             }
@@ -1369,7 +1757,7 @@ impl InvitationHandler {
                 handshake_psk_commitment: [0u8; 32],
                 public_key: [0u8; 32],
                 valid_from: now_ms.saturating_sub(1),
-                valid_until: now_ms.saturating_add(86_400_000),
+                valid_until: now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS),
                 nonce: [0u8; 32],
                 nickname_suggestion: None,
             }
@@ -1389,7 +1777,7 @@ impl InvitationHandler {
                     handshake_psk_commitment: [0u8; 32],
                     public_key: [0u8; 32],
                     valid_from: now_ms.saturating_sub(1),
-                    valid_until: now_ms.saturating_add(86_400_000),
+                    valid_until: now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS),
                     nonce: [0u8; 32],
                     nickname_suggestion: None,
                 });
@@ -1404,7 +1792,7 @@ impl InvitationHandler {
             local_descriptor.valid_from = local_descriptor.valid_from.min(now_ms.saturating_sub(1));
             local_descriptor.valid_until = local_descriptor
                 .valid_until
-                .max(now_ms.saturating_add(86_400_000));
+                .max(now_ms.saturating_add(DESCRIPTOR_VALIDITY_WINDOW_MS));
             let _ = manager.cache_descriptor(local_descriptor).await;
         }
     }
@@ -1429,6 +1817,15 @@ impl InvitationHandler {
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
 
+        let now_ms = Self::best_effort_current_timestamp_ms(effects.as_ref()).await;
+        self.update_imported_invitation_status_if_present(
+            effects.as_ref(),
+            invitation_id,
+            InvitationStatus::Declined,
+            now_ms,
+        )
+        .await?;
+
         // Update cache if we have this invitation
         let _ = self
             .invitation_cache
@@ -1447,58 +1844,66 @@ impl InvitationHandler {
                     "Skipping synchronous invitation exchange receiver for declined channel invitation"
                 );
             } else if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
-                let _ = self
+                if let Err(error) = self
                     .execute_invitation_exchange_receiver(effects.clone(), &invitation, false)
-                    .await;
+                    .await
+                {
+                    tracing::warn!(
+                        invitation_id = %invitation_id,
+                        error = %error,
+                        "decline invitation follow-up exchange failed after local decline"
+                    );
+                }
             }
         }
 
-        Ok(InvitationResult {
-            success: true,
-            invitation_id: invitation_id.clone(),
-            new_status: Some(InvitationStatus::Declined),
-            error: None,
-        })
+        Ok(InvitationResult::new(
+            invitation_id.clone(),
+            InvitationStatus::Declined,
+        ))
     }
 
     /// Cancel an invitation (sender only)
     pub async fn cancel_invitation(
         &self,
-        effects: &AuraEffectSystem,
+        effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
         let own_id = self.context.authority.authority_id();
 
-        self.validate_cached_invitation_cancel(effects, invitation_id)
+        self.validate_cached_invitation_cancel(effects.as_ref(), invitation_id)
             .await?;
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects).await;
+        let snapshot = self.build_snapshot(effects.as_ref()).await;
         let outcome = self
             .service
             .prepare_cancel_invitation(&snapshot, invitation_id);
 
         // Execute the outcome
-        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
+        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
 
         if let Some(mut invitation) =
-            InvitationCacheHandler::load_created_invitation(effects, own_id, invitation_id).await
+            InvitationCacheHandler::load_created_invitation(effects.as_ref(), own_id, invitation_id)
+                .await
         {
             invitation.status = InvitationStatus::Cancelled;
-            InvitationCacheHandler::persist_created_invitation(effects, own_id, &invitation)
-                .await?;
+            InvitationCacheHandler::persist_created_invitation(
+                effects.as_ref(),
+                own_id,
+                &invitation,
+            )
+            .await?;
             self.invitation_cache.cache_invitation(invitation).await;
         } else {
             let _ = self.invitation_cache.remove_invitation(invitation_id).await;
         }
 
-        Ok(InvitationResult {
-            success: true,
-            invitation_id: invitation_id.clone(),
-            new_status: Some(InvitationStatus::Cancelled),
-            error: None,
-        })
+        Ok(InvitationResult::new(
+            invitation_id.clone(),
+            InvitationStatus::Cancelled,
+        ))
     }
 
     /// List pending invitations (from cache)
@@ -1547,9 +1952,19 @@ impl InvitationHandler {
                 let Ok(Some(bytes)) = effects.retrieve(&key).await else {
                     continue;
                 };
-                let Ok(shareable) = serde_json::from_slice::<ShareableInvitation>(&bytes) else {
+                let preserved = serde_json::from_slice::<ShareableInvitation>(&bytes)
+                    .ok()
+                    .and_then(|shareable| invitations.get(&shareable.invitation_id));
+                let Some(stored) = InvitationCacheHandler::parse_imported_invitation_bytes(
+                    &bytes,
+                    preserved,
+                )
+                else {
                     continue;
                 };
+                let status = stored.status.clone();
+                let created_at = stored.created_at;
+                let shareable = stored.shareable;
 
                 let context_id = match &shareable.invitation_type {
                     InvitationType::Channel { .. } => match require_channel_invitation_context(
@@ -1577,15 +1992,23 @@ impl InvitationHandler {
                     sender_id: shareable.sender_id,
                     receiver_id: own_id,
                     invitation_type: shareable.invitation_type,
-                    status: InvitationStatus::Pending,
-                    created_at: now_ms,
+                    status,
+                    created_at: if created_at == 0 { now_ms } else { created_at },
                     expires_at: shareable.expires_at,
                     message: shareable.message,
                 };
 
-                self.invitation_cache
-                    .cache_invitation(invitation.clone())
-                    .await;
+                let should_cache =
+                    invitations
+                        .get(&invitation.invitation_id)
+                        .is_none_or(|existing| {
+                            InvitationCacheHandler::should_replace_invitation(existing, &invitation)
+                        });
+                if should_cache {
+                    self.invitation_cache
+                        .cache_invitation(invitation.clone())
+                        .await;
+                }
                 InvitationCacheHandler::merge_invitation(&mut invitations, invitation);
             }
         }
@@ -1619,9 +2042,12 @@ impl InvitationHandler {
             return Some(inv);
         }
 
-        if let Some(shareable) =
-            Self::load_imported_invitation(effects, own_id, invitation_id).await
+        if let Some(stored) =
+            Self::load_imported_invitation(effects, own_id, invitation_id, None).await
         {
+            let status = stored.status.clone();
+            let created_at = stored.created_at;
+            let shareable = stored.shareable;
             let context_id = match &shareable.invitation_type {
                 InvitationType::Channel { .. } => {
                     match require_channel_invitation_context(
@@ -1650,8 +2076,8 @@ impl InvitationHandler {
                 sender_id: shareable.sender_id,
                 receiver_id: own_id,
                 invitation_type: shareable.invitation_type,
-                status: InvitationStatus::Pending,
-                created_at: now_ms,
+                status,
+                created_at: if created_at == 0 { now_ms } else { created_at },
                 expires_at: shareable.expires_at,
                 message: shareable.message,
             });
@@ -1692,6 +2118,10 @@ impl InvitationHandler {
         authority_id: AuthorityId,
         peer_id: AuthorityId,
     ) -> (ChoreographicRole, ChoreographicRole, Vec<ChoreographicRole>) {
+        // Invitation exchanges use one protocol role per authority. The VM
+        // session resolves concrete participants by authority id and protocol
+        // role name ("Sender"/"Receiver"), so both authorities legitimately use
+        // their local role slot 0 here.
         let sender_index = RoleIndex::new(0).expect("sender role index");
         let receiver_index = RoleIndex::new(0).expect("receiver role index");
         let local_role = ChoreographicRole::for_authority(authority_id, sender_index);
@@ -1711,33 +2141,38 @@ impl InvitationHandler {
         let session_id = Self::invitation_session_id(&invitation.invitation_id);
         let offer = ExchangeInvitationOffer(Self::build_invitation_offer(invitation));
         let peer_roles = BTreeMap::from([("Receiver".to_string(), peer_role)]);
+        let budget = invitation_timeout_budget(
+            effects.as_ref(),
+            "invitation_exchange_sender_vm",
+            INVITATION_VM_LOOP_TIMEOUT_MS,
+        )
+        .await?;
 
-        let result = async {
-            let manifest =
-                aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
-            let global_type =
-                aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
-            let local_types =
-                aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
-            let mut session = open_owned_manifest_vm_session_admitted(
-                effects.clone(),
-                session_id,
-                roles,
-                &manifest,
-                "Sender",
-                &global_type,
-                &local_types,
-                crate::runtime::AuraVmSchedulerSignals::default(),
-            )
-            .await
-            .map_err(|error| AgentError::internal(error.to_string()))?;
-            session.queue_send_bytes(
-                to_vec(&offer).map_err(|error| {
-                    AgentError::internal(format!("offer encode failed: {error}"))
-                })?,
-            );
+        let manifest =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
+        let global_type =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
+        let local_types =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
+            &manifest,
+            "Sender",
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .map_err(|error| AgentError::internal(error.to_string()))?;
+        session.queue_send_bytes(
+            to_vec(&offer)
+                .map_err(|error| AgentError::internal(format!("offer encode failed: {error}")))?,
+        );
 
-            let loop_result = loop {
+        let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+            loop {
                 let round = session
                     .advance_round_until_receive(
                         "Sender",
@@ -1826,13 +2261,19 @@ impl InvitationHandler {
                         ));
                     }
                 }
-            };
+            }
+        })
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                "invitation sender VM exceeded {}ms overall timeout",
+                budget.timeout_ms()
+            )),
+            TimeoutRunError::Operation(error) => error,
+        });
 
-            let _ = session.close().await;
-            loop_result
-        }
-        .await;
-        result
+        let _ = session.close().await;
+        loop_result
     }
 
     #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -1854,28 +2295,34 @@ impl InvitationHandler {
         });
         let mut response_queued = false;
         let peer_roles = BTreeMap::from([("Sender".to_string(), peer_role)]);
+        let budget = invitation_timeout_budget(
+            effects.as_ref(),
+            "invitation_exchange_receiver_vm",
+            INVITATION_VM_LOOP_TIMEOUT_MS,
+        )
+        .await?;
 
-        let result = async {
-            let manifest =
-                aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
-            let global_type =
-                aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
-            let local_types =
-                aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
-            let mut session = open_owned_manifest_vm_session_admitted(
-                effects.clone(),
-                session_id,
-                roles,
-                &manifest,
-                "Receiver",
-                &global_type,
-                &local_types,
-                crate::runtime::AuraVmSchedulerSignals::default(),
-            )
-            .await
-            .map_err(|error| AgentError::internal(error.to_string()))?;
+        let manifest =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::composition_manifest();
+        let global_type =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::global_type();
+        let local_types =
+            aura_invitation::protocol::exchange::telltale_session_types_invitation::vm_artifacts::local_types();
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
+            &manifest,
+            "Receiver",
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .map_err(|error| AgentError::internal(error.to_string()))?;
 
-            let loop_result = loop {
+        let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+            loop {
                 let round = session
                     .advance_round("Receiver", &peer_roles)
                     .await
@@ -1923,13 +2370,19 @@ impl InvitationHandler {
                         ));
                     }
                 }
-            };
+            }
+        })
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                "invitation receiver VM exceeded {}ms overall timeout",
+                budget.timeout_ms()
+            )),
+            TimeoutRunError::Operation(error) => error,
+        });
 
-            let _ = session.close().await;
-            loop_result
-        }
-        .await;
-        result
+        let _ = session.close().await;
+        loop_result
     }
 
     async fn execute_invitation_exchange_sender(
@@ -2076,6 +2529,8 @@ pub enum ShareableInvitationError {
     DecodingFailed,
     /// JSON parsing failed
     ParsingFailed,
+    /// JSON serialization failed
+    SerializationFailed,
 }
 
 impl std::fmt::Display for ShareableInvitationError {
@@ -2085,6 +2540,7 @@ impl std::fmt::Display for ShareableInvitationError {
             Self::UnsupportedVersion(v) => write!(f, "unsupported version: {}", v),
             Self::DecodingFailed => write!(f, "base64 decoding failed"),
             Self::ParsingFailed => write!(f, "JSON parsing failed"),
+            Self::SerializationFailed => write!(f, "JSON serialization failed"),
         }
     }
 }
@@ -2102,7 +2558,7 @@ impl std::error::Error for ShareableInvitationError {}
 /// ```ignore
 /// // Export an invitation
 /// let shareable = ShareableInvitation::from(&invitation);
-/// let code = shareable.to_code();
+/// let code = shareable.to_code()?;
 /// println!("Share this code: {}", code);
 ///
 /// // Import an invitation
@@ -2130,6 +2586,38 @@ pub struct ShareableInvitation {
     pub message: Option<String>,
 }
 
+fn default_imported_invitation_status() -> InvitationStatus {
+    InvitationStatus::Pending
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StoredImportedInvitation {
+    #[serde(flatten)]
+    shareable: ShareableInvitation,
+    #[serde(default = "default_imported_invitation_status")]
+    status: InvitationStatus,
+    #[serde(default)]
+    created_at: u64,
+}
+
+impl StoredImportedInvitation {
+    fn pending(shareable: ShareableInvitation, created_at: u64) -> Self {
+        Self {
+            shareable,
+            status: InvitationStatus::Pending,
+            created_at,
+        }
+    }
+}
+
+impl std::ops::Deref for StoredImportedInvitation {
+    type Target = ShareableInvitation;
+
+    fn deref(&self) -> &Self::Target {
+        &self.shareable
+    }
+}
+
 impl ShareableInvitation {
     /// Current version of the shareable invitation format
     pub const CURRENT_VERSION: u8 = 1;
@@ -2140,12 +2628,13 @@ impl ShareableInvitation {
     /// Encode the invitation as a shareable code string
     ///
     /// Format: `aura:v1:<base64-encoded-json>`
-    pub fn to_code(&self) -> String {
+    pub fn to_code(&self) -> Result<String, ShareableInvitationError> {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
-        let json = serde_json::to_vec(self).expect("serialization should not fail");
+        let json =
+            serde_json::to_vec(self).map_err(|_| ShareableInvitationError::SerializationFailed)?;
         let b64 = URL_SAFE_NO_PAD.encode(&json);
-        format!("{}:v{}:{}", Self::PREFIX, self.version, b64)
+        Ok(format!("{}:v{}:{}", Self::PREFIX, self.version, b64))
     }
 
     /// Decode an invitation from a code string
@@ -2308,12 +2797,78 @@ pub async fn execute_guard_outcome_for_accept(
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
     let (local_effects, deferred_network_effects) =
-        split_invitation_send_guard_outcome(outcome, authority)?;
+        split_invitation_accept_guard_outcome(outcome, authority)?;
     execute_invitation_effect_commands(local_effects, authority, effects, false).await?;
-    execute_invitation_effect_commands(deferred_network_effects.commands, authority, effects, true)
-        .await
+    if let Err(error) = execute_invitation_effect_commands(
+        deferred_network_effects.commands,
+        authority,
+        effects,
+        true,
+    )
+    .await
+    {
+        tracing::warn!(
+            authority = %authority.authority_id(),
+            error = %error,
+            "accept invitation continuing after deferred network side-effect failure"
+        );
+    }
+    Ok(())
 }
 
+/// Accept keeps flow-budget charging and receipt recording local so the
+/// authoritative accept settlement stays atomic even if the peer notification is
+/// deferred or fails later.
+fn split_invitation_accept_guard_outcome(
+    outcome: aura_invitation::guards::GuardOutcome,
+    authority: &AuthorityContext,
+) -> AgentResult<(
+    Vec<aura_invitation::guards::EffectCommand>,
+    DeferredInvitationNetworkEffects,
+)> {
+    if outcome.is_denied() {
+        let reason = outcome
+            .decision
+            .denial_reason()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "Operation denied".to_string());
+        return Err(AgentError::effects(format!(
+            "Guard denied operation: {}",
+            reason
+        )));
+    }
+
+    let mut local_effects = Vec::new();
+    let mut deferred_network_effects = Vec::new();
+    for command in outcome.effects {
+        match command {
+            aura_invitation::guards::EffectCommand::NotifyPeer { .. } => {
+                deferred_network_effects.push(command);
+            }
+            aura_invitation::guards::EffectCommand::ChargeFlowBudget { .. }
+            | aura_invitation::guards::EffectCommand::JournalAppend { .. }
+            | aura_invitation::guards::EffectCommand::RecordReceipt { .. } => {
+                local_effects.push(command);
+            }
+        }
+    }
+
+    tracing::debug!(
+        authority = %authority.authority_id(),
+        local_effect_count = local_effects.len(),
+        deferred_network_effect_count = deferred_network_effects.len(),
+        "Prepared invitation accept guard outcome with deferred peer notification side effects"
+    );
+
+    Ok((
+        local_effects,
+        DeferredInvitationNetworkEffects::new(deferred_network_effects),
+    ))
+}
+
+/// Send defers every outwardly visible side effect except the journal append so
+/// invitation creation can publish the authoritative pending fact before budget,
+/// receipt, and network effects run on their own timeout policy.
 fn split_invitation_send_guard_outcome(
     outcome: aura_invitation::guards::GuardOutcome,
     authority: &AuthorityContext,
@@ -2494,6 +3049,7 @@ async fn execute_charge_flow_budget(
     peer: AuthorityId,
     effects: &AuraEffectSystem,
 ) -> AgentResult<Option<Receipt>> {
+    // Deterministic testing/simulation modes do not model flow charging.
     if effects.is_testing() {
         return Ok(None);
     }
@@ -2513,6 +3069,8 @@ async fn execute_notify_peer(
     effects: &AuraEffectSystem,
     best_effort_network_failures: bool,
 ) -> AgentResult<()> {
+    // Use explicit test mode, not `is_testing()`: simulation runs should still
+    // exercise transport delivery on the shared deterministic network.
     if effects.is_test_mode() {
         return Ok(());
     }
@@ -2528,7 +3086,8 @@ async fn execute_notify_peer(
         InvitationHandler::load_created_invitation(effects, authority_id, &invitation_id).await
     {
         (
-            InvitationServiceApi::export_invitation(&invitation),
+            InvitationServiceApi::export_invitation(&invitation)
+                .map_err(|error| AgentError::invalid(error.to_string()))?,
             invitation.context_id,
         )
     } else {
@@ -2581,7 +3140,12 @@ async fn execute_notify_peer(
             AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
         })?;
 
-        (shareable.to_code(), context_id)
+        (
+            shareable
+                .to_code()
+                .map_err(|error| AgentError::invalid(error.to_string()))?,
+            context_id,
+        )
     };
     let mut metadata = HashMap::new();
     metadata.insert(
@@ -2646,6 +3210,7 @@ async fn execute_record_receipt(
     receipt: Option<Receipt>,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
+    // Deterministic testing/simulation modes do not persist transport receipts.
     if effects.is_testing() {
         return Ok(());
     }
@@ -2704,6 +3269,8 @@ mod tests {
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
     use aura_social::moderation::facts::HomeGrantModeratorFact;
     use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::str::FromStr;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
@@ -2713,16 +3280,46 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    fn install_full_invitation_biscuit_cache(
+        effects: &Arc<AuraEffectSystem>,
+        authority: AuthorityId,
+    ) {
+        let issuer = aura_authorization::TokenAuthority::new(authority);
+        let token = issuer
+            .create_token(authority)
+            .expect("full invitation biscuit should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
+    }
+
     #[track_caller]
     fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
         let config = AgentConfig {
             device_id: authority.device_id(),
             ..Default::default()
         };
-        Arc::new(
+        let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, authority.authority_id())
                 .unwrap(),
-        )
+        );
+        install_full_invitation_biscuit_cache(&effects, authority.authority_id());
+        effects
+    }
+
+    #[track_caller]
+    fn production_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
+        let config = AgentConfig {
+            device_id: authority.device_id(),
+            ..Default::default()
+        };
+        let effects = Arc::new(
+            AuraEffectSystem::production_for_authority(config, authority.authority_id()).unwrap(),
+        );
+        install_full_invitation_biscuit_cache(&effects, authority.authority_id());
+        effects
     }
 
     fn canonical_home_id(seed: u8) -> ChannelId {
@@ -2802,34 +3399,6 @@ mod tests {
                 .await
                 .unwrap();
         }
-    }
-
-    async fn cache_test_peer_descriptor_in_context(
-        effects: &AuraEffectSystem,
-        peer: AuthorityId,
-        context_id: ContextId,
-        addr: &str,
-        now_ms: u64,
-    ) {
-        let manager = effects
-            .rendezvous_manager()
-            .expect("test rendezvous manager should be attached");
-        let hint = TransportHint::tcp_direct(addr.trim_start_matches("tcp://")).unwrap();
-        manager
-            .cache_descriptor(RendezvousDescriptor {
-                authority_id: peer,
-                device_id: None,
-                context_id,
-                transport_hints: vec![hint],
-                handshake_psk_commitment: [0u8; 32],
-                public_key: [0u8; 32],
-                valid_from: now_ms.saturating_sub(1),
-                valid_until: now_ms.saturating_add(86_400_000),
-                nonce: [0u8; 32],
-                nickname_suggestion: None,
-            })
-            .await
-            .unwrap();
     }
 
     async fn accept_invitation_without_notification(
@@ -3086,7 +3655,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let code = InvitationServiceApi::export_invitation(&invitation);
+        let code = InvitationServiceApi::export_invitation(&invitation)
+            .expect("shareable invitation should serialize");
         let imported = receiver_handler
             .import_invitation_code(&receiver_effects, &code)
             .await
@@ -3097,8 +3667,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.success);
-        assert_eq!(result.new_status, Some(InvitationStatus::Accepted));
+        assert_eq!(result.new_status, InvitationStatus::Accepted);
     }
 
     #[tokio::test]
@@ -3142,8 +3711,363 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.success);
-        assert_eq!(result.new_status, Some(InvitationStatus::Declined));
+        assert_eq!(result.new_status, InvitationStatus::Declined);
+    }
+
+    #[tokio::test]
+    async fn importing_channel_invitation_without_context_rejects_before_persist() {
+        let authority_context = create_test_authority(101);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-channel-missing-context"),
+            sender_id: AuthorityId::new_from_entropy([102u8; 32]),
+            context_id: None,
+            invitation_type: InvitationType::Channel {
+                home_id: canonical_home_id(17),
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+                bootstrap: None,
+            },
+            expires_at: None,
+            message: None,
+        };
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
+
+        let error = handler
+            .import_invitation_code(effects.as_ref(), &code)
+            .await
+            .expect_err("channel invitation without authoritative context should fail");
+        assert!(error.to_string().contains("missing authoritative context"));
+
+        let persisted = InvitationHandler::load_imported_invitation(
+            effects.as_ref(),
+            authority_context.authority_id(),
+            &shareable.invitation_id,
+            None,
+        )
+        .await;
+        assert!(persisted.is_none());
+    }
+
+    #[tokio::test]
+    async fn accepting_guardian_invitation_surfaces_choreography_failure() {
+        let authority_context = create_test_authority(103);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context).unwrap();
+        let sender_id = AuthorityId::new_from_entropy([104u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-guardian-missing-ceremony"),
+            sender_id,
+            context_id: None,
+            invitation_type: InvitationType::Guardian {
+                subject_authority: sender_id,
+            },
+            expires_at: None,
+            message: None,
+        };
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &code)
+            .await
+            .expect("guardian invitation should import");
+
+        let error = timeout(
+            Duration::from_secs(5),
+            handler.accept_invitation(effects.clone(), &imported.invitation_id),
+        )
+        .await
+        .expect("guardian accept should terminate")
+        .expect_err("guardian choreography failure should surface");
+        assert!(error
+            .to_string()
+            .contains("guardian invitation accept follow-up failed"));
+    }
+
+    #[tokio::test]
+    async fn declining_contact_invitation_succeeds_locally_when_exchange_failure_occurs() {
+        let authority_context = create_test_authority(105);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context).unwrap();
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-contact-missing-decline-exchange"),
+            sender_id: AuthorityId::new_from_entropy([106u8; 32]),
+            context_id: None,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: None,
+        };
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &code)
+            .await
+            .expect("contact invitation should import");
+
+        let result = timeout(
+            Duration::from_secs(5),
+            handler.decline_invitation(effects.clone(), &imported.invitation_id),
+        )
+        .await
+        .expect("decline should terminate")
+        .expect("decline should settle locally even if follow-up exchange fails");
+        assert_eq!(result.new_status, InvitationStatus::Declined);
+
+        let stored = handler
+            .get_invitation_with_storage(effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect("declined invitation should remain queryable");
+        assert_eq!(stored.status, InvitationStatus::Declined);
+    }
+
+    #[tokio::test]
+    async fn old_format_imported_invitation_preserves_cached_terminal_status() {
+        let authority_context = create_test_authority(111);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("legacy-imported-status-preserved"),
+            sender_id: AuthorityId::new_from_entropy([112u8; 32]),
+            context_id: None,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: Some("legacy invite".to_string()),
+        };
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &code)
+            .await
+            .expect("legacy invite import should succeed");
+
+        handler
+            .invitation_cache
+            .update_invitation(&imported.invitation_id, |invitation| {
+                invitation.status = InvitationStatus::Accepted;
+                invitation.created_at = 123;
+            })
+            .await;
+
+        let legacy_key = InvitationCacheHandler::imported_invitation_key(
+            authority_context.authority_id(),
+            &imported.invitation_id,
+        );
+        effects
+            .store(&legacy_key, serde_json::to_vec(&shareable).unwrap())
+            .await
+            .unwrap();
+
+        let listed = handler.list_with_storage(effects.as_ref()).await;
+        let invitation = listed
+            .into_iter()
+            .find(|invitation| invitation.invitation_id == imported.invitation_id)
+            .expect("legacy imported invitation should remain listable");
+        assert_eq!(invitation.status, InvitationStatus::Accepted);
+        assert_eq!(invitation.created_at, 123);
+    }
+
+    #[tokio::test]
+    async fn choreography_load_preserves_cached_terminal_status_for_legacy_imports() {
+        let authority_context = create_test_authority(113);
+        let effects = effects_for(&authority_context);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("legacy-imported-choreo-status"),
+            sender_id: AuthorityId::new_from_entropy([114u8; 32]),
+            context_id: None,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: Some("legacy invite".to_string()),
+        };
+        let legacy_key = InvitationCacheHandler::imported_invitation_key(
+            authority_context.authority_id(),
+            &shareable.invitation_id,
+        );
+        effects
+            .store(&legacy_key, serde_json::to_vec(&shareable).unwrap())
+            .await
+            .unwrap();
+
+        let preserved = Invitation {
+            invitation_id: shareable.invitation_id.clone(),
+            context_id: authority_context.default_context_id(),
+            sender_id: shareable.sender_id,
+            receiver_id: authority_context.authority_id(),
+            invitation_type: shareable.invitation_type.clone(),
+            status: InvitationStatus::Declined,
+            created_at: 456,
+            expires_at: shareable.expires_at,
+            message: shareable.message.clone(),
+        };
+        let stored = InvitationHandler::load_imported_invitation(
+            effects.as_ref(),
+            authority_context.authority_id(),
+            &shareable.invitation_id,
+            Some(&preserved),
+        )
+        .await
+        .expect("legacy imported invitation should remain loadable");
+        assert_eq!(stored.status, InvitationStatus::Declined);
+        assert_eq!(stored.created_at, 456);
+    }
+
+    #[tokio::test]
+    async fn build_snapshot_uses_authoritative_flow_budget_state() {
+        let authority_context = create_test_authority(115);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let context_id = authority_context.default_context_id();
+
+        aura_core::effects::JournalEffects::update_flow_budget(
+            effects.as_ref(),
+            &context_id,
+            &authority_context.authority_id(),
+            &aura_core::FlowBudget {
+                limit: 50,
+                spent: 27,
+                epoch: aura_core::Epoch::new(7),
+            },
+        )
+        .await
+        .unwrap();
+
+        let snapshot = handler
+            .build_snapshot_for_context(effects.as_ref(), context_id)
+            .await;
+        assert_eq!(snapshot.flow_budget_remaining, FlowCost::new(23));
+        assert_eq!(snapshot.epoch, 7);
+    }
+
+    #[tokio::test]
+    async fn creating_invitation_is_denied_when_biscuit_lacks_invitation_send_capability() {
+        let authority_context = create_test_authority(116);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let keypair = aura_authorization::KeyPair::new();
+        let authority = authority_context.authority_id().to_string();
+        let token = biscuit_auth::macros::biscuit!(
+            r#"
+            authority({authority});
+            role("member");
+            capability("read");
+            capability("write");
+        "#
+        )
+        .build(&keypair)
+        .expect("capability-limited biscuit should build");
+        let token_bytes = token.to_vec().expect("token should serialize");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(&token_bytes),
+            root_pk_b64: engine.encode(keypair.public().to_bytes()),
+        });
+
+        let error = handler
+            .create_invitation(
+                effects.clone(),
+                AuthorityId::new_from_entropy([117u8; 32]),
+                InvitationType::Contact { nickname: None },
+                None,
+                None,
+            )
+            .await
+            .expect_err("missing invitation:send capability should deny invitation creation");
+        assert!(error.to_string().contains("Guard denied operation"));
+    }
+
+    #[tokio::test]
+    async fn accepting_unknown_invitation_is_rejected() {
+        let authority_context = create_test_authority(118);
+        let effects = effects_for(&authority_context);
+        let handler = InvitationHandler::new(authority_context).unwrap();
+
+        let error = handler
+            .accept_invitation(effects, &InvitationId::new("invitation-does-not-exist"))
+            .await
+            .expect_err("unknown invitation should be rejected");
+        assert!(error.to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn accept_guard_outcome_continues_after_deferred_network_failures() {
+        let authority = create_test_authority(107);
+        let effects = production_effects_for(&authority);
+        let peer = AuthorityId::new_from_entropy([108u8; 32]);
+        let outcome = aura_invitation::guards::GuardOutcome::allowed(vec![
+            aura_invitation::guards::EffectCommand::ChargeFlowBudget {
+                cost: FlowCost::new(1),
+            },
+            aura_invitation::guards::EffectCommand::NotifyPeer {
+                peer,
+                invitation_id: InvitationId::new("inv-missing-notify"),
+            },
+            aura_invitation::guards::EffectCommand::RecordReceipt {
+                operation: InvitationOperation::AcceptInvitation,
+                peer: Some(peer),
+            },
+        ]);
+
+        execute_guard_outcome_for_accept(outcome, &authority, effects.as_ref())
+            .await
+            .expect("deferred network failures should not block accept settlement");
+    }
+
+    #[test]
+    fn accept_guard_outcome_only_defers_peer_notification() {
+        let authority = create_test_authority(109);
+        let peer = AuthorityId::new_from_entropy([110u8; 32]);
+        let invitation_id = InvitationId::new("inv-accept-split");
+        let outcome = aura_invitation::guards::GuardOutcome::allowed(vec![
+            aura_invitation::guards::EffectCommand::ChargeFlowBudget {
+                cost: FlowCost::new(1),
+            },
+            aura_invitation::guards::EffectCommand::JournalAppend {
+                fact: InvitationFact::Accepted {
+                    context_id: Some(authority.default_context_id()),
+                    invitation_id: invitation_id.clone(),
+                    acceptor_id: authority.authority_id(),
+                    accepted_at: PhysicalTime {
+                        ts_ms: 1,
+                        uncertainty: None,
+                    },
+                },
+            },
+            aura_invitation::guards::EffectCommand::NotifyPeer {
+                peer,
+                invitation_id: invitation_id.clone(),
+            },
+            aura_invitation::guards::EffectCommand::RecordReceipt {
+                operation: InvitationOperation::AcceptInvitation,
+                peer: Some(peer),
+            },
+        ]);
+
+        let (local_effects, deferred_network_effects) =
+            split_invitation_accept_guard_outcome(outcome, &authority)
+                .expect("accept split should succeed");
+
+        assert_eq!(local_effects.len(), 3);
+        assert_eq!(deferred_network_effects.commands().len(), 1);
+        assert!(matches!(
+            deferred_network_effects.commands().first(),
+            Some(aura_invitation::guards::EffectCommand::NotifyPeer { .. })
+        ));
     }
 
     #[test]
@@ -3176,7 +4100,9 @@ mod tests {
             expires_at: None,
             message: Some("Contact invitation from Alice (demo)".to_string()),
         };
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         let imported = handler
             .import_invitation_code(&effects, &code)
@@ -3263,7 +4189,8 @@ mod tests {
             .await
             .unwrap();
 
-        let code = InvitationServiceApi::export_invitation(&invitation);
+        let code = InvitationServiceApi::export_invitation(&invitation)
+            .expect("shareable invitation should serialize");
         let imported = receiver_handler
             .import_invitation_code(&receiver_effects, &code)
             .await
@@ -3538,7 +4465,8 @@ mod tests {
                 .unwrap();
         }
 
-        let code = InvitationServiceApi::export_invitation(&invitation);
+        let code = InvitationServiceApi::export_invitation(&invitation)
+            .expect("shareable invitation should serialize");
         let imported = receiver_handler
             .import_invitation_code(&receiver_effects, &code)
             .await
@@ -3809,7 +4737,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let code = InvitationServiceApi::export_invitation(&invitation);
+        let code = InvitationServiceApi::export_invitation(&invitation)
+            .expect("shareable invitation should serialize");
         let imported = receiver_handler
             .import_invitation_code(&receiver_effects, &code)
             .await
@@ -3947,14 +4876,6 @@ mod tests {
             .await;
 
         let context_id = ContextId::new_from_entropy([223u8; 32]);
-        cache_test_peer_descriptor_in_context(
-            receiver_effects.as_ref(),
-            sender_id,
-            context_id,
-            "tcp://127.0.0.1:55001",
-            now_ms,
-        )
-        .await;
         let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-real-transport"));
         sender_effects
             .create_channel(ChannelCreateParams {
@@ -3986,7 +4907,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let code = InvitationServiceApi::export_invitation(&invitation);
+        let code = InvitationServiceApi::export_invitation(&invitation)
+            .expect("shareable invitation should serialize");
         let imported = receiver_handler
             .import_invitation_code(&receiver_effects, &code)
             .await
@@ -4058,7 +4980,12 @@ mod tests {
         };
 
         let error = handler
-            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
             .await
             .expect_err("channel invitation import must require authoritative context");
 
@@ -4066,7 +4993,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn channel_acceptance_notification_requires_invitation_context_descriptor() {
+    async fn channel_acceptance_notification_surfaces_peer_channel_establishment_failure() {
         let sender_id = AuthorityId::new_from_entropy([219u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([220u8; 32]);
         let config = AgentConfig::default();
@@ -4101,7 +5028,12 @@ mod tests {
         };
 
         let imported = handler
-            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
             .await
             .expect("channel invitation import should succeed");
         let channel_invite = handler
@@ -4119,9 +5051,10 @@ mod tests {
             .await
             .expect_err("notification must not fall back to sender default context");
 
-        assert!(error
-            .to_string()
-            .contains("Peer descriptor not found in cache"));
+        assert!(matches!(
+            error,
+            AgentError::Runtime(_) | AgentError::Effects(_)
+        ));
     }
 
     #[tokio::test]
@@ -4230,7 +5163,10 @@ mod tests {
                 destination: receiver_id,
                 source: sender_id,
                 context: default_context_id_for_authority(sender_id),
-                payload: shareable.to_code().into_bytes(),
+                payload: shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize")
+                    .into_bytes(),
                 metadata,
                 receipt: None,
             })
@@ -4311,7 +5247,12 @@ mod tests {
         };
 
         let imported = handler
-            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
             .await
             .unwrap();
 
@@ -4427,7 +5368,12 @@ mod tests {
         };
 
         let imported = handler
-            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
             .await
             .unwrap();
 
@@ -4517,7 +5463,12 @@ mod tests {
         };
 
         let imported = handler
-            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
             .await
             .unwrap();
 
@@ -4608,7 +5559,12 @@ mod tests {
         };
 
         let imported = handler
-            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
             .await
             .unwrap();
         assert_eq!(imported.context_id, custom_context);
@@ -4684,7 +5640,9 @@ mod tests {
             expires_at: None,
             message: Some("Contact invitation from Alice (demo)".to_string()),
         };
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         let imported = handler_import
             .import_invitation_code(&effects, &code)
@@ -4749,7 +5707,9 @@ mod tests {
             expires_at: None,
             message: Some("Channel invitation".to_string()),
         };
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         let imported = handler
             .import_invitation_code(&effects, &code)
@@ -4814,6 +5774,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn accepted_imported_invitation_persists_status_across_handler_instances() {
+        let own_authority = AuthorityId::new_from_entropy([126u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([127u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
+        );
+        let authority_context = AuthorityContext::new(own_authority);
+        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("imported-contact-persists-accepted"),
+            sender_id,
+            context_id: None,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: Some("hello".to_string()),
+        };
+
+        let imported = handler
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
+            .await
+            .expect("contact invitation import should succeed");
+        handler
+            .accept_invitation(effects.clone(), &imported.invitation_id)
+            .await
+            .expect("contact invitation accept should persist imported status");
+
+        let retrieved = InvitationHandler::new(authority_context)
+            .unwrap()
+            .get_invitation_with_storage(effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect("accepted imported invitation should remain available");
+        assert_eq!(retrieved.status, InvitationStatus::Accepted);
+        assert_eq!(retrieved.sender_id, sender_id);
+        assert_eq!(retrieved.receiver_id, own_authority);
+    }
+
+    #[tokio::test]
     async fn invitation_can_be_cancelled() {
         let authority_context = create_test_authority(98);
         let effects = effects_for(&authority_context);
@@ -4833,12 +5839,11 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .cancel_invitation(&effects, &invitation.invitation_id)
+            .cancel_invitation(effects.clone(), &invitation.invitation_id)
             .await
             .unwrap();
 
-        assert!(result.success);
-        assert_eq!(result.new_status, Some(InvitationStatus::Cancelled));
+        assert_eq!(result.new_status, InvitationStatus::Cancelled);
 
         // Verify it was removed from pending
         let pending = handler.list_pending().await;
@@ -4885,13 +5890,13 @@ mod tests {
             .await
             .unwrap();
 
-        // Accept one, decline another
+        // Accept one, cancel another
         handler
             .accept_invitation(effects.clone(), &inv1.invitation_id)
             .await
             .unwrap();
         handler
-            .decline_invitation(effects.clone(), &inv2.invitation_id)
+            .cancel_invitation(effects.clone(), &inv2.invitation_id)
             .await
             .unwrap();
 
@@ -4919,7 +5924,9 @@ mod tests {
             message: Some("Hello!".to_string()),
         };
 
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
         assert!(code.starts_with("aura:v1:"));
 
         let decoded = ShareableInvitation::from_code(&code).unwrap();
@@ -4944,7 +5951,9 @@ mod tests {
             message: None,
         };
 
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
         let decoded = ShareableInvitation::from_code(&code).unwrap();
 
         match decoded.invitation_type {
@@ -4976,7 +5985,9 @@ mod tests {
             message: Some("Join my channel!".to_string()),
         };
 
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
         let decoded = ShareableInvitation::from_code(&code).unwrap();
         assert_eq!(decoded.context_id, Some(context_id));
 
@@ -5026,7 +6037,9 @@ mod tests {
             message: None,
         };
 
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
         let decoded = ShareableInvitation::from_code(&code).unwrap();
 
         match decoded.invitation_type {
@@ -5072,7 +6085,9 @@ mod tests {
             expires_at: None,
             message: None,
         };
-        let base = shareable.to_code();
+        let base = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
         let code = format!(
             "{base}:{}:{}",
             URL_SAFE_NO_PAD.encode("127.0.0.1:43501".as_bytes()),
@@ -5166,7 +6181,9 @@ mod tests {
         assert_eq!(shareable.message, invitation.message);
 
         // Round-trip via code
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
         let decoded = ShareableInvitation::from_code(&code).unwrap();
         assert_eq!(decoded.invitation_id, invitation.invitation_id);
     }
@@ -5202,7 +6219,9 @@ mod tests {
             expires_at: None,
             message: Some("Contact invitation from Alice (demo)".to_string()),
         };
-        let alice_code = alice_shareable.to_code();
+        let alice_code = alice_shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         // Create Carol's invitation (matching DemoHints pattern - different seed)
         let carol_sender_id = AuthorityId::new_from_entropy([152u8; 32]);
@@ -5217,7 +6236,9 @@ mod tests {
             expires_at: None,
             message: Some("Contact invitation from Carol (demo)".to_string()),
         };
-        let carol_code = carol_shareable.to_code();
+        let carol_code = carol_shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         // Import and accept Alice's invitation
         let alice_imported = handler

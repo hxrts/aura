@@ -69,6 +69,18 @@ impl ChatCallbacks {
                     .await
                 },
                 |tx, accepted| async move {
+                    if let Some(channel_name) = accepted.channel_name.clone() {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ChannelCreated {
+                                operation_instance_id: None,
+                                channel_id: accepted.binding.channel_id.clone(),
+                                context_id: accepted.binding.context_id.clone(),
+                                name: channel_name,
+                            },
+                        )
+                        .await;
+                    }
                     send_ui_update_required(&tx, UiUpdate::ChannelSelected(accepted.binding)).await;
                 },
             );
@@ -387,6 +399,7 @@ impl ChatCallbacks {
                             send_ui_update_reliable(
                                 &tx,
                                 UiUpdate::RuntimeFactsUpdated {
+                                    revision: None,
                                     replace_kinds: vec![RuntimeEventKind::MessageCommitted],
                                     facts: vec![RuntimeFact::MessageCommitted {
                                         channel: channel_fact,

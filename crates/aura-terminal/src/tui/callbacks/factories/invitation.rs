@@ -27,17 +27,17 @@ impl InvitationsCallbacks {
     }
 
     fn make_accept(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdHandoffCallback {
-        Arc::new(move |invitation_id: String, operation: WorkflowHandoffOperationOwner| {
-            let inv_id = invitation_id.clone();
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            spawn_ctx(ctx.clone(), async move {
-                let app_core = ctx.app_core_raw().clone();
-                let operation_instance_id = operation.harness_handle().instance_id().clone();
-                let transfer = operation.handoff_to_app_workflow(
-                    SemanticOperationTransferScope::AcceptInvitation,
-                );
-                match aura_app::ui::workflows::invitation::accept_invitation_by_str_with_instance(
+        Arc::new(
+            move |invitation_id: String, operation: WorkflowHandoffOperationOwner| {
+                let inv_id = invitation_id.clone();
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                spawn_ctx(ctx.clone(), async move {
+                    let app_core = ctx.app_core_raw().clone();
+                    let operation_instance_id = operation.harness_handle().instance_id().clone();
+                    let transfer = operation
+                        .handoff_to_app_workflow(SemanticOperationTransferScope::AcceptInvitation);
+                    match aura_app::ui::workflows::invitation::accept_invitation_by_str_with_instance(
                     &app_core,
                     &invitation_id,
                     Some(operation_instance_id.clone()),
@@ -84,6 +84,7 @@ impl InvitationsCallbacks {
                         send_ui_update_reliable(
                             &tx,
                             UiUpdate::RuntimeFactsUpdated {
+                                revision: None,
                                 replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
                                 facts: vec![RuntimeFact::InvitationAccepted {
                                     invitation_kind,
@@ -124,8 +125,9 @@ impl InvitationsCallbacks {
                         .await;
                     }
                 }
-            });
-        })
+                });
+            },
+        )
     }
 
     fn make_decline(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {

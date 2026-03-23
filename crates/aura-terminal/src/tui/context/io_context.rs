@@ -31,7 +31,6 @@ cfg_if! {
 }
 use aura_agent::handlers::{InvitationType as AgentInvitationType, ShareableInvitation};
 use aura_app::ui::prelude::*;
-use aura_app::ui_contract::OperationInstanceId;
 use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
@@ -43,6 +42,7 @@ use aura_app::ui::workflows::{
     ceremonies as ceremony_workflows, context as context_workflows, runtime as runtime_workflows,
     settings as settings_workflows, system as system_workflows,
 };
+use aura_app::ui_contract::OperationInstanceId;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
 use aura_core::AuthorityId;
@@ -471,11 +471,13 @@ impl IoContext {
     }
 
     pub fn mark_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
-        self.account_files.mark_bootstrap_runtime_handoff_committed()
+        self.account_files
+            .mark_bootstrap_runtime_handoff_committed()
     }
 
     pub fn clear_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
-        self.account_files.clear_bootstrap_runtime_handoff_committed()
+        self.account_files
+            .clear_bootstrap_runtime_handoff_committed()
     }
 
     pub fn set_account_created(&self) {

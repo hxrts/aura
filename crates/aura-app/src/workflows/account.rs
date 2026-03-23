@@ -45,7 +45,11 @@ where
     match execute_with_runtime_timeout_budget(&runtime, &budget, operation).await {
         Ok(value) => Ok(value),
         Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
-            warn_workflow_timeout("finalize_runtime_account_bootstrap", stage, budget.timeout_ms());
+            warn_workflow_timeout(
+                "finalize_runtime_account_bootstrap",
+                stage,
+                budget.timeout_ms(),
+            );
             Err(AuraError::from(
                 crate::workflows::error::WorkflowError::TimedOut {
                     operation: "finalize_runtime_account_bootstrap",

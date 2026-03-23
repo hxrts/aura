@@ -183,11 +183,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
     /// Times out after `STEP_TIMEOUT` so the loop can re-check `should_exit`.
     pub async fn step(&mut self) -> Result<bool, TerminalError> {
         // Bounded wait for next event — prevents indefinite hang.
-        let event = match tokio::time::timeout(
-            Self::STEP_TIMEOUT,
-            self.terminal.next_event(),
-        )
-        .await
+        let event = match tokio::time::timeout(Self::STEP_TIMEOUT, self.terminal.next_event()).await
         {
             Ok(Ok(event)) => event,
             Ok(Err(e)) => return Err(e),

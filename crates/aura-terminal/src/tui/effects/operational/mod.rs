@@ -240,11 +240,8 @@ impl OperationalHandler {
     /// warning so the failure is observable.
     pub async fn emit_error(&self, error: TerminalError) {
         let mapped = map_terminal_error(&error);
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            self.app_core.read(),
-        )
-        .await
+        match tokio::time::timeout(std::time::Duration::from_millis(500), self.app_core.read())
+            .await
         {
             Ok(core) => {
                 let _ = core.emit(&*ERROR_SIGNAL, Some(mapped)).await;
@@ -261,11 +258,8 @@ impl OperationalHandler {
 
     /// Clear the error signal.
     pub async fn clear_error(&self) {
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            self.app_core.read(),
-        )
-        .await
+        match tokio::time::timeout(std::time::Duration::from_millis(500), self.app_core.read())
+            .await
         {
             Ok(core) => {
                 let _ = core.emit(&*ERROR_SIGNAL, None).await;

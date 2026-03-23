@@ -104,8 +104,9 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 
 // Export domain fact types
 pub use facts::{
-    ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
-    ReadReceiptPolicy, RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer,
+    ContactExistenceIndex, ContactFact, ContactFactReducer, GuardianBindingDetailsFact,
+    GuardianBindingDetailsFactReducer, ReadReceiptPolicy, RecoveryGrantDetailsFact,
+    RecoveryGrantDetailsFactReducer,
     CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
     RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };

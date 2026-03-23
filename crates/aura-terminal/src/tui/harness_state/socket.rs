@@ -4,18 +4,16 @@ use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{HarnessCommandSender, HarnessCommandSubmission};
 use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::{HarnessUiCommand, HarnessUiCommandReceipt};
-use aura_app::ui_contract::{
-    ChannelBindingWitness, HarnessUiOperationHandle, OperationInstanceId,
-};
+use aura_app::ui_contract::{ChannelBindingWitness, HarnessUiOperationHandle, OperationInstanceId};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{
     execute_with_timeout_budget, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
     TimeoutRunError,
 };
 use aura_effects::time::PhysicalTimeHandler;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -214,16 +212,16 @@ pub(crate) async fn clear_harness_command_sender() -> io::Result<()> {
     })
 }
 
-async fn settle_harness_command_plane(
-    control: HarnessCommandPlaneControl,
-) -> io::Result<()> {
+async fn settle_harness_command_plane(control: HarnessCommandPlaneControl) -> io::Result<()> {
     ensure_harness_command_plane_owner_started();
     harness_command_plane_control()?
         .send(control)
         .await
-        .map_err(|error| io::Error::other(format!(
-            "failed to reach harness command plane owner: {error}"
-        )))
+        .map_err(|error| {
+            io::Error::other(format!(
+                "failed to reach harness command plane owner: {error}"
+            ))
+        })
 }
 
 pub(crate) async fn accept_harness_command_submission(
@@ -307,10 +305,7 @@ async fn drive_harness_command_plane(
         HashMap::new();
     let mut pending_bindings: HashMap<String, PendingBindingSubmission> = HashMap::new();
 
-    fn reject_reply(
-        reply: oneshot::Sender<HarnessUiCommandReceipt>,
-        reason: impl Into<String>,
-    ) {
+    fn reject_reply(reply: oneshot::Sender<HarnessUiCommandReceipt>, reason: impl Into<String>) {
         let _ = reply.send(HarnessUiCommandReceipt::Rejected {
             reason: reason.into(),
         });
@@ -329,7 +324,13 @@ async fn drive_harness_command_plane(
             let submission_id = format!("submission-{generation}-{next_submission_id}");
             *next_submission_id = next_submission_id.saturating_add(1);
             pending_replies.insert(submission_id.clone(), reply);
-            Ok((sender, HarnessCommandSubmission { submission_id, command }))
+            Ok((
+                sender,
+                HarnessCommandSubmission {
+                    submission_id,
+                    command,
+                },
+            ))
         };
 
     while let Some(control) = control_rx.recv().await {
@@ -419,10 +420,9 @@ async fn drive_harness_command_plane(
             } => {
                 if let Some(reply) = pending_replies.remove(&submission_id) {
                     let receipt = match operation {
-                        Some(operation) => HarnessUiCommandReceipt::AcceptedWithOperation {
-                            operation,
-                            value,
-                        },
+                        Some(operation) => {
+                            HarnessUiCommandReceipt::AcceptedWithOperation { operation, value }
+                        }
                         None => HarnessUiCommandReceipt::Accepted { value },
                     };
                     let _ = reply.send(receipt);
@@ -452,13 +452,18 @@ async fn drive_harness_command_plane(
                 binding,
             } => {
                 if let Some(pending) = pending_bindings.remove(&instance_id.0) {
-                    let _ = pending.reply.send(HarnessUiCommandReceipt::AcceptedWithOperation {
-                        operation: pending.operation,
-                        value: Some(binding.semantic_value()),
-                    });
+                    let _ = pending
+                        .reply
+                        .send(HarnessUiCommandReceipt::AcceptedWithOperation {
+                            operation: pending.operation,
+                            value: Some(binding.semantic_value()),
+                        });
                 }
             }
-            HarnessCommandPlaneControl::FailPendingBinding { instance_id, reason } => {
+            HarnessCommandPlaneControl::FailPendingBinding {
+                instance_id,
+                reason,
+            } => {
                 if let Some(pending) = pending_bindings.remove(&instance_id.0) {
                     reject_reply(pending.reply, reason);
                 }

@@ -53,36 +53,24 @@ pub async fn handle_invitation(
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
             let invitation_id = InvitationId::new(invitation_id.clone());
-            let result = service.accept(&invitation_id).await?;
-            if result.success {
-                output.println(format!("Invitation {invitation_id} accepted"));
-            } else if let Some(err) = result.error {
-                output.eprintln(format!("Invitation {invitation_id} failed: {err}"));
-            }
+            let _result = service.accept(&invitation_id).await?;
+            output.println(format!("Invitation {invitation_id} accepted"));
             Ok(output)
         }
         InvitationAction::Decline { invitation_id } => {
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
             let invitation_id = InvitationId::new(invitation_id.clone());
-            let result = service.decline(&invitation_id).await?;
-            if result.success {
-                output.println(format!("Invitation {invitation_id} declined"));
-            } else if let Some(err) = result.error {
-                output.eprintln(format!("Invitation {invitation_id} decline failed: {err}"));
-            }
+            let _result = service.decline(&invitation_id).await?;
+            output.println(format!("Invitation {invitation_id} declined"));
             Ok(output)
         }
         InvitationAction::Cancel { invitation_id } => {
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
             let invitation_id = InvitationId::new(invitation_id.clone());
-            let result = service.cancel(&invitation_id).await?;
-            if result.success {
-                output.println(format!("Invitation {invitation_id} canceled"));
-            } else if let Some(err) = result.error {
-                output.eprintln(format!("Invitation {invitation_id} cancel failed: {err}"));
-            }
+            let _result = service.cancel(&invitation_id).await?;
+            output.println(format!("Invitation {invitation_id} canceled"));
             Ok(output)
         }
         InvitationAction::List => {

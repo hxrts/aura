@@ -436,11 +436,6 @@ impl InvitationService {
             return outcome;
         }
 
-        // Check flow budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_ACCEPT_COST) {
-            return outcome;
-        }
-
         // Create acceptance fact
         let fact = InvitationFact::Accepted {
             context_id: Some(snapshot.context_id),
@@ -453,16 +448,7 @@ impl InvitationService {
         };
 
         // Construct effect commands
-        let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::INVITATION_ACCEPT_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: InvitationOperation::AcceptInvitation,
-                peer: None,
-            },
-        ];
+        let effects = vec![EffectCommand::JournalAppend { fact }];
 
         GuardOutcome::allowed(effects)
     }
@@ -486,11 +472,6 @@ impl InvitationService {
             return outcome;
         }
 
-        // Check flow budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_DECLINE_COST) {
-            return outcome;
-        }
-
         // Create decline fact
         let fact = InvitationFact::Declined {
             context_id: Some(snapshot.context_id),
@@ -503,16 +484,7 @@ impl InvitationService {
         };
 
         // Construct effect commands
-        let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::INVITATION_DECLINE_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: InvitationOperation::DeclineInvitation,
-                peer: None,
-            },
-        ];
+        let effects = vec![EffectCommand::JournalAppend { fact }];
 
         GuardOutcome::allowed(effects)
     }
@@ -536,11 +508,6 @@ impl InvitationService {
             return outcome;
         }
 
-        // Check flow budget
-        if let Some(outcome) = check_flow_budget(snapshot, costs::INVITATION_CANCEL_COST) {
-            return outcome;
-        }
-
         // Create cancellation fact
         let fact = InvitationFact::Cancelled {
             context_id: Some(snapshot.context_id),
@@ -553,16 +520,7 @@ impl InvitationService {
         };
 
         // Construct effect commands
-        let effects = vec![
-            EffectCommand::ChargeFlowBudget {
-                cost: costs::INVITATION_CANCEL_COST,
-            },
-            EffectCommand::JournalAppend { fact },
-            EffectCommand::RecordReceipt {
-                operation: InvitationOperation::CancelInvitation,
-                peer: None,
-            },
-        ];
+        let effects = vec![EffectCommand::JournalAppend { fact }];
 
         GuardOutcome::allowed(effects)
     }
@@ -721,7 +679,7 @@ mod tests {
         let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
-        assert_eq!(outcome.effects.len(), 3);
+        assert_eq!(outcome.effects.len(), 1);
     }
 
     #[test]
@@ -733,7 +691,7 @@ mod tests {
         let outcome = service.prepare_decline_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
-        assert_eq!(outcome.effects.len(), 3);
+        assert_eq!(outcome.effects.len(), 1);
     }
 
     #[test]
@@ -745,7 +703,7 @@ mod tests {
         let outcome = service.prepare_cancel_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
-        assert_eq!(outcome.effects.len(), 3);
+        assert_eq!(outcome.effects.len(), 1);
     }
 
     #[test]

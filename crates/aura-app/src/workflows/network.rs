@@ -307,16 +307,16 @@ async fn emit_discovered_peers_signal(
 
     // Get invited peer IDs to mark peers as invited
     let invited_ids: HashSet<AuthorityId> = timeout_runtime_call(
-            &runtime,
-            "emit_discovered_peers_signal",
-            "try_get_invited_peer_ids",
-            Duration::from_millis(5_000),
-            || runtime.try_get_invited_peer_ids(),
-        )
-        .await?
-        .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
-        .into_iter()
-        .collect();
+        &runtime,
+        "emit_discovered_peers_signal",
+        "try_get_invited_peer_ids",
+        Duration::from_millis(5_000),
+        || runtime.try_get_invited_peer_ids(),
+    )
+    .await?
+    .map_err(|e| AuraError::from(super::error::runtime_call("get invited peers", e)))?
+    .into_iter()
+    .collect();
 
     // Combine into discovered peers state
     let mut peers = Vec::new();

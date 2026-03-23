@@ -796,8 +796,9 @@ mod tests {
             SemanticOperationKind::AcceptPendingChannelInvitation,
         );
         let first_instance_id = first_owner.instance_id.clone();
-        let _transfer = first_owner
-            .handoff_to_app_workflow(SemanticOperationTransferScope::AcceptPendingChannelInvitation);
+        let _transfer = first_owner.handoff_to_app_workflow(
+            SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+        );
 
         // Drain the first submission update.
         let first_submitted = rx

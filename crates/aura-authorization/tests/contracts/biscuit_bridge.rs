@@ -48,3 +48,49 @@ fn biscuit_bridge_extracts_token_facts() {
     assert!(!facts.is_empty());
     assert!(facts.iter().any(|f| f.contains("authority(")));
 }
+
+/// Namespaced capabilities with `:` remain valid Biscuit capability tokens.
+#[test]
+fn biscuit_bridge_accepts_namespaced_capability_tokens() {
+    let authority = aura_authorization::TokenAuthority::new(AuthorityId::new_from_entropy([3u8; 32]));
+    let recipient = authority.authority_id();
+    let token = authority
+        .create_token(recipient)
+        .unwrap_or_else(|err| panic!("failed to build invitation-capability token: {err:?}"));
+    let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
+
+    let allowed = bridge
+        .has_capability(&token, "invitation:decline")
+        .unwrap_or_else(|err| panic!("namespaced capability lookup failed unexpectedly: {err:?}"));
+    assert!(allowed);
+}
+
+/// Default member tokens must authorize runtime guard-chain send operations.
+#[test]
+fn biscuit_bridge_default_member_token_carries_guard_chain_send_capabilities() {
+    let authority =
+        aura_authorization::TokenAuthority::new(AuthorityId::new_from_entropy([4u8; 32]));
+    let recipient = authority.authority_id();
+    let token = authority
+        .create_token(recipient)
+        .unwrap_or_else(|err| panic!("failed to build default member token: {err:?}"));
+    let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
+
+    for capability in [
+        "flow_charge",
+        "amp:send",
+        "sync:request_digest",
+        "sync:request_ops",
+        "sync:push_ops",
+        "sync:announce_op",
+        "sync:push_op",
+        "message:send",
+    ] {
+        let allowed = bridge
+            .has_capability(&token, capability)
+            .unwrap_or_else(|err| {
+                panic!("default member token lookup failed for {capability}: {err:?}")
+            });
+        assert!(allowed, "default member token must allow {capability}");
+    }
+}

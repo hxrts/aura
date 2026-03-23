@@ -298,4 +298,51 @@ mod tests {
             helper_source.contains("rollback was incomplete; manual intervention may be required")
         );
     }
+
+    #[test]
+    fn terminal_events_hook_precedes_render_short_circuits() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+
+        let hook_start = shell_source
+            .find("hooks.use_terminal_events({")
+            .unwrap_or_else(|| panic!("missing terminal events hook"));
+        let exit_guard = shell_source
+            .find("if render_should_exit {")
+            .unwrap_or_else(|| panic!("missing render exit guard"));
+        let snapshot_guard = shell_source
+            .find("if render_short_circuit {")
+            .unwrap_or_else(|| panic!("missing render snapshot guard"));
+
+        assert!(
+            hook_start < exit_guard,
+            "terminal events hook must be registered before render exit short-circuits"
+        );
+        assert!(
+            hook_start < snapshot_guard,
+            "terminal events hook must be registered before render snapshot short-circuits"
+        );
+    }
+
+    #[test]
+    fn chat_state_update_clamps_stale_selected_channel_even_with_unresolved_committed_selection() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
+        let shell_source = std::fs::read_to_string(&shell_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+
+        let update_start = shell_source
+            .find("UiUpdate::ChatStateUpdated {")
+            .unwrap_or_else(|| panic!("missing ChatStateUpdated update arm"));
+        let next_arm = shell_source[update_start..]
+            .find("UiUpdate::TopicSet")
+            .map(|offset| update_start + offset)
+            .unwrap_or_else(|| panic!("missing TopicSet update arm"));
+        let update_branch = &shell_source[update_start..next_arm];
+
+        assert!(update_branch.contains("state.chat.selected_channel >= channel_count"));
+        assert!(!update_branch.contains("committed_selection.is_none()\n                                    && state.chat.selected_channel >= channel_count"));
+    }
 }

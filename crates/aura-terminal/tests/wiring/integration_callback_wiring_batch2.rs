@@ -58,7 +58,7 @@ async fn wait_for_dm_send_readiness(
     let _ = wait_for_signal(
         app_core,
         &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-        |facts: &Vec<AuthoritativeSemanticFact>| {
+        |facts: &aura_app::ui_contract::AuthoritativeSemanticFactsSnapshot| {
             let recipient_ready = facts.iter().any(|fact| {
                 matches!(
                     fact,

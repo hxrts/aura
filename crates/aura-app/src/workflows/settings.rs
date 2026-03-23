@@ -36,8 +36,7 @@ async fn refresh_settings_signal_from_runtime(
         let runtime = core
             .runtime()
             .cloned()
-            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
-            ;
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?;
         let authority_id = runtime.authority_id().to_string();
         (runtime, authority_id)
     };

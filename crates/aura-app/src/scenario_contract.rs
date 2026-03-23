@@ -738,10 +738,6 @@ impl IntentAction {
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
                     before_next_intent: vec![
-                        BarrierDeclaration::OperationState {
-                            operation_id: OperationId::account_create(),
-                            state: OperationState::Succeeded,
-                        },
                         BarrierDeclaration::Screen(ScreenId::Neighborhood),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
@@ -749,15 +745,11 @@ impl IntentAction {
                 post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Field(FieldId::AccountName),
                 selection_semantics: SelectionSemantics::None,
-                transitions: vec![
-                    AuthoritativeTransitionKind::Operation(OperationId::account_create()),
-                    AuthoritativeTransitionKind::Screen(ScreenId::Neighborhood),
-                ],
+                // Account creation reloads the bootstrap shell into the runtime-backed
+                // generation, so the authoritative postcondition is the new shell state
+                // rather than the pre-reload local operation handle.
+                transitions: vec![AuthoritativeTransitionKind::Screen(ScreenId::Neighborhood)],
                 terminal_success: vec![
-                    TerminalSuccessKind::OperationState {
-                        operation_id: OperationId::account_create(),
-                        state: OperationState::Succeeded,
-                    },
                     TerminalSuccessKind::Screen(ScreenId::Neighborhood),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
@@ -2265,10 +2257,6 @@ mod tests {
         assert_eq!(
             request.contract.barriers.before_next_intent,
             vec![
-                BarrierDeclaration::OperationState {
-                    operation_id: OperationId::account_create(),
-                    state: OperationState::Succeeded,
-                },
                 BarrierDeclaration::Screen(ScreenId::Neighborhood),
                 BarrierDeclaration::Readiness(UiReadiness::Ready),
             ]

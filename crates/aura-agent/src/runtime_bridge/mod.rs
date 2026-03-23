@@ -162,13 +162,14 @@ fn collect_authoritative_moderation_homes(
     candidates
 }
 
-async fn execute_with_effect_timeout<TTime, T, E, Fut>(
+async fn execute_with_effect_timeout<TTime, T, E, F, Fut>(
     time: &TTime,
     timeout: Duration,
-    operation: Fut,
+    operation: F,
 ) -> Result<T, TimeoutRunError<E>>
 where
     TTime: PhysicalTimeEffects + Sync,
+    F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
 {
     let started_at = time.physical_time().await.map_err(|error| {
@@ -178,7 +179,7 @@ where
     })?;
     let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout)
         .map_err(TimeoutRunError::Timeout)?;
-    execute_with_timeout_budget(time, &budget, || operation).await
+    execute_with_timeout_budget(time, &budget, operation).await
 }
 
 #[derive(Debug, Default)]
@@ -677,7 +678,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let envelope = TransportEnvelope {
             destination: peer,
             source: self.agent.authority_id(),
-            context,
+            // Chat-fact payloads carry the authoritative channel context already.
+            // Transport delivery should ride the established authority route so
+            // remote fanout does not depend on a context-specific descriptor.
+            context: default_context_id_for_authority(peer),
             payload,
             metadata,
             receipt: None,
@@ -687,6 +691,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             source = %self.agent.authority_id(),
             destination = %peer,
             context = %context,
+            transport_context = %envelope.context,
             reachable_device_count,
             mode = "authority_route",
             "send-chat-fact"
@@ -853,16 +858,39 @@ impl RuntimeBridge for AgentRuntimeBridge {
             if invitation.status != aura_invitation::InvitationStatus::Accepted {
                 continue;
             }
-            if invitation.sender_id != local_authority {
-                continue;
-            }
             let aura_invitation::InvitationType::Channel { home_id, .. } =
                 invitation.invitation_type
             else {
                 continue;
             };
+            tracing::debug!(
+                query_context = %context,
+                invitation_context = %invitation.context_id,
+                query_channel = %channel,
+                invitation_channel = %home_id,
+                receiver_id = %invitation.receiver_id,
+                invitation_id = %invitation.invitation_id,
+                "considering accepted channel invitation for authoritative participant augmentation"
+            );
             if invitation.context_id == context && home_id == channel {
-                participants.insert(invitation.receiver_id);
+                let augmented_peer = if invitation.sender_id == local_authority {
+                    Some(invitation.receiver_id)
+                } else if invitation.receiver_id == local_authority {
+                    Some(invitation.sender_id)
+                } else {
+                    None
+                };
+                if let Some(peer_id) = augmented_peer {
+                    participants.insert(peer_id);
+                }
+                tracing::debug!(
+                    query_context = %context,
+                    query_channel = %channel,
+                    receiver_id = %invitation.receiver_id,
+                    sender_id = %invitation.sender_id,
+                    invitation_id = %invitation.invitation_id,
+                    "augmented authoritative participant set from accepted channel invitation"
+                );
             }
         }
 
@@ -1062,7 +1090,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let timestamp = execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            async { Ok::<_, IntentError>(ChannelMembershipFact::random_timestamp(&effects).await) },
+            || async { Ok::<_, IntentError>(ChannelMembershipFact::random_timestamp(&effects).await) },
         )
         .await
         .map_err(|error| match error {
@@ -1081,7 +1109,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            effects.insert_relational_fact(membership.to_generic()),
+            || effects.insert_relational_fact(membership.to_generic()),
         )
         .await
         .map_err(|error| match error {
@@ -3010,7 +3038,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         );
 
         // Use compile-time safe export since we already have the invitation
-        let enrollment_code = invitation_service.export_invitation_with_sender_hint(&invitation);
+        let enrollment_code = invitation_service
+            .export_invitation_with_sender_hint(&invitation)
+            .map_err(|error| IntentError::internal_error(error.to_string()))?;
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
             ceremony_id: ceremony_id.clone(),
@@ -3649,15 +3679,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             match execute_with_effect_timeout(
                 &self.agent.runtime().effects(),
                 Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-                invitation_service.invite_to_channel(
-                    receiver,
-                    home_id,
-                    context_id,
-                    channel_name_hint,
-                    bootstrap,
-                    message,
-                    ttl_ms,
-                ),
+                || {
+                    invitation_service.invite_to_channel(
+                        receiver,
+                        home_id,
+                        context_id,
+                        channel_name_hint,
+                        bootstrap,
+                        message,
+                        ttl_ms,
+                    )
+                },
             )
             .await
             {
@@ -3680,16 +3712,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let invitation = execute_with_effect_timeout(
             &self.agent.runtime().effects(),
             Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-            invitation_service
-                .invite_to_channel(
-                    receiver,
-                    home_id,
-                    context_id,
-                    channel_name_hint,
-                    bootstrap,
-                    message,
-                    ttl_ms,
-                ),
+            || {
+                invitation_service
+                    .invite_to_channel(
+                        receiver,
+                        home_id,
+                        context_id,
+                        channel_name_hint,
+                        bootstrap,
+                        message,
+                        ttl_ms,
+                    )
+            },
         )
         .await
         .map_err(|error| match error {
@@ -3719,7 +3753,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let result = execute_with_effect_timeout(
             &self.agent.runtime().effects(),
             Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-            invitation_service.accept(&invitation_id),
+            || invitation_service.accept(&invitation_id),
         )
         .await
         .map_err(|error| match error {
@@ -3731,16 +3765,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         })?;
 
-        if result.success {
-            Ok(InvitationMutationOutcome {
-                invitation_id,
-                new_status: InvitationBridgeStatus::Accepted,
-            })
-        } else {
-            Err(IntentError::internal_error(result.error.unwrap_or_else(
-                || "Failed to accept invitation".to_string(),
-            )))
-        }
+        Ok(InvitationMutationOutcome {
+            invitation_id,
+            new_status: match result.new_status {
+                crate::handlers::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+                crate::handlers::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+                crate::handlers::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+                crate::handlers::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
+                crate::handlers::InvitationStatus::Cancelled => InvitationBridgeStatus::Cancelled,
+            },
+        })
     }
 
     async fn decline_invitation(
@@ -3761,16 +3795,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to decline invitation: {}", e))
             })?;
 
-        if result.success {
-            Ok(InvitationMutationOutcome {
-                invitation_id,
-                new_status: InvitationBridgeStatus::Declined,
-            })
-        } else {
-            Err(IntentError::internal_error(result.error.unwrap_or_else(
-                || "Failed to decline invitation".to_string(),
-            )))
-        }
+        Ok(InvitationMutationOutcome {
+            invitation_id,
+            new_status: match result.new_status {
+                crate::handlers::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+                crate::handlers::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+                crate::handlers::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+                crate::handlers::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
+                crate::handlers::InvitationStatus::Cancelled => InvitationBridgeStatus::Cancelled,
+            },
+        })
     }
 
     async fn cancel_invitation(
@@ -3791,16 +3825,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to cancel invitation: {}", e))
             })?;
 
-        if result.success {
-            Ok(InvitationMutationOutcome {
-                invitation_id,
-                new_status: InvitationBridgeStatus::Cancelled,
-            })
-        } else {
-            Err(IntentError::internal_error(result.error.unwrap_or_else(
-                || "Failed to cancel invitation".to_string(),
-            )))
-        }
+        Ok(InvitationMutationOutcome {
+            invitation_id,
+            new_status: match result.new_status {
+                crate::handlers::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
+                crate::handlers::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
+                crate::handlers::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
+                crate::handlers::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
+                crate::handlers::InvitationStatus::Cancelled => InvitationBridgeStatus::Cancelled,
+            },
+        })
     }
 
     async fn try_list_pending_invitations(&self) -> Result<Vec<InvitationInfo>, IntentError> {
@@ -4588,6 +4622,7 @@ mod tests {
         .expect("start receiver rendezvous manager");
 
         let sender_bridge = AgentRuntimeBridge::new(sender_agent.clone());
+        let receiver_bridge = AgentRuntimeBridge::new(receiver_agent.clone());
         let context = ContextId::new_from_entropy([46u8; 32]);
         let channel = ChannelId::from_bytes(hash(b"transported-channel-acceptance-visible"));
 
@@ -4631,7 +4666,8 @@ mod tests {
             .import_and_cache(
                 &crate::handlers::invitation_service::InvitationServiceApi::export_invitation(
                     &invitation,
-                ),
+                )
+                .expect("shareable invitation should serialize"),
             )
             .await
             .expect("import channel invitation");
@@ -4639,6 +4675,15 @@ mod tests {
             .accept(&imported.invitation_id)
             .await
             .expect("accept channel invitation");
+        let receiver_participants = receiver_bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect("receiver should list authoritative participants after accepting invite");
+        assert!(receiver_participants.contains(&receiver));
+        assert!(
+            receiver_participants.contains(&authority),
+            "receiver authoritative participant set should include inviter after accepting channel invitation; participants={receiver_participants:?}"
+        );
         crate::handlers::invitation::InvitationHandler::new(crate::core::AuthorityContext::new(
             receiver,
         ))
@@ -4758,7 +4803,9 @@ mod tests {
             expires_at: None,
             message: Some("Join shared-parity-lab".to_string()),
         };
-        let code = shareable.to_code();
+        let code = shareable
+            .to_code()
+            .expect("shareable invitation should serialize");
 
         let imported = invitations
             .import_and_cache(&code)

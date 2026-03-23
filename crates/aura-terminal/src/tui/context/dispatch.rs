@@ -71,7 +71,8 @@ impl AccountFilesHelper {
 
     pub fn mark_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
         std::fs::write(
-            self.base_path.join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME),
+            self.base_path
+                .join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME),
             b"ready",
         )
         .map_err(|error| {
@@ -83,7 +84,9 @@ impl AccountFilesHelper {
     }
 
     pub fn clear_bootstrap_runtime_handoff_committed(&self) -> TerminalResult<()> {
-        let path = self.base_path.join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME);
+        let path = self
+            .base_path
+            .join(BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME);
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

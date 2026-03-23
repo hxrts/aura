@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_lock::Mutex;
 use parking_lot::RwLock;
 
 use iocraft::prelude::*;
@@ -41,7 +40,8 @@ use crate::tui::types::{
     AuthorityInfo, Channel, Contact, Device, Invitation, Message, PendingRequest,
 };
 use crate::tui::updates::{
-    spawn_ordered_ui_updates, spawn_ui_update, UiUpdate, UiUpdatePublication, UiUpdateSender,
+    spawn_ordered_ui_updates, spawn_ui_update, OrderedUiUpdateGate, UiUpdate,
+    UiUpdatePublication, UiUpdateSender,
 };
 
 const DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES: u32 = 200;
@@ -127,6 +127,7 @@ fn bump_projection_version(version: &mut State<usize>) {
 
 fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
     vec![
+        RuntimeEventKind::InvitationAccepted,
         RuntimeEventKind::ContactLinkReady,
         RuntimeEventKind::PendingHomeInvitationReady,
         RuntimeEventKind::ChannelMembershipReady,
@@ -957,7 +958,7 @@ pub fn use_authoritative_semantic_facts_subscription(
 ) {
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let ordered_gate = Arc::new(Mutex::new(()));
+        let ordered_gate = Arc::new(OrderedUiUpdateGate::new());
         let tasks = app_ctx.tasks();
         async move {
             subscribe_signal_with_retry(
@@ -967,6 +968,7 @@ pub fn use_authoritative_semantic_facts_subscription(
                     let Some(ref tx) = update_tx else {
                         return;
                     };
+                    let revision = facts.revision;
                     let mut updates = Vec::new();
                     for (operation_id, instance_id, causality, status) in
                         bridged_operation_statuses(&facts)
@@ -984,6 +986,7 @@ pub fn use_authoritative_semantic_facts_subscription(
                         .collect::<Vec<_>>();
                     let facts = mapped.into_iter().map(|(_, fact)| fact).collect::<Vec<_>>();
                     updates.push(UiUpdate::RuntimeFactsUpdated {
+                        revision: Some(revision),
                         replace_kinds: authoritative_runtime_replace_kinds(),
                         facts,
                     });

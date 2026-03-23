@@ -124,7 +124,13 @@ fn discover_transient_residue_artifacts(env: &[String]) -> Vec<PathBuf> {
     let mut results = Vec::new();
     collect_named_artifacts(
         &transient_root,
-        &[".sock", ".pid", ".json", "clipboard.txt", ".bootstrap-runtime-handoff-ready"],
+        &[
+            ".sock",
+            ".pid",
+            ".json",
+            "clipboard.txt",
+            ".bootstrap-runtime-handoff-ready",
+        ],
         &mut results,
     );
     results

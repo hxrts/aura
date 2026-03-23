@@ -7,6 +7,8 @@ enum InvitationValidationError {
     NotPending { invitation_id: InvitationId },
     #[error("invitation {invitation_id} expired")]
     Expired { invitation_id: InvitationId },
+    #[error("invitation {invitation_id} not found")]
+    NotFound { invitation_id: InvitationId },
     #[error("only sender can cancel invitation {invitation_id}")]
     CancelNotSender { invitation_id: InvitationId },
 }
@@ -68,10 +70,16 @@ impl<'a> InvitationValidationHandler<'a> {
                 ));
             }
         } else {
-            tracing::debug!(
+            tracing::info!(
                 invitation_id = %invitation_id,
-                "Invitation not found in cache or storage, proceeding anyway"
+                "Rejecting invitation accept because the invitation is not present in cache or storage"
             );
+            return Err(AgentError::invalid(
+                InvitationValidationError::NotFound {
+                    invitation_id: invitation_id.clone(),
+                }
+                .to_string(),
+            ));
         }
 
         Ok(())

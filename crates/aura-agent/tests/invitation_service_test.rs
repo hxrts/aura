@@ -8,7 +8,7 @@
 //! - test_invite_as_guardian_via_agent: 220-229
 //! - test_invite_to_channel_via_agent: 230-239
 //! - test_accept_invitation_via_agent: 240-241
-//! - test_decline_invitation_via_agent: 242-243
+//! - test_decline_invitation_via_agent_surfaces_followup_failure: 242-243
 //! - test_cancel_invitation_via_agent: 244-245
 //! - test_list_pending_via_agent: 246-249
 //! - test_get_invitation_via_agent: 250-251
@@ -201,38 +201,50 @@ async fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
 #[tokio::test]
 async fn test_accept_invitation_via_agent() -> TestResult {
     // Entropy range: 240-241
-    let agent = create_test_agent(240).await?;
+    let sender = create_test_agent(240).await?;
+    let receiver = create_test_agent(241).await?;
 
-    let invitations = agent.invitations()?;
-
-    let receiver_id = AuthorityId::new_from_entropy([241u8; 32]);
-    let invitation = invitations
+    let sender_invitations = sender.invitations()?;
+    let receiver_invitations = receiver.invitations()?;
+    let receiver_id = receiver.authority_id();
+    let invitation = sender_invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
+    let code = sender_invitations
+        .export_code(&invitation.invitation_id)
+        .await?;
+    let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let result = invitations.accept(&invitation.invitation_id).await?;
+    let result = receiver_invitations.accept(&imported.invitation_id).await?;
 
-    assert!(result.success);
-    assert_eq!(result.new_status, Some(InvitationStatus::Accepted));
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
     Ok(())
 }
 
 #[tokio::test]
-async fn test_decline_invitation_via_agent() -> TestResult {
+async fn test_decline_invitation_via_agent_surfaces_followup_failure() -> TestResult {
     // Entropy range: 242-243
-    let agent = create_test_agent(242).await?;
+    let sender = create_test_agent(242).await?;
+    let receiver = create_test_agent(243).await?;
 
-    let invitations = agent.invitations()?;
-
-    let receiver_id = AuthorityId::new_from_entropy([243u8; 32]);
-    let invitation = invitations
+    let sender_invitations = sender.invitations()?;
+    let receiver_invitations = receiver.invitations()?;
+    let receiver_id = receiver.authority_id();
+    let invitation = sender_invitations
         .invite_as_contact(receiver_id, None, None, None)
         .await?;
+    let code = sender_invitations
+        .export_code(&invitation.invitation_id)
+        .await?;
+    let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let result = invitations.decline(&invitation.invitation_id).await?;
-
-    assert!(result.success);
-    assert_eq!(result.new_status, Some(InvitationStatus::Declined));
+    let error = receiver_invitations
+        .decline(&imported.invitation_id)
+        .await
+        .expect_err("contact decline should surface follow-up exchange failure");
+    assert!(error
+        .to_string()
+        .contains("decline invitation follow-up failed"));
     Ok(())
 }
 
@@ -253,8 +265,7 @@ async fn test_cancel_invitation_via_agent() -> TestResult {
 
     let result = invitations.cancel(&invitation.invitation_id).await?;
 
-    assert!(result.success);
-    assert_eq!(result.new_status, Some(InvitationStatus::Cancelled));
+    assert_eq!(result.new_status, InvitationStatus::Cancelled);
 
     // Verify it's no longer pending
     assert!(!invitations.is_pending(&invitation.invitation_id).await);

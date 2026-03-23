@@ -127,6 +127,7 @@ pub struct AuraEffectSystem {
     config: AgentConfig,
     authority_id: AuthorityId,
     execution_mode: ExecutionMode,
+    harness_mode_enabled: bool,
 
     // === Subsystems (grouped related fields) ===
     /// Cryptographic operations subsystem
@@ -304,6 +305,7 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let test_mode = execution_mode.is_deterministic();
+        let harness_mode_enabled = std::env::var_os("AURA_HARNESS_MODE").is_some();
 
         // === Build CryptoSubsystem ===
         let crypto_handler = match crypto_seed {
@@ -410,6 +412,7 @@ impl AuraEffectSystem {
             config,
             authority_id: authority,
             execution_mode,
+            harness_mode_enabled,
             crypto,
             transport,
             journal,
@@ -454,6 +457,11 @@ impl AuraEffectSystem {
     /// Check if the effect system is in explicit test mode (not simulation).
     pub fn is_test_mode(&self) -> bool {
         matches!(self.execution_mode, ExecutionMode::Testing)
+    }
+
+    /// Check whether harness diagnostics are enabled for this runtime instance.
+    pub fn harness_mode_enabled(&self) -> bool {
+        self.harness_mode_enabled
     }
 
     fn ensure_mock_network(&self) -> Result<(), NetworkError> {
@@ -725,7 +733,7 @@ impl AuraEffectSystem {
             }
         };
 
-        if std::env::var_os("AURA_HARNESS_MODE").is_some() {
+        if self.harness_mode_enabled() {
             let time = PhysicalTimeHandler::new();
             if let Ok(started_at) = time.physical_time().await {
                 if let Ok(budget) = TimeoutBudget::from_start_and_timeout(
@@ -1528,6 +1536,20 @@ impl AuraEffectSystem {
             capability("delegate");
             capability("moderator");
             capability("flow_charge");
+            capability("amp:send");
+            capability("sync:request_digest");
+            capability("sync:request_ops");
+            capability("sync:push_ops");
+            capability("sync:announce_op");
+            capability("sync:push_op");
+            capability("message:send");
+            capability("invitation:send");
+            capability("invitation:accept");
+            capability("invitation:decline");
+            capability("invitation:cancel");
+            capability("invitation:guardian");
+            capability("invitation:channel");
+            capability("invitation:device");
         "#
         )
         .build(&keypair);

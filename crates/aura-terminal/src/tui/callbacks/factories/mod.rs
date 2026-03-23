@@ -24,13 +24,12 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::{EffectCommand, OpResponse};
 use crate::tui::semantic_lifecycle::{
-    apply_handed_off_terminal_status,
-    LocalTerminalOperationOwner, SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
+    apply_handed_off_terminal_status, LocalTerminalOperationOwner, SemanticOperationTransferScope,
+    WorkflowHandoffOperationOwner,
 };
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
-use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::strong_command::{
     classify_terminal_execution_error, CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
@@ -312,38 +311,10 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
     });
 }
 
-fn invitation_import_runtime_fact_update(
-    invitation: Option<&aura_app::ui::types::InvitationInfo>,
-) -> Option<UiUpdate> {
-    let invitation = invitation?;
-    if matches!(
-        invitation.invitation_type,
-        InvitationBridgeType::Contact { .. }
-    ) {
-        Some(UiUpdate::RuntimeFactsUpdated {
-            replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
-            facts: vec![RuntimeFact::InvitationAccepted {
-                invitation_kind: InvitationFactKind::Contact,
-                authority_id: Some(invitation.sender_id.to_string()),
-                operation_state: Some(OperationState::Succeeded),
-            }],
-        })
-    } else {
-        None
-    }
-}
-
-fn invitation_import_success_updates(
-    code: &str,
-    invitation: Option<&aura_app::ui::types::InvitationInfo>,
-) -> Vec<UiUpdate> {
-    let mut updates = vec![UiUpdate::InvitationImported {
+fn invitation_import_success_updates(code: &str) -> Vec<UiUpdate> {
+    vec![UiUpdate::InvitationImported {
         invitation_code: code.to_string(),
-    }];
-    if let Some(update) = invitation_import_runtime_fact_update(invitation) {
-        updates.push(update);
-    }
-    updates
+    }]
 }
 
 async fn run_invitation_import_flow(
@@ -352,63 +323,34 @@ async fn run_invitation_import_flow(
     code: String,
     operation: WorkflowHandoffOperationOwner,
 ) {
-    let operation_instance_id = operation.harness_handle().instance_id().clone();
-    let transfer =
-        operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
-
     let app_core = ctx.app_core_raw().clone();
-    let invitation = import_invitation_details(&app_core, &code).await.ok();
-    match ctx
-        .dispatch(EffectCommand::ImportInvitation { code: code.clone() })
-        .await
-    {
-        Ok(_) => {
-            // Terminal settlement first (§Semantic Owner Protocol step 4).
-            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
-                causality: None,
-                status: SemanticOperationStatus::new(
-                    transfer.kind(),
-                    SemanticOperationPhase::Succeeded,
-                ),
-            };
-            let _ = apply_handed_off_terminal_status(
-                &app_core,
-                &tx,
-                transfer.operation_id().clone(),
-                operation_instance_id,
-                transfer.kind(),
-                Some(terminal),
-            )
-            .await;
+    let operation_id = OperationId::invitation_accept();
+    let kind = SemanticOperationKind::AcceptContactInvitation;
+    let operation_instance_id = operation.harness_handle().instance_id().clone();
+    let workflow_instance_id = operation.workflow_instance_id();
+    let _ = operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
-            // Best-effort UI enrichment after terminal settlement.
-            for update in invitation_import_success_updates(
-                &code,
-                invitation.as_ref().map(|handle| handle.info()),
-            ) {
-                send_ui_update_required(&tx, update).await;
-            }
-        }
+    let invitation = match import_invitation_details(&app_core, &code).await {
+        Ok(invitation) => invitation,
         Err(error) => {
-            tracing::error!(error = %error, "ImportInvitation dispatch failed");
-            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
-                causality: None,
-                status: SemanticOperationStatus::failed(
-                    transfer.kind(),
-                    SemanticOperationError::new(
-                        SemanticFailureDomain::Command,
-                        SemanticFailureCode::InternalError,
-                    )
-                    .with_detail(error.to_string()),
-                ),
-            };
+            tracing::error!(error = %error, "import_invitation_details failed");
             let _ = apply_handed_off_terminal_status(
                 &app_core,
                 &tx,
-                transfer.operation_id().clone(),
-                operation_instance_id.clone(),
-                transfer.kind(),
-                Some(terminal),
+                operation_id,
+                operation_instance_id,
+                kind,
+                Some(aura_app::ui_contract::WorkflowTerminalStatus {
+                    causality: None,
+                    status: SemanticOperationStatus::failed(
+                        kind,
+                        SemanticOperationError::new(
+                            SemanticFailureDomain::Command,
+                            SemanticFailureCode::InternalError,
+                        )
+                        .with_detail(error.to_string()),
+                    ),
+                }),
             )
             .await;
             send_ui_update_required(
@@ -417,6 +359,53 @@ async fn run_invitation_import_flow(
                     "invitation",
                     format!("Import invitation failed: {error}"),
                 )),
+            )
+            .await;
+            return;
+        }
+    };
+
+    match aura_app::ui::workflows::invitation::accept_imported_invitation_with_terminal_status(
+        &app_core,
+        invitation,
+        workflow_instance_id,
+    )
+    .await
+    {
+        WorkflowTerminalOutcome {
+            result: Ok(()),
+            terminal,
+        } => {
+            for update in invitation_import_success_updates(&code) {
+                send_ui_update_required(&tx, update).await;
+            }
+            let _ = apply_handed_off_terminal_status(
+                &app_core,
+                &tx,
+                operation_id,
+                operation_instance_id,
+                kind,
+                terminal,
+            )
+            .await;
+        }
+        WorkflowTerminalOutcome {
+            result: Err(error),
+            terminal,
+        } => {
+            let _ = apply_handed_off_terminal_status(
+                &app_core,
+                &tx,
+                operation_id,
+                operation_instance_id,
+                kind,
+                terminal,
+            )
+            .await;
+            emit_error_toast(
+                &tx,
+                "invitation",
+                format!("Import invitation failed: {error}"),
             )
             .await;
         }
@@ -652,66 +641,16 @@ impl CallbackRegistry {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use aura_app::ui::types::{InvitationBridgeStatus, InvitationInfo};
-
-    fn authority(value: &str) -> AuthorityId {
-        value.parse().expect("valid authority id")
-    }
-
-    fn contact_invitation() -> InvitationInfo {
-        InvitationInfo {
-            invitation_id: "inv-contact".into(),
-            sender_id: authority("authority-00000000-0000-0000-0000-000000000001"),
-            receiver_id: authority("authority-00000000-0000-0000-0000-000000000002"),
-            invitation_type: InvitationBridgeType::Contact { nickname: None },
-            status: InvitationBridgeStatus::Pending,
-            created_at_ms: 0,
-            expires_at_ms: None,
-            message: None,
-        }
-    }
-
-    fn channel_invitation() -> InvitationInfo {
-        InvitationInfo {
-            invitation_id: "inv-channel".into(),
-            sender_id: authority("authority-00000000-0000-0000-0000-000000000001"),
-            receiver_id: authority("authority-00000000-0000-0000-0000-000000000002"),
-            invitation_type: InvitationBridgeType::Channel {
-                home_id: "home-test".to_string(),
-                context_id: None,
-                nickname_suggestion: None,
-            },
-            status: InvitationBridgeStatus::Pending,
-            created_at_ms: 0,
-            expires_at_ms: None,
-            message: None,
-        }
-    }
 
     #[test]
-    fn invitation_import_success_updates_emit_import_before_runtime_fact() {
-        let updates = invitation_import_success_updates("code-123", Some(&contact_invitation()));
-
-        assert!(matches!(
-            updates.first(),
-            Some(UiUpdate::InvitationImported { invitation_code })
-                if invitation_code == "code-123"
-        ));
-        assert!(matches!(
-            updates.get(1),
-            Some(UiUpdate::RuntimeFactsUpdated { .. })
-        ));
-    }
-
-    #[test]
-    fn invitation_import_success_updates_skip_runtime_fact_for_non_contact_invites() {
-        let updates = invitation_import_success_updates("code-456", Some(&channel_invitation()));
+    fn invitation_import_success_updates_emit_import_notice() {
+        let updates = invitation_import_success_updates("code-123");
 
         assert_eq!(updates.len(), 1);
         assert!(matches!(
             updates.first(),
             Some(UiUpdate::InvitationImported { invitation_code })
-                if invitation_code == "code-456"
+                if invitation_code == "code-123"
         ));
     }
 

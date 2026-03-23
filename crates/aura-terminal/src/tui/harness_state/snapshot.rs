@@ -376,8 +376,10 @@ fn build_authoritative_ui_snapshot(
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
-    let readiness =
-        authoritative_harness_snapshot_readiness(state.should_exit, state.pending_runtime_bootstrap);
+    let readiness = authoritative_harness_snapshot_readiness(
+        state.should_exit,
+        state.pending_runtime_bootstrap,
+    );
 
     let snapshot = UiSnapshot {
         screen,
@@ -502,10 +504,7 @@ pub fn maybe_export_ui_snapshot(
     // Build a canonical snapshot with a stable placeholder revision so identical
     // semantic state deduplicates cleanly instead of generating a fresh revision
     // and flooding the harness bridge on every render.
-    let snapshot = build_authoritative_ui_snapshot(
-        state,
-        semantic_inputs,
-        next_projection_revision(None),
-    )?;
+    let snapshot =
+        build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
     publish_snapshot(&snapshot)
 }

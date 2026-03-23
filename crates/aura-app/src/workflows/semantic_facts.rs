@@ -15,7 +15,8 @@ use crate::signal_defs::{
     HOMES_SIGNAL_NAME,
 };
 use crate::ui_contract::{
-    AuthoritativeSemanticFact, AuthoritativeSemanticFactKind, OperationId, OperationInstanceId,
+    next_projection_revision, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
+    AuthoritativeSemanticFactsSnapshot, OperationId, OperationInstanceId,
     SemanticOperationCausality, SemanticOperationError, SemanticOperationKind,
     SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
 };
@@ -438,16 +439,27 @@ impl SemanticWorkflowOwner {
                 )
             })
         };
-
-        Ok(match publication {
-            Some(publication) => publication.into_fact(),
-            None => operation_phase_fact(
-                self.operation_id.clone(),
-                self.instance_id.clone(),
-                self.kind,
-                SemanticOperationPhase::Succeeded,
+        let (causality, fact) = match publication {
+            Some(publication) => {
+                let causality = publication.causality;
+                (causality, publication.into_fact())
+            }
+            None => (
+                None,
+                operation_phase_fact(
+                    self.operation_id.clone(),
+                    self.instance_id.clone(),
+                    self.kind,
+                    SemanticOperationPhase::Succeeded,
+                ),
             ),
-        })
+        };
+        self.record_terminal_status(
+            causality,
+            SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded),
+        )
+        .await;
+        Ok(fact)
     }
 
     pub(in crate::workflows) async fn terminal_success_fact_with<Proof>(
@@ -951,7 +963,10 @@ where
     if let Err(error) = emit_signal(
         app_core,
         &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
-        updated_facts,
+        AuthoritativeSemanticFactsSnapshot {
+            revision: next_projection_revision(None),
+            facts: updated_facts,
+        },
         AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME,
     )
     .await
@@ -1149,6 +1164,7 @@ mod tests {
     use crate::workflows::signals::read_signal_or_default;
     use crate::{AppConfig, AppCore};
     use aura_core::types::identifiers::AuthorityId;
+    use aura_core::InvitationId;
 
     fn runtime_backed_test_app_core() -> Arc<RwLock<AppCore>> {
         let authority = AuthorityId::new_from_entropy([42; 32]);
@@ -1363,6 +1379,44 @@ mod tests {
                 SemanticOperationPhase::WorkflowDispatched,
             ),
         }));
+    }
+
+    #[tokio::test]
+    async fn batched_terminal_success_fact_records_owner_terminal_status() {
+        let app_core = runtime_backed_test_app_core();
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let owner = SemanticWorkflowOwner::new(
+            &app_core,
+            OperationId::invitation_accept(),
+            Some(OperationInstanceId(
+                "tui-op-invitation_accept-batched".to_string(),
+            )),
+            SemanticOperationKind::AcceptContactInvitation,
+        );
+
+        let _fact = owner
+            .terminal_success_fact_with(issue_invitation_accepted_or_materialized_proof(
+                InvitationId::new("batched-terminal-status"),
+            ))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        assert_eq!(
+            owner.terminal_status().await,
+            Some(WorkflowTerminalStatus {
+                causality: Some(SemanticOperationCausality::new(
+                    OwnerEpoch::new(0),
+                    PublicationSequence::new(0),
+                )),
+                status: SemanticOperationStatus::new(
+                    SemanticOperationKind::AcceptContactInvitation,
+                    SemanticOperationPhase::Succeeded,
+                ),
+            })
+        );
     }
 
     #[test]

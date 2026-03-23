@@ -10,7 +10,9 @@
 //!
 //! Note: LAN discovery is tested separately as it requires actual UDP sockets.
 
-use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvitation};
+use aura_agent::handlers::{
+    InvitationServiceApi, InvitationStatus, InvitationType, ShareableInvitation,
+};
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
 use aura_core::effects::amp::ChannelCreateParams;
 use aura_core::effects::AmpChannelEffects;
@@ -75,7 +77,9 @@ async fn test_invitation_code_roundtrip() -> TestResult {
     };
 
     // Encode to shareable code
-    let code = shareable.to_code();
+    let code = shareable
+        .to_code()
+        .expect("shareable invitation should serialize");
     assert!(code.starts_with("aura:v1:"));
 
     // Decode back
@@ -138,7 +142,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
         .accept(&invitation.invitation_id)
         .await?;
 
-    assert!(accept_result.success);
+    assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
     Ok(())
 }
 
@@ -315,7 +319,7 @@ async fn test_complete_beta_flow() -> TestResult {
 
     // === Step 4: Alice accepts (simulating invitation acknowledgment) ===
     let result = alice_invitations.accept(&invitation.invitation_id).await?;
-    assert!(result.success);
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
 
     // === Step 5: Chat operations (single-agent for testing) ===
     let alice_chat = agent_alice.chat()?;
@@ -460,7 +464,7 @@ async fn test_invitation_decline() -> TestResult {
     // Decline it
     let result = invitations.decline(&invitation.invitation_id).await?;
 
-    assert!(result.success);
+    assert_eq!(result.new_status, InvitationStatus::Declined);
 
     // No longer pending
     assert!(!invitations.is_pending(&invitation.invitation_id).await);
@@ -487,7 +491,7 @@ async fn test_invitation_cancel() -> TestResult {
     // Cancel it
     let result = invitations.cancel(&invitation.invitation_id).await?;
 
-    assert!(result.success);
+    assert_eq!(result.new_status, InvitationStatus::Cancelled);
 
     // No longer in pending list
     let pending = invitations.list_pending().await;

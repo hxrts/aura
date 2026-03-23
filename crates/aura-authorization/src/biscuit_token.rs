@@ -46,6 +46,21 @@ impl TokenAuthority {
             capability("execute");
             capability("delegate");
             capability("moderator");
+            capability("flow_charge");
+            capability("amp:send");
+            capability("sync:request_digest");
+            capability("sync:request_ops");
+            capability("sync:push_ops");
+            capability("sync:announce_op");
+            capability("sync:push_op");
+            capability("message:send");
+            capability("invitation:send");
+            capability("invitation:accept");
+            capability("invitation:decline");
+            capability("invitation:cancel");
+            capability("invitation:guardian");
+            capability("invitation:channel");
+            capability("invitation:device");
         "#
         )
         .build(&self.root_keypair)?;

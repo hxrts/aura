@@ -53,9 +53,10 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             }
         }
 
-        if let Some(shareable) =
-            InvitationHandler::load_imported_invitation(effects, own_id, invitation_id).await
+        if let Some(stored) =
+            InvitationHandler::load_imported_invitation(effects, own_id, invitation_id, None).await
         {
+            let shareable = stored.shareable;
             if let InvitationType::DeviceEnrollment {
                 subject_authority,
                 device_id,
@@ -153,52 +154,69 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 to_vec(&confirm).map_err(|error| AgentError::internal(error.to_string()))?,
             );
 
-            let loop_result = loop {
-                let round = session
-                    .advance_round_until_receive(
-                        "Initiator",
-                        &peer_roles,
-                        InvitationHandler::is_transport_no_message,
-                    )
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
+            let budget = invitation_timeout_budget(
+                effects.as_ref(),
+                "device_enrollment_initiator_vm",
+                INVITATION_VM_LOOP_TIMEOUT_MS,
+            )
+            .await?;
 
-                if let Some(blocked) = round.blocked_receive {
-                    session
-                        .inject_blocked_receive(&blocked)
+            let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+                loop {
+                    let round = session
+                        .advance_round_until_receive(
+                            "Initiator",
+                            &peer_roles,
+                            InvitationHandler::is_transport_no_message,
+                        )
+                        .await
                         .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
 
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Deferred => break Ok(()),
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "device enrollment initiator VM timed out while waiting for receive"
-                                .to_string(),
-                        ));
+                    if let Some(blocked) = round.blocked_receive {
+                        session
+                            .inject_blocked_receive(&blocked)
+                            .map_err(|error| AgentError::internal(error.to_string()))?;
+                        continue;
                     }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "device enrollment initiator VM cancelled while waiting for receive"
-                                .to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Delivered => {}
-                }
 
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "device enrollment initiator VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
+                    match round.host_wait_status {
+                        AuraVmHostWaitStatus::Deferred => break Ok(()),
+                        AuraVmHostWaitStatus::Idle => {}
+                        AuraVmHostWaitStatus::TimedOut => {
+                            break Err(AgentError::internal(
+                                "device enrollment initiator VM timed out while waiting for receive"
+                                    .to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Cancelled => {
+                            break Err(AgentError::internal(
+                                "device enrollment initiator VM cancelled while waiting for receive"
+                                    .to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Delivered => {}
+                    }
+
+                    match round.step {
+                        StepResult::AllDone => break Ok(()),
+                        StepResult::Continue => {}
+                        StepResult::Stuck => {
+                            break Err(AgentError::internal(
+                                "device enrollment initiator VM became stuck without a pending receive"
+                                    .to_string(),
+                            ));
+                        }
                     }
                 }
-            };
+            })
+            .await
+            .map_err(|error| match error {
+                TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                    "device enrollment initiator VM exceeded {}ms overall timeout",
+                    budget.timeout_ms()
+                )),
+                TimeoutRunError::Operation(error) => error,
+            });
 
             let _ = session.close().await;
             loop_result
@@ -256,47 +274,64 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                 to_vec(&accept).map_err(|error| AgentError::internal(error.to_string()))?,
             );
 
-            let loop_result = loop {
-                let round = session
-                    .advance_round("Invitee", &peer_roles)
-                    .await
-                    .map_err(|error| AgentError::internal(error.to_string()))?;
+            let budget = invitation_timeout_budget(
+                effects.as_ref(),
+                "device_enrollment_invitee_vm",
+                INVITATION_VM_LOOP_TIMEOUT_MS,
+            )
+            .await?;
 
-                if let Some(blocked) = round.blocked_receive {
-                    session
-                        .inject_blocked_receive(&blocked)
+            let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+                loop {
+                    let round = session
+                        .advance_round("Invitee", &peer_roles)
+                        .await
                         .map_err(|error| AgentError::internal(error.to_string()))?;
-                    continue;
-                }
 
-                match round.host_wait_status {
-                    AuraVmHostWaitStatus::Idle => {}
-                    AuraVmHostWaitStatus::TimedOut => {
-                        break Err(AgentError::internal(
-                            "device enrollment invitee VM timed out while waiting for receive"
-                                .to_string(),
-                        ));
+                    if let Some(blocked) = round.blocked_receive {
+                        session
+                            .inject_blocked_receive(&blocked)
+                            .map_err(|error| AgentError::internal(error.to_string()))?;
+                        continue;
                     }
-                    AuraVmHostWaitStatus::Cancelled => {
-                        break Err(AgentError::internal(
-                            "device enrollment invitee VM cancelled while waiting for receive"
-                                .to_string(),
-                        ));
-                    }
-                    AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
-                }
 
-                match round.step {
-                    StepResult::AllDone => break Ok(()),
-                    StepResult::Continue => {}
-                    StepResult::Stuck => {
-                        break Err(AgentError::internal(
-                            "device enrollment invitee VM became stuck without a pending receive"
-                                .to_string(),
-                        ));
+                    match round.host_wait_status {
+                        AuraVmHostWaitStatus::Idle => {}
+                        AuraVmHostWaitStatus::TimedOut => {
+                            break Err(AgentError::internal(
+                                "device enrollment invitee VM timed out while waiting for receive"
+                                    .to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Cancelled => {
+                            break Err(AgentError::internal(
+                                "device enrollment invitee VM cancelled while waiting for receive"
+                                    .to_string(),
+                            ));
+                        }
+                        AuraVmHostWaitStatus::Deferred | AuraVmHostWaitStatus::Delivered => {}
+                    }
+
+                    match round.step {
+                        StepResult::AllDone => break Ok(()),
+                        StepResult::Continue => {}
+                        StepResult::Stuck => {
+                            break Err(AgentError::internal(
+                                "device enrollment invitee VM became stuck without a pending receive"
+                                    .to_string(),
+                            ));
+                        }
                     }
                 }
-            };
+            })
+            .await
+            .map_err(|error| match error {
+                TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+                    "device enrollment invitee VM exceeded {}ms overall timeout",
+                    budget.timeout_ms()
+                )),
+                TimeoutRunError::Operation(error) => error,
+            });
 
             let _ = session.close().await;
             loop_result

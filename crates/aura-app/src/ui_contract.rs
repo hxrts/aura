@@ -8,6 +8,7 @@
 use aura_core::{OwnerEpoch, PublicationSequence};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::scenario_contract::SemanticCommandValue;
@@ -206,6 +207,7 @@ impl ChannelBindingWitness {
 pub struct AcceptedPendingChannelBinding {
     pub invitation_id: String,
     pub binding: ChannelBindingWitness,
+    pub channel_name: Option<String>,
 }
 
 impl ModalId {
@@ -1013,6 +1015,7 @@ impl SemanticOperationCausality {
 #[serde(rename_all = "snake_case")]
 pub enum AuthoritativeSemanticFactKind {
     OperationStatus,
+    InvitationAccepted,
     ContactLinkReady,
     PendingHomeInvitationReady,
     ChannelMembershipReady,
@@ -1030,6 +1033,11 @@ pub enum AuthoritativeSemanticFact {
         instance_id: Option<OperationInstanceId>,
         causality: Option<SemanticOperationCausality>,
         status: SemanticOperationStatus,
+    },
+    InvitationAccepted {
+        invitation_kind: InvitationFactKind,
+        authority_id: Option<String>,
+        operation_state: Option<OperationState>,
     },
     ContactLinkReady {
         authority_id: String,
@@ -1064,6 +1072,7 @@ impl AuthoritativeSemanticFact {
     pub fn kind(&self) -> AuthoritativeSemanticFactKind {
         match self {
             Self::OperationStatus { .. } => AuthoritativeSemanticFactKind::OperationStatus,
+            Self::InvitationAccepted { .. } => AuthoritativeSemanticFactKind::InvitationAccepted,
             Self::ContactLinkReady { .. } => AuthoritativeSemanticFactKind::ContactLinkReady,
             Self::PendingHomeInvitationReady => {
                 AuthoritativeSemanticFactKind::PendingHomeInvitationReady
@@ -1096,6 +1105,14 @@ impl AuthoritativeSemanticFact {
                     .as_ref()
                     .map(|value| value.0.as_str())
                     .unwrap_or("*")
+            ),
+            Self::InvitationAccepted {
+                invitation_kind,
+                authority_id,
+                ..
+            } => format!(
+                "invitation_accepted:{invitation_kind:?}:{}",
+                authority_id.as_deref().unwrap_or("*")
             ),
             Self::ContactLinkReady { authority_id, .. } => {
                 format!("contact_link_ready:{authority_id}")
@@ -1152,6 +1169,18 @@ impl AuthoritativeSemanticFact {
     #[must_use]
     pub fn runtime_fact_bridge(&self) -> Option<(RuntimeEventKind, RuntimeFact)> {
         match self {
+            Self::InvitationAccepted {
+                invitation_kind,
+                authority_id,
+                operation_state,
+            } => Some((
+                RuntimeEventKind::InvitationAccepted,
+                RuntimeFact::InvitationAccepted {
+                    invitation_kind: *invitation_kind,
+                    authority_id: authority_id.clone(),
+                    operation_state: *operation_state,
+                },
+            )),
             Self::ContactLinkReady {
                 authority_id,
                 contact_count,
@@ -1709,6 +1738,15 @@ pub struct ProjectionRevision {
     pub render_seq: Option<u64>,
 }
 
+impl Default for ProjectionRevision {
+    fn default() -> Self {
+        Self {
+            semantic_seq: 0,
+            render_seq: None,
+        }
+    }
+}
+
 impl ProjectionRevision {
     #[must_use]
     pub const fn has_sequence_metadata(self) -> bool {
@@ -1743,6 +1781,29 @@ pub fn next_projection_revision(render_seq: Option<u64>) -> ProjectionRevision {
     ProjectionRevision {
         semantic_seq: counter,
         render_seq,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoritativeSemanticFactsSnapshot {
+    pub revision: ProjectionRevision,
+    pub facts: Vec<AuthoritativeSemanticFact>,
+}
+
+impl Default for AuthoritativeSemanticFactsSnapshot {
+    fn default() -> Self {
+        Self {
+            revision: ProjectionRevision::default(),
+            facts: Vec::new(),
+        }
+    }
+}
+
+impl Deref for AuthoritativeSemanticFactsSnapshot {
+    type Target = [AuthoritativeSemanticFact];
+
+    fn deref(&self) -> &Self::Target {
+        &self.facts
     }
 }
 
@@ -3446,10 +3507,10 @@ mod tests {
         validate_render_convergence, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,
         BrowserHarnessBridgeMethodKind, ChannelFactKey, ConfirmationState, ControlId, FieldId,
         FlowAvailability, FrontendExecutionBoundaryKind, FrontendSpecificSettingsSectionId,
-        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, ListId,
-        ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId,
-        OperationSnapshot, OperationState, ParityUiIdentity, ProjectionRevision,
-        QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
+        HarnessModeChangeKind, HarnessShellMode, HarnessShellStructureSnapshot, InvitationFactKind,
+        ListId, ListItemSnapshot, ListSnapshot, MessageSnapshot, ModalId, OperationId,
+        OperationInstanceId, OperationSnapshot, OperationState, ParityUiIdentity,
+        ProjectionRevision, QuiescenceSnapshot, RenderHeartbeat, RuntimeEventId, RuntimeEventKind,
         RuntimeEventSnapshot, RuntimeFact, ScreenId, SelectionSnapshot, SemanticFailureCode,
         SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
         SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
@@ -3758,6 +3819,27 @@ mod tests {
                 RuntimeFact::MessageDeliveryReady {
                     channel: ChannelFactKey::named("shared"),
                     member_count: 2,
+                },
+            ))
+        );
+    }
+
+    #[test]
+    fn authoritative_semantic_fact_runtime_fact_bridge_maps_invitation_acceptance() {
+        let fact = AuthoritativeSemanticFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: Some("authority:peer".to_string()),
+            operation_state: Some(OperationState::Succeeded),
+        };
+
+        assert_eq!(
+            fact.runtime_fact_bridge(),
+            Some((
+                RuntimeEventKind::InvitationAccepted,
+                RuntimeFact::InvitationAccepted {
+                    invitation_kind: InvitationFactKind::Contact,
+                    authority_id: Some("authority:peer".to_string()),
+                    operation_state: Some(OperationState::Succeeded),
                 },
             ))
         );

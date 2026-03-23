@@ -2,6 +2,8 @@ use super::*;
 use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 
+const CONTACT_INVITATION_ACCEPTANCE_PROCESS_TIMEOUT_MS: u64 = 20_000;
+
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,
 }
@@ -85,10 +87,8 @@ impl<'a> InvitationContactHandler<'a> {
             receipt: None,
         };
 
-        effects
-            .send_envelope(envelope)
-            .await
-            .map_err(|e| AgentError::effects(e.to_string()))?;
+        attempt_network_send_envelope(effects, "contact invitation acceptance send", envelope)
+            .await?;
 
         Ok(())
     }
@@ -99,367 +99,424 @@ impl<'a> InvitationContactHandler<'a> {
     ) -> AgentResult<usize> {
         let mut processed = 0usize;
         let mut deferred_envelopes = Vec::new();
+        let mut in_flight_envelope: Option<TransportEnvelope> = None;
         let mut scanned = 0usize;
         const MAX_SCANS_PER_TICK: usize = 4096;
+        let budget = invitation_timeout_budget(
+            effects.as_ref(),
+            "process_contact_invitation_acceptances",
+            CONTACT_INVITATION_ACCEPTANCE_PROCESS_TIMEOUT_MS,
+        )
+        .await?;
 
-        while scanned < MAX_SCANS_PER_TICK {
-            let envelope = match effects.receive_envelope().await {
-                Ok(env) => env,
-                Err(TransportError::NoMessage) => break,
-                Err(e) => {
-                    tracing::warn!("Error receiving contact invitation acceptance: {}", e);
-                    break;
-                }
-            };
-            scanned = scanned.saturating_add(1);
+        let process_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+            while scanned < MAX_SCANS_PER_TICK {
+                let envelope = match effects.receive_envelope().await {
+                    Ok(env) => env,
+                    Err(TransportError::NoMessage) => break,
+                    Err(e) => {
+                        tracing::warn!("Error receiving contact invitation acceptance: {}", e);
+                        break;
+                    }
+                };
+                scanned = scanned.saturating_add(1);
+                in_flight_envelope = Some(envelope);
 
-            let Some(content_type) = envelope.metadata.get("content-type") else {
-                deferred_envelopes.push(envelope);
-                continue;
-            };
+                let Some(content_type) = in_flight_envelope
+                    .as_ref()
+                    .and_then(|envelope| envelope.metadata.get("content-type"))
+                    .cloned()
+                else {
+                    if let Some(envelope) = in_flight_envelope.take() {
+                        deferred_envelopes.push(envelope);
+                    }
+                    continue;
+                };
 
-            if content_type == CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
-                let acceptance: ContactInvitationAcceptance =
-                    match serde_json::from_slice(&envelope.payload) {
-                        Ok(data) => data,
-                        Err(e) => {
+                if content_type == CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
+                    let acceptance: ContactInvitationAcceptance = match in_flight_envelope
+                        .as_ref()
+                        .map(|envelope| serde_json::from_slice(&envelope.payload))
+                    {
+                        Some(Ok(data)) => data,
+                        Some(Err(e)) => {
                             tracing::warn!(
                                 error = %e,
                                 "Invalid contact invitation acceptance payload"
                             );
+                            in_flight_envelope = None;
                             continue;
                         }
+                        None => continue,
                     };
 
-                if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
-                    continue;
-                }
+                    if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
+                        in_flight_envelope = None;
+                        continue;
+                    }
 
-                let acceptor_addr = envelope.metadata.get("acceptor-addr").map(String::as_str);
-                let acceptor_device_id = envelope
-                    .metadata
-                    .get("acceptor-device-id")
-                    .and_then(|value| value.parse().ok());
-                if acceptor_addr.is_some() || acceptor_device_id.is_some() {
-                    let now_ms = effects.current_timestamp().await.unwrap_or(0);
-                    self.handler
-                        .cache_peer_descriptor_for_peer(
-                            effects.as_ref(),
-                            acceptance.acceptor_id,
-                            acceptor_device_id,
-                            acceptor_addr,
-                            now_ms,
-                        )
-                        .await;
-                }
+                    let acceptor_addr = in_flight_envelope
+                        .as_ref()
+                        .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
+                        .map(String::as_str);
+                    let acceptor_device_id = in_flight_envelope
+                        .as_ref()
+                        .and_then(|envelope| envelope.metadata.get("acceptor-device-id"))
+                        .and_then(|value| value.parse().ok());
+                    if acceptor_addr.is_some() || acceptor_device_id.is_some() {
+                        let now_ms =
+                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
+                                .await;
+                        self.handler
+                            .cache_peer_descriptor_for_peer(
+                                effects.as_ref(),
+                                acceptance.acceptor_id,
+                                acceptor_device_id,
+                                acceptor_addr,
+                                now_ms,
+                            )
+                            .await;
+                    }
 
-                let Some(invitation) = InvitationHandler::load_created_invitation(
-                    effects.as_ref(),
-                    self.handler.context.authority.authority_id(),
-                    &acceptance.invitation_id,
-                )
-                .await
-                else {
-                    tracing::debug!(
-                        invitation_id = %acceptance.invitation_id,
-                        "Ignoring acceptance for unknown invitation"
-                    );
-                    continue;
-                };
-
-                if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-                    continue;
-                }
-
-                if invitation.status == InvitationStatus::Accepted {
-                    continue;
-                }
-
-                let now_ms = effects.current_timestamp().await.unwrap_or(0);
-                let context_id = self.handler.context.authority.default_context_id();
-
-                let fact = InvitationFact::accepted_ms(
-                    acceptance.invitation_id.clone(),
-                    acceptance.acceptor_id,
-                    now_ms,
-                );
-                execute_journal_append(
-                    fact,
-                    &self.handler.context.authority,
-                    context_id,
-                    effects.as_ref(),
-                )
-                .await?;
-                effects.await_next_view_update().await;
-
-                let contact_fact = ContactFact::Added {
-                    context_id,
-                    owner_id: self.handler.context.authority.authority_id(),
-                    contact_id: acceptance.acceptor_id,
-                    nickname: acceptance.acceptor_id.to_string(),
-                    added_at: PhysicalTime {
-                        ts_ms: now_ms,
-                        uncertainty: None,
-                    },
-                };
-
-                effects
-                    .commit_generic_fact_bytes(
-                        context_id,
-                        CONTACT_FACT_TYPE_ID.into(),
-                        contact_fact.to_bytes(),
+                    let Some(invitation) = InvitationHandler::load_created_invitation(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        &acceptance.invitation_id,
                     )
                     .await
-                    .map_err(|e| AgentError::effects(e.to_string()))?;
-                effects.await_next_view_update().await;
+                    else {
+                        tracing::debug!(
+                            invitation_id = %acceptance.invitation_id,
+                            "Ignoring acceptance for unknown invitation"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    };
 
-                let mut updated = invitation.clone();
-                updated.status = InvitationStatus::Accepted;
-                InvitationHandler::persist_created_invitation(
-                    effects.as_ref(),
-                    self.handler.context.authority.authority_id(),
-                    &updated,
-                )
-                .await?;
-                if let InvitationType::Channel {
-                    home_id,
-                    nickname_suggestion,
-                    ..
-                } = &updated.invitation_type
-                {
-                    let reactive = effects.reactive_handler();
+                    if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    if invitation.status == InvitationStatus::Accepted {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
                     let now_ms =
                         InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
-                    let home_name =
-                        require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
-                    crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                        &reactive,
-                        *home_id,
-                        &home_name,
-                        updated.sender_id,
-                        updated.receiver_id,
-                        updated.context_id,
+                    let context_id = self.handler.context.authority.default_context_id();
+
+                    let fact = InvitationFact::accepted_ms(
+                        acceptance.invitation_id.clone(),
+                        acceptance.acceptor_id,
                         now_ms,
+                    );
+                    execute_journal_append(
+                        fact,
+                        &self.handler.context.authority,
+                        context_id,
+                        effects.as_ref(),
                     )
-                    .await
-                    .map_err(AgentError::runtime)?;
+                    .await?;
+                    effects.await_next_view_update().await;
+
+                    let contact_fact = ContactFact::Added {
+                        context_id,
+                        owner_id: self.handler.context.authority.authority_id(),
+                        contact_id: acceptance.acceptor_id,
+                        nickname: acceptance.acceptor_id.to_string(),
+                        added_at: PhysicalTime {
+                            ts_ms: now_ms,
+                            uncertainty: None,
+                        },
+                    };
+
+                    effects
+                        .commit_generic_fact_bytes(
+                            context_id,
+                            CONTACT_FACT_TYPE_ID.into(),
+                            contact_fact.to_bytes(),
+                        )
+                        .await
+                        .map_err(|e| AgentError::effects(e.to_string()))?;
+                    effects.await_next_view_update().await;
+
+                    let mut updated = invitation.clone();
+                    updated.status = InvitationStatus::Accepted;
+                    InvitationHandler::persist_created_invitation(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        &updated,
+                    )
+                    .await?;
+                    if let InvitationType::Channel {
+                        home_id,
+                        nickname_suggestion,
+                        ..
+                    } = &updated.invitation_type
+                    {
+                        let reactive = effects.reactive_handler();
+                        let now_ms =
+                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
+                                .await;
+                        let home_name =
+                            require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                            &reactive,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                            updated.context_id,
+                            now_ms,
+                        )
+                        .await
+                        .map_err(AgentError::runtime)?;
+                    }
+                    self.handler
+                        .invitation_cache
+                        .cache_invitation(updated)
+                        .await;
+
+                    processed = processed.saturating_add(1);
+                    in_flight_envelope = None;
+                    continue;
                 }
-                self.handler
-                    .invitation_cache
-                    .cache_invitation(updated)
-                    .await;
 
-                processed = processed.saturating_add(1);
-                continue;
-            }
-
-            if content_type == CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE {
-                let acceptance: ChannelInvitationAcceptance =
-                    match serde_json::from_slice(&envelope.payload) {
-                        Ok(data) => data,
-                        Err(e) => {
+                if content_type == CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE {
+                    let acceptance: ChannelInvitationAcceptance = match in_flight_envelope
+                        .as_ref()
+                        .map(|envelope| serde_json::from_slice(&envelope.payload))
+                    {
+                        Some(Ok(data)) => data,
+                        Some(Err(e)) => {
                             tracing::warn!(
                                 error = %e,
                                 "Invalid channel invitation acceptance payload"
+                            );
+                            in_flight_envelope = None;
+                            continue;
+                        }
+                        None => continue,
+                    };
+
+                    if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    let acceptor_addr = in_flight_envelope
+                        .as_ref()
+                        .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
+                        .map(String::as_str);
+                    let acceptor_device_id = in_flight_envelope
+                        .as_ref()
+                        .and_then(|envelope| envelope.metadata.get("acceptor-device-id"))
+                        .and_then(|value| value.parse().ok());
+                    if acceptor_addr.is_some() || acceptor_device_id.is_some() {
+                        let now_ms =
+                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
+                                .await;
+                        self.handler
+                            .cache_peer_descriptor_for_peer(
+                                effects.as_ref(),
+                                acceptance.acceptor_id,
+                                acceptor_device_id,
+                                acceptor_addr,
+                                now_ms,
+                            )
+                            .await;
+                    }
+
+                    let Some(invitation) = InvitationHandler::load_created_invitation(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        &acceptance.invitation_id,
+                    )
+                    .await
+                    else {
+                        tracing::warn!(
+                            invitation_id = %acceptance.invitation_id,
+                            acceptor_id = %acceptance.acceptor_id,
+                            context_id = %acceptance.context_id,
+                            channel_id = %acceptance.channel_id,
+                            "Ignoring channel acceptance for unknown invitation"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    };
+
+                    if !matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    let fact = InvitationFact::accepted_ms(
+                        acceptance.invitation_id.clone(),
+                        acceptance.acceptor_id,
+                        now_ms,
+                    );
+                    execute_journal_append(
+                        fact,
+                        &self.handler.context.authority,
+                        acceptance.context_id,
+                        effects.as_ref(),
+                    )
+                    .await?;
+                    effects.await_next_view_update().await;
+
+                    let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await;
+                    let membership = ChannelMembershipFact::new(
+                        acceptance.context_id,
+                        acceptance.channel_id,
+                        acceptance.acceptor_id,
+                        ChannelParticipantEvent::Joined,
+                        timestamp,
+                    )
+                    .to_generic();
+
+                    effects
+                        .commit_relational_facts(vec![membership])
+                        .await
+                        .map_err(|e| AgentError::effects(e.to_string()))?;
+                    effects.await_next_view_update().await;
+
+                    let mut updated = invitation.clone();
+                    updated.status = InvitationStatus::Accepted;
+                    tracing::debug!(
+                        invitation_id = %updated.invitation_id,
+                        sender_id = %updated.sender_id,
+                        receiver_id = %updated.receiver_id,
+                        invitation_context = %updated.context_id,
+                        acceptance_context = %acceptance.context_id,
+                        channel_id = %acceptance.channel_id,
+                        "processed channel invitation acceptance for created invitation"
+                    );
+                    InvitationHandler::persist_created_invitation(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        &updated,
+                    )
+                    .await?;
+                    if let InvitationType::Channel {
+                        home_id,
+                        nickname_suggestion,
+                        ..
+                    } = &updated.invitation_type
+                    {
+                        let reactive = effects.reactive_handler();
+                        let now_ms =
+                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
+                                .await;
+                        let home_name =
+                            require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
+                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                            &reactive,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                            updated.context_id,
+                            now_ms,
+                        )
+                        .await
+                        .map_err(AgentError::runtime)?;
+                    }
+                    self.handler
+                        .invitation_cache
+                        .cache_invitation(updated)
+                        .await;
+
+                    processed = processed.saturating_add(1);
+                    in_flight_envelope = None;
+                    continue;
+                }
+
+                if content_type == CHAT_FACT_CONTENT_TYPE {
+                    let fact: RelationalFact = match in_flight_envelope
+                        .as_ref()
+                        .map(|envelope| from_slice(&envelope.payload))
+                    {
+                        Some(Ok(fact)) => fact,
+                        Some(Err(error)) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Invalid chat fact payload envelope"
+                            );
+                            in_flight_envelope = None;
+                            continue;
+                        }
+                        None => continue,
+                    };
+
+                    super::channel::InvitationChannelHandler::new(self.handler)
+                        .provision_amp_channel_for_inbound_chat_fact(effects.as_ref(), &fact)
+                        .await;
+
+                    effects
+                        .commit_relational_facts(vec![fact])
+                        .await
+                        .map_err(|e| AgentError::effects(e.to_string()))?;
+                    effects.await_next_view_update().await;
+
+                    processed = processed.saturating_add(1);
+                    in_flight_envelope = None;
+                    continue;
+                }
+
+                if content_type == INVITATION_CONTENT_TYPE {
+                    let payload = in_flight_envelope
+                        .take()
+                        .map(|envelope| envelope.payload)
+                        .unwrap_or_default();
+                    let code = match String::from_utf8(payload) {
+                        Ok(code) => code,
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Invalid invitation payload envelope"
                             );
                             continue;
                         }
                     };
 
-                if acceptance.acceptor_id == self.handler.context.authority.authority_id() {
-                    continue;
-                }
-
-                let acceptor_addr = envelope.metadata.get("acceptor-addr").map(String::as_str);
-                let acceptor_device_id = envelope
-                    .metadata
-                    .get("acceptor-device-id")
-                    .and_then(|value| value.parse().ok());
-                if acceptor_addr.is_some() || acceptor_device_id.is_some() {
-                    let now_ms = effects.current_timestamp().await.unwrap_or(0);
-                    self.handler
-                        .cache_peer_descriptor_for_peer(
-                            effects.as_ref(),
-                            acceptance.acceptor_id,
-                            acceptor_device_id,
-                            acceptor_addr,
-                            now_ms,
-                        )
-                        .await;
-                }
-
-                let Some(invitation) = InvitationHandler::load_created_invitation(
-                    effects.as_ref(),
-                    self.handler.context.authority.authority_id(),
-                    &acceptance.invitation_id,
-                )
-                .await
-                else {
-                    tracing::debug!(
-                        invitation_id = %acceptance.invitation_id,
-                        "Ignoring channel acceptance for unknown invitation"
-                    );
-                    continue;
-                };
-
-                if !matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
-                    continue;
-                }
-
-                let now_ms = effects.current_timestamp().await.unwrap_or(0);
-                let fact = InvitationFact::accepted_ms(
-                    acceptance.invitation_id.clone(),
-                    acceptance.acceptor_id,
-                    now_ms,
-                );
-                execute_journal_append(
-                    fact,
-                    &self.handler.context.authority,
-                    acceptance.context_id,
-                    effects.as_ref(),
-                )
-                .await?;
-                effects.await_next_view_update().await;
-
-                let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await;
-                let membership = ChannelMembershipFact::new(
-                    acceptance.context_id,
-                    acceptance.channel_id,
-                    acceptance.acceptor_id,
-                    ChannelParticipantEvent::Joined,
-                    timestamp,
-                )
-                .to_generic();
-
-                effects
-                    .commit_relational_facts(vec![membership])
-                    .await
-                    .map_err(|e| AgentError::effects(e.to_string()))?;
-                effects.await_next_view_update().await;
-
-                let mut updated = invitation.clone();
-                updated.status = InvitationStatus::Accepted;
-                InvitationHandler::persist_created_invitation(
-                    effects.as_ref(),
-                    self.handler.context.authority.authority_id(),
-                    &updated,
-                )
-                .await?;
-                if let InvitationType::Channel {
-                    home_id,
-                    nickname_suggestion,
-                    ..
-                } = &updated.invitation_type
-                {
-                    let reactive = effects.reactive_handler();
-                    let now_ms =
-                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
-                    let home_name =
-                        require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
-                    crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                        &reactive,
-                        *home_id,
-                        &home_name,
-                        updated.sender_id,
-                        updated.receiver_id,
-                        updated.context_id,
-                        now_ms,
-                    )
-                    .await
-                    .map_err(AgentError::runtime)?;
-                }
-                self.handler
-                    .invitation_cache
-                    .cache_invitation(updated)
-                    .await;
-
-                processed = processed.saturating_add(1);
-                continue;
-            }
-
-            if content_type == CHAT_FACT_CONTENT_TYPE {
-                let fact: RelationalFact = match from_slice(&envelope.payload) {
-                    Ok(fact) => fact,
-                    Err(error) => {
-                        tracing::warn!(
-                            error = %error,
-                            "Invalid chat fact payload envelope"
-                        );
+                    let code = code.trim();
+                    if code.is_empty() {
+                        tracing::warn!("Received empty invitation payload envelope");
                         continue;
                     }
-                };
 
-                super::channel::InvitationChannelHandler::new(self.handler)
-                    .provision_amp_channel_for_inbound_chat_fact(effects.as_ref(), &fact)
-                    .await;
-
-                effects
-                    .commit_relational_facts(vec![fact])
-                    .await
-                    .map_err(|e| AgentError::effects(e.to_string()))?;
-                effects.await_next_view_update().await;
-
-                processed = processed.saturating_add(1);
-                continue;
-            }
-
-            if content_type == INVITATION_CONTENT_TYPE {
-                let code = match String::from_utf8(envelope.payload) {
-                    Ok(code) => code,
-                    Err(error) => {
-                        tracing::warn!(
-                            error = %error,
-                            "Invalid invitation payload envelope"
-                        );
-                        continue;
-                    }
-                };
-
-                let code = code.trim();
-                if code.is_empty() {
-                    tracing::warn!("Received empty invitation payload envelope");
-                    continue;
-                }
-
-                match self
-                    .handler
-                    .import_invitation_code(effects.as_ref(), code)
-                    .await
-                {
-                    Ok(invitation) => {
-                        if matches!(invitation.invitation_type, InvitationType::Channel { .. })
-                            && InvitationHandler::sender_contact_exists(
-                                effects.as_ref(),
-                                self.handler.context.authority.authority_id(),
-                                invitation.sender_id,
-                            )
-                            .await
-                        {
-                            if let Err(error) = self
-                                .handler
-                                .accept_invitation(effects.clone(), &invitation.invitation_id)
-                                .await
-                            {
-                                tracing::warn!(
-                                    invitation_id = %invitation.invitation_id,
-                                    sender_id = %invitation.sender_id,
-                                    error = %error,
-                                    "Failed to auto-accept inbound channel invitation"
-                                );
-                            }
+                    match self
+                        .handler
+                        .import_invitation_code(effects.as_ref(), code)
+                        .await
+                    {
+                        Ok(_invitation) => {
+                            processed = processed.saturating_add(1);
                         }
-                        processed = processed.saturating_add(1);
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Failed to import inbound invitation envelope"
+                            );
+                        }
                     }
-                    Err(error) => {
-                        tracing::warn!(
-                            error = %error,
-                            "Failed to import inbound invitation envelope"
-                        );
-                    }
+                    continue;
                 }
-                continue;
+
+                if let Some(envelope) = in_flight_envelope.take() {
+                    deferred_envelopes.push(envelope);
+                }
             }
 
+            Ok(())
+        })
+        .await;
+
+        if let Some(envelope) = in_flight_envelope.take() {
             deferred_envelopes.push(envelope);
         }
 
@@ -467,7 +524,19 @@ impl<'a> InvitationContactHandler<'a> {
             effects.requeue_envelope(envelope);
         }
 
-        Ok(processed)
+        match process_result {
+            Ok(()) => Ok(processed),
+            Err(TimeoutRunError::Timeout(error)) => {
+                tracing::warn!(
+                    scanned,
+                    processed,
+                    error = %error,
+                    "contact invitation acceptance processing timed out; requeued remaining envelopes"
+                );
+                Ok(processed)
+            }
+            Err(TimeoutRunError::Operation(error)) => Err(error),
+        }
     }
 
     pub(super) async fn resolve_contact_invitation(
@@ -516,9 +585,10 @@ impl<'a> InvitationContactHandler<'a> {
             );
         }
 
-        if let Some(shareable) =
-            InvitationHandler::load_imported_invitation(effects, own_id, invitation_id).await
+        if let Some(stored) =
+            InvitationHandler::load_imported_invitation(effects, own_id, invitation_id, None).await
         {
+            let shareable = stored.shareable;
             tracing::debug!(
                 invitation_id = %invitation_id,
                 invitation_type = ?shareable.invitation_type,
@@ -585,6 +655,9 @@ impl<'a> InvitationContactHandler<'a> {
 
             let nickname = nickname
                 .or_else(|| {
+                    // Legacy fallback for older invite codes that only embedded a
+                    // human-readable message string. Remove this once all invite
+                    // codes carry the explicit `nickname` field end to end.
                     message
                         .as_deref()
                         .and_then(|m| m.split("from ").nth(1))
