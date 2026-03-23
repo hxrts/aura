@@ -247,7 +247,10 @@ impl RendezvousHandler {
         match self.cache_manager.get_descriptor(context_id, peer).await {
             Some(descriptor) => Some(descriptor),
             None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => manager.get_descriptor(context_id, peer).await,
+                Some(manager) => match manager.get_descriptor(context_id, peer).await {
+                    Some(descriptor) => Some(descriptor),
+                    None => manager.get_any_descriptor_for_authority(peer).await,
+                },
                 None => None,
             },
         }
@@ -309,16 +312,10 @@ impl RendezvousHandler {
         let psk = derive_channel_psk(context_id, self.context.authority.authority_id(), peer);
 
         // Prepare channel establishment
-        let peer_descriptor = match self.cache_manager.get_descriptor(context_id, peer).await {
-            Some(descriptor) => descriptor,
-            None => match self.rendezvous_manager.as_ref() {
-                Some(manager) => manager
-                    .get_descriptor(context_id, peer)
-                    .await
-                    .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?,
-                None => return Err(AgentError::invalid("Peer descriptor not found in cache")),
-            },
-        };
+        let peer_descriptor = self
+            .get_peer_descriptor(context_id, peer)
+            .await
+            .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;

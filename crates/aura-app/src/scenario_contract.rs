@@ -1183,18 +1183,10 @@ impl IntentAction {
                             operation_id: OperationId::invitation_create(),
                             state: OperationState::Succeeded,
                         },
-                        BarrierDeclaration::RuntimeEvent(
-                            RuntimeEventKind::PendingHomeInvitationReady,
-                        ),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
                     ],
                 },
-                post_operation_convergence: Some(PostOperationConvergenceContract {
-                    required_before_next_intent: vec![BarrierDeclaration::RuntimeEvent(
-                        RuntimeEventKind::PendingHomeInvitationReady,
-                    )],
-                    violation_code: "pending_home_invitation_convergence_required".to_string(),
-                }),
+                post_operation_convergence: None,
                 focus_semantics: FocusSemantics::Screen(ScreenId::Contacts),
                 selection_semantics: SelectionSemantics::List(ListId::Contacts),
                 transitions: vec![AuthoritativeTransitionKind::Operation(
@@ -1205,7 +1197,6 @@ impl IntentAction {
                         operation_id: OperationId::invitation_create(),
                         state: OperationState::Succeeded,
                     },
-                    TerminalSuccessKind::RuntimeEvent(RuntimeEventKind::PendingHomeInvitationReady),
                     TerminalSuccessKind::Readiness(UiReadiness::Ready),
                 ],
                 terminal_failure_codes: vec![
@@ -2241,14 +2232,9 @@ mod tests {
             channel_id: None,
         }
         .contract();
-        let invite_convergence = invite_contract
-            .post_operation_convergence
-            .expect("invite_actor_to_channel must declare convergence");
-        assert_eq!(
-            invite_convergence.required_before_next_intent,
-            vec![BarrierDeclaration::RuntimeEvent(
-                RuntimeEventKind::PendingHomeInvitationReady,
-            )]
+        assert!(
+            invite_contract.post_operation_convergence.is_none(),
+            "invite_actor_to_channel convergence belongs to the invitee-facing follow-up step, not the inviter-facing action"
         );
 
         let accept_pending_contract = IntentAction::AcceptPendingChannelInvitation.contract();

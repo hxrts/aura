@@ -1812,6 +1812,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             return Ok(());
         }
 
+        let _ = rendezvous::trigger_discovery(self).await;
+        self.seed_sync_peers_from_rendezvous().await;
+        let _ = self.sync_seeded_peers().await;
+        let _ = self.process_ceremony_messages().await;
+
         let result = handler
             .initiate_channel(&effects, context, peer)
             .await

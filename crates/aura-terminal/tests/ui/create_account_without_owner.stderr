@@ -1,0 +1,8 @@
+error[E0593]: closure is expected to take 2 arguments, but it takes 1 argument
+ --> tests/ui/create_account_without_owner.rs:6:45
+  |
+6 |     let _: CreateAccountCallback = Arc::new(|_name: String| {});
+  |                                             ^^^^^^^^^^^^^^^
+  |                                             |
+  |                                             expected closure that takes 2 arguments
+  |                                             takes 1 argument

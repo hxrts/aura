@@ -1,0 +1,8 @@
+error[E0593]: closure is expected to take 2 arguments, but it takes 1 argument
+ --> tests/ui/handoff_owner_without_handoff.rs:6:53
+  |
+6 |     let _: ImportInvitationOwnedCallback = Arc::new(|_code: String| {});
+  |                                                     ^^^^^^^^^^^^^^^
+  |                                                     |
+  |                                                     expected closure that takes 2 arguments
+  |                                                     takes 1 argument

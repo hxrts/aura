@@ -61,9 +61,13 @@ use crate::tui::hooks::{
 };
 
 #[derive(Clone, Debug)]
-pub struct AuthoritySwitchRequest {
-    pub authority_id: aura_core::types::identifiers::AuthorityId,
-    pub nickname_suggestion: Option<String>,
+pub enum ShellExitIntent {
+    UserQuit,
+    BootstrapReload,
+    AuthoritySwitch {
+        authority_id: aura_core::types::identifiers::AuthorityId,
+        nickname_suggestion: Option<String>,
+    },
 }
 
 struct StoredCeremonyHandle {
@@ -241,7 +245,7 @@ impl IoContextBuilder {
         let current_context = Arc::new(RwLock::new(None));
         let channel_modes = Arc::new(RwLock::new(HashMap::new()));
         let ceremony_handles = Arc::new(RwLock::new(HashMap::new()));
-        let requested_authority_switch = Arc::new(std::sync::Mutex::new(None));
+        let requested_shell_exit = Arc::new(std::sync::Mutex::new(None));
 
         let dispatch = DispatchHelper::new(
             operational.clone(),
@@ -276,7 +280,7 @@ impl IoContextBuilder {
             ceremony_handles,
             tasks,
             pending_runtime_bootstrap: self.pending_runtime_bootstrap,
-            requested_authority_switch,
+            requested_shell_exit,
         })
     }
 }
@@ -314,7 +318,7 @@ pub struct IoContext {
     ceremony_handles: Arc<RwLock<HashMap<String, StoredCeremonyHandle>>>,
     tasks: Arc<UiTaskOwner>,
     pending_runtime_bootstrap: bool,
-    requested_authority_switch: Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>>,
+    requested_shell_exit: Arc<std::sync::Mutex<Option<ShellExitIntent>>>,
 }
 
 /// Lightweight TUI-facing result of starting device enrollment.
@@ -354,10 +358,23 @@ impl IoContext {
         self.tasks.clone()
     }
 
-    pub fn authority_switch_request_handle(
-        &self,
-    ) -> Arc<std::sync::Mutex<Option<AuthoritySwitchRequest>>> {
-        self.requested_authority_switch.clone()
+    pub fn take_shell_exit_intent(&self) -> Option<ShellExitIntent> {
+        self.requested_shell_exit
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+    }
+
+    pub fn request_user_quit(&self) {
+        if let Ok(mut guard) = self.requested_shell_exit.lock() {
+            *guard = Some(ShellExitIntent::UserQuit);
+        }
+    }
+
+    pub fn request_bootstrap_reload(&self) {
+        if let Ok(mut guard) = self.requested_shell_exit.lock() {
+            *guard = Some(ShellExitIntent::BootstrapReload);
+        }
     }
 
     pub fn request_authority_switch(
@@ -365,8 +382,8 @@ impl IoContext {
         authority_id: aura_core::types::identifiers::AuthorityId,
         nickname_suggestion: Option<String>,
     ) {
-        if let Ok(mut guard) = self.requested_authority_switch.lock() {
-            *guard = Some(AuthoritySwitchRequest {
+        if let Ok(mut guard) = self.requested_shell_exit.lock() {
+            *guard = Some(ShellExitIntent::AuthoritySwitch {
                 authority_id,
                 nickname_suggestion,
             });

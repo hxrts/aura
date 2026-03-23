@@ -13,7 +13,10 @@
 use std::env;
 use std::fs;
 use std::io;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::panic::AssertUnwindSafe;
+use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -48,13 +51,14 @@ use aura_effects::{
 };
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
+use futures::FutureExt;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
 use crate::demo::{spawn_amp_inbox_listener, DemoSimulator, EchoPeer};
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
-    context::{InitializedAppCore, IoContext},
+    context::{InitializedAppCore, IoContext, ShellExitIntent},
     screens::run_app_with_context,
     tasks::UiTaskOwner,
 };
@@ -190,6 +194,24 @@ async fn try_load_account(
         context: config.context_id,
         nickname_suggestion: config.nickname_suggestion,
     })
+}
+
+async fn wait_for_persisted_account(
+    storage: &impl StorageCoreEffects,
+    timeout: std::time::Duration,
+    poll_interval: std::time::Duration,
+) -> Result<AccountLoadResult, AuraError> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let loaded = try_load_account(storage).await?;
+        if matches!(loaded, AccountLoadResult::Loaded { .. }) {
+            return Ok(loaded);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(loaded);
+        }
+        tokio::time::sleep(poll_interval).await;
+    }
 }
 
 /// Load persisted account state for a terminal storage root.
@@ -374,6 +396,30 @@ async fn persist_selected_authority(
     .await?;
 
     Ok(context_id)
+}
+
+fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+fn reexec_current_tui_process(reason: &str) -> Result<(), AuraError> {
+    let current_exe = env::current_exe().map_err(|error| {
+        AuraError::internal(format!(
+            "Failed to resolve current TUI executable for {reason}: {error}"
+        ))
+    })?;
+    let error = Command::new(current_exe)
+        .args(env::args_os().skip(1))
+        .exec();
+    Err(AuraError::internal(format!(
+        "Failed to re-exec TUI process for {reason}: {error}"
+    )))
 }
 
 /// Create a new account and save to disk
@@ -1448,10 +1494,25 @@ async fn handle_tui_launch(
         stdio.println(format_args!("Launching TUI..."));
         stdio.newline();
 
-        let authority_switch_handle = ctx.authority_switch_request_handle();
-        let (returned_stdio, result) = during_fullscreen(stdio, run_app_with_context(ctx)).await;
+        let (returned_stdio, result) = during_fullscreen(
+            stdio,
+            AssertUnwindSafe(run_app_with_context(ctx)).catch_unwind(),
+        )
+        .await;
         stdio = returned_stdio.into();
-        let result = result.map_err(|e| AuraError::internal(format!("TUI failed: {e}")));
+        let shell_exit_intent = match result {
+            Ok(Ok(intent)) => intent,
+            Ok(Err(error)) => {
+                return Err(AuraError::internal(format!("TUI failed: {error}")).into())
+            }
+            Err(payload) => {
+                return Err(AuraError::internal(format!(
+                    "TUI fullscreen generation panicked: {}",
+                    panic_payload_message(payload)
+                ))
+                .into())
+            }
+        };
 
         #[cfg(feature = "development")]
         if let Some(ref mut sim) = simulator {
@@ -1464,44 +1525,46 @@ async fn handle_tui_launch(
             }
         }
 
-        result?;
-        let _ = std::fs::write(base_path.join(".debug-after-fullscreen"), b"after-fullscreen");
-        stdio.println(format_args!(
-            "DEBUG after fullscreen has_existing_account={} handoff_marker={}",
-            has_existing_account,
-            base_path.join(".bootstrap-runtime-handoff-ready").exists()
-        ));
-
-        let switch_request = authority_switch_handle
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take());
-        if let Some(request) = switch_request {
-            let _ = persist_selected_authority(
-                &base_path,
-                request.authority_id,
-                request.nickname_suggestion.clone(),
-            )
-            .await?;
-            stdio.println(format_args!(
-                "Reloading TUI for authority: {}",
-                request.authority_id
-            ));
-            continue;
+        match shell_exit_intent {
+            ShellExitIntent::UserQuit => break,
+            ShellExitIntent::BootstrapReload => {
+                if !base_path.join(".bootstrap-runtime-handoff-ready").exists() {
+                    return Err(AuraError::internal(
+                        "bootstrap reload requested without persisted handoff marker",
+                    )
+                    .into());
+                }
+                match wait_for_persisted_account(
+                    storage.as_ref(),
+                    std::time::Duration::from_secs(5),
+                    std::time::Duration::from_millis(50),
+                )
+                .await?
+                {
+                    AccountLoadResult::Loaded { .. } => {}
+                    AccountLoadResult::NotFound => {
+                        return Err(AuraError::internal(
+                            "bootstrap runtime handoff marker was set before persisted account became observable",
+                        )
+                        .into());
+                    }
+                }
+                stdio.println(format_args!(
+                    "Reloading TUI with newly created bootstrap identity"
+                ));
+                return reexec_current_tui_process("bootstrap reload").map_err(Into::into);
+            }
+            ShellExitIntent::AuthoritySwitch {
+                authority_id,
+                nickname_suggestion,
+            } => {
+                let _ =
+                    persist_selected_authority(&base_path, authority_id, nickname_suggestion)
+                        .await?;
+                stdio.println(format_args!("Reloading TUI for authority: {}", authority_id));
+                return reexec_current_tui_process("authority switch").map_err(Into::into);
+            }
         }
-
-        if !has_existing_account
-            && base_path.join(".bootstrap-runtime-handoff-ready").exists()
-        {
-            let _ = std::fs::write(base_path.join(".debug-bootstrap-continue"), b"continue");
-            stdio.println(format_args!("DEBUG continuing bootstrap reload"));
-            stdio.println(format_args!(
-                "Reloading TUI with newly created bootstrap identity"
-            ));
-            continue;
-        }
-
-        break;
     }
 
     Ok(())

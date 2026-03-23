@@ -96,7 +96,7 @@ pub type ImportDeviceEnrollmentCallback =
 pub type InvitationCallback = IdCallback;
 pub type CreateInvitationCallback = CreateInvitationCallbackType;
 pub type ExportInvitationCallback = IdCallback;
-pub type ImportInvitationOwnedCallback =
+pub(crate) type ImportInvitationOwnedCallback =
     Arc<dyn Fn(String, WorkflowHandoffOperationOwner) + Send + Sync>;
 
 // --- Neighborhood Screen ---

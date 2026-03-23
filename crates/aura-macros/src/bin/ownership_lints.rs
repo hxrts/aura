@@ -44,6 +44,7 @@ enum LintMode {
     AuthoritativeRefNoReresolution,
     WeakToStrongIdentifierUpgrade,
     HandoffTerminalSettlement,
+    TerminalShellExplicitExitIntent,
 }
 
 impl LintMode {
@@ -79,6 +80,7 @@ impl LintMode {
             "authoritative-ref-no-reresolution" => Ok(Self::AuthoritativeRefNoReresolution),
             "weak-to-strong-identifier-upgrade" => Ok(Self::WeakToStrongIdentifierUpgrade),
             "handoff-terminal-settlement" => Ok(Self::HandoffTerminalSettlement),
+            "terminal-shell-explicit-exit-intent" => Ok(Self::TerminalShellExplicitExitIntent),
             other => Err(format!("unknown lint mode: {other}")),
         }
     }
@@ -115,6 +117,7 @@ impl LintMode {
             Self::AuthoritativeRefNoReresolution => "authoritative-ref-no-reresolution",
             Self::WeakToStrongIdentifierUpgrade => "weak-to-strong-identifier-upgrade",
             Self::HandoffTerminalSettlement => "handoff-terminal-settlement",
+            Self::TerminalShellExplicitExitIntent => "terminal-shell-explicit-exit-intent",
         }
     }
 }
@@ -292,6 +295,11 @@ fn run() -> Result<(), String> {
                     "handoff_to_app_workflow calls without paired apply_handed_off_terminal_status in the same function body. {OWNERSHIP_MODEL_GUIDANCE}"
                 )
             }
+            LintMode::TerminalShellExplicitExitIntent => {
+                format!(
+                    "terminal shell reload/exit still relies on implicit fullscreen return or side-channel state instead of explicit ShellExitIntent ownership. {OWNERSHIP_MODEL_GUIDANCE}"
+                )
+            }
         });
     }
 
@@ -369,6 +377,9 @@ fn scan_file(
         }
         LintMode::HandoffTerminalSettlement => {
             return scan_handoff_terminal_settlement(file, syntax);
+        }
+        LintMode::TerminalShellExplicitExitIntent => {
+            return scan_terminal_shell_explicit_exit_intent(file, source);
         }
         LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
@@ -906,7 +917,8 @@ fn scan_function(
         | LintMode::OptionalOwnerBoundary
         | LintMode::TimeoutPolicyBoundary
         | LintMode::TimeDomainUsage
-        | LintMode::HandoffTerminalSettlement => false,
+        | LintMode::HandoffTerminalSettlement
+        | LintMode::TerminalShellExplicitExitIntent => false,
     };
     if !should_scan {
         return;
@@ -1602,7 +1614,8 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::TimeDomainUsage
             | LintMode::AuthoritativeRefNoReresolution
             | LintMode::WeakToStrongIdentifierUpgrade
-            | LintMode::HandoffTerminalSettlement => {}
+            | LintMode::HandoffTerminalSettlement
+            | LintMode::TerminalShellExplicitExitIntent => {}
         }
 
         visit::visit_expr_await(self, node);
@@ -2208,6 +2221,129 @@ fn scan_harness_recovery_ownership(file: &Path, source: &str) -> Vec<String> {
         ],
         &[],
     )
+}
+
+fn scan_terminal_shell_explicit_exit_intent(file: &Path, source: &str) -> Vec<String> {
+    let display = file.display().to_string();
+    let mut violations = Vec::new();
+
+    if display.ends_with("crates/aura-terminal/src/handlers/tui.rs") {
+        let required = [
+            (
+                "ShellExitIntent::UserQuit",
+                "outer TUI runner must match explicit ShellExitIntent::UserQuit terminal ownership",
+            ),
+            (
+                "ShellExitIntent::BootstrapReload",
+                "outer TUI runner must match explicit ShellExitIntent::BootstrapReload instead of inferring reload from fullscreen return",
+            ),
+            (
+                "ShellExitIntent::AuthoritySwitch",
+                "outer TUI runner must match explicit ShellExitIntent::AuthoritySwitch instead of reading side-channel state",
+            ),
+            (
+                "reexec_current_tui_process(",
+                "outer TUI runner must re-exec through a dedicated owner helper instead of in-process fullscreen continuation",
+            ),
+            (
+                ".exec()",
+                "outer TUI runner must use exec-based reload to reset process-global owner state by construction",
+            ),
+            (
+                "catch_unwind()",
+                "outer TUI runner must convert fullscreen panics into typed terminal failure before process exit",
+            ),
+        ];
+        for (pattern, message) in required {
+            if !source.contains(pattern) {
+                violations.push(format!(
+                    "{}:1:1: {}. {}",
+                    file.display(),
+                    message,
+                    OWNERSHIP_MODEL_GUIDANCE
+                ));
+            }
+        }
+        if source.contains("authority_switch_request_handle(") {
+            violations.push(format!(
+                "{}:1:1: side-channel authority_switch_request_handle reload ownership is forbidden; use explicit ShellExitIntent transfer instead. {}",
+                file.display(),
+                OWNERSHIP_MODEL_GUIDANCE
+            ));
+        }
+    }
+
+    if display.ends_with("crates/aura-terminal/src/tui/screens/app/shell.rs") {
+        let required = [
+            (
+                "-> std::io::Result<ShellExitIntent>",
+                "run_app_with_context must return explicit ShellExitIntent, not implicit unit success",
+            ),
+            (
+                "take_shell_exit_intent()",
+                "shell must consume explicit ShellExitIntent before reporting fullscreen completion",
+            ),
+            (
+                "request_bootstrap_reload()",
+                "bootstrap handoff must request explicit ShellExitIntent::BootstrapReload",
+            ),
+            (
+                "request_user_quit()",
+                "user-driven exit must request explicit ShellExitIntent::UserQuit",
+            ),
+            (
+                "fullscreen generation exited without explicit ShellExitIntent",
+                "shell must fail closed if fullscreen exits without explicit ShellExitIntent ownership",
+            ),
+        ];
+        for (pattern, message) in required {
+            if !source.contains(pattern) {
+                violations.push(format!(
+                    "{}:1:1: {}. {}",
+                    file.display(),
+                    message,
+                    OWNERSHIP_MODEL_GUIDANCE
+                ));
+            }
+        }
+    }
+
+    if display.ends_with("crates/aura-terminal/src/tui/context/io_context.rs") {
+        let required = [
+            (
+                "pub enum ShellExitIntent",
+                "IoContext must define the explicit ShellExitIntent handoff contract",
+            ),
+            (
+                "take_shell_exit_intent(",
+                "IoContext must expose typed ShellExitIntent consumption",
+            ),
+            (
+                "request_bootstrap_reload(",
+                "IoContext must expose explicit bootstrap reload intent",
+            ),
+            (
+                "request_user_quit(",
+                "IoContext must expose explicit user-quit intent",
+            ),
+            (
+                "request_authority_switch(",
+                "IoContext must expose explicit authority-switch intent",
+            ),
+        ];
+        for (pattern, message) in required {
+            if !source.contains(pattern) {
+                violations.push(format!(
+                    "{}:1:1: {}. {}",
+                    file.display(),
+                    message,
+                    OWNERSHIP_MODEL_GUIDANCE
+                ));
+            }
+        }
+    }
+
+    violations
 }
 
 fn scan_must_settle_boundary(file: &Path, source: &str) -> Vec<String> {

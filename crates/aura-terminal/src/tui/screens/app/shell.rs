@@ -64,7 +64,7 @@ use crate::tui::channel_selection::{
 use crate::tui::components::{
     DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
 };
-use crate::tui::context::IoContext;
+use crate::tui::context::{IoContext, ShellExitIntent};
 use crate::tui::harness_state::{
     accept_harness_command_submission, apply_harness_command, clear_harness_command_sender,
     complete_pending_binding_submission, ensure_harness_command_listener,
@@ -1447,25 +1447,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
 
                     let updated_state = tui.read_clone();
-                    if updated_state.should_exit && !should_exit.get() {
-                        should_exit.set(true);
-                        bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
-                        break;
-                    }
-
-                    let app_snapshot = match app_ctx_for_commands.snapshot() {
-                        AppSnapshotAvailability::Available(snapshot) => snapshot,
-                        AppSnapshotAvailability::Contended => {
-                            tracing::warn!(
-                                "failed to export authoritative TUI projection after applying harness command: state lock contended"
-                            );
-                            continue;
-                        }
-                    };
-                    let harness_contacts = shared_contacts_for_commands.read().clone();
-                    let harness_devices = shared_devices_for_commands.read().clone();
-                    let harness_channels = shared_channels_for_commands.read().clone();
-                    let harness_messages = shared_messages_for_commands.read().clone();
                     let settlement = match operation_handle {
                         Some(operation)
                             if operation.operation_id()
@@ -1487,6 +1468,26 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             "failed to settle harness command submission"
                         );
                     }
+
+                    if updated_state.should_exit && !should_exit.get() {
+                        should_exit.set(true);
+                        bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
+                        break;
+                    }
+
+                    let app_snapshot = match app_ctx_for_commands.snapshot() {
+                        AppSnapshotAvailability::Available(snapshot) => snapshot,
+                        AppSnapshotAvailability::Contended => {
+                            tracing::warn!(
+                                "failed to export authoritative TUI projection after applying harness command: state lock contended"
+                            );
+                            continue;
+                        }
+                    };
+                    let harness_contacts = shared_contacts_for_commands.read().clone();
+                    let harness_devices = shared_devices_for_commands.read().clone();
+                    let harness_channels = shared_channels_for_commands.read().clone();
+                    let harness_messages = shared_messages_for_commands.read().clone();
 
                     let export_result = maybe_export_ui_snapshot(
                         &updated_state,
@@ -2655,6 +2656,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 );
                             }
                             if show_setup {
+                                io_ctx.request_bootstrap_reload();
                                 if let Err(error) = io_ctx.mark_bootstrap_runtime_handoff_committed()
                                 {
                                     enqueue_toast!(
@@ -2925,6 +2927,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     for cmd in commands {
                         match cmd {
                             TuiCommand::Exit => {
+                                app_ctx_for_dispatch.io_context().request_user_quit();
                                 should_exit.set(true);
                                 bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
                             }
@@ -4836,7 +4839,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 ///
 /// This version uses the IoContext to fetch actual data from the reactive
 /// views instead of mock data.
-pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
+pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIntent> {
     // Create the UI update channel for reactive updates
     let (update_tx, update_rx) = ui_update_channel();
     let update_rx_holder = Arc::new(Mutex::new(Some(update_rx)));
@@ -5008,37 +5011,41 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                 }
             }
         };
-        let bootstrap_handoff_deadline = async {
-            if !show_account_setup {
-                std::future::pending::<std::io::Result<()>>().await
-            } else {
-                bootstrap_handoff_rx.await.map_err(|error| {
-                    std::io::Error::other(format!(
-                        "bootstrap runtime handoff notification dropped before shell exit: {error}"
-                    ))
-                })?;
-                if !ctx_arc.bootstrap_runtime_handoff_committed() {
-                    return Err(std::io::Error::other(
-                        "bootstrap runtime handoff notified without committed marker",
-                    ));
+        let result = if show_account_setup {
+            let app_future = app.fullscreen();
+            tokio::pin!(app_future);
+            tokio::select! {
+                result = &mut app_future => result,
+                result = async {
+                    bootstrap_handoff_rx.await.map_err(|error| {
+                        std::io::Error::other(format!(
+                            "bootstrap runtime handoff notification dropped before shell exit: {error}"
+                        ))
+                    })
+                } => {
+                    result?;
+                    if !ctx_arc.bootstrap_runtime_handoff_committed() {
+                        return Err(std::io::Error::other(
+                            "bootstrap runtime handoff notified without committed marker",
+                        ));
+                    }
+                    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut app_future).await {
+                        Ok(result) => result,
+                        Err(_) => Err(std::io::Error::other(
+                            "bootstrap runtime handoff committed but fullscreen generation did not exit within 5s",
+                        )),
+                    }
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                Err(std::io::Error::other(
-                    "bootstrap runtime handoff committed but fullscreen generation did not exit within 5s",
-                ))
             }
-        };
-
-        let result = tokio::select! {
-            result = app.fullscreen() => result,
-            result = bootstrap_handoff_deadline => result,
-        };
-        let handoff_committed = show_account_setup && ctx_arc.bootstrap_runtime_handoff_committed();
-        let _ = clear_harness_command_sender().await;
-        if handoff_committed {
-            Ok(())
         } else {
-            result
-        }
+            app.fullscreen().await
+        };
+        let _ = clear_harness_command_sender().await;
+        result?;
+        ctx_arc.take_shell_exit_intent().ok_or_else(|| {
+            std::io::Error::other(
+                "fullscreen generation exited without explicit ShellExitIntent; see docs/122_ownership_model.md",
+            )
+        })
     }
 }

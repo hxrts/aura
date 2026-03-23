@@ -387,8 +387,14 @@ impl InvitationServiceApi {
             )
             .await?;
         let invitation = prepared.invitation;
+        execute_invitation_effect_commands(
+            prepared.deferred_network_effects.into_commands(),
+            self.handler.authority_context(),
+            self.effects.as_ref(),
+            true,
+        )
+        .await?;
         self.spawn_invitation_ceremony_registration(&invitation);
-        self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
     }

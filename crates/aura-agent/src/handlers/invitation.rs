@@ -2600,10 +2600,15 @@ async fn execute_notify_peer(
         "Sending invitation envelope"
     );
 
+    // The invitation establishes or extends semantic access to `invitation_context`,
+    // so the transport envelope itself must ride over the existing authority-scoped
+    // peer path instead of assuming the invitee is already routable on that context.
+    let delivery_context = default_context_id_for_authority(peer);
+
     let envelope = TransportEnvelope {
         destination: peer,
         source: authority.authority_id(),
-        context: invitation_context,
+        context: delivery_context,
         payload: code.into_bytes(),
         metadata,
         receipt: receipt.map(transport_receipt_from_flow),

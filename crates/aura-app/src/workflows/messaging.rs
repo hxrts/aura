@@ -981,7 +981,11 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
             if let Some(channel) = state.authoritative_channel {
                 runtime_channel_state_exists(runtime, channel).await?
             } else {
-                false
+                messaging_warn!(
+                    "Retaining ChannelMembershipReady for {} without a re-resolved authoritative context; see docs/122_ownership_model.md",
+                    state.channel_id
+                );
+                true
             }
         } else {
             true
@@ -3885,7 +3889,7 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
     )
     .await?;
     update_workflow_stage(&stage_tracker, "ensure_invited_peer_channel");
-    timeout_workflow_stage_with_deadline(
+    if let Err(_error) = timeout_workflow_stage_with_deadline(
         &runtime,
         "invite_authority_to_channel",
         "ensure_invited_peer_channel",
@@ -3904,7 +3908,16 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
             Ok(())
         },
     )
-    .await?;
+    .await
+    {
+        messaging_warn!(
+            "Best-effort ensure_invited_peer_channel failed for {} on {} in {}: {}",
+            receiver,
+            channel_id,
+            context_id,
+            _error
+        );
+    }
 
     Ok(invitation.invitation_id)
 }
