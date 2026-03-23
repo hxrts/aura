@@ -22,7 +22,14 @@
 )]
 use aura_authorization::{BiscuitError, ResourceScope};
 use aura_core::types::identifiers::AuthorityId;
-use biscuit_auth::{macros::*, Biscuit, PublicKey};
+use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
+use std::time::Duration;
+
+const GUARD_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
+    max_facts: 10_000,
+    max_iterations: 1_000,
+    max_time: Duration::from_millis(100),
+};
 
 pub struct BiscuitAuthorizationBridge {
     root_public_key: PublicKey,
@@ -212,7 +219,7 @@ impl BiscuitAuthorizationBridge {
         authorizer
             .add_policy(policy!("allow if true"))
             .map_err(BiscuitError::BiscuitLib)?;
-        let authorization_result = authorizer.authorize();
+        let authorization_result = authorizer.authorize_with_limits(GUARD_BISCUIT_LIMITS);
 
         let authorized = match authorization_result {
             Ok(_) => true,
@@ -275,7 +282,7 @@ impl BiscuitAuthorizationBridge {
             .map_err(BiscuitError::BiscuitLib)?;
 
         // Run Datalog evaluation
-        let result = authorizer.authorize();
+        let result = authorizer.authorize_with_limits(GUARD_BISCUIT_LIMITS);
 
         match result {
             Ok(_) => Ok(true),
