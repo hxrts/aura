@@ -286,13 +286,8 @@ pub(crate) async fn fail_pending_binding_submission(
 pub(crate) fn authoritative_harness_snapshot_readiness(
     should_exit: bool,
     pending_runtime_bootstrap: bool,
-    harness_observation_enabled: bool,
-    command_plane_generation_present: bool,
 ) -> aura_app::ui::contract::UiReadiness {
-    if should_exit
-        || pending_runtime_bootstrap
-        || (harness_observation_enabled && !command_plane_generation_present)
-    {
+    if should_exit || pending_runtime_bootstrap {
         aura_app::ui::contract::UiReadiness::Loading
     } else {
         aura_app::ui::contract::UiReadiness::Ready

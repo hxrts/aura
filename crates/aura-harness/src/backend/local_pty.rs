@@ -501,10 +501,7 @@ impl LocalPtyBackend {
         Ok(())
     }
 
-    fn send_harness_command_receipt(
-        &mut self,
-        command: &HarnessUiCommand,
-    ) -> Result<HarnessUiCommandReceipt> {
+    fn send_harness_command_receipt(&self, command: &HarnessUiCommand) -> Result<HarnessUiCommandReceipt> {
         let socket_path = Self::absolutize_path(self.command_socket_path());
         let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -896,10 +893,24 @@ impl InstanceBackend for LocalPtyBackend {
         }
 
         let deadline = Instant::now() + timeout;
+        let mut last_ping_error: Option<String> = None;
         loop {
             if let Ok(snapshot) = self.ui_snapshot() {
                 if snapshot.readiness == UiReadiness::Ready {
-                    return Ok(());
+                    match self.send_harness_command_receipt(&HarnessUiCommand::Ping) {
+                        Ok(HarnessUiCommandReceipt::Accepted { .. })
+                        | Ok(HarnessUiCommandReceipt::AcceptedWithOperation { .. }) => {
+                            return Ok(());
+                        }
+                        Ok(HarnessUiCommandReceipt::Rejected { reason }) => {
+                            last_ping_error = Some(format!(
+                                "command plane rejected readiness ping: {reason}"
+                            ));
+                        }
+                        Err(error) => {
+                            last_ping_error = Some(error.to_string());
+                        }
+                    }
                 }
             }
             if self.session.as_ref().is_some_and(|session| {
@@ -921,7 +932,7 @@ impl InstanceBackend for LocalPtyBackend {
             if Instant::now() >= deadline {
                 let readiness = self.ui_snapshot().ok().map(|snapshot| snapshot.readiness);
                 anyhow::bail!(
-                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}",
+                    "local PTY instance {} did not reach semantic readiness within {:?}; readiness={readiness:?}; command_plane={last_ping_error:?}",
                     self.config.id,
                     timeout,
                 );

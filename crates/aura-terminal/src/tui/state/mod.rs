@@ -289,9 +289,6 @@ pub struct TuiState {
     /// True while the shell is waiting for a startup runtime bootstrap to converge.
     pub pending_runtime_bootstrap: bool,
 
-    /// Owner-issued harness command-plane generation active for this shell session.
-    pub harness_command_plane_generation: Option<u64>,
-
     /// Long-lived subscriptions that have permanently degraded.
     pub degraded_subscriptions: HashMap<String, String>,
 

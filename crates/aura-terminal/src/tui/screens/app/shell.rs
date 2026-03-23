@@ -805,8 +805,6 @@ pub struct IoAppProps {
     pub show_account_setup: bool,
     /// Whether startup runtime bootstrap is still converging.
     pub pending_runtime_bootstrap: bool,
-    /// Owner-issued harness command-plane generation for this shell session.
-    pub harness_command_plane_generation: Option<u64>,
     // Network status
     /// Unified network status (disconnected, no peers, syncing, synced)
     pub network_status: NetworkStatus,
@@ -858,7 +856,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // This is the source of truth; iocraft hooks sync FROM this state
     let show_setup = props.show_account_setup;
     let pending_runtime_bootstrap = props.pending_runtime_bootstrap;
-    let harness_command_plane_generation = props.harness_command_plane_generation;
     #[cfg(feature = "development")]
     let demo_alice = props.demo_alice_code.clone();
     #[cfg(feature = "development")]
@@ -876,7 +873,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 TuiState::new()
             };
             state.pending_runtime_bootstrap = pending_runtime_bootstrap;
-            state.harness_command_plane_generation = harness_command_plane_generation;
             // Set demo mode codes for import modal shortcuts (on contacts screen)
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
@@ -890,12 +886,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             if show_setup {
                 let mut state = TuiState::with_account_setup();
                 state.pending_runtime_bootstrap = pending_runtime_bootstrap;
-                state.harness_command_plane_generation = harness_command_plane_generation;
                 state
             } else {
                 let mut state = TuiState::new();
                 state.pending_runtime_bootstrap = pending_runtime_bootstrap;
-                state.harness_command_plane_generation = harness_command_plane_generation;
                 state
             }
         }
@@ -1445,6 +1439,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     if updated_state.should_exit && !should_exit.get() {
                         should_exit.set(true);
                         bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
+                        break;
                     }
 
                     let app_snapshot = match app_ctx_for_commands.snapshot() {
@@ -2628,7 +2623,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             tui.with_mut(|state| {
                                 state.account_created_queued();
                                 state.should_exit = true;
-                                state.harness_command_plane_generation = None;
                             });
                             if show_setup {
                                 if let Err(error) = io_ctx.mark_bootstrap_runtime_handoff_committed()
@@ -2641,6 +2635,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 }
                                 should_exit.set(true);
                                 bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
+                                break;
                             }
                         }
 
@@ -2697,6 +2692,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         bg_shutdown
                             .read()
                             .store(true, std::sync::atomic::Ordering::Release);
+                        break;
                     }
                 }
             }
@@ -4807,7 +4803,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     ctx.clear_bootstrap_runtime_handoff_committed()
         .map_err(|error| std::io::Error::other(error.to_string()))?;
     ensure_harness_command_listener().await?;
-    let command_plane_generation = register_harness_command_sender(harness_command_tx).await?;
+    register_harness_command_sender(harness_command_tx).await?;
 
     // Create effect dispatch callbacks using CallbackRegistry
     let ctx_arc = Arc::new(ctx);
@@ -4904,7 +4900,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Account setup
                         show_account_setup: show_account_setup,
                         pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
-                        harness_command_plane_generation: Some(command_plane_generation),
                         // Network status
                         network_status: network_status.clone(),
                         transport_peers: transport_peers,
@@ -4953,7 +4948,6 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Account setup
                         show_account_setup: show_account_setup,
                         pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
-                        harness_command_plane_generation: Some(command_plane_generation),
                         // Network status
                         network_status: network_status,
                         transport_peers: transport_peers,

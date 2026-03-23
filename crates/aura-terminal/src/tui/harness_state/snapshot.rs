@@ -381,14 +381,8 @@ fn build_authoritative_ui_snapshot(
 
     let operations = state.exported_operation_snapshots();
     let runtime_events = state.exported_runtime_events();
-    let harness_observation_enabled =
-        configured_ui_state_socket().is_some() || configured_ui_state_file().is_some();
-    let readiness = authoritative_harness_snapshot_readiness(
-        state.should_exit,
-        state.pending_runtime_bootstrap,
-        harness_observation_enabled,
-        state.harness_command_plane_generation.is_some(),
-    );
+    let readiness =
+        authoritative_harness_snapshot_readiness(state.should_exit, state.pending_runtime_bootstrap);
 
     let snapshot = UiSnapshot {
         screen,

@@ -1443,10 +1443,7 @@ async fn handle_tui_launch(
         }
 
         if !has_existing_account
-            && matches!(
-                try_load_account(storage.as_ref()).await?,
-                AccountLoadResult::Loaded { .. }
-            )
+            && base_path.join(".bootstrap-runtime-handoff-ready").exists()
         {
             stdio.println(format_args!(
                 "Reloading TUI with newly created bootstrap identity"
