@@ -19,6 +19,7 @@ static RUN_TOKEN_COUNTER: AtomicU64 = AtomicU64::new(1);
 pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Result<RunConfig> {
     let root = run_root(&config);
     config.run.artifact_dir = Some(root.clone());
+    let run_name = config.run.name.clone();
 
     let seed_bundle = build_seed_bundle(&config);
     let run_token = run_token();
@@ -30,7 +31,7 @@ pub fn materialize_run_config(mut config: RunConfig, _config_path: &Path) -> Res
 
     for instance in &mut config.instances {
         let instance_root = root.join("instances").join(&instance.id);
-        let transient_root = instance_root.join("transient");
+        let transient_root = transient_root(&run_name, &instance.id, run_token.as_deref());
         if !instance.data_dir.is_absolute() {
             instance.data_dir = instance_root.join("state");
         }
@@ -155,6 +156,23 @@ fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {
         Some(token) if !token.is_empty() => base.join("runs").join(token),
         _ => base,
     }
+}
+
+fn transient_root(run_name: &str, instance_id: &str, token: Option<&str>) -> PathBuf {
+    if let Some(explicit) = std::env::var_os("AURA_HARNESS_TRANSIENT_ROOT") {
+        return absolutize_path(PathBuf::from(explicit)).join(instance_id);
+    }
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    run_name.hash(&mut hasher);
+    instance_id.hash(&mut hasher);
+    token.unwrap_or_default().hash(&mut hasher);
+    workspace_root()
+        .join(".tmp")
+        .join("harness")
+        .join("transient")
+        .join(format!("{:016x}", hasher.finish()))
+        .join(instance_id)
 }
 
 fn absolutize_path(path: PathBuf) -> PathBuf {
