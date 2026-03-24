@@ -279,23 +279,17 @@ mod tests {
 
         let cached = manager.list_matching(|_| true).await;
         assert_eq!(cached.len(), 2);
-        assert!(
-            manager
-                .get_invitation(&InvitationId::new("invitation-1"))
-                .await
-                .is_none()
-        );
-        assert!(
-            manager
-                .get_invitation(&InvitationId::new("invitation-2"))
-                .await
-                .is_some()
-        );
-        assert!(
-            manager
-                .get_invitation(&InvitationId::new("invitation-3"))
-                .await
-                .is_some()
-        );
+        assert!(manager
+            .get_invitation(&InvitationId::new("invitation-1"))
+            .await
+            .is_none());
+        assert!(manager
+            .get_invitation(&InvitationId::new("invitation-2"))
+            .await
+            .is_some());
+        assert!(manager
+            .get_invitation(&InvitationId::new("invitation-3"))
+            .await
+            .is_some());
     }
 }

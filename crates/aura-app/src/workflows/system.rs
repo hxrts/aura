@@ -417,7 +417,10 @@ async fn refresh_authoritative_invitation_and_channel_readiness_hook(
         .capture(super::invitation::refresh_authoritative_invitation_readiness(app_core))
         .await;
     let _ = best_effort
-        .capture(refresh_authoritative_channel_and_recipient_readiness_hook(app_core))
+        .capture(super::messaging::refresh_authoritative_channel_membership_readiness(app_core))
+        .await;
+    let _ = best_effort
+        .capture(super::messaging::refresh_authoritative_recipient_resolution_readiness(app_core))
         .await;
     best_effort.finish()
 }
@@ -436,24 +439,25 @@ async fn refresh_authoritative_channel_and_recipient_readiness_hook(
     best_effort.finish()
 }
 
-fn spawn_coalesced_signal_refresh<T>(
+async fn spawn_coalesced_signal_refresh<T>(
     reactive: ReactiveHandler,
     signal: &'static Signal<T>,
     spawner: OwnedTaskSpawner,
     app_core: Arc<RwLock<AppCore>>,
     refresh_name: &'static str,
     refresh: RefreshHook,
-) where
+) -> Result<(), AuraError>
+where
     T: Clone + Send + Sync + 'static,
 {
+    let mut stream = reactive
+        .subscribe(signal)
+        .map_err(|error| AuraError::internal(error.to_string()))?;
     let refresh_in_flight = Arc::new(AtomicBool::new(false));
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let refresh_spawner = spawner.clone();
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
-        let Ok(mut stream) = reactive.subscribe(signal) else {
-            return;
-        };
         loop {
             let Ok(_) = stream.recv().await else {
                 break;
@@ -484,6 +488,8 @@ fn spawn_coalesced_signal_refresh<T>(
             });
         }
     });
+
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -652,7 +658,8 @@ pub async fn install_contacts_refresh_hook(
         Arc::new(|app_core| {
             Box::pin(async move { refresh_connection_status_from_contacts(&app_core).await })
         }),
-    );
+    )
+    .await?;
 
     Ok(())
 }
@@ -699,7 +706,8 @@ pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Resul
         Arc::new(|app_core| {
             Box::pin(async move { refresh_chat_projection_and_readiness(&app_core).await })
         }),
-    );
+    )
+    .await?;
 
     Ok(())
 }
@@ -747,7 +755,8 @@ pub async fn install_authoritative_readiness_hook(
                 async move { refresh_authoritative_contact_link_readiness_hook(&app_core).await },
             )
         }),
-    );
+    )
+    .await?;
     spawn_coalesced_signal_refresh(
         reactive.clone(),
         &*CHAT_SIGNAL,
@@ -759,7 +768,8 @@ pub async fn install_authoritative_readiness_hook(
                 refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
             })
         }),
-    );
+    )
+    .await?;
     spawn_coalesced_signal_refresh(
         reactive.clone(),
         &*HOMES_SIGNAL,
@@ -771,7 +781,8 @@ pub async fn install_authoritative_readiness_hook(
                 refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
             })
         }),
-    );
+    )
+    .await?;
     spawn_coalesced_signal_refresh(
         reactive.clone(),
         &*TRANSPORT_PEERS_SIGNAL,
@@ -783,7 +794,8 @@ pub async fn install_authoritative_readiness_hook(
                 refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
             })
         }),
-    );
+    )
+    .await?;
     spawn_coalesced_signal_refresh(
         reactive.clone(),
         &*SYNC_STATUS_SIGNAL,
@@ -795,7 +807,8 @@ pub async fn install_authoritative_readiness_hook(
                 refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
             })
         }),
-    );
+    )
+    .await?;
     spawn_coalesced_signal_refresh(
         reactive,
         &*INVITATIONS_SIGNAL,
@@ -807,9 +820,19 @@ pub async fn install_authoritative_readiness_hook(
                 refresh_authoritative_invitation_and_channel_readiness_hook(&app_core).await
             })
         }),
-    );
+    )
+    .await?;
 
-    Ok(())
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(refresh_authoritative_contact_link_readiness_hook(app_core))
+        .await;
+    let _ = best_effort
+        .capture(refresh_authoritative_invitation_and_channel_readiness_hook(
+            app_core,
+        ))
+        .await;
+    best_effort.finish()
 }
 
 #[cfg(not(feature = "signals"))]
@@ -1116,6 +1139,57 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
+    async fn authoritative_readiness_hook_bootstraps_pending_home_invitation() {
+        let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([81u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        runtime.set_pending_invitations(vec![crate::runtime_bridge::InvitationInfo {
+            invitation_id: aura_core::types::identifiers::InvitationId::new("inv-hook-bootstrap"),
+            sender_id: aura_core::types::identifiers::AuthorityId::new_from_entropy([82u8; 32]),
+            receiver_id: authority,
+            invitation_type: crate::runtime_bridge::InvitationBridgeType::Channel {
+                home_id: aura_core::types::identifiers::ChannelId::from_bytes([83u8; 32])
+                    .to_string(),
+                context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
+                    [84u8; 32],
+                )),
+                nickname_suggestion: Some("bootstrap-lab".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+        }]);
+        let app_core =
+            crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime.clone());
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            let facts = read_signal(
+                &app_core,
+                &*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+                "authoritative_semantic_facts",
+            )
+            .await
+            .unwrap();
+            if facts.iter().any(|fact| {
+                matches!(
+                    fact,
+                    crate::ui_contract::AuthoritativeSemanticFact::PendingHomeInvitationReady
+                )
+            }) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "pending-home invitation readiness was not bootstrapped during hook installation"
+            );
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
     async fn authoritative_invitations_readiness_hook_publishes_pending_home_invitation() {
         let authority = aura_core::types::identifiers::AuthorityId::new_from_entropy([91u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
@@ -1126,9 +1200,9 @@ mod tests {
             invitation_type: crate::runtime_bridge::InvitationBridgeType::Channel {
                 home_id: aura_core::types::identifiers::ChannelId::from_bytes([93u8; 32])
                     .to_string(),
-                context_id: Some(
-                    aura_core::types::identifiers::ContextId::new_from_entropy([94u8; 32]),
-                ),
+                context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
+                    [94u8; 32],
+                )),
                 nickname_suggestion: Some("shared-parity-lab".to_string()),
             },
             status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
@@ -1150,14 +1224,18 @@ mod tests {
                     invitation_type: crate::views::invitations::InvitationType::Home,
                     status: crate::views::invitations::InvitationStatus::Pending,
                     direction: crate::views::invitations::InvitationDirection::Received,
-                    from_id: aura_core::types::identifiers::AuthorityId::new_from_entropy([92u8; 32]),
+                    from_id: aura_core::types::identifiers::AuthorityId::new_from_entropy(
+                        [92u8; 32],
+                    ),
                     from_name: "Alice".to_string(),
                     to_id: None,
                     to_name: None,
                     created_at: 1,
                     expires_at: None,
                     message: None,
-                    home_id: Some(aura_core::types::identifiers::ChannelId::from_bytes([93u8; 32])),
+                    home_id: Some(aura_core::types::identifiers::ChannelId::from_bytes(
+                        [93u8; 32],
+                    )),
                     home_name: Some("shared-parity-lab".to_string()),
                 }],
                 Vec::new(),
@@ -1170,13 +1248,19 @@ mod tests {
 
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
         loop {
-            let facts = read_signal(&app_core, &*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, "authoritative_semantic_facts")
-                .await
-                .unwrap();
-            if facts
-                .iter()
-                .any(|fact| matches!(fact, crate::ui_contract::AuthoritativeSemanticFact::PendingHomeInvitationReady))
-            {
+            let facts = read_signal(
+                &app_core,
+                &*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+                "authoritative_semantic_facts",
+            )
+            .await
+            .unwrap();
+            if facts.iter().any(|fact| {
+                matches!(
+                    fact,
+                    crate::ui_contract::AuthoritativeSemanticFact::PendingHomeInvitationReady
+                )
+            }) {
                 break;
             }
             assert!(

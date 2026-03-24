@@ -723,7 +723,10 @@ impl<'a> InvitationChannelHandler<'a> {
                 .commit_relational_facts(vec![chat_fact.to_generic()])
                 .await
                 .map_err(|e| AgentError::effects(e.to_string()))?;
-            self.handler.invitation_cache.record_chat_fact(&chat_fact).await;
+            self.handler
+                .invitation_cache
+                .record_chat_fact(&chat_fact)
+                .await;
         }
 
         let reactive = effects.reactive_handler();

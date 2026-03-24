@@ -27,9 +27,8 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::backend::{
-    latest_invitation_code, ChannelBinding, ContactInvitationCode, DiagnosticBackend,
-    InstanceBackend, ObservationBackend, RawUiBackend, SharedSemanticBackend, SubmittedAction,
-    UiOperationHandle, UiSnapshotEvent,
+    ChannelBinding, ContactInvitationCode, DiagnosticBackend, InstanceBackend, ObservationBackend,
+    RawUiBackend, SharedSemanticBackend, SubmittedAction, UiOperationHandle, UiSnapshotEvent,
 };
 use crate::config::InstanceConfig;
 use crate::screen_normalization::{authoritative_screen, has_nav_header};
@@ -1559,23 +1558,6 @@ impl RawUiBackend for LocalPtyBackend {
 }
 
 impl LocalPtyBackend {
-    fn wait_for_contact_invitation_code(&self, timeout: Duration) -> Result<ContactInvitationCode> {
-        const POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-        let code = crate::timeouts::blocking_wait_until(timeout, POLL_INTERVAL, || {
-            let snapshot = self.ui_snapshot().ok()?;
-            latest_invitation_code(&snapshot).map(|code| ContactInvitationCode { code })
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!("submit_create_contact_invitation did not publish InvitationCodeReady")
-        })?;
-        eprintln!(
-            "[local_pty contact_invite] instance={} observed_invitation_code",
-            self.config.id
-        );
-        Ok(code)
-    }
-
     fn dismiss_contact_invitation_code_modal(&mut self, timeout: Duration) -> Result<()> {
         const POLL_INTERVAL: Duration = Duration::from_millis(50);
         let modal_visible = crate::timeouts::blocking_wait_until(timeout, POLL_INTERVAL, || {
@@ -1845,26 +1827,17 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         receiver_authority_id: &str,
     ) -> Result<SubmittedAction<ContactInvitationCode>> {
-        let (handle, exported_code) = require_contact_invitation_submission(
+        let (handle, code) = require_contact_invitation_submission(
             self.send_harness_command_receipt(&HarnessUiCommand::CreateContactInvitation {
                 receiver_authority_id: receiver_authority_id.to_string(),
             })?,
             "create_contact_invitation",
         )?;
-        let observed_code = self.wait_for_contact_invitation_code(Duration::from_secs(5))?;
-        let code = match exported_code {
-            Some(code) => {
-                if code != observed_code {
-                    anyhow::bail!(
-                        "create_contact_invitation receipt/runtime-event mismatch: receipt={:?} runtime={:?}",
-                        code,
-                        observed_code
-                    );
-                }
-                code
-            }
-            None => observed_code,
-        };
+        let code = code.ok_or_else(|| {
+            anyhow::anyhow!(
+                "create_contact_invitation accepted without an authoritative contact invitation code payload"
+            )
+        })?;
         self.dismiss_contact_invitation_code_modal(Duration::from_secs(5))?;
         Ok(SubmittedAction::with_ui_operation(code, handle))
     }
@@ -2068,6 +2041,7 @@ mod tests {
         ));
         assert!(invitation_branch
             .contains("self.dismiss_contact_invitation_code_modal(Duration::from_secs(5))?;"));
+        assert!(!invitation_branch.contains("wait_for_contact_invitation_code"));
         assert!(source.contains("self.send_harness_command(&HarnessUiCommand::DismissTransient)?;"));
         assert!(
             source.contains("self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {")

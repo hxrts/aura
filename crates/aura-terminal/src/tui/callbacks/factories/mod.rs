@@ -35,9 +35,9 @@ use aura_app::ui::workflows::strong_command::{
     classify_terminal_execution_error, CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
 };
 use aura_app::ui_contract::{
-    ChannelFactKey, InvitationFactKind, OperationId, OperationState, RuntimeEventKind, RuntimeFact,
-    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationKind,
-    SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalOutcome,
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
+    WorkflowTerminalOutcome,
 };
 use aura_core::AuthorityId;
 use futures::FutureExt;

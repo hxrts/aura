@@ -44,7 +44,7 @@ impl InvitationsCallbacks {
                 )
                 .await
                 {
-                    Ok(accepted) => {
+                    Ok(_accepted) => {
                         // Terminal settlement first.
                         let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
                             causality: None,
@@ -68,29 +68,6 @@ impl InvitationsCallbacks {
                             &tx,
                             UiUpdate::InvitationAccepted {
                                 invitation_id: inv_id.clone(),
-                            },
-                        )
-                        .await;
-                        let invitation_kind = match accepted.invitation_type {
-                            aura_app::ui::types::InvitationBridgeType::Contact { .. }
-                            | aura_app::ui::types::InvitationBridgeType::Channel { .. } => {
-                                InvitationFactKind::Contact
-                            }
-                            aura_app::ui::types::InvitationBridgeType::Guardian { .. }
-                            | aura_app::ui::types::InvitationBridgeType::DeviceEnrollment { .. } => {
-                                InvitationFactKind::Generic
-                            }
-                        };
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::RuntimeFactsUpdated {
-                                revision: None,
-                                replace_kinds: vec![RuntimeEventKind::InvitationAccepted],
-                                facts: vec![RuntimeFact::InvitationAccepted {
-                                    invitation_kind,
-                                    authority_id: Some(accepted.sender_id.to_string()),
-                                    operation_state: Some(OperationState::Succeeded),
-                                }],
                             },
                         )
                         .await;
@@ -198,7 +175,10 @@ impl InvitationsCallbacks {
                   message: Option<String>,
                   ttl_secs: Option<u64>,
                   operation: LocalTerminalOperationOwner| {
-                let operation_instance_id = operation.harness_handle().instance_id().clone();
+                let operation_handle = operation.harness_handle();
+                let operation_instance_id = operation_handle.instance_id().clone();
+                let operation_id = operation_handle.operation_id().clone();
+                let workflow_instance_id = operation_instance_id.clone();
                 spawn_local_terminal_result_callback(
                     ctx.clone(),
                     tx.clone(),
@@ -210,7 +190,7 @@ impl InvitationsCallbacks {
                             &invitation_type,
                             message,
                             ttl_secs,
-                            Some(operation_instance_id),
+                            Some(workflow_instance_id),
                         )
                         .await
                     },
@@ -218,7 +198,15 @@ impl InvitationsCallbacks {
                         if let Err(e) = copy_to_clipboard(&code) {
                             tracing::debug!(error = %e, "clipboard copy failed; code still available in UI");
                         }
-                        send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code }).await;
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::InvitationExported {
+                                code,
+                                operation_id: Some(operation_id),
+                                instance_id: Some(operation_instance_id),
+                            },
+                        )
+                        .await;
                     },
                     |tx, error| async move {
                         send_ui_update_reliable(
@@ -246,7 +234,15 @@ impl InvitationsCallbacks {
                     if let Err(e) = copy_to_clipboard(&code) {
                         tracing::debug!(error = %e, "clipboard copy failed; code still available in UI");
                     }
-                    send_ui_update_reliable(&tx, UiUpdate::InvitationExported { code }).await;
+                    send_ui_update_reliable(
+                        &tx,
+                        UiUpdate::InvitationExported {
+                            code,
+                            operation_id: None,
+                            instance_id: None,
+                        },
+                    )
+                    .await;
                 },
                 |tx, error| async move {
                     emit_error_toast(

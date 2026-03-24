@@ -9,9 +9,9 @@ pub use commands::TuiSemanticInputs;
 pub use snapshot::{maybe_export_ui_snapshot, publish_loading_ui_snapshot};
 pub(crate) use socket::{
     accept_harness_command_submission, clear_harness_command_sender,
-    complete_pending_binding_submission, ensure_harness_command_listener,
-    fail_pending_binding_submission, register_harness_command_sender,
-    reject_harness_command_submission, track_pending_binding_submission,
+    complete_pending_semantic_submission, ensure_harness_command_listener,
+    fail_pending_semantic_submission, register_harness_command_sender,
+    reject_harness_command_submission, track_pending_semantic_submission, PendingSemanticValueKind,
 };
 
 #[cfg(test)]
@@ -20,7 +20,9 @@ mod tests {
     use super::snapshot::authoritative_ui_snapshot;
     use super::socket::{
         accept_harness_command_submission, clear_harness_command_sender,
-        forward_test_harness_commands_from_listener, register_harness_command_sender,
+        complete_pending_semantic_submission, forward_test_harness_commands_from_listener,
+        register_harness_command_sender, track_pending_semantic_submission,
+        PendingSemanticValueKind,
     };
     use crate::tui::screens::Screen;
     use crate::tui::state::modal_queue::QueuedModal;
@@ -785,6 +787,125 @@ mod tests {
                     panic!("failed to decode harness command receipt: {error}")
                 });
             assert_eq!(receipt, HarnessUiCommandReceipt::Accepted { value: None });
+        };
+
+        let (_, ()) = tokio::join!(apply_task, client_task);
+        bridge_tasks.shutdown();
+
+        clear_harness_command_sender()
+            .await
+            .unwrap_or_else(|error| panic!("failed to clear harness command sender: {error}"));
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    #[tokio::test]
+    async fn harness_command_bridge_tracks_pending_contact_invitation_value() {
+        let socket_path = test_socket_path("pending-contact-invitation");
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = StdUnixListener::bind(&socket_path)
+            .unwrap_or_else(|error| panic!("failed to bind {}: {error}", socket_path.display()));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|error| panic!("failed to configure nonblocking listener: {error}"));
+        let listener = UnixListener::from_std(listener)
+            .unwrap_or_else(|error| panic!("failed to convert listener: {error}"));
+
+        let (command_tx, mut command_rx) = harness_command_channel();
+        register_harness_command_sender(command_tx)
+            .await
+            .unwrap_or_else(|error| panic!("failed to register harness command sender: {error}"));
+        let bridge_tasks = UiTaskOwner::new();
+        bridge_tasks.spawn(async move {
+            forward_test_harness_commands_from_listener(listener).await;
+        });
+
+        let apply_task = async move {
+            let observed_submission = command_rx
+                .recv()
+                .await
+                .unwrap_or_else(|| panic!("harness command channel closed unexpectedly"));
+            match observed_submission {
+                HarnessCommandSubmission {
+                    submission_id,
+                    command:
+                        HarnessUiCommand::CreateContactInvitation {
+                            receiver_authority_id,
+                        },
+                } => {
+                    assert_eq!(receiver_authority_id, "authority:test-peer");
+                    let operation = aura_app::ui_contract::HarnessUiOperationHandle::new(
+                        OperationId::invitation_create(),
+                        aura_app::ui_contract::OperationInstanceId(
+                            "test-contact-invitation-instance".to_string(),
+                        ),
+                    );
+                    track_pending_semantic_submission(
+                        submission_id,
+                        operation.clone(),
+                        PendingSemanticValueKind::ContactInvitationCode,
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("failed to track pending semantic submission: {error}")
+                    });
+                    complete_pending_semantic_submission(
+                        operation.instance_id().clone(),
+                        aura_app::scenario_contract::SemanticCommandValue::ContactInvitationCode {
+                            code: "invite-code".to_string(),
+                        },
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("failed to complete pending semantic submission: {error}")
+                    });
+                }
+                other => panic!("unexpected harness command submission: {other:?}"),
+            }
+        };
+
+        let client_task = async {
+            let mut stream = UnixStream::connect(&socket_path)
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("failed to connect {}: {error}", socket_path.display())
+                });
+            let command = HarnessUiCommand::CreateContactInvitation {
+                receiver_authority_id: "authority:test-peer".to_string(),
+            };
+            let payload = serde_json::to_vec(&command)
+                .unwrap_or_else(|error| panic!("failed to encode harness command: {error}"));
+            stream
+                .write_all(&payload)
+                .await
+                .unwrap_or_else(|error| panic!("failed to write harness command: {error}"));
+            stream.shutdown().await.unwrap_or_else(|error| {
+                panic!("failed to half-close harness command stream: {error}")
+            });
+            let mut receipt_payload = Vec::new();
+            stream
+                .read_to_end(&mut receipt_payload)
+                .await
+                .unwrap_or_else(|error| panic!("failed to read harness command receipt: {error}"));
+            let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt_payload)
+                .unwrap_or_else(|error| {
+                    panic!("failed to decode harness command receipt: {error}")
+                });
+            assert_eq!(
+                receipt,
+                HarnessUiCommandReceipt::AcceptedWithOperation {
+                    operation: aura_app::ui_contract::HarnessUiOperationHandle::new(
+                        OperationId::invitation_create(),
+                        aura_app::ui_contract::OperationInstanceId(
+                            "test-contact-invitation-instance".to_string(),
+                        ),
+                    ),
+                    value: Some(
+                        aura_app::scenario_contract::SemanticCommandValue::ContactInvitationCode {
+                            code: "invite-code".to_string(),
+                        },
+                    ),
+                }
+            );
         };
 
         let (_, ()) = tokio::join!(apply_task, client_task);

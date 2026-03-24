@@ -14,7 +14,6 @@ use aura_app::ui::contract::{
     ControlId, FieldId, ListId, OperationId, OperationInstanceId, OperationState, UiSnapshot,
 };
 use aura_app::ui_contract::ProjectionRevision;
-use aura_app::ui_contract::RuntimeFact;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -330,22 +329,6 @@ fn expect_semantic_command_channel_binding_with_required_handle(
         ));
     }
     Ok(submitted)
-}
-
-#[must_use]
-pub(crate) fn latest_invitation_code(snapshot: &UiSnapshot) -> Option<String> {
-    snapshot
-        .runtime_events
-        .iter()
-        .rev()
-        .find_map(|event| match &event.fact {
-            RuntimeFact::InvitationCodeReady {
-                source_operation,
-                code: Some(code),
-                ..
-            } if *source_operation == OperationId::invitation_create() => Some(code.clone()),
-            _ => None,
-        })
 }
 
 #[must_use]

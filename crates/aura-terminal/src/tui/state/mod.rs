@@ -448,16 +448,14 @@ impl TuiState {
 
     pub fn apply_runtime_facts_update(
         &mut self,
-        revision: Option<ProjectionRevision>,
+        revision: ProjectionRevision,
         replace_kinds: Vec<RuntimeEventKind>,
         facts: Vec<RuntimeFact>,
     ) -> bool {
-        if let Some(revision) = revision {
-            if revision.is_stale_against(self.last_authoritative_runtime_facts_revision) {
-                return false;
-            }
-            self.last_authoritative_runtime_facts_revision = revision;
+        if revision.is_stale_against(self.last_authoritative_runtime_facts_revision) {
+            return false;
         }
+        self.last_authoritative_runtime_facts_revision = revision;
         for kind in replace_kinds {
             self.clear_runtime_fact_kind(kind);
         }

@@ -52,7 +52,8 @@ fn biscuit_bridge_extracts_token_facts() {
 /// Namespaced capabilities with `:` remain valid Biscuit capability tokens.
 #[test]
 fn biscuit_bridge_accepts_namespaced_capability_tokens() {
-    let authority = aura_authorization::TokenAuthority::new(AuthorityId::new_from_entropy([3u8; 32]));
+    let authority =
+        aura_authorization::TokenAuthority::new(AuthorityId::new_from_entropy([3u8; 32]));
     let recipient = authority.authority_id();
     let token = authority
         .create_token(recipient)

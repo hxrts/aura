@@ -708,7 +708,8 @@ impl InvitationHandler {
         authority_id: AuthorityId,
     ) -> AgentResult<()> {
         let envelopes =
-            load_relational_fact_envelopes_by_type(effects, authority_id, CHAT_FACT_TYPE_ID).await?;
+            load_relational_fact_envelopes_by_type(effects, authority_id, CHAT_FACT_TYPE_ID)
+                .await?;
         let mut index = aura_chat::ChannelContextIndex::new();
         for envelope in envelopes {
             let Some(chat_fact) = ChatFact::from_envelope(&envelope) else {
@@ -716,7 +717,9 @@ impl InvitationHandler {
             };
             index.apply_fact(&chat_fact);
         }
-        self.invitation_cache.replace_channel_context_index(index).await;
+        self.invitation_cache
+            .replace_channel_context_index(index)
+            .await;
         Ok(())
     }
 
@@ -735,12 +738,20 @@ impl InvitationHandler {
             self.refresh_channel_context_index(effects, own_id).await?;
         }
 
-        if let Some(context_id) = self.invitation_cache.channel_context(*home_id, own_id).await {
+        if let Some(context_id) = self
+            .invitation_cache
+            .channel_context(*home_id, own_id)
+            .await
+        {
             return Ok(context_id);
         }
 
         self.refresh_channel_context_index(effects, own_id).await?;
-        if let Some(context_id) = self.invitation_cache.channel_context(*home_id, own_id).await {
+        if let Some(context_id) = self
+            .invitation_cache
+            .channel_context(*home_id, own_id)
+            .await
+        {
             return Ok(context_id);
         }
 
@@ -914,10 +925,10 @@ impl InvitationHandler {
         if let InvitationType::Contact { .. } = invitation.invitation_type {
             let sender_contact_exists = self
                 .sender_contact_exists(
-                effects.as_ref(),
-                invitation.sender_id,
-                invitation.receiver_id,
-            )
+                    effects.as_ref(),
+                    invitation.sender_id,
+                    invitation.receiver_id,
+                )
                 .await;
             if !sender_contact_exists {
                 let contact_fact = ContactFact::Added {
@@ -946,7 +957,9 @@ impl InvitationHandler {
                     },
                 )
                 .await?;
-                self.invitation_cache.record_contact_fact(&contact_fact).await;
+                self.invitation_cache
+                    .record_contact_fact(&contact_fact)
+                    .await;
             }
         }
 
@@ -1689,6 +1702,19 @@ impl InvitationHandler {
         self.invitation_cache
             .cache_invitation(invitation.clone())
             .await;
+        crate::reactive::app_signal_views::materialize_pending_invitation_signal(
+            &effects.reactive_handler(),
+            self.context.authority.authority_id(),
+            invitation.invitation_id.as_str(),
+            invitation.sender_id,
+            invitation.receiver_id,
+            &invitation.invitation_type,
+            invitation.created_at,
+            invitation.expires_at,
+            invitation.message.clone(),
+        )
+        .await
+        .map_err(AgentError::runtime)?;
 
         Ok(invitation)
     }
@@ -1955,10 +1981,8 @@ impl InvitationHandler {
                 let preserved = serde_json::from_slice::<ShareableInvitation>(&bytes)
                     .ok()
                     .and_then(|shareable| invitations.get(&shareable.invitation_id));
-                let Some(stored) = InvitationCacheHandler::parse_imported_invitation_bytes(
-                    &bytes,
-                    preserved,
-                )
+                let Some(stored) =
+                    InvitationCacheHandler::parse_imported_invitation_bytes(&bytes, preserved)
                 else {
                     continue;
                 };
@@ -3255,9 +3279,10 @@ mod tests {
     use crate::runtime::services::ceremony_runner::CeremonyRunner;
     use crate::runtime::services::CeremonyTracker;
     use crate::runtime::TaskSupervisor;
-    use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL};
+    use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL, INVITATIONS_SIGNAL};
     use aura_app::views::home::{HomeRole, HomesState};
     use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+    use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::types::identifiers::{
         AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
     };
@@ -5128,6 +5153,9 @@ mod tests {
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, receiver_id).unwrap(),
         );
+        register_app_signals(&effects.reactive_handler())
+            .await
+            .expect("app signals should register");
 
         let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
 
@@ -5194,6 +5222,17 @@ mod tests {
             found,
             "expected imported channel invitation to appear in pending list"
         );
+
+        let invitations = effects
+            .reactive_handler()
+            .read(&*INVITATIONS_SIGNAL)
+            .await
+            .expect("invitation signal should be registered");
+        assert!(invitations.all_pending().iter().any(|inv| {
+            inv.id == invitation_id.to_string()
+                && inv.direction == aura_app::views::invitations::InvitationDirection::Received
+                && inv.status == aura_app::views::invitations::InvitationStatus::Pending
+        }));
     }
 
     #[tokio::test]

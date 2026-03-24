@@ -387,27 +387,6 @@ impl ChatCallbacks {
                                 Some(terminal),
                             )
                             .await;
-
-                            // Best-effort runtime fact after terminal settlement.
-                            let channel_fact =
-                                match channel_id_clone.parse::<aura_core::ChannelId>() {
-                                    Ok(channel_id) => {
-                                        ChannelFactKey::identified(channel_id.to_string())
-                                    }
-                                    Err(_) => ChannelFactKey::named(channel_id_clone.clone()),
-                                };
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::RuntimeFactsUpdated {
-                                    revision: None,
-                                    replace_kinds: vec![RuntimeEventKind::MessageCommitted],
-                                    facts: vec![RuntimeFact::MessageCommitted {
-                                        channel: channel_fact,
-                                        content: content_clone.clone(),
-                                    }],
-                                },
-                            )
-                            .await;
                         }
                         Err(e) => {
                             // Terminal failure settlement.

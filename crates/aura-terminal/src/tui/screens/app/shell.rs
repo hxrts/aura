@@ -69,10 +69,10 @@ use crate::tui::components::{
 use crate::tui::context::{IoContext, ShellExitIntent};
 use crate::tui::harness_state::{
     accept_harness_command_submission, apply_harness_command, clear_harness_command_sender,
-    complete_pending_binding_submission, ensure_harness_command_listener,
-    fail_pending_binding_submission, maybe_export_ui_snapshot, publish_loading_ui_snapshot,
+    complete_pending_semantic_submission, ensure_harness_command_listener,
+    fail_pending_semantic_submission, maybe_export_ui_snapshot, publish_loading_ui_snapshot,
     register_harness_command_sender, reject_harness_command_submission,
-    track_pending_binding_submission, TuiSemanticInputs,
+    track_pending_semantic_submission, PendingSemanticValueKind, TuiSemanticInputs,
 };
 use crate::tui::hooks::{AppCoreContext, AppSnapshotAvailability, CallbackContext};
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
@@ -259,9 +259,9 @@ async fn complete_ready_join_binding_submissions(
         ready.drain().collect::<Vec<_>>()
     };
     for instance_id in ready_instance_ids {
-        if let Err(error) = complete_pending_binding_submission(
+        if let Err(error) = complete_pending_semantic_submission(
             aura_app::ui_contract::OperationInstanceId(instance_id),
-            binding.clone(),
+            binding.clone().semantic_value(),
         )
         .await
         {
@@ -1603,12 +1603,36 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     )
                                     .await
                                 } else {
-                                    track_pending_binding_submission(submission_id, operation)
-                                        .await
+                                    track_pending_semantic_submission(
+                                        submission_id,
+                                        operation,
+                                        PendingSemanticValueKind::ChannelBinding,
+                                    )
+                                    .await
                                 }
                             } else {
-                                track_pending_binding_submission(submission_id, operation).await
+                                track_pending_semantic_submission(
+                                    submission_id,
+                                    operation,
+                                    PendingSemanticValueKind::ChannelBinding,
+                                )
+                                .await
                             }
+                        }
+                        Some(operation)
+                            if operation.operation_id()
+                                == &aura_app::ui_contract::OperationId::invitation_create()
+                                && matches!(
+                                    submission.command,
+                                    HarnessUiCommand::CreateContactInvitation { .. }
+                                ) =>
+                        {
+                            track_pending_semantic_submission(
+                                submission_id,
+                                operation,
+                                PendingSemanticValueKind::ContactInvitationCode,
+                            )
+                            .await
                         }
                         Some(operation) => {
                             accept_harness_command_submission(submission_id, Some(operation), None)
@@ -2192,9 +2216,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 crate::tui::state::ToastLevel::Success
                             );
                             if let Some(instance_id) = operation_instance_id {
-                                if let Err(error) = complete_pending_binding_submission(
+                                if let Err(error) = complete_pending_semantic_submission(
                                     instance_id,
-                                    ChannelBindingWitness::new(channel_id, context_id),
+                                    ChannelBindingWitness::new(channel_id, context_id)
+                                        .semantic_value(),
                                 )
                                 .await
                                 {
@@ -2360,21 +2385,30 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 crate::tui::state::ToastLevel::Success
                             );
                         }
-                        UiUpdate::InvitationExported { code } => {
+                        UiUpdate::InvitationExported {
+                            code,
+                            operation_id,
+                            instance_id,
+                        } => {
+                            let source_operation = operation_id
+                                .clone()
+                                .unwrap_or_else(OperationId::invitation_create);
+                            let runtime_code = code.clone();
                             tui.with_mut(|state| {
-                                state.last_exported_invitation_code = Some(code.clone());
+                                state.last_exported_invitation_code = Some(runtime_code.clone());
                                 state.upsert_runtime_fact(RuntimeFact::InvitationCodeReady {
                                     receiver_authority_id: None,
-                                    source_operation: OperationId::invitation_create(),
-                                    code: Some(code.clone()),
+                                    source_operation,
+                                    code: Some(runtime_code.clone()),
                                 });
-                                let copied = copy_to_clipboard(&code).is_ok();
+                                let copied = copy_to_clipboard(&runtime_code).is_ok();
                                 state
                                     .modal_queue
                                     .enqueue(crate::tui::state::QueuedModal::ContactsCode(
                                         {
-                                            let mut modal =
-                                                crate::tui::state::InvitationCodeModalState::for_code(code);
+                                            let mut modal = crate::tui::state::InvitationCodeModalState::for_code(
+                                                runtime_code,
+                                            );
                                             if copied {
                                                 modal.set_copied();
                                             }
@@ -2382,6 +2416,19 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         },
                                     ));
                             });
+                            if let Some(instance_id) = instance_id {
+                                if let Err(error) = complete_pending_semantic_submission(
+                                    instance_id,
+                                    SemanticCommandValue::ContactInvitationCode { code },
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        error = %error,
+                                        "failed to settle pending contact invitation submission"
+                                    );
+                                }
+                            }
                         }
                         UiUpdate::AuthoritativeOperationStatus {
                             operation_id,
@@ -2389,30 +2436,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             instance_id,
                             causality,
                         } => {
-                            if operation_id == aura_app::ui_contract::OperationId::create_channel()
-                                && matches!(
-                                    status.phase,
-                                    aura_app::ui_contract::SemanticOperationPhase::Failed
-                                        | aura_app::ui_contract::SemanticOperationPhase::Cancelled
-                                )
-                            {
-                                if let Some(instance_id) = instance_id.clone() {
-                                    let reason = status
-                                        .error
-                                        .as_ref()
-                                        .and_then(|error| error.detail.clone())
-                                        .unwrap_or_else(|| "create channel failed".to_string());
-                                    if let Err(error) =
-                                        fail_pending_binding_submission(instance_id, reason).await
-                                    {
-                                        tracing::warn!(
-                                            error = %error,
-                                            "failed to reject pending create-channel binding submission"
-                                        );
-                                    }
-                                }
-                            }
                             if let Some(instance_id) = instance_id.clone() {
+                                let pending_instance_id = instance_id.clone();
                                 let is_join_channel = status.kind
                                     == SemanticOperationKind::JoinChannel
                                     && operation_id
@@ -2437,8 +2462,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .as_ref()
                                             .and_then(|error| error.detail.clone())
                                             .unwrap_or_else(|| "join channel failed".to_string());
-                                        if let Err(error) = fail_pending_binding_submission(
-                                            instance_id,
+                                        if let Err(error) = fail_pending_semantic_submission(
+                                            pending_instance_id.clone(),
                                             reason,
                                         )
                                         .await
@@ -2462,6 +2487,39 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             )
                                             .await;
                                         }
+                                    }
+                                }
+                                let tracks_pending_semantic_value =
+                                    operation_id
+                                        == aura_app::ui_contract::OperationId::create_channel()
+                                        || operation_id
+                                            == aura_app::ui_contract::OperationId::join_channel()
+                                        || operation_id
+                                            == aura_app::ui_contract::OperationId::invitation_create();
+                                if matches!(
+                                    status.phase,
+                                    aura_app::ui_contract::SemanticOperationPhase::Failed
+                                        | aura_app::ui_contract::SemanticOperationPhase::Cancelled
+                                ) && tracks_pending_semantic_value
+                                {
+                                    let reason = status
+                                        .error
+                                        .as_ref()
+                                        .and_then(|error| error.detail.clone())
+                                        .unwrap_or_else(|| {
+                                            format!("{} failed", operation_id.0)
+                                        });
+                                    if let Err(error) =
+                                        fail_pending_semantic_submission(
+                                            pending_instance_id,
+                                            reason,
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            error = %error,
+                                            "failed to reject pending semantic submission"
+                                        );
                                     }
                                 }
                             }

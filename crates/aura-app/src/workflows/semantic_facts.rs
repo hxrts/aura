@@ -258,10 +258,6 @@ impl SemanticWorkflowOwner {
         }
     }
 
-    pub(in crate::workflows) fn app_core(&self) -> &Arc<RwLock<AppCore>> {
-        &self.app_core
-    }
-
     pub(in crate::workflows) fn kind(&self) -> SemanticOperationKind {
         self.kind
     }
@@ -426,6 +422,7 @@ impl SemanticWorkflowOwner {
         Ok(())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::workflows) async fn terminal_success_fact(
         &self,
     ) -> Result<AuthoritativeSemanticFact, AuraError> {
@@ -462,6 +459,7 @@ impl SemanticWorkflowOwner {
         Ok(fact)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::workflows) async fn terminal_success_fact_with<Proof>(
         &self,
         proof: Proof,
@@ -952,14 +950,20 @@ where
     F: FnOnce(&mut Vec<AuthoritativeSemanticFact>),
 {
     let _guard = AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE.lock().await;
-    let (previous_facts, updated_facts) = {
+    let (previous_facts, updated_facts, changed) = {
         let mut core = app_core.write().await;
         let previous_facts = core.authoritative_semantic_facts();
         let mut updated_facts = previous_facts.clone();
         update(&mut updated_facts);
-        core.set_authoritative_semantic_facts(updated_facts.clone());
-        (previous_facts, updated_facts)
+        let changed = updated_facts != previous_facts;
+        if changed {
+            core.set_authoritative_semantic_facts(updated_facts.clone());
+        }
+        (previous_facts, updated_facts, changed)
     };
+    if !changed {
+        return Ok(());
+    }
     if let Err(error) = emit_signal(
         app_core,
         &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
@@ -1254,6 +1258,34 @@ mod tests {
             })
         );
         assert_eq!(facts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn no_op_authoritative_fact_update_does_not_bump_revision() {
+        let app_core = crate::testing::default_test_app_core();
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+
+        publish_authoritative_semantic_fact(
+            &app_core,
+            authorize_readiness_publication(AuthoritativeSemanticFact::PendingHomeInvitationReady),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+
+        let before = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+
+        update_authoritative_semantic_facts(&app_core, |_facts| {})
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        let after = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.facts, before.facts);
     }
 
     #[tokio::test]

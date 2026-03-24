@@ -4,7 +4,7 @@ use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{HarnessCommandSender, HarnessCommandSubmission};
 use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::{HarnessUiCommand, HarnessUiCommandReceipt};
-use aura_app::ui_contract::{ChannelBindingWitness, HarnessUiOperationHandle, OperationInstanceId};
+use aura_app::ui_contract::{HarnessUiOperationHandle, OperationInstanceId};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{
     execute_with_timeout_budget, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
@@ -57,27 +57,35 @@ enum HarnessCommandPlaneControl {
         operation: Option<HarnessUiOperationHandle>,
         value: Option<SemanticCommandValue>,
     },
-    TrackPendingBinding {
+    TrackPendingSemanticValue {
         submission_id: String,
         operation: HarnessUiOperationHandle,
+        kind: PendingSemanticValueKind,
     },
     Reject {
         submission_id: String,
         reason: String,
     },
-    CompletePendingBinding {
+    CompletePendingSemanticValue {
         instance_id: OperationInstanceId,
-        binding: ChannelBindingWitness,
+        value: SemanticCommandValue,
     },
-    FailPendingBinding {
+    FailPendingSemanticValue {
         instance_id: OperationInstanceId,
         reason: String,
     },
 }
 
-struct PendingBindingSubmission {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingSemanticValueKind {
+    ChannelBinding,
+    ContactInvitationCode,
+}
+
+struct PendingSemanticSubmission {
     reply: oneshot::Sender<HarnessUiCommandReceipt>,
     operation: HarnessUiOperationHandle,
+    kind: PendingSemanticValueKind,
 }
 
 struct HarnessSocketGuard {
@@ -237,13 +245,15 @@ pub(crate) async fn accept_harness_command_submission(
     .await
 }
 
-pub(crate) async fn track_pending_binding_submission(
+pub(crate) async fn track_pending_semantic_submission(
     submission_id: String,
     operation: HarnessUiOperationHandle,
+    kind: PendingSemanticValueKind,
 ) -> io::Result<()> {
-    settle_harness_command_plane(HarnessCommandPlaneControl::TrackPendingBinding {
+    settle_harness_command_plane(HarnessCommandPlaneControl::TrackPendingSemanticValue {
         submission_id,
         operation,
+        kind,
     })
     .await
 }
@@ -259,22 +269,22 @@ pub(crate) async fn reject_harness_command_submission(
     .await
 }
 
-pub(crate) async fn complete_pending_binding_submission(
+pub(crate) async fn complete_pending_semantic_submission(
     instance_id: OperationInstanceId,
-    binding: ChannelBindingWitness,
+    value: SemanticCommandValue,
 ) -> io::Result<()> {
-    settle_harness_command_plane(HarnessCommandPlaneControl::CompletePendingBinding {
+    settle_harness_command_plane(HarnessCommandPlaneControl::CompletePendingSemanticValue {
         instance_id,
-        binding,
+        value,
     })
     .await
 }
 
-pub(crate) async fn fail_pending_binding_submission(
+pub(crate) async fn fail_pending_semantic_submission(
     instance_id: OperationInstanceId,
     reason: String,
 ) -> io::Result<()> {
-    settle_harness_command_plane(HarnessCommandPlaneControl::FailPendingBinding {
+    settle_harness_command_plane(HarnessCommandPlaneControl::FailPendingSemanticValue {
         instance_id,
         reason,
     })
@@ -303,7 +313,7 @@ async fn drive_harness_command_plane(
         Vec::new();
     let mut pending_replies: HashMap<String, oneshot::Sender<HarnessUiCommandReceipt>> =
         HashMap::new();
-    let mut pending_bindings: HashMap<String, PendingBindingSubmission> = HashMap::new();
+    let mut pending_semantic_values: HashMap<String, PendingSemanticSubmission> = HashMap::new();
 
     fn reject_reply(reply: oneshot::Sender<HarnessUiCommandReceipt>, reason: impl Into<String>) {
         let _ = reply.send(HarnessUiCommandReceipt::Rejected {
@@ -428,14 +438,19 @@ async fn drive_harness_command_plane(
                     let _ = reply.send(receipt);
                 }
             }
-            HarnessCommandPlaneControl::TrackPendingBinding {
+            HarnessCommandPlaneControl::TrackPendingSemanticValue {
                 submission_id,
                 operation,
+                kind,
             } => {
                 if let Some(reply) = pending_replies.remove(&submission_id) {
-                    pending_bindings.insert(
+                    pending_semantic_values.insert(
                         operation.instance_id().0.clone(),
-                        PendingBindingSubmission { reply, operation },
+                        PendingSemanticSubmission {
+                            reply,
+                            operation,
+                            kind,
+                        },
                     );
                 }
             }
@@ -447,24 +462,44 @@ async fn drive_harness_command_plane(
                     reject_reply(reply, reason);
                 }
             }
-            HarnessCommandPlaneControl::CompletePendingBinding {
-                instance_id,
-                binding,
-            } => {
-                if let Some(pending) = pending_bindings.remove(&instance_id.0) {
-                    let _ = pending
-                        .reply
-                        .send(HarnessUiCommandReceipt::AcceptedWithOperation {
-                            operation: pending.operation,
-                            value: Some(binding.semantic_value()),
-                        });
+            HarnessCommandPlaneControl::CompletePendingSemanticValue { instance_id, value } => {
+                if let Some(pending) = pending_semantic_values.remove(&instance_id.0) {
+                    let value_matches_kind = match (&pending.kind, &value) {
+                        (
+                            PendingSemanticValueKind::ChannelBinding,
+                            SemanticCommandValue::AuthoritativeChannelBinding { .. },
+                        ) => true,
+                        (
+                            PendingSemanticValueKind::ContactInvitationCode,
+                            SemanticCommandValue::ContactInvitationCode { .. },
+                        ) => true,
+                        _ => false,
+                    };
+                    if value_matches_kind {
+                        let _ =
+                            pending
+                                .reply
+                                .send(HarnessUiCommandReceipt::AcceptedWithOperation {
+                                    operation: pending.operation,
+                                    value: Some(value),
+                                });
+                    } else {
+                        reject_reply(
+                            pending.reply,
+                            format!(
+                                "pending semantic settlement kind mismatch for {}:{}",
+                                pending.operation.operation_id().0,
+                                pending.operation.instance_id().0
+                            ),
+                        );
+                    }
                 }
             }
-            HarnessCommandPlaneControl::FailPendingBinding {
+            HarnessCommandPlaneControl::FailPendingSemanticValue {
                 instance_id,
                 reason,
             } => {
-                if let Some(pending) = pending_bindings.remove(&instance_id.0) {
+                if let Some(pending) = pending_semantic_values.remove(&instance_id.0) {
                     reject_reply(pending.reply, reason);
                 }
             }
@@ -483,10 +518,10 @@ async fn drive_harness_command_plane(
             "harness command plane stopped before terminal settlement",
         );
     }
-    for (_instance_id, pending) in pending_bindings.drain() {
+    for (_instance_id, pending) in pending_semantic_values.drain() {
         reject_reply(
             pending.reply,
-            "harness command plane stopped before authoritative binding settlement",
+            "harness command plane stopped before semantic value settlement",
         );
     }
     let _ = state_tx.send(HarnessCommandPlaneLifecycle::Stopped);

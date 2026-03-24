@@ -106,8 +106,7 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 pub use facts::{
     ContactExistenceIndex, ContactFact, ContactFactReducer, GuardianBindingDetailsFact,
     GuardianBindingDetailsFactReducer, ReadReceiptPolicy, RecoveryGrantDetailsFact,
-    RecoveryGrantDetailsFactReducer,
-    CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+    RecoveryGrantDetailsFactReducer, CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
     RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 

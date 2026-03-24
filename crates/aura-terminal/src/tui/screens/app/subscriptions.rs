@@ -40,8 +40,8 @@ use crate::tui::types::{
     AuthorityInfo, Channel, Contact, Device, Invitation, Message, PendingRequest,
 };
 use crate::tui::updates::{
-    spawn_ordered_ui_updates, spawn_ui_update, OrderedUiUpdateGate, UiUpdate,
-    UiUpdatePublication, UiUpdateSender,
+    spawn_ordered_ui_updates, spawn_ui_update, OrderedUiUpdateGate, UiUpdate, UiUpdatePublication,
+    UiUpdateSender,
 };
 
 const DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES: u32 = 200;
@@ -132,6 +132,7 @@ fn authoritative_runtime_replace_kinds() -> Vec<RuntimeEventKind> {
         RuntimeEventKind::PendingHomeInvitationReady,
         RuntimeEventKind::ChannelMembershipReady,
         RuntimeEventKind::RecipientPeersResolved,
+        RuntimeEventKind::MessageCommitted,
         RuntimeEventKind::MessageDeliveryReady,
     ]
 }
@@ -986,7 +987,7 @@ pub fn use_authoritative_semantic_facts_subscription(
                         .collect::<Vec<_>>();
                     let facts = mapped.into_iter().map(|(_, fact)| fact).collect::<Vec<_>>();
                     updates.push(UiUpdate::RuntimeFactsUpdated {
-                        revision: Some(revision),
+                        revision,
                         replace_kinds: authoritative_runtime_replace_kinds(),
                         facts,
                     });

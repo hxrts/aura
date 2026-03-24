@@ -3843,9 +3843,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
         Ok(invitation_service
-            .list_pending()
+            .list_with_storage()
             .await
             .iter()
+            .filter(|inv| inv.status == crate::handlers::InvitationStatus::Pending)
             .map(convert_invitation_to_bridge_info)
             .collect())
     }
@@ -3873,10 +3874,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
         let our_authority = self.agent.authority_id();
         Ok(invitation_service
-            .list_pending()
+            .list_with_storage()
             .await
             .iter()
-            .filter(|inv| inv.sender_id == our_authority)
+            .filter(|inv| {
+                inv.status == crate::handlers::InvitationStatus::Pending
+                    && inv.sender_id == our_authority
+            })
             .map(|inv| inv.receiver_id)
             .collect())
     }
@@ -3900,7 +3904,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .agent
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?
-            .list_pending()
+            .list_with_storage()
             .await
             .iter()
             .filter(|inv| {

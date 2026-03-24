@@ -50,8 +50,8 @@ use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{AuthorityInfo, Device, MfaPolicy};
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{
-    ChannelBindingWitness, OperationId, OperationInstanceId, ProjectionRevision,
-    RuntimeEventKind, RuntimeFact, SemanticOperationStatus,
+    ChannelBindingWitness, OperationId, OperationInstanceId, ProjectionRevision, RuntimeEventKind,
+    RuntimeFact, SemanticOperationStatus,
 };
 use aura_core::types::Epoch;
 pub use aura_ui::FrontendUiOperation as UiOperation;
@@ -408,6 +408,10 @@ pub enum UiUpdate {
     InvitationExported {
         /// The exported invite code
         code: String,
+        /// Operation that exported the code, when the export belongs to an exact semantic flow
+        operation_id: Option<OperationId>,
+        /// Exact instance that produced the code, when the export belongs to an exact semantic flow
+        instance_id: Option<OperationInstanceId>,
     },
 
     /// An invitation was imported from a file
@@ -527,7 +531,7 @@ pub enum UiUpdate {
 
     /// Replace the authoritative runtime facts for specific fact kinds.
     RuntimeFactsUpdated {
-        revision: Option<ProjectionRevision>,
+        revision: ProjectionRevision,
         replace_kinds: Vec<RuntimeEventKind>,
         facts: Vec<RuntimeFact>,
     },
