@@ -281,7 +281,7 @@ of their proper owner.
 - [x] Run `cargo test -p aura-terminal --test e2e_terminal_state`.
 - [x] Run `just lint-arch-syntax`.
 - [x] Confirm every targeted check is green before committing.
-- [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): simplify modal and props wiring"`.
+- [x] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): simplify modal and props wiring"`.
 
 ## Workstream D — Terminal-Local Type Reduction
 
