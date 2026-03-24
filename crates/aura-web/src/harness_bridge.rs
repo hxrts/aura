@@ -889,14 +889,7 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let screen = snapshot.screen;
     let open_modal = snapshot.open_modal;
     let operation_count = snapshot.operations.len();
-    if !publish_ui_snapshot_now(
-        &window,
-        value,
-        json,
-        screen,
-        open_modal,
-        operation_count,
-    ) {
+    if !publish_ui_snapshot_now(&window, value, json, screen, open_modal, operation_count) {
         return;
     }
 

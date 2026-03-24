@@ -209,12 +209,14 @@ use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use std::sync::Mutex;
 
 mod dispatch;
+mod dispatch_command_handlers;
 mod events;
 mod input;
 mod props;
 mod render;
 mod runtime;
 mod state;
+mod update_handlers;
 mod updates;
 use dispatch::{
     authoritative_binding_for_requested_join, complete_ready_join_binding_submissions,

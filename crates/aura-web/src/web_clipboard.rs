@@ -4,8 +4,8 @@
 //! with a synchronous mirror for read operations that can't await async results.
 
 use crate::error::{log_web_error, WebUiError};
-use aura_ui::FrontendUiOperation as WebUiOperation;
 use aura_ui::ClipboardPort;
+use aura_ui::FrontendUiOperation as WebUiOperation;
 use js_sys::Reflect;
 use std::sync::RwLock;
 use wasm_bindgen::JsCast;

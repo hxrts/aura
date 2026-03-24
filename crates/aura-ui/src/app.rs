@@ -6612,7 +6612,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_semantic_snapshot_marks_active_home_row_selected_when_falling_back_to_runtime_home() {
+    fn runtime_semantic_snapshot_marks_active_home_row_selected_when_falling_back_to_runtime_home()
+    {
         let model = UiModel::new("authority-test".to_string());
         let neighborhood_runtime = NeighborhoodRuntimeView {
             loaded: true,
@@ -6645,7 +6646,10 @@ mod tests {
             .find(|list| list.id == ListId::Homes)
             .expect("homes list should be exported");
         assert!(
-            homes.items.iter().any(|item| item.id == "channel:home-1" && item.selected),
+            homes
+                .items
+                .iter()
+                .any(|item| item.id == "channel:home-1" && item.selected),
             "active runtime home fallback must mark the matching row selected"
         );
         assert_eq!(

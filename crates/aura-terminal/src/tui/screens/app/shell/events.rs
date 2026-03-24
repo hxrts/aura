@@ -54,6 +54,13 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
+    fn read_repo_source(relative_path: &str) -> String {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source_path = repo_root.join(relative_path);
+        std::fs::read_to_string(&source_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", source_path.display()))
+    }
+
     #[test]
     fn committed_channel_resolution_requires_authoritative_selection() {
         let mut state = TuiState::new();
@@ -112,10 +119,9 @@ mod tests {
 
     #[test]
     fn send_dispatch_does_not_background_retry_selection() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
         let send_start = shell_source
             .find("DispatchCommand::SendChatMessage")
             .unwrap_or_else(|| panic!("missing SendChatMessage dispatch arm"));
@@ -134,10 +140,9 @@ mod tests {
 
     #[test]
     fn start_chat_dispatch_does_not_optimistically_navigate() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
         let start_chat = shell_source
             .find("DispatchCommand::StartChat")
             .unwrap_or_else(|| panic!("missing StartChat dispatch arm"));
@@ -152,10 +157,9 @@ mod tests {
 
     #[test]
     fn invitation_dispatch_uses_product_callbacks_without_harness_shortcuts() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
 
         let create_start = shell_source
             .find("DispatchCommand::CreateInvitation")
@@ -221,10 +225,9 @@ mod tests {
 
     #[test]
     fn invite_to_channel_dispatch_clears_readiness_without_local_lifecycle_authorship() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
 
         let invite_start = shell_source
             .find("DispatchCommand::InviteActorToChannel {")
@@ -241,10 +244,8 @@ mod tests {
 
     #[test]
     fn device_enrollment_completion_refresh_does_not_sleep() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let shell_source =
+            read_repo_source("crates/aura-terminal/src/tui/screens/app/shell/update_handlers.rs");
 
         let status_start = shell_source
             .find("UiUpdate::KeyRotationCeremonyStatus {")
@@ -262,13 +263,10 @@ mod tests {
 
     #[test]
     fn ceremony_monitors_use_typed_lifecycle_outcomes() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
-        let helper_path = repo_root.join("crates/aura-terminal/src/tui/key_rotation.rs");
-        let helper_source = std::fs::read_to_string(&helper_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", helper_path.display()));
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
+        let helper_source = read_repo_source("crates/aura-terminal/src/tui/key_rotation.rs");
 
         let guardian_start = shell_source
             .find("DispatchCommand::StartGuardianCeremony")
@@ -328,10 +326,8 @@ mod tests {
 
     #[test]
     fn chat_state_update_clamps_stale_selected_channel_even_with_unresolved_committed_selection() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shell_path = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
-        let shell_source = std::fs::read_to_string(&shell_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", shell_path.display()));
+        let shell_source =
+            read_repo_source("crates/aura-terminal/src/tui/screens/app/shell/update_handlers.rs");
 
         let update_start = shell_source
             .find("UiUpdate::ChatStateUpdated {")

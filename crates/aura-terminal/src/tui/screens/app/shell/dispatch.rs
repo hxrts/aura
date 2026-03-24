@@ -1,27 +1,19 @@
 use super::*;
 use std::collections::HashSet;
 
-use aura_app::ui::workflows::access as access_workflows;
-use aura_app::ui::workflows::ceremonies::{
-    monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
-    start_guardian_ceremony, CeremonyLifecycleState, CeremonyPollPolicy,
-};
-use aura_app::ui_contract::SemanticOperationKind;
-use aura_core::types::FrostThreshold;
-
-use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
 use crate::tui::screens::app::subscriptions::{
     SharedChannels, SharedContacts, SharedDiscoveredPeers, SharedInvitations, SharedMessages,
     SharedPendingRequests, SharedThreshold,
 };
 use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::tasks::UiTaskOwner;
-use crate::tui::updates::{
-    publish_ui_update, UiOperation, UiOperationFailure, UiUpdatePublication,
-};
+use crate::tui::updates::{publish_ui_update, UiOperationFailure, UiUpdatePublication};
+use aura_app::ui_contract::SemanticOperationKind;
+
+use super::dispatch_command_handlers::handle_dispatch_command_match;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum NotificationSelection {
+pub(super) enum NotificationSelection {
     ReceivedInvitation(String),
     SentInvitation(String),
     RecoveryRequest(String),
@@ -124,7 +116,7 @@ pub(super) async fn send_optional_ui_update_required(
     }
 }
 
-fn read_selected_notification(
+pub(super) fn read_selected_notification(
     selected_index: usize,
     invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
     pending_requests: &std::sync::Arc<parking_lot::RwLock<Vec<crate::tui::types::PendingRequest>>>,
@@ -170,7 +162,7 @@ fn read_selected_notification(
         .map(|(_, selection)| selection.clone())
 }
 
-fn semantic_accept_kind_for_invitation(
+pub(super) fn semantic_accept_kind_for_invitation(
     invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
     invitation_id: &str,
 ) -> SemanticOperationKind {
@@ -963,52 +955,30 @@ pub(super) fn handle_dispatch_command(
     new_state: &mut TuiState,
     event_ctx: &EventDispatchContext<'_>,
 ) -> EventCommandLoopAction {
-    let cb = event_ctx.callbacks;
-    let app_ctx_for_dispatch = event_ctx.app_ctx.clone();
-    let app_core_for_events = event_ctx.app_ctx.app_core.raw().clone();
-    let app_core_for_ceremony = event_ctx.app_ctx.app_core.clone();
-    let io_ctx_for_ceremony = event_ctx.app_ctx.clone();
-    let update_tx_for_events = event_ctx.update_tx_for_events.clone();
-    let update_tx_for_dispatch = event_ctx.update_tx_for_dispatch.clone();
-    let update_tx_for_ceremony = event_ctx.update_tx_for_ceremony.clone();
-    let tasks_for_events = event_ctx.tasks_for_events.clone();
-    let shared_channels_for_dispatch = event_ctx.shared_channels_for_dispatch;
-    let shared_neighborhood_homes_for_dispatch = event_ctx.shared_neighborhood_homes_for_dispatch;
-    let shared_invitations_for_dispatch = event_ctx.shared_invitations_for_dispatch;
-    let shared_pending_requests_for_dispatch = event_ctx.shared_pending_requests_for_dispatch;
-    let shared_contacts_for_dispatch = event_ctx.shared_contacts_for_dispatch;
-    let shared_discovered_peers_for_dispatch = event_ctx.shared_discovered_peers_for_dispatch;
-    let shared_messages_for_dispatch = event_ctx.shared_messages_for_dispatch;
-    let shared_devices_for_dispatch = event_ctx.shared_devices_for_dispatch;
-    let shared_threshold_for_dispatch = event_ctx.shared_threshold_for_dispatch;
-    let tui_selected_for_events = event_ctx.tui_selected_for_events;
-    let selected_channel_binding_for_events = event_ctx.selected_channel_binding_for_events;
-
     if let Some(result) = open_chat_modal_from_authoritative_selection(
         &dispatch_cmd,
         new_state,
-        shared_channels_for_dispatch,
-        cb,
+        event_ctx.shared_channels_for_dispatch,
+        event_ctx.callbacks,
     ) {
         return result;
     }
     if let Some(result) = open_ceremony_setup_modal(
         &dispatch_cmd,
         new_state,
-        shared_contacts_for_dispatch,
-        shared_devices_for_dispatch,
+        event_ctx.shared_contacts_for_dispatch,
+        event_ctx.shared_devices_for_dispatch,
     ) {
         return result;
     }
     if let Some(result) = open_observed_convenience_modal(
         &dispatch_cmd,
         new_state,
-        shared_contacts_for_dispatch,
-        shared_devices_for_dispatch,
+        event_ctx.shared_contacts_for_dispatch,
+        event_ctx.shared_devices_for_dispatch,
     ) {
         return result;
     }
 
-    include!("event_dispatch_match.inc");
-    EventCommandLoopAction::Handled
+    handle_dispatch_command_match(dispatch_cmd, new_state, event_ctx)
 }
