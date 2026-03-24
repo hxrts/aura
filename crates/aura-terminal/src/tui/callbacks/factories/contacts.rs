@@ -15,7 +15,9 @@ pub struct ContactsCallbacks {
 
 impl ContactsCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
@@ -93,12 +95,14 @@ impl ContactsCallbacks {
                     ctx,
                     tx,
                     operation,
-                    OperationId::invitation_create(),
-                    SemanticOperationKind::InviteActorToChannel,
-                    SemanticOperationTransferScope::InviteActorToChannel,
-                    "invitation",
-                    "Invite to channel failed",
-                    "invite_to_channel callback",
+                    WorkflowHandoffSpec::new(
+                        OperationId::invitation_create(),
+                        SemanticOperationKind::InviteActorToChannel,
+                        SemanticOperationTransferScope::InviteActorToChannel,
+                        "invitation",
+                        "Invite to channel failed",
+                        "invite_to_channel callback",
+                    ),
                     move |app_core, operation_instance_id| {
                         let contact_id = contact_id.clone();
                         let channel = channel.clone();

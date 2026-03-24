@@ -50,6 +50,57 @@ use crate::tui::updates::{send_ui_update_lossy, send_ui_update_required};
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
+pub struct CallbackFactoryRuntime {
+    ctx: Arc<IoContext>,
+    tx: UiUpdateSender,
+}
+
+impl CallbackFactoryRuntime {
+    #[must_use]
+    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+        Self { ctx, tx }
+    }
+
+    fn ctx(&self) -> Arc<IoContext> {
+        self.ctx.clone()
+    }
+
+    fn tx(&self) -> UiUpdateSender {
+        self.tx.clone()
+    }
+}
+
+#[derive(Clone)]
+struct WorkflowHandoffSpec {
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+    scope: SemanticOperationTransferScope,
+    toast_scope: &'static str,
+    failure_prefix: &'static str,
+    panic_context: &'static str,
+}
+
+impl WorkflowHandoffSpec {
+    fn new(
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+        scope: SemanticOperationTransferScope,
+        toast_scope: &'static str,
+        failure_prefix: &'static str,
+        panic_context: &'static str,
+    ) -> Self {
+        Self {
+            operation_id,
+            kind,
+            scope,
+            toast_scope,
+            failure_prefix,
+            panic_context,
+        }
+    }
+}
+
 #[allow(clippy::needless_pass_by_value)] // Arc clone pattern for task spawning
 fn spawn_ctx<F>(ctx: Arc<IoContext>, fut: F)
 where
@@ -195,12 +246,7 @@ fn spawn_handoff_workflow_callback<T, Fut, F>(
     ctx: Arc<IoContext>,
     tx: UiUpdateSender,
     operation: WorkflowHandoffOperationOwner,
-    operation_id: OperationId,
-    kind: SemanticOperationKind,
-    scope: SemanticOperationTransferScope,
-    toast_scope: &'static str,
-    failure_prefix: &'static str,
-    panic_context: &'static str,
+    spec: WorkflowHandoffSpec,
     workflow: F,
 ) where
     T: Clone + Send + 'static,
@@ -216,12 +262,7 @@ fn spawn_handoff_workflow_callback<T, Fut, F>(
         ctx,
         tx,
         operation,
-        operation_id,
-        kind,
-        scope,
-        toast_scope,
-        failure_prefix,
-        panic_context,
+        spec,
         workflow,
         |_tx, _value| async {},
     );
@@ -231,12 +272,7 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
     ctx: Arc<IoContext>,
     tx: UiUpdateSender,
     operation: WorkflowHandoffOperationOwner,
-    operation_id: OperationId,
-    kind: SemanticOperationKind,
-    scope: SemanticOperationTransferScope,
-    toast_scope: &'static str,
-    failure_prefix: &'static str,
-    panic_context: &'static str,
+    spec: WorkflowHandoffSpec,
     workflow: F,
     on_success: Success,
 ) where
@@ -253,9 +289,10 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
 {
     let app_core = ctx.app_core_raw().clone();
     let operation_instance_id = operation.harness_handle().instance_id().clone();
+    let spec_for_handoff = spec.clone();
     spawn_ctx(ctx, async move {
         let workflow_instance_id = operation.workflow_instance_id();
-        let _ = operation.handoff_to_app_workflow(scope);
+        let _ = operation.handoff_to_app_workflow(spec_for_handoff.scope);
 
         match std::panic::AssertUnwindSafe(workflow(app_core.clone(), workflow_instance_id))
             .catch_unwind()
@@ -269,14 +306,14 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
                 if let Err(error) = apply_handed_off_terminal_status(
                     &app_core,
                     &tx,
-                    operation_id,
+                    spec.operation_id.clone(),
                     operation_instance_id,
-                    kind,
+                    spec.kind,
                     terminal,
                 )
                 .await
                 {
-                    emit_error_toast(&tx, toast_scope, error).await;
+                    emit_error_toast(&tx, spec.toast_scope, error).await;
                 }
             }
             Ok(WorkflowTerminalOutcome {
@@ -286,26 +323,31 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
                 let _ = apply_handed_off_terminal_status(
                     &app_core,
                     &tx,
-                    operation_id,
+                    spec.operation_id.clone(),
                     operation_instance_id.clone(),
-                    kind,
+                    spec.kind,
                     terminal,
                 )
                 .await;
-                emit_error_toast(&tx, toast_scope, format!("{failure_prefix}: {error}")).await;
+                emit_error_toast(
+                    &tx,
+                    spec.toast_scope,
+                    format!("{}: {error}", spec.failure_prefix),
+                )
+                .await;
             }
             Err(panic) => {
-                let detail = panic_detail(panic_context, panic.as_ref());
+                let detail = panic_detail(spec.panic_context, panic.as_ref());
                 let _ = apply_handed_off_terminal_status(
                     &app_core,
                     &tx,
-                    operation_id,
+                    spec.operation_id,
                     operation_instance_id,
-                    kind,
+                    spec.kind,
                     None,
                 )
                 .await;
-                emit_error_toast(&tx, toast_scope, detail).await;
+                emit_error_toast(&tx, spec.toast_scope, detail).await;
             }
         }
     });
@@ -523,7 +565,9 @@ pub struct AppCallbacks {
 
 impl AppCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_create_account: Self::make_create_account(ctx.clone(), tx.clone()),
             on_import_device_enrollment_during_onboarding:
@@ -620,19 +664,16 @@ pub struct CallbackRegistry {
 
 impl CallbackRegistry {
     /// Create all callbacks from context
-    pub fn new(
-        ctx: Arc<IoContext>,
-        tx: UiUpdateSender,
-        app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
-    ) -> Self {
+    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+        let runtime = CallbackFactoryRuntime::new(ctx, tx);
         Self {
-            chat: ChatCallbacks::new(ctx.clone(), tx.clone(), app_core),
-            contacts: ContactsCallbacks::new(ctx.clone(), tx.clone()),
-            invitations: InvitationsCallbacks::new(ctx.clone(), tx.clone()),
-            recovery: RecoveryCallbacks::new(ctx.clone(), tx.clone()),
-            settings: SettingsCallbacks::new(ctx.clone(), tx.clone()),
-            neighborhood: NeighborhoodCallbacks::new(ctx.clone(), tx.clone()),
-            app: AppCallbacks::new(ctx, tx),
+            chat: ChatCallbacks::new(&runtime),
+            contacts: ContactsCallbacks::new(&runtime),
+            invitations: InvitationsCallbacks::new(&runtime),
+            recovery: RecoveryCallbacks::new(&runtime),
+            settings: SettingsCallbacks::new(&runtime),
+            neighborhood: NeighborhoodCallbacks::new(&runtime),
+            app: AppCallbacks::new(&runtime),
         }
     }
 }

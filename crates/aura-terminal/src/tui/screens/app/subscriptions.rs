@@ -3,6 +3,10 @@
 //! Keep shell.rs focused on wiring and rendering by extracting the
 //! signal-subscription use_future homes here.
 
+mod contracts;
+mod display_clock;
+mod nav_status;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,6 +38,10 @@ use crate::tui::context::InitializedAppCore;
 use crate::tui::hooks::{
     subscribe_signal_with_retry, subscribe_signal_with_retry_report, AppCoreContext,
 };
+use crate::tui::screens::app::subscriptions::contracts::{
+    subscribe_lifecycle_signal, subscribe_observed_projection_signal,
+    subscribe_update_bridge_signal, StructuralDegradationSink,
+};
 use crate::tui::semantic_lifecycle::authoritative_operation_status_update;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{
@@ -44,82 +52,10 @@ use crate::tui::updates::{
     UiUpdateSender,
 };
 
-const DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES: u32 = 200;
-const DISPLAY_CLOCK_POLL_INTERVAL: Duration = Duration::from_millis(1000);
-
-fn report_subscription_degradation(
-    tasks: &Arc<UiTaskOwner>,
-    tx: &Option<UiUpdateSender>,
-    signal_id: &str,
-    reason: String,
-) {
-    if let Some(tx) = tx {
-        spawn_ui_update(
-            tasks,
-            tx,
-            UiUpdate::SubscriptionDegraded {
-                signal_id: signal_id.to_string(),
-                reason,
-            },
-            UiUpdatePublication::RequiredUnordered,
-        );
-    }
-}
-
-async fn subscribe_signal_with_retry_report_to_ui<T, F>(
-    app_core: InitializedAppCore,
-    signal: &'static aura_core::effects::reactive::Signal<T>,
-    on_value: F,
-    tasks: Arc<UiTaskOwner>,
-    update_tx: Option<UiUpdateSender>,
-) where
-    T: Clone + Send + Sync + 'static,
-    F: FnMut(T) + Send + 'static,
-{
-    let signal_id = signal.id().to_string();
-    subscribe_signal_with_retry_report(app_core, signal, on_value, move |reason| {
-        report_subscription_degradation(&tasks, &update_tx, &signal_id, reason);
-    })
-    .await;
-}
-
-/// Best-effort physical display clock for relative-time formatting only.
-///
-/// This state is explicitly observed-only UI maintenance. It must not gate or
-/// synthesize parity-critical lifecycle semantics. On repeated failures it
-/// stops updating rather than retrying forever during shutdown.
-pub fn use_display_clock_state(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> State<Option<u64>> {
-    let now_ms = hooks.use_state(|| None::<u64>);
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut now_ms = now_ms.clone();
-        async move {
-            let time = PhysicalTimeHandler::new();
-            let mut consecutive_failures = 0u32;
-            loop {
-                match time_workflows::current_time_ms(app_core.raw()).await {
-                    Ok(ts) => {
-                        let next = Some(ts);
-                        if now_ms.get() != next {
-                            now_ms.set(next);
-                        }
-                        consecutive_failures = 0;
-                    }
-                    Err(_) => {
-                        consecutive_failures += 1;
-                    }
-                }
-                if consecutive_failures > DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES {
-                    break;
-                }
-                let _ = time
-                    .sleep_ms(DISPLAY_CLOCK_POLL_INTERVAL.as_millis() as u64)
-                    .await;
-            }
-        }
-    });
-    now_ms
-}
+pub use display_clock::use_display_clock_state;
+pub use nav_status::{
+    use_authority_id_subscription, use_nav_status_signals, NavStatusSignals, SharedAuthorityId,
+};
 
 fn bump_projection_version(version: &mut State<usize>) {
     version.set(version.get().wrapping_add(1));
@@ -144,180 +80,6 @@ fn is_dm_like_shared_channel(channel: &Channel) -> bool {
             .as_deref()
             .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
             .unwrap_or(false)
-}
-
-/// Shared authority id state for UI dispatch handlers.
-#[derive(Clone, Default)]
-pub struct SharedAuthorityId(Arc<RwLock<Option<AuthorityId>>>);
-
-impl SharedAuthorityId {
-    #[must_use]
-    pub fn new() -> Self {
-        Self(Arc::new(RwLock::new(None)))
-    }
-
-    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, Option<AuthorityId>> {
-        self.0.read()
-    }
-
-    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Option<AuthorityId>> {
-        self.0.write()
-    }
-}
-
-/// Create a shared authority id holder and subscribe it to SETTINGS_SIGNAL.
-pub fn use_authority_id_subscription(
-    hooks: &mut Hooks,
-    app_ctx: &AppCoreContext,
-    update_tx: Option<UiUpdateSender>,
-) -> SharedAuthorityId {
-    let shared_ref = hooks.use_ref(SharedAuthorityId::new);
-    let shared: SharedAuthorityId = shared_ref.read().clone();
-    let tasks = app_ctx.tasks();
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let authority_id = shared.clone();
-        let tasks = tasks;
-        let update_tx_for_report = update_tx.clone();
-        async move {
-            subscribe_signal_with_retry_report_to_ui(
-                app_core,
-                &*SETTINGS_SIGNAL,
-                move |settings_state| {
-                    *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
-                    if let Some(ref tx) = update_tx {
-                        let current_index = settings_state
-                            .authorities
-                            .iter()
-                            .position(|authority| authority.is_current)
-                            .unwrap_or(0);
-                        let authorities = settings_state
-                            .authorities
-                            .iter()
-                            .map(|authority| {
-                                let info = AuthorityInfo::new(
-                                    authority.id.to_string(),
-                                    authority.nickname_suggestion.clone(),
-                                );
-                                if authority.is_current {
-                                    info.current()
-                                } else {
-                                    info
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        let _ = tx.try_send(UiUpdate::AuthoritiesUpdated {
-                            authorities,
-                            current_index,
-                        });
-                    }
-                },
-                tasks,
-                update_tx_for_report,
-            )
-            .await;
-        }
-    });
-
-    shared
-}
-
-pub struct NavStatusSignals {
-    pub network_status: State<NetworkStatus>,
-    /// Online contacts (people you know who are currently online)
-    pub known_online: State<usize>,
-    /// Transport-level peers (active network connections)
-    pub transport_peers: State<usize>,
-    pub now_ms: State<Option<u64>>,
-}
-
-pub fn use_nav_status_signals(
-    hooks: &mut Hooks,
-    app_ctx: &AppCoreContext,
-    initial_network_status: NetworkStatus,
-    initial_known_online: usize,
-    initial_transport_peers: usize,
-) -> NavStatusSignals {
-    let network_status = hooks.use_state(|| initial_network_status);
-    let known_online = hooks.use_state(|| initial_known_online);
-    let transport_peers = hooks.use_state(|| initial_transport_peers);
-    let now_ms = use_display_clock_state(hooks, app_ctx);
-    let tasks = app_ctx.tasks();
-
-    // Subscribe to unified network status signal
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut network_status = network_status.clone();
-        let tasks = tasks.clone();
-        async move {
-            subscribe_signal_with_retry_report_to_ui(
-                app_core,
-                &*NETWORK_STATUS_SIGNAL,
-                move |status| {
-                    if network_status.get() != status {
-                        network_status.set(status);
-                    }
-                },
-                tasks,
-                None,
-            )
-            .await;
-        }
-    });
-
-    // Subscribe to connection status for online contacts count
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut known_online = known_online.clone();
-        let tasks = tasks.clone();
-        async move {
-            subscribe_signal_with_retry_report_to_ui(
-                app_core,
-                &*CONNECTION_STATUS_SIGNAL,
-                move |status| {
-                    let count = match status {
-                        ConnectionStatus::Online { peer_count } => peer_count,
-                        _ => 0,
-                    };
-                    if known_online.get() != count {
-                        known_online.set(count);
-                    }
-                },
-                tasks,
-                None,
-            )
-            .await;
-        }
-    });
-
-    // Subscribe to transport peers signal
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let mut transport_peers = transport_peers.clone();
-        let tasks = tasks;
-        async move {
-            subscribe_signal_with_retry_report_to_ui(
-                app_core,
-                &*TRANSPORT_PEERS_SIGNAL,
-                move |count| {
-                    if transport_peers.get() != count {
-                        transport_peers.set(count);
-                    }
-                },
-                tasks,
-                None,
-            )
-            .await;
-        }
-    });
-
-    NavStatusSignals {
-        network_status,
-        known_online,
-        transport_peers,
-        now_ms,
-    }
 }
 
 /// Shared contacts state that can be read by closures without re-rendering.
@@ -383,32 +145,37 @@ pub fn use_discovered_peers_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let peers = shared.clone();
-        let tasks = tasks;
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         async move {
-            subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
-                let lan_peers: Vec<_> = peers_state
-                    .peers
-                    .iter()
-                    .filter(|p| p.method == DiscoveredPeerMethod::Lan)
-                    .cloned()
-                    .collect();
+            subscribe_update_bridge_signal(
+                app_core,
+                &*DISCOVERED_PEERS_SIGNAL,
+                move |peers_state| {
+                    let lan_peers: Vec<_> = peers_state
+                        .peers
+                        .iter()
+                        .filter(|p| p.method == DiscoveredPeerMethod::Lan)
+                        .cloned()
+                        .collect();
 
-                let new_count = lan_peers.len();
+                    let new_count = lan_peers.len();
 
-                *peers.write() = lan_peers;
+                    *peers.write() = lan_peers;
 
-                if let Some(ref tx) = update_tx {
-                    let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
-                    if previous != new_count {
-                        spawn_ui_update(
-                            &tasks,
-                            tx,
-                            UiUpdate::LanPeersCountChanged(new_count),
-                            UiUpdatePublication::RequiredUnordered,
-                        );
+                    if let Some(ref tx) = update_tx {
+                        let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
+                        if previous != new_count {
+                            spawn_ui_update(
+                                &tasks,
+                                tx,
+                                UiUpdate::LanPeersCountChanged(new_count),
+                                UiUpdatePublication::RequiredUnordered,
+                            );
+                        }
                     }
-                }
-            })
+                },
+                degradation,
+            )
             .await;
         }
     });
@@ -441,30 +208,35 @@ pub fn use_contacts_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
-        let tasks = tasks;
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
-                let contact_list: Vec<Contact> =
-                    contacts_state.all_contacts().map(Contact::from).collect();
-                let new_count = contact_list.len();
+            subscribe_update_bridge_signal(
+                app_core,
+                &*CONTACTS_SIGNAL,
+                move |contacts_state| {
+                    let contact_list: Vec<Contact> =
+                        contacts_state.all_contacts().map(Contact::from).collect();
+                    let new_count = contact_list.len();
 
-                *contacts.write() = contact_list;
-                bump_projection_version(&mut projection_version);
+                    *contacts.write() = contact_list;
+                    bump_projection_version(&mut projection_version);
 
-                // Send contact count update for keyboard navigation
-                if let Some(ref tx) = update_tx {
-                    let previous = last_contact_count.swap(new_count, Ordering::Relaxed);
-                    if previous != new_count {
-                        spawn_ui_update(
-                            &tasks,
-                            tx,
-                            UiUpdate::ContactCountChanged(new_count),
-                            UiUpdatePublication::RequiredUnordered,
-                        );
+                    // Send contact count update for keyboard navigation
+                    if let Some(ref tx) = update_tx {
+                        let previous = last_contact_count.swap(new_count, Ordering::Relaxed);
+                        if previous != new_count {
+                            spawn_ui_update(
+                                &tasks,
+                                tx,
+                                UiUpdate::ContactCountChanged(new_count),
+                                UiUpdatePublication::RequiredUnordered,
+                            );
+                        }
                     }
-                }
-            })
+                },
+                degradation,
+            )
             .await;
         }
     });
@@ -506,33 +278,38 @@ pub fn use_devices_subscription(
         let app_core = app_ctx.app_core.clone();
         let devices = shared_devices.clone();
         let update_tx = update_tx;
-        let tasks = tasks;
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                let list: Vec<Device> = settings_state
-                    .devices
-                    .iter()
-                    .map(|d| Device {
-                        id: d.id.to_string(),
-                        name: d.name.clone(),
-                        is_current: d.is_current,
-                        last_seen: d.last_seen,
-                    })
-                    .collect();
-                *devices.write() = list.clone();
-                bump_projection_version(&mut projection_version);
-                if list.len() >= 2 {
-                    if let Some(tx) = update_tx.as_ref() {
-                        spawn_ui_update(
-                            &tasks,
-                            tx,
-                            UiUpdate::RuntimeBootstrapFinalized,
-                            UiUpdatePublication::RequiredUnordered,
-                        );
+            subscribe_update_bridge_signal(
+                app_core,
+                &*SETTINGS_SIGNAL,
+                move |settings_state| {
+                    let list: Vec<Device> = settings_state
+                        .devices
+                        .iter()
+                        .map(|d| Device {
+                            id: d.id.to_string(),
+                            name: d.name.clone(),
+                            is_current: d.is_current,
+                            last_seen: d.last_seen,
+                        })
+                        .collect();
+                    *devices.write() = list.clone();
+                    bump_projection_version(&mut projection_version);
+                    if list.len() >= 2 {
+                        if let Some(tx) = update_tx.as_ref() {
+                            spawn_ui_update(
+                                &tasks,
+                                tx,
+                                UiUpdate::RuntimeBootstrapFinalized,
+                                UiUpdatePublication::RequiredUnordered,
+                            );
+                        }
                     }
-                }
-            })
+                },
+                degradation,
+            )
             .await;
         }
     });
@@ -569,7 +346,7 @@ pub fn use_messages_subscription(
         let messages = shared_messages.clone();
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
+            subscribe_observed_projection_signal(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let channel_id = selected_channel_id
                     .read()
                     .clone()
@@ -880,7 +657,7 @@ pub fn use_channels_subscription(
         let app_core = app_ctx.app_core.clone();
         let coordinator = coordinator.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
+            subscribe_observed_projection_signal(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 coordinator.update_chat_state(chat_state);
             })
             .await;
@@ -891,10 +668,15 @@ pub fn use_channels_subscription(
         let app_core = app_ctx.app_core.clone();
         let coordinator = coordinator.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                coordinator
-                    .update_authority_id(settings_state.authority_id.parse::<AuthorityId>().ok());
-            })
+            subscribe_observed_projection_signal(
+                app_core,
+                &*SETTINGS_SIGNAL,
+                move |settings_state| {
+                    coordinator.update_authority_id(
+                        settings_state.authority_id.parse::<AuthorityId>().ok(),
+                    );
+                },
+            )
             .await;
         }
     });
@@ -903,9 +685,13 @@ pub fn use_channels_subscription(
         let app_core = app_ctx.app_core.clone();
         let coordinator = coordinator;
         async move {
-            subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
-                coordinator.update_active_scope(Some(active_home_scope_id(&neighborhood)));
-            })
+            subscribe_observed_projection_signal(
+                app_core,
+                &*NEIGHBORHOOD_SIGNAL,
+                move |neighborhood| {
+                    coordinator.update_active_scope(Some(active_home_scope_id(&neighborhood)));
+                },
+            )
             .await;
         }
     });
@@ -933,18 +719,22 @@ pub fn use_invitations_subscription(
         let invitations = shared_invitations.clone();
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |inv_state| {
-                let all: Vec<Invitation> = inv_state
-                    .all_pending()
-                    .iter()
-                    .chain(inv_state.all_sent().iter())
-                    .chain(inv_state.all_history().iter())
-                    .map(Invitation::from)
-                    .collect();
+            subscribe_observed_projection_signal(
+                app_core,
+                &*INVITATIONS_SIGNAL,
+                move |inv_state| {
+                    let all: Vec<Invitation> = inv_state
+                        .all_pending()
+                        .iter()
+                        .chain(inv_state.all_sent().iter())
+                        .chain(inv_state.all_history().iter())
+                        .map(Invitation::from)
+                        .collect();
 
-                *invitations.write() = all;
-                bump_projection_version(&mut projection_version);
-            })
+                    *invitations.write() = all;
+                    bump_projection_version(&mut projection_version);
+                },
+            )
             .await;
         }
     });
@@ -960,9 +750,10 @@ pub fn use_authoritative_semantic_facts_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let ordered_gate = Arc::new(OrderedUiUpdateGate::new());
+        let degradation = StructuralDegradationSink::new(app_ctx.tasks(), update_tx.clone());
         let tasks = app_ctx.tasks();
         async move {
-            subscribe_signal_with_retry(
+            subscribe_lifecycle_signal(
                 app_core,
                 &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
                 move |facts| {
@@ -993,6 +784,7 @@ pub fn use_authoritative_semantic_facts_subscription(
                     });
                     spawn_ordered_ui_updates(&tasks, tx, &ordered_gate, updates);
                 },
+                degradation,
             )
             .await;
         }
@@ -1018,7 +810,7 @@ pub fn use_neighborhood_homes_subscription(
         let homes = shared_homes.clone();
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
+            subscribe_observed_projection_signal(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let mut ids: Vec<String> = Vec::with_capacity(n.neighbor_count() + 1);
                 ids.push(n.home_home_id.to_string());
                 ids.extend(
@@ -1059,7 +851,7 @@ pub fn use_neighborhood_home_meta_subscription(
         let meta = shared_meta.clone();
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
+            subscribe_observed_projection_signal(app_core, &*HOMES_SIGNAL, move |homes_state| {
                 let snapshot = homes_state
                     .current_home()
                     .map(|home| NeighborhoodHomeMeta {
@@ -1096,7 +888,7 @@ pub fn use_pending_requests_subscription(
         let requests = shared_requests.clone();
         let mut projection_version = projection_version.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |r| {
+            subscribe_observed_projection_signal(app_core, &*RECOVERY_SIGNAL, move |r| {
                 let pending: Vec<PendingRequest> = r
                     .pending_requests()
                     .iter()
@@ -1150,17 +942,23 @@ pub fn use_notifications_subscription(
         let last_total = last_total.clone();
         let update_tx = update_tx.clone();
         let tasks = tasks.clone();
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         async move {
-            subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
-                invite_count.store(state.pending_received_count(), Ordering::Relaxed);
-                send_total(
-                    &tasks,
-                    &update_tx,
-                    &invite_count,
-                    &recovery_count,
-                    &last_total,
-                );
-            })
+            subscribe_update_bridge_signal(
+                app_core,
+                &*INVITATIONS_SIGNAL,
+                move |state| {
+                    invite_count.store(state.pending_received_count(), Ordering::Relaxed);
+                    send_total(
+                        &tasks,
+                        &update_tx,
+                        &invite_count,
+                        &recovery_count,
+                        &last_total,
+                    );
+                },
+                degradation,
+            )
             .await;
         }
     });
@@ -1169,17 +967,23 @@ pub fn use_notifications_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let tasks = tasks;
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         async move {
-            subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
-                recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
-                send_total(
-                    &tasks,
-                    &update_tx,
-                    &invite_count,
-                    &recovery_count,
-                    &last_total,
-                );
-            })
+            subscribe_update_bridge_signal(
+                app_core,
+                &*RECOVERY_SIGNAL,
+                move |state| {
+                    recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
+                    send_total(
+                        &tasks,
+                        &update_tx,
+                        &invite_count,
+                        &recovery_count,
+                        &last_total,
+                    );
+                },
+                degradation,
+            )
             .await;
         }
     });
@@ -1203,9 +1007,13 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
         let app_core = app_ctx.app_core.clone();
         let threshold = shared_threshold.clone();
         async move {
-            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                *threshold.write() = (settings_state.threshold_k, settings_state.threshold_n);
-            })
+            subscribe_observed_projection_signal(
+                app_core,
+                &*SETTINGS_SIGNAL,
+                move |settings_state| {
+                    *threshold.write() = (settings_state.threshold_k, settings_state.threshold_n);
+                },
+            )
             .await;
         }
     });
@@ -1216,10 +1024,11 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 #[cfg(test)]
 mod tests {
     use super::compute_scoped_channel_projection;
-    use super::report_subscription_degradation;
+    use super::contracts::{report_subscription_degradation, StructuralDegradationSink};
+    use super::display_clock::{
+        DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES, DISPLAY_CLOCK_POLL_INTERVAL,
+    };
     use super::scoped_channel_snapshot;
-    use super::DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES;
-    use super::DISPLAY_CLOCK_POLL_INTERVAL;
     use crate::tui::tasks::UiTaskOwner;
     use crate::tui::types::{Channel as UiChannel, Device};
     use crate::tui::updates::UiUpdate;
@@ -1341,10 +1150,10 @@ mod tests {
     async fn subscription_degradation_reports_structural_ui_update() {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let sink = StructuralDegradationSink::new(tasks.clone(), Some(tx));
 
         report_subscription_degradation(
-            &tasks,
-            &Some(tx),
+            &sink,
             "app:chat",
             "attempts exhausted after 1 retries".to_string(),
         );
@@ -1552,28 +1361,20 @@ mod tests {
     #[test]
     fn display_clock_helper_is_bounded_and_ui_only() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let subscriptions_path =
-            repo_root.join("crates/aura-terminal/src/tui/screens/app/subscriptions.rs");
-        let source = std::fs::read_to_string(&subscriptions_path).unwrap_or_else(|error| {
-            panic!("failed to read {}: {error}", subscriptions_path.display())
+        let display_clock_path = repo_root
+            .join("crates/aura-terminal/src/tui/screens/app/subscriptions/display_clock.rs");
+        let source = std::fs::read_to_string(&display_clock_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", display_clock_path.display())
         });
-
-        let helper_start = source
-            .find("pub fn use_display_clock_state(")
-            .unwrap_or_else(|| panic!("missing use_display_clock_state helper"));
-        let helper_end = source[helper_start..]
-            .find("fn bump_projection_version(")
-            .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing helper terminator"));
-        let helper = &source[helper_start..helper_end];
 
         assert!(source.contains("relative-time formatting only"));
         assert!(source.contains("observed-only UI maintenance"));
-        assert!(helper.contains("time_workflows::current_time_ms"));
-        assert!(helper.contains("DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES"));
-        assert!(helper.contains("DISPLAY_CLOCK_POLL_INTERVAL"));
-        assert!(!helper.contains("Ceremony"));
-        assert!(!helper.contains("UiUpdate::KeyRotationCeremonyStatus"));
+        assert!(source.contains("pub fn use_display_clock_state("));
+        assert!(source.contains("time_workflows::current_time_ms"));
+        assert!(source.contains("DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES"));
+        assert!(source.contains("DISPLAY_CLOCK_POLL_INTERVAL"));
+        assert!(!source.contains("Ceremony"));
+        assert!(!source.contains("UiUpdate::KeyRotationCeremonyStatus"));
     }
 
     #[test]

@@ -13,7 +13,7 @@
 //! use crate::tui::callbacks::{CallbackRegistry, IdCallback};
 //!
 //! // Create all callbacks at once
-//! let registry = CallbackRegistry::new(ctx, tx, app_core);
+//! let registry = CallbackRegistry::new(ctx, tx);
 //!
 //! // Use individual callbacks
 //! let on_send = registry.chat.on_send.clone();

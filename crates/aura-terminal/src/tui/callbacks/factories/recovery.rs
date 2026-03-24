@@ -13,7 +13,9 @@ pub struct RecoveryCallbacks {
 
 impl RecoveryCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_start_recovery: Self::make_start_recovery(ctx.clone(), tx.clone()),
             on_add_guardian: Self::make_add_guardian(ctx.clone(), tx.clone()),

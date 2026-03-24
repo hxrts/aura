@@ -15,7 +15,9 @@ pub struct InvitationsCallbacks {
 
 impl InvitationsCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_accept: Self::make_accept(ctx.clone(), tx.clone()),
             on_decline: Self::make_decline(ctx.clone(), tx.clone()),

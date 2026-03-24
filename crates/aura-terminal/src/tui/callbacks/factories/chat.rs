@@ -19,11 +19,9 @@ pub struct ChatCallbacks {
 
 impl ChatCallbacks {
     /// Create chat callbacks from context
-    pub fn new(
-        ctx: Arc<IoContext>,
-        tx: UiUpdateSender,
-        _app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
-    ) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_send: Self::make_send_command(ctx.clone(), tx.clone()),
             on_send_owned: Self::make_send_owned(ctx.clone(), tx.clone()),
@@ -55,12 +53,14 @@ impl ChatCallbacks {
                 ctx,
                 tx,
                 operation,
-                OperationId::invitation_accept(),
-                SemanticOperationKind::AcceptPendingChannelInvitation,
-                SemanticOperationTransferScope::AcceptPendingChannelInvitation,
-                "invitation",
-                "Accept pending invitation failed",
-                "accept_pending_channel_invitation callback",
+                WorkflowHandoffSpec::new(
+                    OperationId::invitation_accept(),
+                    SemanticOperationKind::AcceptPendingChannelInvitation,
+                    SemanticOperationTransferScope::AcceptPendingChannelInvitation,
+                    "invitation",
+                    "Accept pending invitation failed",
+                    "accept_pending_channel_invitation callback",
+                ),
                 |app_core, operation_instance_id| async move {
                     aura_app::ui::workflows::invitation::accept_pending_channel_invitation_with_binding_terminal_status(
                         &app_core,
@@ -467,12 +467,14 @@ impl ChatCallbacks {
                     ctx,
                     tx,
                     operation,
-                    OperationId::join_channel(),
-                    SemanticOperationKind::JoinChannel,
-                    SemanticOperationTransferScope::JoinChannel,
-                    "chat",
-                    "Join channel failed",
-                    "join_channel callback",
+                    WorkflowHandoffSpec::new(
+                        OperationId::join_channel(),
+                        SemanticOperationKind::JoinChannel,
+                        SemanticOperationTransferScope::JoinChannel,
+                        "chat",
+                        "Join channel failed",
+                        "join_channel callback",
+                    ),
                     move |app_core, operation_instance_id| async move {
                         aura_app::ui::workflows::messaging::join_channel_by_name_with_binding_terminal_status(
                                 &app_core,

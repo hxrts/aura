@@ -169,8 +169,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIn
 
     // Create effect dispatch callbacks using CallbackRegistry
     let ctx_arc = Arc::new(ctx);
-    let app_core = ctx_arc.app_core_raw().clone();
-    let callbacks = CallbackRegistry::new(ctx_arc.clone(), update_tx.clone(), app_core);
+    let callbacks = CallbackRegistry::new(ctx_arc.clone(), update_tx.clone());
 
     // Create CallbackContext for providing callbacks to components via iocraft context
     let callback_context = CallbackContext::new(callbacks.clone());

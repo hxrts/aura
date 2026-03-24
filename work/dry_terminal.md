@@ -195,55 +195,55 @@ ownership boundaries.
 
 ### B1. Subscription Contract Classification
 
-- [ ] Audit every `use_*_subscription` helper in `src/tui/screens/app/subscriptions.rs`.
-- [ ] Classify each subscription as:
-- [ ] observed-only projection subscription
-- [ ] parity-relevant lifecycle or readiness subscription
-- [ ] structural degraded-state subscription
-- [ ] side-effect or update-loop bridge
-- [ ] Document the class in the code shape, helper naming, and module layout rather than relying on comments alone.
+- [x] Audit every `use_*_subscription` helper in `src/tui/screens/app/subscriptions.rs`.
+- [x] Classify each subscription as:
+- [x] observed-only projection subscription
+- [x] parity-relevant lifecycle or readiness subscription
+- [x] structural degraded-state subscription
+- [x] side-effect or update-loop bridge
+- [x] Document the class in the code shape, helper naming, and module layout rather than relying on comments alone.
 
 ### B2. Typed Subscription Helpers
 
-- [ ] Introduce one helper family per subscription contract class instead of a single generic subscription wrapper.
-- [ ] Add typed result/degradation payloads where current helpers pass loosely structured closures and string reasons.
-- [ ] Make registration failure, lag-to-newer-snapshot semantics, and degraded-state publication explicit in the helper signatures.
-- [ ] Avoid helpers that hide whether a given subscription is parity-relevant or merely observed.
+- [x] Introduce one helper family per subscription contract class instead of a single generic subscription wrapper.
+- [x] Add typed result/degradation payloads where current helpers pass loosely structured closures and string reasons.
+- [x] Make registration failure, lag-to-newer-snapshot semantics, and degraded-state publication explicit in the helper signatures.
+- [x] Avoid helpers that hide whether a given subscription is parity-relevant or merely observed.
 
 ### B3. Callback Factory Cleanup
 
-- [ ] Audit factories in `src/tui/callbacks/factories/mod.rs`, `chat.rs`, `contacts.rs`, `invitation.rs`, `recovery.rs`, and `settings.rs`.
-- [ ] Collapse trivial alias types and repeated `new()` boilerplate only when the ownership class is identical.
-- [ ] Keep separate factory surfaces where APIs require different owner types such as `LocalTerminalOperationOwner` versus `WorkflowHandoffOperationOwner`.
-- [ ] Replace weakly typed callback setup data with typed request structs where factories currently rely on repeated parameter clusters.
+- [x] Audit factories in `src/tui/callbacks/factories/mod.rs`, `chat.rs`, `contacts.rs`, `invitation.rs`, `recovery.rs`, and `settings.rs`.
+- [x] Collapse trivial alias types and repeated `new()` boilerplate only when the ownership class is identical.
+- [x] Keep separate factory surfaces where APIs require different owner types such as `LocalTerminalOperationOwner` versus `WorkflowHandoffOperationOwner`.
+- [x] Replace weakly typed callback setup data with typed request structs where factories currently rely on repeated parameter clusters.
 
 ### B4. Spawn Helper Consolidation
 
-- [ ] Consolidate spawn helpers by ownership and publication class:
-- [ ] observed dispatch with toast/reporting
-- [ ] local owner submission
-- [ ] workflow handoff submission
-- [ ] Preserve distinct helper entry points when handoff timing, terminal publication, or capability-gated settlement differ.
-- [ ] Do not introduce any ownerless shortcut for parity-critical callbacks.
+- [x] Consolidate spawn helpers by ownership and publication class:
+- [x] observed dispatch with toast/reporting
+- [x] local owner submission
+- [x] workflow handoff submission
+- [x] Preserve distinct helper entry points when handoff timing, terminal publication, or capability-gated settlement differ.
+- [x] Do not introduce any ownerless shortcut for parity-critical callbacks.
 
 ### B5. Subscription and Callback File Decomposition
 
-- [ ] Reduce `src/tui/screens/app/subscriptions.rs` from 1611 LOC to under 1500 LOC.
-- [ ] Split `subscriptions.rs` into coherent modules with descriptive names such as `shared_state.rs`, `observed_projections.rs`, `lifecycle.rs`, `degraded_state.rs`, and `display_clock.rs` where they match the final classification.
-- [ ] If callback cleanup materially grows `src/tui/callbacks/factories/mod.rs`, `chat.rs`, or `settings.rs`, split them by owner class or domain contract before they exceed 1500 LOC.
+- [x] Reduce `src/tui/screens/app/subscriptions.rs` from 1611 LOC to under 1500 LOC.
+- [x] Split `subscriptions.rs` into coherent modules with descriptive names such as `shared_state.rs`, `observed_projections.rs`, `lifecycle.rs`, `degraded_state.rs`, and `display_clock.rs` where they match the final classification.
+- [x] If callback cleanup materially grows `src/tui/callbacks/factories/mod.rs`, `chat.rs`, or `settings.rs`, split them by owner class or domain contract before they exceed 1500 LOC.
 
 ### B6. Workstream B Verification and Commit
 
-- [ ] Run `cargo check -p aura-terminal`.
-- [ ] Run `cargo test -p aura-terminal --test wiring`.
-- [ ] Run `cargo test -p aura-terminal --test integration_bridge`.
-- [ ] Run `cargo test -p aura-terminal --test compile_fail`.
-- [ ] Run `just ci-parity-critical-callback-settlement`.
-- [ ] Run `just ci-observed-layer-boundaries`.
-- [ ] Run `just ci-frontend-handoff-boundary`.
-- [ ] Run `just ci-actor-lifecycle`.
-- [ ] Confirm every targeted check is green before committing.
-- [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): classify subscriptions and callbacks"`.
+- [x] Run `cargo check -p aura-terminal`.
+- [x] Run `cargo test -p aura-terminal --test wiring`.
+- [x] Run `cargo test -p aura-terminal --test integration_bridge`.
+- [x] Run `cargo test -p aura-terminal --test compile_fail`.
+- [x] Run `just ci-parity-critical-callback-settlement`.
+- [x] Run `just ci-observed-layer-boundaries`.
+- [x] Run `just ci-frontend-handoff-boundary`.
+- [x] Run `just ci-actor-lifecycle`.
+- [x] Confirm every targeted check is green before committing.
+- [x] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): classify subscriptions and callbacks"`.
 
 ## Workstream C — Modal and Props Simplification
 

@@ -27,7 +27,9 @@ pub struct SettingsCallbacks {
 
 impl SettingsCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_update_mfa: Self::make_update_mfa(ctx.clone(), tx.clone()),
             on_update_nickname_suggestion: Self::make_update_nickname_suggestion(
@@ -431,7 +433,9 @@ pub struct NeighborhoodCallbacks {
 
 impl NeighborhoodCallbacks {
     #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
+    pub fn new(runtime: &CallbackFactoryRuntime) -> Self {
+        let ctx = runtime.ctx();
+        let tx = runtime.tx();
         Self {
             on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
             on_go_home: Self::make_go_home(ctx.clone(), tx.clone()),
