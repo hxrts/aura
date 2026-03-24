@@ -22,6 +22,7 @@ aura-guards = { path = "../aura-guards" }
 aura-consensus = { path = "../aura-consensus" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
+aura-amp = { path = "../aura-amp" }
 aura-chat = { path = "../aura-chat" }
 aura-authentication = { path = "../aura-authentication" }
 aura-invitation = { path = "../aura-invitation" }

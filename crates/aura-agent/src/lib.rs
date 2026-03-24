@@ -99,6 +99,8 @@ pub mod builder;
 mod runtime;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 mod task_registry;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+mod token_profiles;
 
 // Handler modules (public for service access)
 #[cfg(feature = "choreo-backend-telltale-vm")]

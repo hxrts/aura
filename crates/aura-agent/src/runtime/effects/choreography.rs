@@ -1,5 +1,6 @@
 use super::{AuraEffectSystem, CHOREO_FLOW_COST_PER_KB, DEFAULT_CHOREO_FLOW_COST};
 use async_trait::async_trait;
+use aura_chat::capabilities::ChatCapability;
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt};
 use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::hash::hash;
@@ -112,7 +113,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             .saturating_add(kb_units.saturating_mul(CHOREO_FLOW_COST_PER_KB));
 
         let guard_chain = create_send_guard_op(
-            GuardOperation::Custom("message:send".to_string()),
+            GuardOperation::Custom(ChatCapability::MessageSend.as_name().to_string()),
             context_id,
             peer,
             FlowCost::new(flow_cost),

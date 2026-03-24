@@ -359,13 +359,19 @@ pub struct AuthorizationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::types::identifiers::AuthorityId;
+    use aura_core::{capability_name, types::identifiers::AuthorityId};
 
     fn test_bridge() -> (BiscuitAuthorizationBridge, Biscuit) {
         let authority_id = AuthorityId::new_from_entropy([42u8; 32]);
         let authority = aura_authorization::TokenAuthority::new(authority_id);
         let token = authority
-            .create_token(authority_id)
+            .create_token(
+                authority_id,
+                vec![
+                    capability_name!("execute"),
+                    capability_name!("invitation:send"),
+                ],
+            )
             .unwrap_or_else(|err| panic!("failed to create token: {err:?}"));
         let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), authority_id);
         (bridge, token)

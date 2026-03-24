@@ -3291,8 +3291,6 @@ mod tests {
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
     use aura_social::moderation::facts::HomeGrantModeratorFact;
     use std::collections::HashMap;
-    use std::path::PathBuf;
-    use std::str::FromStr;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::{sleep, timeout};
@@ -3308,7 +3306,10 @@ mod tests {
     ) {
         let issuer = aura_authorization::TokenAuthority::new(authority);
         let token = issuer
-            .create_token(authority)
+            .create_token(
+                authority,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
             .expect("full invitation biscuit should build");
         let engine = base64::engine::general_purpose::STANDARD;
         effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {

@@ -5,8 +5,11 @@
 use aura_authorization::{
     BiscuitAuthorizationBridge, BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority,
 };
-use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::scope::AuthorizationOp;
+use aura_core::{
+    capability_name,
+    types::identifiers::{AuthorityId, ContextId},
+};
 
 /// Read-attenuated token must block write operations — the core monotonicity
 /// property. If this fails, delegation can escalate privileges.
@@ -18,7 +21,10 @@ fn attenuated_read_token_blocks_write() {
 
     let authority = TokenAuthority::new(issuer);
     let token = authority
-        .create_token(recipient)
+        .create_token(
+            recipient,
+            vec![capability_name!("read"), capability_name!("write")],
+        )
         .unwrap_or_else(|err| panic!("token creation should succeed: {err:?}"));
     let manager = BiscuitTokenManager::new(recipient, token.clone());
 

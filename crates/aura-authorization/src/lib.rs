@@ -66,7 +66,9 @@ pub use aura_core::semilattice::{MeetSemiLattice, Top};
 
 // Re-export Biscuit types
 pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
-pub use biscuit_token::{BiscuitError, BiscuitTokenManager, SerializableBiscuit, TokenAuthority};
+pub use biscuit_token::{
+    BiscuitError, BiscuitTokenManager, SerializableBiscuit, TokenAuthority, TokenGrantProfile,
+};
 pub use flow_budget::JournalBackedFlowBudgetHandler;
 
 // Re-export fact types for journal integration

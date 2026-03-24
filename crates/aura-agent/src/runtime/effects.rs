@@ -47,7 +47,7 @@ use aura_journal::fact::{
 };
 use aura_mpst::CompositionManifest;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
-use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
+use biscuit_auth::{Biscuit, PublicKey};
 use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
@@ -393,7 +393,10 @@ impl AuraEffectSystem {
             use base64::Engine;
             let engine = base64::engine::general_purpose::STANDARD;
             let token_authority = aura_authorization::TokenAuthority::new(authority);
-            match token_authority.create_token(authority) {
+            match token_authority.create_token(
+                authority,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            ) {
                 Ok(biscuit) => match biscuit.to_vec() {
                     Ok(token_bytes) => {
                         let root_pk_bytes = token_authority.root_public_key().to_bytes();
@@ -861,7 +864,10 @@ impl AuraEffectSystem {
 
         let token_authority = aura_authorization::TokenAuthority::new(*authority);
         let biscuit = token_authority
-            .create_token(*authority)
+            .create_token(
+                *authority,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
             .map_err(|e| AuraError::internal(format!("Failed to create Biscuit token: {e}")))?;
 
         let token_bytes = biscuit
@@ -1524,40 +1530,17 @@ impl AuraEffectSystem {
         Option<(Biscuit, BiscuitAuthorizationBridge)>,
         Option<Vec<u8>>,
     ) {
-        let keypair = KeyPair::new();
-        let authority = authority_id.to_string();
-        let token = biscuit!(
-            r#"
-            authority({authority});
-            role("member");
-            capability("read");
-            capability("write");
-            capability("execute");
-            capability("delegate");
-            capability("moderator");
-            capability("flow_charge");
-            capability("amp:send");
-            capability("sync:request_digest");
-            capability("sync:request_ops");
-            capability("sync:push_ops");
-            capability("sync:announce_op");
-            capability("sync:push_op");
-            capability("message:send");
-            capability("invitation:send");
-            capability("invitation:accept");
-            capability("invitation:decline");
-            capability("invitation:cancel");
-            capability("invitation:guardian");
-            capability("invitation:channel");
-            capability("invitation:device");
-        "#
-        )
-        .build(&keypair);
+        let issuer = aura_authorization::TokenAuthority::new(authority_id);
+        let token = issuer.create_token(
+            authority_id,
+            crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+        );
 
         match token {
             Ok(token) => {
-                let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
-                let verifying_key = keypair.public().to_bytes().to_vec();
+                let bridge =
+                    BiscuitAuthorizationBridge::new(issuer.root_public_key(), authority_id);
+                let verifying_key = issuer.root_public_key().to_bytes().to_vec();
                 (Some((token, bridge)), Some(verifying_key))
             }
             Err(_) => (None, None),

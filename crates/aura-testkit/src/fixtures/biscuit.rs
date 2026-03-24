@@ -8,14 +8,39 @@
 //! (not devices) are the cryptographic actors that issue and manage tokens.
 
 use aura_authorization::biscuit_token::{BiscuitError, BiscuitTokenManager, TokenAuthority};
-use aura_core::types::identifiers::AuthorityId;
 use aura_core::types::scope::{AuthorityOp, ResourceScope, StoragePath};
+use aura_core::{capability_name, types::identifiers::AuthorityId, CapabilityName};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
 fn authority(seed: u8) -> AuthorityId {
     AuthorityId::new_from_entropy([seed; 32])
+}
+
+fn standard_device_test_capabilities() -> Vec<CapabilityName> {
+    vec![
+        capability_name!("read"),
+        capability_name!("write"),
+        capability_name!("execute"),
+        capability_name!("delegate"),
+        capability_name!("moderator"),
+        capability_name!("flow_charge"),
+        capability_name!("amp:send"),
+        capability_name!("sync:request_digest"),
+        capability_name!("sync:request_ops"),
+        capability_name!("sync:push_ops"),
+        capability_name!("sync:announce_op"),
+        capability_name!("sync:push_op"),
+        capability_name!("chat:message:send"),
+        capability_name!("invitation:send"),
+        capability_name!("invitation:accept"),
+        capability_name!("invitation:decline"),
+        capability_name!("invitation:cancel"),
+        capability_name!("invitation:guardian"),
+        capability_name!("invitation:channel"),
+        capability_name!("invitation:device:enroll"),
+    ]
 }
 
 /// Comprehensive fixture for Biscuit token testing scenarios
@@ -66,7 +91,9 @@ impl BiscuitTestFixture {
 
     /// Add an authority token with full owner capabilities
     pub fn add_authority_token(&mut self, recipient: AuthorityId) -> Result<(), BiscuitError> {
-        let token = self.token_authority.create_token(recipient)?;
+        let token = self
+            .token_authority
+            .create_token(recipient, standard_device_test_capabilities())?;
         let manager = BiscuitTokenManager::new(recipient, token);
         self.authority_tokens.insert(recipient, manager);
         Ok(())
