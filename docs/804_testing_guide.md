@@ -126,6 +126,9 @@ For parity-critical waits and assertions:
 - semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or a frontend-local submitting phase
 - shared semantic harness core should decode typed `ToolPayload` and bridge structs directly; keep raw `serde_json::Value` plumbing at outer CLI/browser adapters only
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
+- scenario-language text assertions must keep the same split:
+  - `message_contains` means authoritative `UiSnapshot.messages`
+  - `diagnostic_screen_contains` is frontend-conformance-only rendered text
 - harness mode may change instrumentation and render stability, but it must not change business-flow semantics
 
 ### Ownership Test Expectations

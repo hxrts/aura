@@ -41,18 +41,18 @@ runtime_substrate = "real_runtime"
 notes = "Shared semantic notifications navigation and authority-switch command coverage."
 
 [[scenario]]
-id = "scenario4-global-nav-and-help-e2e"
-path = "scenarios/harness/scenario4-global-nav-and-help-e2e.toml"
+id = "tui-conformance-global-navigation-help-hotkeys"
+path = "scenarios/harness/tui-conformance-global-navigation-help-hotkeys.toml"
 classification = "tui_conformance"
 runtime_substrate = "real_runtime"
 notes = "Intentional TUI frontend-conformance coverage for numeric navigation, focus stepping, and help-modal hotkeys; keep isolated from shared semantic product flows."
 
 [[scenario]]
-id = "scenario7-neighborhood-keypath-parity-e2e"
-path = "scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml"
+id = "tui-conformance-neighborhood-keypaths-and-detail"
+path = "scenarios/harness/tui-conformance-neighborhood-keypaths-and-detail.toml"
 classification = "tui_conformance"
 runtime_substrate = "real_runtime"
-notes = "Intentional TUI frontend-conformance coverage for neighborhood key-paths and toast wiring; keep isolated from shared semantic product flows."
+notes = "Intentional TUI frontend-conformance coverage for neighborhood keypaths, rendered map/detail text, and toast wiring; keep isolated from shared semantic product flows."
 
 [[scenario]]
 id = "semantic-observation-browser-smoke"

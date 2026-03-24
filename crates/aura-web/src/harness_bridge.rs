@@ -5,7 +5,7 @@
 
 use aura_app::ui::contract::{
     classify_screen_item_id, classify_semantic_settings_section_item_id, ListId, ModalId,
-    RenderHeartbeat, ScreenId, UiSnapshot,
+    RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
@@ -17,9 +17,11 @@ use aura_app::ui::workflows::ceremonies as ceremony_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
+use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui_contract::RuntimeFact;
 use aura_core::{types::identifiers::ChannelId, AuthorityId, DeviceId};
+use aura_effects::ReactiveEffects;
 use aura_ui::UiController;
 use futures::channel::oneshot;
 use js_sys::{Array, Function, Object, Reflect, JSON};
@@ -244,7 +246,8 @@ fn selected_authority_id(controller: &UiController) -> Option<String> {
     controller.selected_authority_id().map(|id| id.to_string())
 }
 
-pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {
+pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>) -> UiSnapshot {
+    set_controller(controller.clone());
     let snapshot = controller.semantic_model_snapshot();
     controller.publish_ui_snapshot(snapshot.clone());
     snapshot
@@ -257,8 +260,15 @@ pub(crate) async fn schedule_browser_ui_mutation(
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("window unavailable"))?;
     let (tx, rx) = oneshot::channel::<()>();
     let action = Rc::new(StdRefCell::new(Some(Box::new(move || {
+        let snapshot = controller.semantic_model_snapshot();
+        if snapshot.readiness != UiReadiness::Ready || snapshot.screen == ScreenId::Onboarding {
+            controller.set_account_setup_state(true, "", None);
+            if snapshot.screen == ScreenId::Onboarding {
+                controller.set_screen(ScreenId::Neighborhood);
+            }
+        }
         action(controller.as_ref());
-        let _ = publish_semantic_controller_snapshot(controller.as_ref());
+        let _ = publish_semantic_controller_snapshot(controller.clone());
     }) as Box<dyn FnOnce()>)));
     let callback_action = action.clone();
     let callback = Closure::once(move || {
@@ -641,14 +651,14 @@ fn publish_ui_snapshot_now(
 
     let mut publication_issues = Vec::new();
     let cache_published = match cache_publish {
-        Ok(()) => true,
+        Ok(published) => published,
         Err(error) => {
             publication_issues.push(format!("cache_publish_failed: {}", js_value_detail(&error)));
             false
         }
     };
     let json_published = match json_publish {
-        Ok(()) => true,
+        Ok(published) => published,
         Err(error) => {
             publication_issues.push(format!("json_publish_failed: {}", js_value_detail(&error)));
             false
@@ -725,7 +735,7 @@ fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbea
 
     let mut publication_issues = Vec::new();
     let heartbeat_published = match heartbeat_publish {
-        Ok(()) => true,
+        Ok(published) => published,
         Err(error) => {
             publication_issues.push(format!(
                 "heartbeat_publish_failed: {}",
@@ -735,7 +745,7 @@ fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &RenderHeartbea
         }
     };
     let heartbeat_json_published = match heartbeat_json_publish {
-        Ok(()) => true,
+        Ok(published) => published,
         Err(error) => {
             publication_issues.push(format!(
                 "heartbeat_json_publish_failed: {}",
@@ -872,44 +882,46 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let screen = snapshot.screen;
     let open_modal = snapshot.open_modal;
     let operation_count = snapshot.operations.len();
+    if !publish_ui_snapshot_now(
+        &window,
+        value,
+        json,
+        screen,
+        open_modal,
+        operation_count,
+    ) {
+        return;
+    }
+
     let callback_window = window.clone();
     let callback = Closure::once_into_js(move || {
-        if publish_ui_snapshot_now(
+        let render_seq = RENDER_SEQ.with(|slot| {
+            let mut seq = slot.borrow_mut();
+            *seq = seq.saturating_add(1);
+            *seq
+        });
+        publish_render_heartbeat(
             &callback_window,
-            value,
-            json,
-            screen,
-            open_modal,
-            operation_count,
-        ) {
-            let render_seq = RENDER_SEQ.with(|slot| {
-                let mut seq = slot.borrow_mut();
-                *seq = seq.saturating_add(1);
-                *seq
-            });
-            publish_render_heartbeat(
-                &callback_window,
-                &RenderHeartbeat {
-                    screen,
-                    open_modal,
-                    render_seq,
-                },
-            );
-        }
+            &RenderHeartbeat {
+                screen,
+                open_modal,
+                render_seq,
+            },
+        );
     });
     let callback_fn: &js_sys::Function = callback.unchecked_ref();
     if let Err(error) = window.request_animation_frame(callback_fn) {
         log_js_callback_error("requestAnimationFrame publish_ui_snapshot", &error);
         update_publication_state(
             &window,
-            UI_PUBLICATION_STATE_KEY,
-            "ui_state",
+            RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+            "render_heartbeat",
             "unavailable",
             &format!(
                 "request_animation_frame_failed: {}",
                 js_value_detail(&error)
             ),
-            "window_cache_only",
+            "driver_push",
         );
     }
 }
@@ -1540,7 +1552,7 @@ mod tests {
             .find("fn selected_authority_id(controller: &UiController) -> Option<String> {")
             .unwrap_or_else(|| panic!("missing selected_authority_id"));
         let authority_end = source[authority_start..]
-            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {")
+            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>) -> UiSnapshot {")
             .map(|offset| authority_start + offset)
             .unwrap_or(source.len());
         let authority_block = &source[authority_start..authority_end];
@@ -1551,6 +1563,47 @@ mod tests {
         assert!(
             !authority_block.contains(".selected_item_id(ListId::Authorities)"),
             "selected_authority_id command paths must not re-read observed authority selection"
+        );
+
+        let publish_start = source
+            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>) -> UiSnapshot {")
+            .unwrap_or_else(|| panic!("missing publish_semantic_controller_snapshot"));
+        let publish_end = source[publish_start..]
+            .find("pub(crate) async fn schedule_browser_ui_mutation(")
+            .map(|offset| publish_start + offset)
+            .unwrap_or(source.len());
+        let publish_block = &source[publish_start..publish_end];
+        assert!(
+            publish_block.contains("set_controller(Arc::new(controller.clone()));"),
+            "published semantic controller snapshots must refresh the harness bridge controller owner"
+        );
+    }
+
+    #[test]
+    fn semantic_ui_snapshot_publication_precedes_render_heartbeat_scheduling() {
+        let source = include_str!("harness_bridge.rs");
+        let publish_start = source
+            .find("pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {")
+            .unwrap_or_else(|| panic!("missing publish_ui_snapshot"));
+        let publish_end = source[publish_start..]
+            .find("fn published_ui_snapshot_value(window: &web_sys::Window) -> JsValue {")
+            .map(|offset| publish_start + offset)
+            .unwrap_or(source.len());
+        let publish_block = &source[publish_start..publish_end];
+
+        let publish_now_index = publish_block
+            .find("if !publish_ui_snapshot_now(")
+            .unwrap_or_else(|| panic!("publish_ui_snapshot must publish immediately"));
+        let raf_index = publish_block
+            .find("window.request_animation_frame(callback_fn)")
+            .unwrap_or_else(|| panic!("publish_ui_snapshot must still schedule render heartbeat"));
+        assert!(
+            publish_now_index < raf_index,
+            "semantic snapshot publication must happen before RAF heartbeat scheduling"
+        );
+        assert!(
+            publish_block.contains("RENDER_HEARTBEAT_PUBLICATION_STATE_KEY"),
+            "RAF failures must degrade the render heartbeat publication state, not ui_state"
         );
     }
 }

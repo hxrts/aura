@@ -1,10 +1,9 @@
 use std::cell::OnceCell;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 
-use async_lock::Mutex;
 use async_trait::async_trait;
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::{OwnedShutdownToken, OwnedTaskSpawner};
@@ -28,7 +27,10 @@ impl FrontendTaskCancellationState {
         }
 
         let waiters = {
-            let mut guard = self.waiters.lock_blocking();
+            let mut guard = self
+                .waiters
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             std::mem::take(&mut *guard)
         };
         for waiter in waiters {
@@ -55,7 +57,11 @@ impl CancellationToken for FrontendTaskCancellationToken {
 
         let (tx, rx) = oneshot::channel();
         {
-            let mut waiters = self.state.waiters.lock().await;
+            let mut waiters = self
+                .state
+                .waiters
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if self.state.is_cancelled() {
                 return;
             }

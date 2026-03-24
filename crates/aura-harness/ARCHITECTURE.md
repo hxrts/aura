@@ -55,6 +55,7 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 - Parity-critical create/join/accept shared-channel flows must receive canonical operation handles and channel bindings from the authoritative submission/receipt path; post-hoc polling repair is forbidden.
 - Local PTY shared-semantic submissions must treat harness command receipts as the only success witness at issue time. Visible homes, modal closure, message appearance, selected-list bindings, and `Submitting` are not semantic completion signals.
 - Raw renderer capture is diagnostic-only and is exposed through explicitly named `diagnostic_*` observation surfaces; typed `UiSnapshot` / `UiSnapshotEvent` remain the only authoritative shared-semantic observation plane, and diagnostic query APIs keep the `diagnostic_*` naming through the tool boundary.
+- In semantic scenarios, `message_contains` is authoritative `UiSnapshot.messages` observation only. Rendered-text assertions must use explicitly named conformance-only diagnostic actions such as `diagnostic_screen_contains`, and those actions are forbidden in shared-semantic scenarios.
 - Projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation. Runtime-event, toast, and exact operation-state waits remain fail-closed across restarts.
 - Time-bounded loops in shared semantic code are allowed only for infrastructure readiness, transport, or bounded observation waits whose owner is explicit; ownership transfer itself must not depend on settle windows or heuristic polling.
 - The Playwright browser driver should prefer pushed UI/DOM observer waiters over fixed settle sleeps when deterministic publication state is already available.
@@ -168,6 +169,7 @@ For shared semantic flows, `aura-harness` uses `Observed` for typed projection r
 ## Contributor Guidance
 
 - Treat `SharedSemanticBackend` plus `UiSnapshot` / `UiSnapshotEvent` as the primary shared-semantic contract. If you need raw screen or DOM data, the API and variable names must say `diagnostic`.
+- In scenario files, use `message_contains` only for authoritative snapshot message content. Use `diagnostic_screen_contains` only in frontend-conformance scenarios when you intentionally need rendered shell text.
 - When a parity-critical command result needs an operation handle, channel binding, or other owned token, require it in the immediate typed receipt. Do not add later polling, re-resolution, or inferred repair.
 - If a convenience helper still needs exported data after submission, the follow-on wait must bind to an authoritative runtime event or projection contract, not a modal/screen side effect.
 - Shared semantic executor/replay/backend core must decode typed `ToolPayload` and bridge structs directly. Keep `serde_json::Value` and `serde_json::from_value` quarantined to outer CLI/browser boundary adapters.

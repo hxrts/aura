@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use aura_app::scenario_contract::{
-    ActorId, ScenarioAction as SemanticAction, ScenarioDefinition, ScenarioStep as SemanticStep,
-    SemanticScenarioFile,
+    ActorId, Expectation, ScenarioAction as SemanticAction, ScenarioDefinition,
+    ScenarioStep as SemanticStep, SemanticScenarioFile, VariableAction,
 };
 use serde::{Deserialize, Serialize};
 
@@ -595,13 +595,17 @@ impl ScenarioConfig {
                 }
             }
             if self.is_shared_semantic()
-                && self
-                    .semantic_steps
-                    .iter()
-                    .any(|step| matches!(step.action, SemanticAction::Ui(_)))
+                && self.semantic_steps.iter().any(|step| {
+                    matches!(step.action, SemanticAction::Ui(_))
+                        || matches!(
+                            step.action,
+                            SemanticAction::Expect(Expectation::DiagnosticScreenContains { .. })
+                                | SemanticAction::Variables(VariableAction::Extract { .. })
+                        )
+                })
             {
                 bail!(
-                    "shared semantic scenario {} contains frontend-local ui mechanics; classify it as frontend_conformance instead",
+                    "shared semantic scenario {} contains frontend-conformance-only mechanics or diagnostic observation; classify it as frontend_conformance instead",
                     self.id
                 );
             }
@@ -816,13 +820,18 @@ mod tests {
             action = "toast_contains"
             kind = "success"
             value = "done"
+
+            [[steps]]
+            id = "diagnostic"
+            action = "diagnostic_screen_contains"
+            value = "Can enter:"
         "#;
 
         let file: SemanticScenarioFile = toml::from_str(body)
             .unwrap_or_else(|error| panic!("semantic file parse failed: {error}"));
         let definition = ScenarioDefinition::try_from(file)
             .unwrap_or_else(|error| panic!("semantic file conversion failed: {error}"));
-        assert_eq!(definition.steps.len(), 2);
+        assert_eq!(definition.steps.len(), 3);
         assert!(matches!(
             definition.steps[0].action,
             SemanticAction::Ui(UiAction::Navigate(ScreenId::Chat))
@@ -833,6 +842,11 @@ mod tests {
                 kind: Some(ToastKind::Success),
                 message_contains
             }) if message_contains == "done"
+        ));
+        assert!(matches!(
+            &definition.steps[2].action,
+            SemanticAction::Expect(Expectation::DiagnosticScreenContains { text_contains })
+                if text_contains == "Can enter:"
         ));
     }
 
@@ -1118,6 +1132,57 @@ mod tests {
         );
 
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn shared_semantic_scenario_rejects_diagnostic_screen_expectation() {
+        let config = semantic_scenario(
+            "shared-reject-diagnostic-screen",
+            "reject conformance-only diagnostic screen expectation in shared lane",
+            vec![ScenarioStep {
+                id: "diagnostic-screen".to_string(),
+                actor: Some(ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: SemanticAction::Expect(Expectation::DiagnosticScreenContains {
+                    text_contains: "Can enter:".to_string(),
+                }),
+            }],
+        );
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| {
+                panic!("shared semantic scenario should reject diagnostic screen expectation")
+            })
+            .to_string();
+        assert!(error.contains("frontend-conformance-only mechanics or diagnostic observation"));
+    }
+
+    #[test]
+    fn shared_semantic_scenario_rejects_diagnostic_extract() {
+        let config = semantic_scenario(
+            "shared-reject-diagnostic-extract",
+            "reject diagnostic extract in shared lane",
+            vec![ScenarioStep {
+                id: "extract-screen".to_string(),
+                actor: Some(ActorId("alice".to_string())),
+                timeout_ms: Some(1000),
+                action: SemanticAction::Variables(VariableAction::Extract {
+                    name: "capture".to_string(),
+                    regex: "Access:".to_string(),
+                    group: 0,
+                    from: aura_app::scenario_contract::ExtractSource::Screen,
+                }),
+            }],
+        );
+
+        let error = config
+            .validate()
+            .err()
+            .unwrap_or_else(|| panic!("shared semantic scenario should reject diagnostic extract"))
+            .to_string();
+        assert!(error.contains("frontend-conformance-only mechanics or diagnostic observation"));
     }
 
     #[test]

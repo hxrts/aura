@@ -1,8 +1,12 @@
-# Neighborhood key-path parity end-to-end:
+# TUI frontend-conformance: neighborhood keypaths, rendered map/detail text, and toast wiring.
+#
+# This is intentionally not a shared semantic product-flow scenario.
+# It validates TUI-specific key mappings and rendered shell text through
+# frontend-conformance-only diagnostic screen assertions.
 #
 # Phase 1 - Setup:
 # 1. Launch alice and complete account setup.
-# 2. Wait for neighborhood map to be ready.
+# 2. Wait for neighborhood map chrome and status text to be visible.
 #
 # Phase 2 - Neighborhood key-path commands:
 # 1. Use 'm' key for create/select neighborhood.
@@ -11,17 +15,17 @@
 #
 # Phase 3 - Map navigation:
 # 1. Use g/H/b key paths.
-# 2. Assert stable map visibility.
+# 2. Assert stable rendered map visibility.
 #
 # Phase 4 - Home detail:
 # 1. Enter home detail via Enter key.
 # 2. Send a message via insert mode.
 #
-# Success criteria: neighborhood key-path commands produce correct
-# toasts and state transitions.
+# Success criteria: neighborhood keypath commands preserve the expected
+# rendered map/detail text, toast wiring, and state transitions.
 
-id = "scenario7-neighborhood-keypath-parity-e2e"
-goal = "Exercise neighborhood key-path commands and verify resulting toasts and state transitions."
+id = "tui-conformance-neighborhood-keypaths-and-detail"
+goal = "Exercise TUI neighborhood keypaths and verify rendered map/detail text, toast wiring, and state transitions."
 
 [[steps]]
 id = "launch"
@@ -58,14 +62,14 @@ timeout_ms = 30000
 
 [[steps]]
 id = "alice-neighborhood-map-visible"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Can enter:"
 timeout_ms = 8000
 
 [[steps]]
 id = "alice-neighborhood-state-indicator-visible"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "D:Lim M:Off P:0"
 timeout_ms = 8000
@@ -142,7 +146,7 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-map-stable-after-g"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Can enter:"
 timeout_ms = 8000
@@ -156,7 +160,7 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-map-stable-after-H"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Can enter:"
 timeout_ms = 8000
@@ -170,7 +174,7 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-map-stable-after-b"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Can enter:"
 timeout_ms = 8000
@@ -191,7 +195,7 @@ timeout_ms = 1000
 
 [[steps]]
 id = "alice-home-detail-visible"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Access:"
 timeout_ms = 10000
@@ -205,7 +209,7 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-detail-still-visible-after-send"
-action = "message_contains"
+action = "diagnostic_screen_contains"
 actor = "alice"
 value = "Access:"
 timeout_ms = 8000

@@ -45,8 +45,8 @@ This report is a traceability document for those classes. It is not a proof of p
 | Scenario | File | Primary Flow |
 |----------|------|--------------|
 | Startup Smoke | `scenarios/harness/real-runtime-mixed-startup-smoke.toml` | Shared runtime startup and onboarding readiness |
-| Scenario 4 | `scenarios/harness/scenario4-global-nav-and-help-e2e.toml` | TUI frontend-conformance: global navigation and help modal behavior |
-| Scenario 7 | `scenarios/harness/scenario7-neighborhood-keypath-parity-e2e.toml` | TUI frontend-conformance: neighborhood keypath parity and detail navigation |
+| TUI Global Navigation/Help Hotkeys | `scenarios/harness/tui-conformance-global-navigation-help-hotkeys.toml` | TUI frontend-conformance: global navigation, key mappings, and help modal behavior |
+| TUI Neighborhood Keypaths/Detail | `scenarios/harness/tui-conformance-neighborhood-keypaths-and-detail.toml` | TUI frontend-conformance: neighborhood keypaths, rendered map/detail text, and toast wiring |
 | Scenario 12 | `scenarios/harness/scenario12-mixed-device-enrollment-removal-e2e.toml` | Mixed TUI/Web device enrollment + removal |
 | Scenario 13 | `scenarios/harness/scenario13-mixed-contact-channel-message-e2e.toml` | Mixed TUI/Web contact invite + channel messaging |
 | Shared Settings | `scenarios/harness/shared-settings-parity.toml` | Shared semantic settings parity |
@@ -55,14 +55,14 @@ This report is a traceability document for those classes. It is not a proof of p
 | TUI Observation | `scenarios/harness/semantic-observation-tui-smoke.toml` | TUI semantic observation contract smoke |
 | Quint Observation | `scenarios/harness/quint-semantic-observation-smoke.toml` | Quint-origin semantic observation reference |
 
-Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. All harness scenarios in this inventory now use the semantic scenario format.
+The two TUI-only conformance scenarios are retained as frontend-conformance coverage. All harness scenarios in this inventory now use the semantic scenario format.
 
 ## User Flow Matrix
 
 | Flow Domain | Main Coverage | Secondary Coverage | Runtime Context |
 |------------|----------------|--------------------|-----------------|
 | Startup and onboarding readiness | `real-runtime-mixed-startup-smoke.toml` | `quint-semantic-observation-smoke.toml` | TUI + Web |
-| Navigate neighborhood | `real-runtime-mixed-startup-smoke.toml` | Scenario 7 | TUI + Web |
+| Navigate neighborhood | `real-runtime-mixed-startup-smoke.toml` | TUI Neighborhood Keypaths/Detail | TUI + Web |
 | Navigate chat | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate contacts | Scenario 13 | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
 | Navigate notifications | `shared-notifications-and-authority.toml` | `semantic-observation-browser-smoke.toml`, `semantic-observation-tui-smoke.toml` | TUI + Web |
@@ -75,8 +75,8 @@ Scenarios 4 and 7 are retained as TUI frontend-conformance coverage. All harness
 | Add device | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
 | Remove device | Scenario 12 | `shared-settings-parity.toml` | Mixed runtime |
 | Switch authority | `shared-notifications-and-authority.toml` | `shared-settings-parity.toml` | TUI + Web |
-| Global navigation/help | Scenario 4 | None | TUI frontend-conformance |
-| Neighborhood keypath navigation | Scenario 7 | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
+| Global navigation/help | TUI Global Navigation/Help Hotkeys | None | TUI frontend-conformance |
+| Neighborhood keypath navigation | TUI Neighborhood Keypaths/Detail | `real-runtime-mixed-startup-smoke.toml` | TUI frontend-conformance + shared startup |
 | Semantic observation contract | `semantic-observation-browser-smoke.toml` | `semantic-observation-tui-smoke.toml`, `quint-semantic-observation-smoke.toml` | Browser + TUI |
 
 Current parity-critical source changes touched the following shared-flow areas
@@ -94,8 +94,8 @@ These scenarios are maintained outside the main shared semantic lane:
 
 | Scenario File | Focus |
 |---------------|-------|
-| `scenario4-global-nav-and-help-e2e.toml` | TUI hotkeys, global navigation, help modal wiring |
-| `scenario7-neighborhood-keypath-parity-e2e.toml` | TUI neighborhood keypaths, detail navigation, toast wiring |
+| `tui-conformance-global-navigation-help-hotkeys.toml` | TUI hotkeys, global navigation, help modal wiring |
+| `tui-conformance-neighborhood-keypaths-and-detail.toml` | TUI neighborhood keypaths, rendered map/detail text, toast wiring |
 | `semantic-observation-browser-smoke.toml` | Browser observation contract smoke |
 | `semantic-observation-tui-smoke.toml` | TUI observation contract smoke |
 | `quint-semantic-observation-smoke.toml` | Reference semantic observation smoke |

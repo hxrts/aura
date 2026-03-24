@@ -1,4 +1,7 @@
-# Global navigation and help modal end-to-end:
+# TUI frontend-conformance: global navigation, numeric hotkeys, and help-modal wiring.
+#
+# This is intentionally not a shared semantic product-flow scenario.
+# It validates TUI-specific key mappings and modal wiring through frontend-local input.
 #
 # 1. Boot two local instances and complete account setup.
 # 2. Validate numeric navigation across core screens.
@@ -6,11 +9,11 @@
 # 4. Validate help modal open/close from global '?' hotkey.
 # 5. Trigger slash-help toast and dismiss it with Esc.
 #
-# Success criteria: global navigation hotkeys, help modal, and toast
-# dismissal work correctly.
+# Success criteria: TUI navigation hotkeys, help-modal wiring, and toast
+# dismissal behavior stay correct.
 
-id = "scenario4-global-nav-and-help-e2e"
-goal = "Validate global navigation hotkeys, help modal behavior, and toast dismissal flow."
+id = "tui-conformance-global-navigation-help-hotkeys"
+goal = "Validate TUI global navigation hotkeys, help-modal wiring, and toast dismissal behavior."
 
 [[steps]]
 id = "launch"

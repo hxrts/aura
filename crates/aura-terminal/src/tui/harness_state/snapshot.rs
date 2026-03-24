@@ -93,7 +93,7 @@ fn build_authoritative_ui_snapshot(
             let id = map_screen(*candidate);
             ListItemSnapshot {
                 id: screen_item_id(id).to_string(),
-                selected: *candidate == state.screen(),
+                selected: !onboarding_active && *candidate == state.screen(),
                 confirmation: ConfirmationState::Confirmed,
                 is_current: false,
             }
@@ -513,6 +513,8 @@ pub fn maybe_export_ui_snapshot(
 
 #[cfg(test)]
 mod tests {
+    use crate::tui::harness_state::TuiSemanticInputs;
+
     #[test]
     fn tui_harness_snapshot_exports_canonical_selection_for_parity_lists() {
         let source = include_str!("snapshot.rs");
@@ -544,5 +546,39 @@ mod tests {
         assert!(devices_block.contains("ListId::Devices"));
         assert!(devices_block.contains("selected: false"));
         assert!(devices_block.contains("None,"));
+    }
+
+    #[test]
+    fn onboarding_snapshot_does_not_mark_navigation_row_selected_without_exported_selection() {
+        use super::authoritative_ui_snapshot;
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::AccountSetupModalState;
+        use crate::tui::TuiState;
+        use aura_app::ui::contract::{ListId, ScreenId};
+        use aura_app::ui::types::StateSnapshot;
+
+        let mut state = TuiState::new();
+        state.show_modal(QueuedModal::AccountSetup(AccountSetupModalState::default()));
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        );
+
+        assert_eq!(snapshot.screen, ScreenId::Onboarding);
+        assert_eq!(snapshot.selected_item_id(ListId::Navigation), None);
+        let navigation = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Navigation)
+            .unwrap_or_else(|| panic!("navigation list should exist"));
+        assert!(navigation.items.iter().all(|item| !item.selected));
     }
 }

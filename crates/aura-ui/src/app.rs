@@ -5578,16 +5578,6 @@ fn runtime_semantic_snapshot(
         );
     }
 
-    let homes = neighborhood_runtime
-        .homes
-        .iter()
-        .map(|home| ListItemSnapshot {
-            id: home.id.clone(),
-            selected: model.selected_home_id() == Some(home.id.as_str()),
-            confirmation: ConfirmationState::Confirmed,
-            is_current: false,
-        })
-        .collect::<Vec<_>>();
     let selected_home_id = model.selected_home_id().map(str::to_string).or_else(|| {
         neighborhood_runtime
             .homes
@@ -5595,6 +5585,16 @@ fn runtime_semantic_snapshot(
             .find(|home| home.name == neighborhood_runtime.active_home_name)
             .map(|home| home.id.clone())
     });
+    let homes = neighborhood_runtime
+        .homes
+        .iter()
+        .map(|home| ListItemSnapshot {
+            id: home.id.clone(),
+            selected: selected_home_id.as_deref() == Some(home.id.as_str()),
+            confirmation: ConfirmationState::Confirmed,
+            is_current: false,
+        })
+        .collect::<Vec<_>>();
     upsert_snapshot_list(&mut snapshot, ListId::Homes, homes, selected_home_id);
 
     let members = neighborhood_runtime
@@ -5690,7 +5690,7 @@ fn runtime_semantic_snapshot(
         .iter()
         .map(|device| ListItemSnapshot {
             id: device.id.clone(),
-            selected: device.is_current,
+            selected: false,
             confirmation: ConfirmationState::Confirmed,
             is_current: device.is_current,
         })
@@ -6449,6 +6449,8 @@ fn should_skip_global_key(controller: &UiController, event: &KeyboardData) -> bo
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::model::UiModel;
     use std::path::Path;
 
     #[test]
@@ -6607,5 +6609,84 @@ mod tests {
 
         assert!(channels_branch.contains("controller.select_channel_by_id(&channel_id);"));
         assert!(!channels_branch.contains("select_channel_by_name("));
+    }
+
+    #[test]
+    fn runtime_semantic_snapshot_marks_active_home_row_selected_when_falling_back_to_runtime_home() {
+        let model = UiModel::new("authority-test".to_string());
+        let neighborhood_runtime = NeighborhoodRuntimeView {
+            loaded: true,
+            active_home_name: "Shared Home".to_string(),
+            homes: vec![NeighborhoodRuntimeHome {
+                id: "channel:home-1".to_string(),
+                name: "Shared Home".to_string(),
+                member_count: Some(1),
+                can_enter: true,
+                is_local: true,
+            }],
+            ..NeighborhoodRuntimeView::default()
+        };
+
+        let snapshot = runtime_semantic_snapshot(
+            &model,
+            &neighborhood_runtime,
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView::default(),
+            &NotificationsRuntimeView::default(),
+        );
+
+        snapshot
+            .validate_invariants()
+            .expect("runtime snapshot should export matching home selection");
+        let homes = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Homes)
+            .expect("homes list should be exported");
+        assert!(
+            homes.items.iter().any(|item| item.id == "channel:home-1" && item.selected),
+            "active runtime home fallback must mark the matching row selected"
+        );
+        assert_eq!(
+            snapshot.selected_item_id(ListId::Homes),
+            Some("channel:home-1")
+        );
+    }
+
+    #[test]
+    fn runtime_semantic_snapshot_keeps_current_device_distinct_from_selection() {
+        let model = UiModel::new("authority-test".to_string());
+        let settings_runtime = SettingsRuntimeView {
+            loaded: true,
+            devices: vec![SettingsRuntimeDevice {
+                id: "device-1".to_string(),
+                name: "Current Device".to_string(),
+                is_current: true,
+            }],
+            ..SettingsRuntimeView::default()
+        };
+
+        let snapshot = runtime_semantic_snapshot(
+            &model,
+            &NeighborhoodRuntimeView::default(),
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &settings_runtime,
+            &NotificationsRuntimeView::default(),
+        );
+
+        snapshot
+            .validate_invariants()
+            .expect("current device marker must not fabricate list selection");
+        let devices = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Devices)
+            .expect("devices list should be exported");
+        assert_eq!(snapshot.selected_item_id(ListId::Devices), None);
+        assert_eq!(devices.items.len(), 1);
+        assert!(devices.items[0].is_current);
+        assert!(!devices.items[0].selected);
     }
 }

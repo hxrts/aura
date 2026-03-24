@@ -352,12 +352,12 @@ pub async fn monitor_key_rotation_ceremony_with_policy<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
     handle: &CeremonyStatusHandle,
     policy: CeremonyPollPolicy,
-    mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
+    mut on_update: impl FnMut(&KeyRotationCeremonyStatus),
     mut sleep_fn: SleepFn,
 ) -> Result<CeremonyLifecycle<KeyRotationCeremonyStatus>, AuraError>
 where
-    SleepFn: FnMut(Duration) -> SleepFut + Send,
-    SleepFut: Future<Output = ()> + Send,
+    SleepFn: FnMut(Duration) -> SleepFut,
+    SleepFut: Future<Output = ()>,
 {
     // Bounded polling to avoid infinite loops; UIs can re-invoke if desired.
     let mut attempts = AttemptBudget::new(policy.max_attempts);
@@ -446,12 +446,12 @@ pub async fn monitor_key_rotation_ceremony<SleepFn, SleepFut>(
     app_core: &Arc<RwLock<AppCore>>,
     handle: &CeremonyStatusHandle,
     poll_interval: Duration,
-    mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
+    mut on_update: impl FnMut(&KeyRotationCeremonyStatus),
     mut sleep_fn: SleepFn,
 ) -> Result<KeyRotationCeremonyStatus, AuraError>
 where
-    SleepFn: FnMut(Duration) -> SleepFut + Send,
-    SleepFut: Future<Output = ()> + Send,
+    SleepFn: FnMut(Duration) -> SleepFut,
+    SleepFut: Future<Output = ()>,
 {
     let policy = CeremonyPollPolicy::with_interval(poll_interval);
     let lifecycle = monitor_key_rotation_ceremony_with_policy(

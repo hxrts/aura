@@ -1057,6 +1057,16 @@ fn execute_semantic_step(
                         step_budget_ms,
                     )
                 }
+                aura_app::scenario_contract::Expectation::DiagnosticScreenContains {
+                    text_contains,
+                } => wait_for_diagnostic_screen_contains_in_lane(
+                    tool_api,
+                    semantic_lane,
+                    &instance_id,
+                    &step.id,
+                    text_contains,
+                    step_budget_ms,
+                ),
                 _ => {
                     let wait_step = semantic_expectation_wait_step(step, expectation, context)?;
                     wait_for_semantic_state(
@@ -1660,6 +1670,12 @@ fn semantic_expectation_wait_step(
             wait_step.action = CompatibilityAction::MessageContains;
             wait_step.value = Some(message_contains.clone());
         }
+        Expectation::DiagnosticScreenContains { .. } => {
+            bail!(
+                "step {} diagnostic_screen_contains must use the explicit frontend-conformance diagnostic wait path",
+                step.id
+            );
+        }
         Expectation::ToastContains {
             kind,
             message_contains,
@@ -1909,6 +1925,9 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             aura_app::scenario_contract::Expectation::ControlVisible(_) => "control_visible",
             aura_app::scenario_contract::Expectation::ModalOpen(_) => "modal_open",
             aura_app::scenario_contract::Expectation::MessageContains { .. } => "message_contains",
+            aura_app::scenario_contract::Expectation::DiagnosticScreenContains { .. } => {
+                "diagnostic_screen_contains"
+            }
             aura_app::scenario_contract::Expectation::ToastContains { .. } => "toast_contains",
             aura_app::scenario_contract::Expectation::ListContains { .. } => "list_contains",
             aura_app::scenario_contract::Expectation::ListCountIs { .. } => "list_count_is",
@@ -2729,6 +2748,28 @@ fn read_clipboard_value(
         instance_id,
         step_id,
         timeout_ms,
+    )
+}
+
+fn wait_for_diagnostic_screen_contains_in_lane(
+    tool_api: &mut ToolApi,
+    lane: ExecutionLane,
+    instance_id: &str,
+    step_id: &str,
+    text_contains: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    require_frontend_conformance_lane(lane, step_id, "diagnostic_screen_contains")?;
+    dispatch_in_lane(
+        tool_api,
+        lane,
+        ToolRequest::WaitFor {
+            instance_id: instance_id.to_string(),
+            pattern: text_contains.to_string(),
+            timeout_ms,
+            screen_source: ScreenSource::Default,
+            selector: None,
+        },
     )
 }
 
@@ -3835,6 +3876,7 @@ fn shared_semantic_raw_ui_request(request: &ToolRequest) -> bool {
             | ToolRequest::ClickButton { .. }
             | ToolRequest::FillInput { .. }
             | ToolRequest::FillField { .. }
+            | ToolRequest::WaitFor { .. }
     )
 }
 

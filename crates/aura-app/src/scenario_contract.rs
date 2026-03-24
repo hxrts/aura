@@ -1326,6 +1326,9 @@ pub enum Expectation {
     MessageContains {
         message_contains: String,
     },
+    DiagnosticScreenContains {
+        text_contains: String,
+    },
     ToastContains {
         kind: Option<ToastKind>,
         message_contains: String,
@@ -1441,6 +1444,7 @@ pub enum SemanticActionKind {
     ControlVisible,
     ModalOpen,
     MessageContains,
+    DiagnosticScreenContains,
     ToastContains,
     ListContains,
     ListCountIs,
@@ -1647,6 +1651,11 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
             SemanticActionKind::MessageContains => {
                 ScenarioAction::Expect(Expectation::MessageContains {
                     message_contains: required(value.value, "value", value.action)?,
+                })
+            }
+            SemanticActionKind::DiagnosticScreenContains => {
+                ScenarioAction::Expect(Expectation::DiagnosticScreenContains {
+                    text_contains: required(value.value, "value", value.action)?,
                 })
             }
             SemanticActionKind::ToastContains => {

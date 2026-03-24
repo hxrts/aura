@@ -15,7 +15,7 @@ cfg_if! {
         mod web_clipboard;
 
         use async_lock::{Mutex, RwLock};
-        use aura_agent::AgentBuilder;
+        use aura_agent::{AgentBuilder, AuraAgent};
         use aura_app::{AppConfig, AppCore};
         use aura_app::ui::workflows::account as account_workflows;
         use aura_app::ui::workflows::invitation as invitation_workflows;
@@ -34,10 +34,10 @@ cfg_if! {
             ControlId, FieldId, ScreenId, UiReadiness,
         };
         use aura_effects::{new_authority_id, new_device_id, RealRandomHandler};
-        use aura_ui::{AuraUiRoot, UiController};
+        use aura_ui::{AuraUiRoot, FrontendUiOperation as WebUiOperation, UiController};
         use dioxus::dioxus_core::schedule_update;
         use dioxus::prelude::*;
-        use error::{log_web_error, WebUiError, WebUiOperation};
+        use error::{log_web_error, WebUiError};
         use std::cell::Cell;
         use std::future::Future;
         use std::rc::Rc;
@@ -388,7 +388,7 @@ cfg_if! {
                     ),
                 );
             }
-            let _ = harness_bridge::publish_semantic_controller_snapshot(controller.as_ref());
+            let _ = harness_bridge::publish_semantic_controller_snapshot(controller.clone());
         }
 
         fn load_pending_device_enrollment_code(
@@ -614,7 +614,7 @@ cfg_if! {
 
                 let current_device_id = current_runtime_identity.device_id;
                 let controller = Arc::new(UiController::with_authority_switcher(
-                    app_core,
+                    app_core.clone(),
                     clipboard,
                     Some(Arc::new(move |authority_id: AuthorityId| {
                         let storage_prefix = active_storage_prefix();
@@ -653,13 +653,13 @@ cfg_if! {
                         });
                     })),
                 ));
+                controller.set_account_setup_state(account_ready, "", None);
                 install_harness_instrumentation(controller.clone());
                 spawn_ceremony_acceptance_loop(
                     controller.clone(),
                     app_core.clone(),
                     agent.clone(),
                 );
-                controller.set_account_setup_state(account_ready, "", None);
 
                 if account_ready {
                     if let Err(error) = settings_workflows::refresh_settings_from_runtime(
@@ -730,7 +730,7 @@ cfg_if! {
                     BootstrapEventKind::RuntimeBootstrapFinalized,
                 );
                 let final_snapshot =
-                    harness_bridge::publish_semantic_controller_snapshot(controller.as_ref());
+                    harness_bridge::publish_semantic_controller_snapshot(controller.clone());
                 web_sys::console::log_1(
                     &format!(
                         "[web-bootstrap] final_snapshot screen={:?};readiness={:?};revision={:?}",
@@ -769,8 +769,8 @@ cfg_if! {
                         )
                     })?;
                 let controller = Arc::new(UiController::new(app_core, clipboard));
-                install_harness_instrumentation(controller.clone());
                 controller.set_account_setup_state(false, "", None);
+                install_harness_instrumentation(controller.clone());
                 let waiting_event = BootstrapEvent::new(
                     BootstrapSurface::Web,
                     BootstrapEventKind::ShellAwaitingAccount,
@@ -933,6 +933,23 @@ cfg_if! {
             let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
                 && controller_snapshot.screen != ScreenId::Onboarding;
             let account_ready = bootstrap_account_ready() || controller_account_ready;
+
+            use_effect({
+                let controller = controller.clone();
+                move || {
+                    if bootstrap_account_ready() {
+                        let snapshot = controller.semantic_model_snapshot();
+                        if snapshot.readiness != UiReadiness::Ready
+                            || snapshot.screen == ScreenId::Onboarding
+                        {
+                            controller.set_account_setup_state(true, "", None);
+                            if snapshot.screen == ScreenId::Onboarding {
+                                controller.set_screen(ScreenId::Neighborhood);
+                            }
+                        }
+                    }
+                }
+            });
 
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
@@ -1350,7 +1367,6 @@ cfg_if! {
                                             let value = event.value();
                                             account_name.set(value.clone());
                                             account_error.set(None);
-                                            controller.set_account_setup_state(false, value, None);
                                         },
                                     }
                                 }
@@ -1519,7 +1535,7 @@ cfg_if! {
         fn spawn_ceremony_acceptance_loop(
             controller: Arc<UiController>,
             app_core: Arc<RwLock<AppCore>>,
-            agent: Arc<aura_agent::Agent>,
+            agent: Arc<AuraAgent>,
         ) {
             spawn_browser_maintenance_loop(
                 controller,
@@ -1537,7 +1553,7 @@ cfg_if! {
                                 &WebUiError::operation(
                                     WebUiOperation::ProcessCeremonyAcceptances,
                                     "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                                    error.to_string(),
+                                    format!("{error}"),
                                 ),
                             );
                         }
@@ -1701,9 +1717,55 @@ mod tests {
         assert!(bridge_source.contains("pub(crate) fn publish_semantic_controller_snapshot"));
         assert!(bridge_source.contains("controller.publish_ui_snapshot(snapshot.clone())"));
         assert!(production_main
-            .contains("harness_bridge::publish_semantic_controller_snapshot(controller.as_ref())"));
+            .contains("harness_bridge::publish_semantic_controller_snapshot(controller.clone())"));
         assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&final_snapshot)"));
         assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&initial_snapshot)"));
+    }
+
+    #[test]
+    fn web_bootstrap_sets_account_gate_before_initial_harness_publication() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let source = std::fs::read_to_string(&main_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+
+        let runtime_branch_start = source
+            .find("let controller = Arc::new(UiController::with_authority_switcher(")
+            .unwrap_or_else(|| panic!("missing runtime bootstrap controller"));
+        let runtime_branch_end = source[runtime_branch_start..]
+            .find("if account_ready {")
+            .map(|offset| runtime_branch_start + offset)
+            .unwrap_or_else(|| panic!("missing runtime bootstrap refresh branch"));
+        let runtime_branch = &source[runtime_branch_start..runtime_branch_end];
+        let runtime_gate_index = runtime_branch
+            .find("controller.set_account_setup_state(account_ready, \"\", None);")
+            .unwrap_or_else(|| panic!("missing runtime bootstrap account gate"));
+        let runtime_install_index = runtime_branch
+            .find("install_harness_instrumentation(controller.clone());")
+            .unwrap_or_else(|| panic!("missing runtime bootstrap harness install"));
+        assert!(
+            runtime_gate_index < runtime_install_index,
+            "runtime bootstrap must set the account gate before initial harness publication"
+        );
+
+        let shell_branch_start = source
+            .find("let controller = Arc::new(UiController::new(app_core, clipboard));")
+            .unwrap_or_else(|| panic!("missing shell bootstrap controller"));
+        let shell_branch_end = source[shell_branch_start..]
+            .find("let waiting_event = BootstrapEvent::new(")
+            .map(|offset| shell_branch_start + offset)
+            .unwrap_or_else(|| panic!("missing shell waiting event"));
+        let shell_branch = &source[shell_branch_start..shell_branch_end];
+        let shell_gate_index = shell_branch
+            .find("controller.set_account_setup_state(false, \"\", None);")
+            .unwrap_or_else(|| panic!("missing shell bootstrap account gate"));
+        let shell_install_index = shell_branch
+            .find("install_harness_instrumentation(controller.clone());")
+            .unwrap_or_else(|| panic!("missing shell bootstrap harness install"));
+        assert!(
+            shell_gate_index < shell_install_index,
+            "shell bootstrap must publish onboarding state only after applying the account gate"
+        );
     }
 
     #[test]
@@ -1741,7 +1803,7 @@ mod tests {
             .find("fn selected_authority_id(controller: &UiController) -> Option<String> {")
             .unwrap_or_else(|| panic!("missing selected_authority_id"));
         let authority_end = source[authority_start..]
-            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {")
+            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>) -> UiSnapshot {")
             .map(|offset| authority_start + offset)
             .unwrap_or(source.len());
         let authority_block = &source[authority_start..authority_end];
