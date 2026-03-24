@@ -52,6 +52,9 @@
 /// for guard chain integration following the pattern from `aura-invitation`.
 pub mod guards;
 
+/// Typed capability families owned by the authentication domain.
+pub mod capabilities;
+
 /// Domain fact types for authentication state changes
 pub mod facts;
 

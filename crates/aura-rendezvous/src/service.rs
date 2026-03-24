@@ -4,6 +4,7 @@
 //! All operations flow through the guard chain and return outcomes
 //! for the caller to execute effects.
 
+use crate::capabilities::RendezvousCapability;
 use crate::descriptor::{DescriptorBuilder, SelectedTransport, TransportSelector};
 use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::new_channel::{HandshakeConfig, Handshaker, SecureChannel};
@@ -288,7 +289,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
+            &types::CapabilityId::from(RendezvousCapability::Publish.as_name()),
         ) {
             return outcome;
         }
@@ -368,7 +369,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+            &types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
         ) {
             return Ok(outcome);
         }
@@ -479,7 +480,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+            &types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
         ) {
             return Ok((outcome, None));
         }
@@ -639,7 +640,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_RELAY),
+            &types::CapabilityId::from(RendezvousCapability::Relay.as_name()),
         ) {
             return outcome;
         }
@@ -695,8 +696,8 @@ mod tests {
             context_id: test_context(),
             flow_budget_remaining: FlowCost::new(100),
             capabilities: vec![
-                types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
-                types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+                types::CapabilityId::from(RendezvousCapability::Publish.as_name()),
+                types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
             ],
             epoch: 1,
         }

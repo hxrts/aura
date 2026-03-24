@@ -25,6 +25,7 @@ serde_json = { workspace = true }
 async-trait = "0.1"
 
 # Aura crate dependencies for Biscuit integration (minimal to avoid cycles)
+aura-core = { path = "../aura-core" }
 aura-mpst = { path = "../aura-mpst" }
 
 [dev-dependencies]

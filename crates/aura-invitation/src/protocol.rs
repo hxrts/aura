@@ -199,6 +199,8 @@ pub struct DeviceEnrollmentConfirm {
 
 /// Guard annotations module for flow costs and capabilities
 pub mod guards {
+    use crate::capabilities::InvitationCapability;
+
     /// Flow cost for sending an invitation
     pub const INVITATION_SEND_COST: u32 = 1;
 
@@ -217,21 +219,6 @@ pub mod guards {
     /// Flow cost for guardian confirmation
     pub const GUARDIAN_CONFIRM_COST: u32 = 1;
 
-    /// Required capability for sending invitations
-    pub const CAP_INVITATION_SEND: &str = "invitation:send";
-
-    /// Required capability for accepting invitations
-    pub const CAP_INVITATION_ACCEPT: &str = "invitation:accept";
-
-    /// Required capability for declining invitations
-    pub const CAP_INVITATION_DECLINE: &str = "invitation:decline";
-
-    /// Required capability for guardian invitations
-    pub const CAP_GUARDIAN_INVITE: &str = "invitation:guardian";
-
-    /// Required capability for accepting guardian role
-    pub const CAP_GUARDIAN_ACCEPT: &str = "invitation:guardian:accept";
-
     /// Flow cost for device enrollment request
     pub const DEVICE_ENROLL_REQUEST_COST: u32 = 2;
 
@@ -241,11 +228,25 @@ pub mod guards {
     /// Flow cost for device enrollment confirmation
     pub const DEVICE_ENROLL_CONFIRM_COST: u32 = 1;
 
-    /// Required capability for device enrollment
-    pub const CAP_DEVICE_ENROLL: &str = "invitation:device:enroll";
+    pub fn invitation_send_capability() -> aura_core::CapabilityName {
+        InvitationCapability::Send.as_name()
+    }
 
-    /// Required capability for accepting device enrollment
-    pub const CAP_DEVICE_ACCEPT: &str = "invitation:device:accept";
+    pub fn guardian_invite_capability() -> aura_core::CapabilityName {
+        InvitationCapability::Guardian.as_name()
+    }
+
+    pub fn guardian_accept_capability() -> aura_core::CapabilityName {
+        InvitationCapability::GuardianAccept.as_name()
+    }
+
+    pub fn device_enroll_capability() -> aura_core::CapabilityName {
+        InvitationCapability::DeviceEnroll.as_name()
+    }
+
+    pub fn device_accept_capability() -> aura_core::CapabilityName {
+        InvitationCapability::DeviceAccept.as_name()
+    }
 }
 
 // =============================================================================
@@ -602,8 +603,8 @@ mod tests {
     fn test_guard_constants() {
         assert_eq!(guards::INVITATION_SEND_COST, 1);
         assert_eq!(guards::GUARDIAN_REQUEST_COST, 2);
-        assert_eq!(guards::CAP_INVITATION_SEND, "invitation:send");
-        assert_eq!(guards::CAP_GUARDIAN_INVITE, "invitation:guardian");
+        assert_eq!(guards::invitation_send_capability().as_str(), "invitation:send");
+        assert_eq!(guards::guardian_invite_capability().as_str(), "invitation:guardian");
     }
 
     #[test]

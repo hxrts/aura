@@ -42,6 +42,8 @@
 pub mod errors;
 
 // Application effects implementation (Layer 2 pattern)
+/// Typed capability families shared across authorization policy surfaces.
+pub mod capabilities;
 pub mod effect_policy;
 pub mod effects;
 pub mod flow_budget;

@@ -24,11 +24,6 @@ pub mod costs {
     /// Flow cost for sending a message.
     pub const CHAT_MESSAGE_SEND_COST: FlowCost = FlowCost::new(1);
 
-    /// Required capability for creating a channel.
-    pub const CAP_CHAT_CHANNEL_CREATE: &str = "chat:channel:create";
-
-    /// Required capability for sending a message.
-    pub const CAP_CHAT_MESSAGE_SEND: &str = "chat:message:send";
 }
 
 // =============================================================================

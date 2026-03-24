@@ -14,7 +14,7 @@
 //! ## Canonical API
 //!
 //! Use `ChatFactService` for all chat operations. It integrates with:
-//! - Capability guards (`CAP_CHAT_CHANNEL_CREATE`, `CAP_CHAT_MESSAGE_SEND`)
+//! - Capability guards (`ChatCapability::ChannelCreate`, `ChatCapability::MessageSend`)
 //! - Flow budget charging (`CHAT_CHANNEL_CREATE_COST`, `CHAT_MESSAGE_SEND_COST`)
 //! - Journal fact emission via `EffectCommand::JournalAppend`
 //!
@@ -78,6 +78,8 @@ pub mod fact_service;
 pub mod facts;
 pub mod group;
 pub mod guards;
+/// Typed capability families owned by the chat domain.
+pub mod capabilities;
 pub mod types;
 pub mod view;
 

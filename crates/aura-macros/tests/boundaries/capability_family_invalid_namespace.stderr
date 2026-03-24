@@ -1,0 +1,5 @@
+error: capability family namespace must be a single root segment
+ --> tests/boundaries/capability_family_invalid_namespace.rs:3:33
+  |
+3 | #[capability_family(namespace = "chat:message")]
+  |                                 ^^^^^^^^^^^^^^

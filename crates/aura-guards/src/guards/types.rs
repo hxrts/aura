@@ -6,7 +6,7 @@
 //! This module provides shared guard decision/outcome types and basic capability/budget
 //! checks that are generic over a feature crate's command enum.
 
-use aura_core::FlowCost;
+use aura_core::{CapabilityName, FlowCost};
 use serde::{Deserialize, Serialize};
 
 /// Typed identifier for guard capabilities.
@@ -45,6 +45,18 @@ impl From<String> for CapabilityId {
 impl From<&str> for CapabilityId {
     fn from(value: &str) -> Self {
         Self::new(value)
+    }
+}
+
+impl From<CapabilityName> for CapabilityId {
+    fn from(value: CapabilityName) -> Self {
+        Self(value.as_str().to_owned())
+    }
+}
+
+impl From<&CapabilityName> for CapabilityId {
+    fn from(value: &CapabilityName) -> Self {
+        Self(value.as_str().to_owned())
     }
 }
 

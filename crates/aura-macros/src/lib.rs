@@ -30,6 +30,7 @@ use syn::{
 };
 
 mod ceremony_facts;
+mod capability_family;
 mod choreography;
 mod domain_fact;
 mod effect_handlers;
@@ -144,6 +145,25 @@ pub fn derive_domain_fact(input: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn ceremony_facts(attr: TokenStream, item: TokenStream) -> TokenStream {
     ceremony_facts::ceremony_facts_impl(attr, item)
+}
+
+/// Declare a first-party capability family with validated canonical names.
+///
+/// Usage:
+/// ```ignore
+/// use aura_macros::capability_family;
+///
+/// #[capability_family(namespace = "invitation")]
+/// pub enum InvitationCapability {
+///     #[capability("send")]
+///     Send,
+///     #[capability("guardian:accept")]
+///     GuardianAccept,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn capability_family(attr: TokenStream, item: TokenStream) -> TokenStream {
+    capability_family::capability_family_impl(attr, item)
 }
 
 #[proc_macro]

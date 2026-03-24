@@ -23,6 +23,9 @@
 //! `SessionCreationCoordinator`, `GuardianAuthCoordinator`) with a unified
 //! service that uses the guard chain pattern.
 
+use crate::capabilities::{
+    AuthenticationCapability, GuardianAuthCapability, RecoveryAuthorizationCapability,
+};
 use crate::facts::AuthFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
@@ -137,7 +140,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
+            &aura_guards::types::CapabilityId::from(AuthenticationCapability::Request.as_name()),
         ) {
             return outcome;
         }
@@ -194,7 +197,9 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
+            &aura_guards::types::CapabilityId::from(
+                AuthenticationCapability::SubmitProof.as_name(),
+            ),
         ) {
             return outcome;
         }
@@ -248,7 +253,9 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_CREATE_SESSION),
+            &aura_guards::types::CapabilityId::from(
+                AuthenticationCapability::CreateSession.as_name(),
+            ),
         ) {
             return outcome;
         }
@@ -319,7 +326,9 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
+            &aura_guards::types::CapabilityId::from(
+                GuardianAuthCapability::RequestApproval.as_name(),
+            ),
         ) {
             return outcome;
         }
@@ -334,7 +343,7 @@ impl AuthService {
             match context.operation_type {
                 RecoveryOperationType::GuardianSetModification => {
                     if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
-                        costs::CAP_APPROVE_RECOVERY,
+                        RecoveryAuthorizationCapability::Approve.as_name(),
                     )) {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
@@ -343,7 +352,7 @@ impl AuthService {
                 }
                 RecoveryOperationType::EmergencyFreeze if !context.is_emergency => {
                     if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
-                        costs::CAP_INITIATE_RECOVERY,
+                        RecoveryAuthorizationCapability::Initiate.as_name(),
                     )) {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::EmergencyFreezeRequiresInitiateCapability.to_string(),
@@ -407,7 +416,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
+            &aura_guards::types::CapabilityId::from(GuardianAuthCapability::Verify.as_name()),
         ) {
             return outcome;
         }
@@ -471,7 +480,9 @@ impl AuthService {
         // Session revocation uses the create_session capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(costs::CAP_CREATE_SESSION),
+            &aura_guards::types::CapabilityId::from(
+                AuthenticationCapability::CreateSession.as_name(),
+            ),
         ) {
             return outcome;
         }
@@ -609,11 +620,11 @@ mod tests {
             None,
             FlowCost::new(100),
             vec![
-                CapabilityId::from(costs::CAP_REQUEST_AUTH),
-                CapabilityId::from(costs::CAP_SUBMIT_PROOF),
-                CapabilityId::from(costs::CAP_CREATE_SESSION),
-                CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
-                CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
+                CapabilityId::from(AuthenticationCapability::Request.as_name()),
+                CapabilityId::from(AuthenticationCapability::SubmitProof.as_name()),
+                CapabilityId::from(AuthenticationCapability::CreateSession.as_name()),
+                CapabilityId::from(GuardianAuthCapability::RequestApproval.as_name()),
+                CapabilityId::from(GuardianAuthCapability::Verify.as_name()),
             ],
             1,
             1000,

@@ -1,0 +1,5 @@
+error: missing #[capability("...")] attribute on capability family variant
+ --> tests/boundaries/capability_family_missing_local_name.rs:5:5
+  |
+5 |     Send,
+  |     ^^^^

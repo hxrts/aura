@@ -47,6 +47,8 @@
 //! - **Effect system**: Uses PhysicalTimeEffects and RandomEffects for deterministic testing
 
 // Pure core - effect-free state machine for verification
+/// Typed capability families owned by the consensus protocol.
+pub mod capabilities;
 pub mod config;
 pub mod core;
 

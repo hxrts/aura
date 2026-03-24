@@ -17,6 +17,7 @@
 //! - Effect execution is explicit and controllable
 //! - No I/O happens during guard evaluation
 
+use crate::capabilities::InvitationCapability;
 use crate::facts::InvitationFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
@@ -25,7 +26,7 @@ use crate::InvitationOperation;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
-use aura_core::DeviceId;
+use aura_core::{CapabilityName, DeviceId};
 use aura_guards::types::CapabilityId;
 use serde::{Deserialize, Serialize};
 
@@ -190,12 +191,14 @@ impl InvitationType {
     }
 
     /// Get required capability for this invitation type (if any)
-    pub fn required_capability(&self) -> Option<&'static str> {
+    pub fn required_capability(&self) -> Option<CapabilityName> {
         match self {
-            InvitationType::Channel { .. } => Some(costs::CAP_CHANNEL_INVITE),
-            InvitationType::Guardian { .. } => Some(costs::CAP_GUARDIAN_INVITE),
+            InvitationType::Channel { .. } => Some(InvitationCapability::Channel.as_name()),
+            InvitationType::Guardian { .. } => Some(InvitationCapability::Guardian.as_name()),
             InvitationType::Contact { .. } => None,
-            InvitationType::DeviceEnrollment { .. } => Some(costs::CAP_DEVICE_ENROLL),
+            InvitationType::DeviceEnrollment { .. } => {
+                Some(InvitationCapability::DeviceEnroll.as_name())
+            }
         }
     }
 }
@@ -312,9 +315,10 @@ impl InvitationService {
     ) -> GuardOutcome {
         let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_SEND))
-        {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(InvitationCapability::Send.as_name()),
+        ) {
             return outcome;
         }
 
@@ -430,9 +434,10 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_ACCEPT))
-        {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(InvitationCapability::Accept.as_name()),
+        ) {
             return outcome;
         }
 
@@ -466,9 +471,10 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_DECLINE))
-        {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(InvitationCapability::Decline.as_name()),
+        ) {
             return outcome;
         }
 
@@ -502,9 +508,10 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) =
-            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_CANCEL))
-        {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(InvitationCapability::Cancel.as_name()),
+        ) {
             return outcome;
         }
 
@@ -549,12 +556,12 @@ mod tests {
 
     fn full_capabilities() -> Vec<aura_guards::types::CapabilityId> {
         vec![
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_SEND),
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_DECLINE),
-            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_CANCEL),
-            aura_guards::types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE),
-            aura_guards::types::CapabilityId::from(costs::CAP_CHANNEL_INVITE),
+            aura_guards::types::CapabilityId::from(InvitationCapability::Send.as_name()),
+            aura_guards::types::CapabilityId::from(InvitationCapability::Accept.as_name()),
+            aura_guards::types::CapabilityId::from(InvitationCapability::Decline.as_name()),
+            aura_guards::types::CapabilityId::from(InvitationCapability::Cancel.as_name()),
+            aura_guards::types::CapabilityId::from(InvitationCapability::Guardian.as_name()),
+            aura_guards::types::CapabilityId::from(InvitationCapability::Channel.as_name()),
         ]
     }
 

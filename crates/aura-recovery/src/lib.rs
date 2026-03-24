@@ -56,6 +56,9 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+/// Typed capability families owned by recovery workflows.
+pub mod capabilities;
+
 /// Recovery domain facts for journal integration
 pub mod facts;
 

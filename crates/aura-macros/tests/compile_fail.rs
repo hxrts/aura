@@ -50,6 +50,7 @@ fn choreography_annotation_validation() {
     // Valid choreographies must compile
     t.pass("tests/boundaries/valid_annotations.rs");
     t.pass("tests/boundaries/ceremony_facts_valid.rs");
+    t.pass("tests/boundaries/capability_family_valid.rs");
     // Ownership macro valid cases
     t.pass("tests/boundaries/semantic_owner_valid.rs");
     t.pass("tests/boundaries/actor_owned_valid.rs");
@@ -61,6 +62,9 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/invalid_guard_capability.rs");
     t.compile_fail("tests/boundaries/incoherent_self_send.rs");
     t.compile_fail("tests/boundaries/missing_namespace.rs");
+    t.compile_fail("tests/boundaries/capability_family_duplicate_local_name.rs");
+    t.compile_fail("tests/boundaries/capability_family_invalid_namespace.rs");
+    t.compile_fail("tests/boundaries/capability_family_missing_local_name.rs");
     // Ownership macro rejection cases
     t.compile_fail("tests/boundaries/semantic_owner_missing_context.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_owner.rs");

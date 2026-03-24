@@ -13,6 +13,7 @@ use crate::runtime::vm_host_bridge::AuraVmRoundDisposition;
 use crate::runtime::{
     handle_owned_vm_round, open_owned_manifest_vm_session_admitted, AuraEffectSystem,
 };
+use aura_chat::capabilities::ChatCapability;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
@@ -276,10 +277,10 @@ impl ChatServiceApi {
 
         // NOTE: Authorization/capability integration for chat is not yet wired to Biscuit/WoT.
         // The current runtime treats guard capabilities as permissive; we provide the required
-        // strings so guards can evolve without breaking call sites.
+        // typed names so guards can evolve without reopening raw-string call sites.
         let capabilities = vec![
-            CapabilityId::from(aura_chat::guards::costs::CAP_CHAT_CHANNEL_CREATE),
-            CapabilityId::from(aura_chat::guards::costs::CAP_CHAT_MESSAGE_SEND),
+            CapabilityId::from(ChatCapability::ChannelCreate.as_name()),
+            CapabilityId::from(ChatCapability::MessageSend.as_name()),
         ];
         let committed_facts = self
             .effects

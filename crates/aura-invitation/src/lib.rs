@@ -58,6 +58,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+/// Typed capability families owned by the invitation domain.
+pub mod capabilities;
+
 /// Guard types for invitation operations
 ///
 /// Provides `GuardSnapshot`, `GuardOutcome`, `EffectCommand`, and related types
