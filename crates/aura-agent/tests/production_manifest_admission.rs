@@ -6,7 +6,7 @@
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 
-use aura_mpst::CompositionManifest;
+use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
 use aura_protocol::admission::{protocol_admission_profile, required_artifacts};
 
 fn production_manifests() -> Vec<CompositionManifest> {
@@ -61,7 +61,7 @@ fn production_manifests_match_admission_capability_mapping() {
 fn production_manifests_declare_only_admitted_guard_capabilities() {
     for manifest in production_manifests() {
         manifest
-            .validate_guard_capabilities()
+            .validate_guard_capabilities(GuardCapabilityAdmission::first_party_only())
             .expect("production manifest guard capabilities must be canonical");
     }
 }

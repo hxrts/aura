@@ -75,8 +75,9 @@ pub mod composition;
 
 use async_trait::async_trait;
 pub use composition::{
-    startup_defaults_for_qualified_name, CompositionDelegationConstraint, CompositionLinkSpec,
-    CompositionManifest,
+    startup_defaults_for_qualified_name, AdmittedModuleGuardCapabilities,
+    CompositionDelegationConstraint, CompositionLinkSpec, CompositionManifest,
+    GuardCapabilityAdmission, GuardCapabilityAdmissionError, ModuleGuardCapabilityError,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 

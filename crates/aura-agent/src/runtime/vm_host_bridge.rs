@@ -13,7 +13,7 @@ use crate::runtime::{
 use aura_core::effects::{VmBridgeEffects, VmBridgePendingSend};
 use aura_core::AuraVmDeterminismProfileV1;
 use aura_mpst::telltale_types::{GlobalType, LocalTypeR};
-use aura_mpst::CompositionManifest;
+use aura_mpst::{CompositionManifest, GuardCapabilityAdmission};
 use aura_protocol::effects::{ChoreographicEffects, ChoreographicRole, ChoreographyError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -490,12 +490,12 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
     ),
     AuraVmSessionOpenError,
 > {
-    manifest.validate_guard_capabilities().map_err(|error| {
-        AuraVmSessionOpenError::ManifestGuardCapability {
+    manifest
+        .validate_guard_capabilities(GuardCapabilityAdmission::first_party_only())
+        .map_err(|error| AuraVmSessionOpenError::ManifestGuardCapability {
             protocol_id: manifest.protocol_id.clone(),
             message: error.to_string(),
-        }
-    })?;
+        })?;
     let role_names = manifest
         .role_names
         .iter()
