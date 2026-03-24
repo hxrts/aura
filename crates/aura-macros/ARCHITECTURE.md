@@ -72,6 +72,7 @@ Contract alignment:
 ### Capability-Gated Points
 
 - Generated typed capability surfaces and ownership contracts consumed by downstream crates
+- Compile-time validation for canonical capability-family declarations and choreography capability parsing boundaries
 
 ## Testing
 
@@ -104,6 +105,8 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | Valid authoritative_source / strong_reference / weak_identifier rejected | `boundaries/authoritative_source_valid.rs`, `boundaries/strong_reference_valid.rs`, `boundaries/weak_identifier_valid.rs` | covered (pass) |
 | Invalid flow_cost silently accepted | `boundaries/invalid_flow_cost.rs` | covered (compile_fail) |
 | Invalid guard_capability accepted | `boundaries/invalid_guard_capability.rs` | covered (compile_fail) |
+| Invalid generated canonical capability accepted | `boundaries/capability_family_invalid_generated_name.rs` | covered (compile_fail) |
+| Macro/module namespace mismatch accepted | `boundaries/choreography_namespace_mismatch.rs` | covered (compile_fail) |
 | Self-send accepted | `boundaries/incoherent_self_send.rs` | covered (compile_fail) |
 | Missing namespace accepted | `boundaries/missing_namespace.rs` | covered (compile_fail) |
 | semantic_owner missing context | `boundaries/semantic_owner_missing_context.rs` | covered (compile_fail) |

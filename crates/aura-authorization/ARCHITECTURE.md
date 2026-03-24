@@ -2,13 +2,16 @@
 
 ## Purpose
 
-Define authorization semantics and capability refinement using Biscuit tokens for cryptographically verifiable capability delegation.
+Define authorization semantics and capability refinement using Biscuit tokens
+for cryptographically verifiable capability delegation, explicit issuance
+profiles, and evaluated capability frontiers.
 
 ## Scope
 
 | Belongs here | Does not belong here |
 |-------------|---------------------|
 | Biscuit token model and verification semantics | Cryptographic signing (use aura-signature) |
+| Explicit token grant profile expansion | Owning first-party capability families (those stay in the owning crates) |
 | Authorization handler: `WotAuthorizationHandler` | Transport operations (use effect traits) |
 | Fact types: `WotFact`, `ProposalFact` | Runtime handler composition |
 | Flow budget handler: `JournalBackedFlowBudgetHandler` | |
@@ -26,6 +29,10 @@ Define authorization semantics and capability refinement using Biscuit tokens fo
 - Authority-centric resource scopes (AuthorityOp, ContextOp).
 - Capability refinement via meet-semilattice: `C₁ ⊓ C₂ ≤ min(C₁, C₂)`.
 - Biscuit tokens for cryptographic delegation.
+- Issuance profiles are explicit and reviewable; there is no implicit
+  "grant every declared capability" path.
+- Evaluated frontiers in guard snapshots are distinct from issuance profiles and
+  declared capability families.
 - Policies are Datalog-based for flexible evaluation.
 
 ### InvariantCapabilityMeetMonotonicity

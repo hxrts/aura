@@ -61,7 +61,14 @@ The `Journal` type keeps these dimensions separate. Facts can only grow. Capabil
 
 Facts represent evidence that accumulates over time. Examples include signed operations, attestations, flow budget charges, and consensus commits. Once a fact is added, it cannot be removed. Garbage collection uses tombstones and reduction rather than deletion.
 
-Capabilities represent authority that restricts over time. The system evaluates Biscuit tokens against policy to derive the current capability frontier. Delegation can only attenuate. No operation can widen capability scope. See [Theoretical Model](002_theoretical_model.md) for formal definitions of these lattices.
+Capabilities represent authority that restricts over time. First-party
+capability vocabulary is declared in typed families owned by the crates that
+define the behavior. The system evaluates Biscuit tokens against policy to
+derive the current capability frontier. Delegation can only attenuate. No
+operation can widen capability scope. Token issuance is explicit, and guard
+snapshots carry evaluated frontiers rather than declared capability families.
+See [Theoretical Model](002_theoretical_model.md) for formal definitions of
+these lattices.
 
 ### 1.2 Journals and namespaces
 
@@ -204,7 +211,13 @@ LeakageTrackingGuard records privacy budget usage per observer class. Observer c
 
 ### 5.1 Choreographic protocols
 
-Choreographies define global protocols using multi-party session types. A global type describes the entire protocol from an overview perspective. Each message specifies sender, receiver, payload type, and guard annotations. Annotations compile into guard chain requirements: `guard_capability` specifies required Biscuit capabilities, `flow_cost` specifies budget charges, `journal_facts` specifies facts to commit, and `leak` specifies leakage budget allocation.
+Choreographies define global protocols using multi-party session types. A
+global type describes the entire protocol from an overview perspective. Each
+message specifies sender, receiver, payload type, and guard annotations.
+Annotations compile into guard chain requirements: `guard_capability` is the
+canonical namespaced capability string admitted at the DSL boundary,
+`flow_cost` specifies budget charges, `journal_facts` specifies facts to
+commit, and `leak` specifies leakage budget allocation.
 
 Projection extracts each role's local view from the global type. The local view specifies what messages the role sends and receives. Execution interprets the local view against the effect system. See [MPST and Choreography](110_mpst_and_choreography.md) for projection rules and the global type grammar.
 

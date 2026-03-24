@@ -66,16 +66,22 @@ choreography! {
     protocol SecureRequest {
         roles: Client, Server;
 
-        Client[guard_capability = "send_request", flow_cost = 50]
+        Client[guard_capability = "chat:message:send", flow_cost = 50]
         -> Server: SendRequest(RequestData);
 
-        Server[guard_capability = "send_response", flow_cost = 30, journal_facts = "response_sent"]
+        Server[guard_capability = "chat:message:send", flow_cost = 30, journal_facts = "response_sent"]
         -> Client: SendResponse(ResponseData);
     }
 }
 ```
 
-Annotation syntax: `Role[guard_capability = "...", flow_cost = N, journal_facts = "..."] -> Target: Message`
+Annotation syntax: `Role[guard_capability = "namespace:capability", flow_cost = N, journal_facts = "..."] -> Target: Message`
+
+`guard_capability` is the one sanctioned raw-string boundary for first-party
+capability names in choreography source. The macro parses these values into
+validated `CapabilityName`s and fails closed on invalid or legacy names. In
+Rust code outside `.choreo` or `choreography!` inputs, prefer typed capability
+families from the owning crate.
 
 Select the narrowest `TimeStamp` domain for each time field. See [Effect System](103_effect_system.md) for time domains.
 
@@ -365,6 +371,10 @@ When integrating guards into choreographies, use the annotation syntax on choreo
 - `flow_cost`: Charges flow budget
 - `journal_facts`: Records facts after successful send
 - `leak`: Records leakage budget charge
+
+Snapshot builders must not treat declared choreography guard names as already
+granted. They evaluate typed candidate sets against the current Biscuit/policy
+frontier and publish only the admitted frontier into the `GuardSnapshot`.
 
 ## 7. Domain Service Pattern
 

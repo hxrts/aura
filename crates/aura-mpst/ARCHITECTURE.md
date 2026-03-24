@@ -29,7 +29,7 @@ Runtime library for choreographic protocol specifications and multi-party sessio
 - `src/types.rs`: Core session type definitions.
 - `src/guards.rs`: Guard chain integration traits.
 - `src/runtime.rs`: Session endpoints and continuation types.
-- `src/ast_extraction.rs`: Annotation parsing and typed choreography metadata extraction.
+- `src/ast_extraction.rs`: Annotation parsing, canonical capability parsing, and typed choreography metadata extraction.
 
 ## Invariants
 
@@ -37,6 +37,8 @@ Runtime library for choreographic protocol specifications and multi-party sessio
 - No handler implementations or composition.
 - Extensions handled externally via aura-macros.
 - Provides the same `choreography!` macro interface over Telltale.
+- Choreography capability parsing is fail-closed and admits only canonical
+  namespaced `CapabilityName` values.
 
 ### InvariantMpstProjectionSafety
 
@@ -95,6 +97,7 @@ cargo test -p aura-mpst --lib             # inline unit tests
 | What breaks if wrong | Test location | Status |
 |---------------------|--------------|--------|
 | Guard capability annotation lost | `tests/protocols/annotation_extraction.rs` | covered |
+| Legacy or unnamespaced guard capability admitted | `src/composition.rs` inline | covered |
 | Leak annotation lost | `tests/protocols/annotation_extraction.rs` | covered |
 | Multiple annotations reordered | `tests/protocols/annotation_extraction.rs` | covered |
 | Extension registry creation fails | `tests/protocols/extension_types.rs` | covered |

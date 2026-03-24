@@ -13,7 +13,11 @@ Guards are pure: evaluation runs synchronously over a prepared `GuardSnapshot` a
 ```rust
 // Phase 1: Authorization via Biscuit + policy (async, cached)
 let token = effects.verify_biscuit(&request.token).await?;
-let capabilities = token.capabilities();
+let capabilities = evaluate_candidate_frontier(
+    &token,
+    evaluation_candidates_for_chat_guard(),
+    &policy,
+)?;
 
 // Phase 2: Prepare snapshot and evaluate guards (sync)
 let snapshot = GuardSnapshot {
@@ -50,7 +54,7 @@ No transport observable occurs until the interpreter executes commands in order.
 
 The guards execute in this order:
 
-1. **CapabilityGuard**: Validates Biscuit token capabilities
+1. **CapabilityGuard**: Validates the evaluated Biscuit/policy frontier
 2. **FlowBudgetGuard**: Checks and charges flow budget
 3. **LeakageTracker**: Records privacy leakage
 4. **JournalCoupler**: Commits facts to journal
@@ -185,9 +189,14 @@ The time domain system is specified in [Effect System](103_effect_system.md). Se
 
 The capability system uses multiple layers:
 
-- **Canonical types** in `aura-core`: Lightweight references
-- **Authorization layer** (`aura-authorization`): Policy enforcement
-- **Storage layer** (`aura-store`): Capability-based access control
+- **Canonical types** in `aura-core`: validated `CapabilityName`
+- **Owning families** in feature/domain crates: typed first-party capability
+  declarations
+- **Authorization layer** (`aura-authorization`): explicit issuance profiles and
+  Biscuit/policy evaluation
+- **Guard snapshots** (`aura-guards` plus runtime handlers): evaluated
+  frontiers only
+- **Storage layer** (`aura-store`): capability-based access control
 
 Clear conversion paths enable inter-layer communication.
 

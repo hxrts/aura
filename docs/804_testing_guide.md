@@ -16,10 +16,14 @@ For parity-critical ownership work, completeness also means:
 
 - compile-fail coverage where ownership/capability boundaries are enforced in
   types
+- compile-fail coverage for forbidden capability construction paths such as
+  `CapabilityId::from("...")` or invalid `capability_name!(...)` literals
 - invariant tests for owner drop, stale-handle rejection, and terminality
 - timeout/backoff tests for typed timeout failure, remaining-budget
   propagation, and bounded retries
 - the relevant ownership `just ci-*` policy checks
+- `just lint-arch-syntax` when changing capability parsing boundaries, typed
+  capability-family usage, or choreography capability admission rules
 
 ### Harness Policy
 

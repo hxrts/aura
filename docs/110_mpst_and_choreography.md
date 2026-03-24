@@ -91,12 +91,17 @@ Choreographies support annotations that modify runtime behavior. The `choreograp
 
 | Annotation | Description | Generated Effect |
 |------------|-------------|------------------|
-| `guard_capability = "cap"` | Capability requirement | `StoreMetadata` (audit trail) |
+| `guard_capability = "namespace:capability"` | Canonical capability requirement | `StoreMetadata` (audit trail) |
 | `flow_cost = N` | Flow budget charge | `ChargeBudget` |
 | `journal_facts = "fact"` | Journal fact recording | `StoreMetadata` (fact key) |
 | `journal_merge = true` | Request journal merge | `StoreMetadata` (merge flag) |
 | `audit_log = "event"` | Audit trail entry | `StoreMetadata` (audit key) |
 | `leak = "External"` | Leakage tracking | `RecordLeakage` |
+
+`guard_capability` is the string boundary for choreography DSL input. The macro
+parses it into a validated `CapabilityName` and rejects legacy, unnamespaced,
+or invalid values at compile time. Outside the DSL boundary, first-party Rust
+code should use typed capability families rather than hand-written strings.
 
 See [Choreography Development Guide](803_choreography_guide.md) for annotation syntax and usage, including protocol artifact requirements, dynamic reconfiguration, protocol evolution compatibility policy, termination budgets, effect command generation, macro output contracts, and effect interpreter integration.
 
@@ -183,7 +188,8 @@ Practical integration points:
 
 1. Choreography annotations declare intent (`guard_capability`, `flow_cost`, `journal_facts`, `leak`).
 2. Macro output emits `EffectCommand` sequences.
-3. Guard chain evaluates commands and budgets at send sites.
+3. Snapshot builders evaluate typed capability candidates into an admitted
+   frontier, and the guard chain evaluates commands and budgets at send sites.
 4. VM output/flow policies gate observable commits and cross-role message flow before transport effects execute.
 
 Choreography-level guard semantics and VM-level hardening are additive, not competing. Annotations define required effects. Policies constrain which effects are allowed to become observable.
