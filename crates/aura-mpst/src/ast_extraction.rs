@@ -4,6 +4,7 @@
 //! Uses a minimal parser-oriented pattern for clean annotation processing.
 
 use crate::ids::RoleId;
+use aura_core::{CapabilityName, CapabilityNameError};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{bracketed, parenthesized, Ident, LitBool, LitInt, LitStr, Token};
@@ -13,8 +14,8 @@ use syn::{bracketed, parenthesized, Ident, LitBool, LitInt, LitStr, Token};
 pub enum AuraEffect {
     /// Capability-based authorization requirement
     GuardCapability {
-        /// The required capability string
-        capability: String,
+        /// The required canonical capability name
+        capability: CapabilityName,
         /// The role that needs this capability
         role: RoleId,
     },
@@ -88,6 +89,46 @@ pub enum AuraExtractionError {
     /// Unsupported feature
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
+}
+
+/// Errors that can occur while parsing a choreography guard capability.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ChoreographyCapabilityError {
+    /// Capability grammar validation failed.
+    #[error(transparent)]
+    InvalidName(#[from] CapabilityNameError),
+
+    /// Choreography capability strings must use canonical namespaced names.
+    #[error("choreography guard capabilities must be canonical namespaced values, got `{value}`")]
+    MissingNamespace {
+        /// The rejected raw capability string.
+        value: String,
+    },
+
+    /// The legacy `cap:` namespace is not admitted.
+    #[error("legacy `cap:` choreography capability namespace is not admitted: `{value}`")]
+    LegacyNamespace {
+        /// The rejected raw capability string.
+        value: String,
+    },
+}
+
+/// Parse a choreography guard capability at the DSL boundary.
+pub fn parse_choreography_capability(
+    value: &str,
+) -> Result<CapabilityName, ChoreographyCapabilityError> {
+    let parsed = CapabilityName::parse(value)?;
+    if !parsed.as_str().contains(':') {
+        return Err(ChoreographyCapabilityError::MissingNamespace {
+            value: value.to_string(),
+        });
+    }
+    if parsed.as_str().starts_with("cap:") {
+        return Err(ChoreographyCapabilityError::LegacyNamespace {
+            value: value.to_string(),
+        });
+    }
+    Ok(parsed)
 }
 
 #[derive(Debug)]
@@ -301,6 +342,12 @@ fn detect_annotations_in_text(
                             ))
                         }
                     };
+                    let capability =
+                        parse_choreography_capability(&capability).map_err(|error| {
+                            AuraExtractionError::InvalidAnnotationValue(format!(
+                                "invalid guard_capability `{capability}`: {error}"
+                            ))
+                        })?;
                     effects.push(AuraEffect::GuardCapability {
                         capability,
                         role: role.clone(),
@@ -650,13 +697,14 @@ mod tests {
     #[test]
     fn test_aura_effect_types() {
         let guard_effect = AuraEffect::GuardCapability {
-            capability: "test_capability".to_string(),
+            capability: parse_choreography_capability("chat:message:send")
+                .expect("canonical choreography capability"),
             role: RoleId::new("TestRole"),
         };
 
         match guard_effect {
             AuraEffect::GuardCapability { capability, role } => {
-                assert_eq!(capability, "test_capability");
+                assert_eq!(capability.as_str(), "chat:message:send");
                 assert_eq!(role.as_str(), "TestRole");
             }
             _ => panic!("Wrong effect type"),
@@ -681,7 +729,7 @@ mod tests {
 
     #[test]
     fn test_extract_role_from_line() {
-        let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
+        let line = r#"Alice[guard_capability = "chat:message:send"] -> Bob: Message;"#;
         let role = extract_role_from_line(line);
         assert_eq!(
             role.map(|role| role.as_str().to_string()),
@@ -691,8 +739,7 @@ mod tests {
 
     #[test]
     fn test_extract_role_from_record_line() {
-        let line =
-            r#"Alice { guard_capability = "send_message" } -> Bob : Message of crate.demo.Payload"#;
+        let line = r#"Alice { guard_capability = "chat:message:send" } -> Bob : Message of crate.demo.Payload"#;
         let role = extract_role_from_line(line);
         assert_eq!(
             role.map(|role| role.as_str().to_string()),
@@ -703,12 +750,12 @@ mod tests {
     #[test]
     fn test_guard_capability_annotation() {
         let choreography = r#"
-            Alice[guard_capability = "send_message"] -> Bob: Message;
+            Alice[guard_capability = "chat:message:send"] -> Bob: Message;
         "#;
         let effects = extract_aura_annotations(choreography).unwrap();
         let has_guard = effects.iter().any(|e| {
             matches!(e, AuraEffect::GuardCapability { capability, role }
-                if capability == "send_message" && role.as_str() == "Alice")
+                if capability.as_str() == "chat:message:send" && role.as_str() == "Alice")
         });
         assert!(has_guard, "Should extract guard_capability annotation");
     }
@@ -730,7 +777,7 @@ mod tests {
     fn test_default_flow_cost() {
         // Line with annotation but no flow_cost should get default of 100
         let choreography = r#"
-            Alice[guard_capability = "send_message"] -> Bob: Message;
+            Alice[guard_capability = "chat:message:send"] -> Bob: Message;
         "#;
         let effects = extract_aura_annotations(choreography).unwrap();
 
@@ -750,7 +797,7 @@ mod tests {
     fn test_explicit_flow_cost_overrides_default() {
         // Explicit flow_cost should override the default
         let choreography = r#"
-            Alice[guard_capability = "send_message", flow_cost = 250] -> Bob: Message;
+            Alice[guard_capability = "chat:message:send", flow_cost = 250] -> Bob: Message;
         "#;
         let effects = extract_aura_annotations(choreography).unwrap();
 
@@ -914,5 +961,24 @@ mod tests {
                 .any(|effect| matches!(effect, AuraEffect::FlowCost { cost: 100, .. })),
             "quoted leakage_budget should parse without breaking annotation extraction"
         );
+    }
+
+    #[test]
+    fn test_parse_choreography_capability_rejects_unnamespaced_legacy_value() {
+        let err = parse_choreography_capability("send_message").expect_err("legacy name must fail");
+        assert!(matches!(
+            err,
+            ChoreographyCapabilityError::MissingNamespace { .. }
+        ));
+    }
+
+    #[test]
+    fn test_parse_choreography_capability_rejects_legacy_cap_namespace() {
+        let err = parse_choreography_capability("cap:amp_send")
+            .expect_err("legacy cap namespace must fail");
+        assert!(matches!(
+            err,
+            ChoreographyCapabilityError::LegacyNamespace { .. }
+        ));
     }
 }

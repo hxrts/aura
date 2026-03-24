@@ -7,6 +7,8 @@
 //! - metadata: Session metadata management
 //! - service: Public API wrapper
 
+/// Typed capability family for session coordination choreography.
+pub mod capabilities;
 pub mod coordination;
 pub mod metadata;
 pub mod service;

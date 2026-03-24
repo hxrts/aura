@@ -4,13 +4,14 @@
 //! flow cost management, and journal coupling into choreographic protocols.
 
 use crate::ids::RoleId;
+use aura_core::CapabilityName;
 use serde::{Deserialize, Serialize};
 
 /// Extension for validating capabilities before protocol operations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidateCapability {
-    /// The capability string to validate
-    pub capability: String,
+    /// The canonical capability to validate
+    pub capability: CapabilityName,
     /// Role name as string to avoid generic conflicts
     pub role: RoleId,
 }
@@ -18,8 +19,8 @@ pub struct ValidateCapability {
 /// Extension for executing guard chain validations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExecuteGuardChain {
-    /// List of guard strings to execute
-    pub guards: Vec<String>,
+    /// List of canonical guards to execute
+    pub guards: Vec<CapabilityName>,
     /// Role executing the guard chain
     pub role: RoleId,
     /// Operation being guarded
@@ -103,7 +104,7 @@ impl CompositeExtension {
     }
 
     /// Add a capability guard
-    pub fn with_capability_guard(self, capability: String) -> Self {
+    pub fn with_capability_guard(self, capability: CapabilityName) -> Self {
         let ext = ValidateCapability {
             capability,
             role: self.role.clone(),
@@ -132,7 +133,7 @@ impl CompositeExtension {
     }
 
     /// Add guard chain execution
-    pub fn with_guard_chain(self, guards: Vec<String>) -> Self {
+    pub fn with_guard_chain(self, guards: Vec<CapabilityName>) -> Self {
         let ext = ExecuteGuardChain {
             guards,
             operation: self.operation.clone(),

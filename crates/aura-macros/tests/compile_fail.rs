@@ -60,6 +60,7 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/parameterized_roles_and_parallel.rs");
     t.compile_fail("tests/boundaries/invalid_flow_cost.rs");
     t.compile_fail("tests/boundaries/invalid_guard_capability.rs");
+    t.compile_fail("tests/boundaries/legacy_guard_capability_name.rs");
     t.compile_fail("tests/boundaries/incoherent_self_send.rs");
     t.compile_fail("tests/boundaries/missing_namespace.rs");
     t.compile_fail("tests/boundaries/capability_family_duplicate_local_name.rs");

@@ -1,3 +1,5 @@
+use crate::{parse_choreography_capability, ChoreographyCapabilityError};
+use aura_core::CapabilityName;
 use serde::{Deserialize, Serialize};
 
 /// Generated host-side startup metadata for one choreography bundle.
@@ -15,6 +17,8 @@ pub struct CompositionManifest {
     pub role_names: Vec<String>,
     /// Required runtime capability identifiers for admission.
     pub required_capabilities: Vec<String>,
+    /// Canonical guard capabilities declared by the choreography source.
+    pub guard_capabilities: Vec<CapabilityName>,
     /// Determinism/scheduler policy selector reference.
     pub determinism_policy_ref: Option<String>,
     /// Typed link composition boundaries declared by the choreography.
@@ -30,6 +34,14 @@ impl CompositionManifest {
             || protocol_name.to_string(),
             |namespace| format!("{namespace}.{protocol_name}"),
         )
+    }
+
+    /// Validate that all declared guard capabilities are admitted choreography names.
+    pub fn validate_guard_capabilities(&self) -> Result<(), ChoreographyCapabilityError> {
+        for capability in &self.guard_capabilities {
+            parse_choreography_capability(capability.as_str())?;
+        }
+        Ok(())
     }
 }
 
@@ -151,6 +163,7 @@ pub fn startup_defaults_for_qualified_name(qualified_name: &str) -> CompositionS
 #[cfg(test)]
 mod tests {
     use super::{startup_defaults_for_qualified_name, CompositionManifest};
+    use aura_core::CapabilityName;
 
     #[test]
     fn qualified_name_uses_namespace_when_present() {
@@ -234,5 +247,51 @@ mod tests {
                 "missing startup defaults for {qualified_name}"
             );
         }
+    }
+
+    #[test]
+    fn validate_guard_capabilities_accepts_canonical_names() {
+        let manifest = CompositionManifest {
+            protocol_name: "TestProtocol".to_string(),
+            protocol_namespace: Some("test".to_string()),
+            protocol_qualified_name: "test.TestProtocol".to_string(),
+            protocol_id: "test.protocol".to_string(),
+            role_names: vec!["Alice".to_string(), "Bob".to_string()],
+            required_capabilities: Vec::new(),
+            guard_capabilities: vec![
+                CapabilityName::parse("chat:message:send").expect("capability"),
+                CapabilityName::parse("amp:receive").expect("capability"),
+            ],
+            determinism_policy_ref: None,
+            link_specs: Vec::new(),
+            delegation_constraints: Vec::new(),
+        };
+
+        manifest
+            .validate_guard_capabilities()
+            .expect("canonical capability list should validate");
+    }
+
+    #[test]
+    fn validate_guard_capabilities_rejects_legacy_or_unnamespaced_values() {
+        let manifest = CompositionManifest {
+            protocol_name: "LegacyProtocol".to_string(),
+            protocol_namespace: Some("legacy".to_string()),
+            protocol_qualified_name: "legacy.LegacyProtocol".to_string(),
+            protocol_id: "legacy.protocol".to_string(),
+            role_names: vec!["Alice".to_string(), "Bob".to_string()],
+            required_capabilities: Vec::new(),
+            guard_capabilities: vec![
+                CapabilityName::parse("send_message").expect("grammar-valid capability token")
+            ],
+            determinism_policy_ref: None,
+            link_specs: Vec::new(),
+            delegation_constraints: Vec::new(),
+        };
+
+        let error = manifest
+            .validate_guard_capabilities()
+            .expect_err("legacy capability name must fail manifest validation");
+        assert!(error.to_string().contains("canonical namespaced"));
     }
 }

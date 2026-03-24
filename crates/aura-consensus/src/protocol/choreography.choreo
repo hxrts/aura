@@ -5,32 +5,32 @@ protocol AuraConsensus =
 
   -- Phase 1: Execute consensus round
   Coordinator { parallel = true
-              , guard_capability = "initiate_consensus"
+              , guard_capability = "consensus:initiate"
               , flow_cost = 100 }
     -> Witness[*] : Execute of crate.ConsensusMessage
 
   -- Phase 2: Nonce commitment
   Witness[*] { parallel = true
-             , guard_capability = "witness_nonce"
+             , guard_capability = "consensus:witness_nonce"
              , flow_cost = 50 }
     -> Coordinator : NonceCommit of crate.ConsensusMessage
 
   -- Phase 3: Request signatures
   Coordinator { parallel = true
-              , guard_capability = "aggregate_nonces"
+              , guard_capability = "consensus:aggregate_nonces"
               , flow_cost = 75 }
     -> Witness[*] : SignRequest of crate.ConsensusMessage
 
   -- Phase 4: Collect signature shares
   Witness[*] { parallel = true
-             , guard_capability = "witness_sign"
+             , guard_capability = "consensus:witness_sign"
              , flow_cost = 50
              , leak = "pipelined_commitment" }
     -> Coordinator : SignShare of crate.ConsensusMessage
 
   -- Phase 5: Finalize and broadcast result
   Coordinator { parallel = true
-              , guard_capability = "finalize_consensus"
+              , guard_capability = "consensus:finalize"
               , flow_cost = 100
               , journal_facts = "consensus_complete" }
     -> Witness[*] : ConsensusResult of crate.ConsensusMessage

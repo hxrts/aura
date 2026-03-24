@@ -56,3 +56,12 @@ fn production_manifests_match_admission_capability_mapping() {
         );
     }
 }
+
+#[test]
+fn production_manifests_declare_only_admitted_guard_capabilities() {
+    for manifest in production_manifests() {
+        manifest
+            .validate_guard_capabilities()
+            .expect("production manifest guard capabilities must be canonical");
+    }
+}

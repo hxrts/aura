@@ -566,6 +566,15 @@ fn generate_vm_projection_artifacts(
     let protocol_name = choreography.name.to_string();
     let qualified_name = aura_mpst::CompositionManifest::qualified_name(namespace, &protocol_name);
     let startup_defaults = aura_mpst::startup_defaults_for_qualified_name(&qualified_name);
+    let mut guard_capabilities = annotations
+        .iter()
+        .filter_map(|annotation| match annotation {
+            AuraEffect::GuardCapability { capability, .. } => Some(capability.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    guard_capabilities.sort_by(|left, right| left.as_str().cmp(right.as_str()));
+    guard_capabilities.dedup_by(|left, right| left.as_str() == right.as_str());
     let manifest = aura_mpst::CompositionManifest {
         protocol_name,
         protocol_namespace: namespace.map(str::to_string),
@@ -584,6 +593,7 @@ fn generate_vm_projection_artifacts(
             .iter()
             .map(|capability| (*capability).to_string())
             .collect(),
+        guard_capabilities,
         determinism_policy_ref: Some(startup_defaults.determinism_policy_ref.to_string()),
         link_specs: annotations
             .iter()
@@ -1923,33 +1933,6 @@ fn generate_aura_wrapper(
                 operations: Vec<Operation>,
             }
 
-            /// Map guard capability to appropriate resource type string
-            ///
-            /// This provides a simple mapping that users can extend for their Biscuit ResourceScope types
-            pub fn map_capability_to_resource_type(capability: &str) -> &'static str {
-                match capability {
-                    // Storage operations
-                    cap if cap.contains("read_storage") || cap.contains("access_storage") => "storage",
-                    cap if cap.contains("write_storage") => "storage",
-
-                    // Journal operations
-                    cap if cap.contains("read_journal") => "journal",
-                    cap if cap.contains("write_journal") || cap.contains("journal_sync") => "journal",
-
-                    // Recovery operations
-                    cap if cap.contains("emergency_recovery") || cap.contains("guardian") => "recovery",
-
-                    // Admin operations
-                    cap if cap.contains("admin") || cap.contains("setup") => "admin",
-
-                    // Relay/communication operations
-                    cap if cap.contains("relay") || cap.contains("send") || cap.contains("receive") || cap.contains("initiate") => "relay",
-
-                    // Default fallback
-                    _ => "default"
-                }
-            }
-
             /// Create a new choreography builder
             pub fn builder() -> ChoreographyBuilder {
                 ChoreographyBuilder::new()
@@ -2007,8 +1990,8 @@ fn generate_aura_wrapper(
 
             /// Example choreography for demonstration with guard validation
             pub fn example_aura_choreography() -> ChoreographyProgram {
-                let capability = "send_money";
-                let resource_type = map_capability_to_resource_type(capability);
+                let capability = "chat:message:send";
+                let resource_type = "relay";
 
                 builder()
                     .audit_log("example_start", HashMap::new())
@@ -2024,8 +2007,8 @@ fn generate_aura_wrapper(
                 // In a real macro expansion, this would receive the extracted annotations
                 // Example annotations that would be extracted from choreography syntax:
                 let sample_annotations = vec![
-                    ("Alice".to_string(), "guard_capability".to_string(), "send_message".to_string(), 100),
-                    ("Bob".to_string(), "guard_with_flow".to_string(), "receive_message".to_string(), 50),
+                    ("Alice".to_string(), "guard_capability".to_string(), "chat:message:send".to_string(), 100),
+                    ("Bob".to_string(), "guard_with_flow".to_string(), "amp:receive".to_string(), 50),
                     ("Alice".to_string(), "journal_facts".to_string(), "message_sent".to_string(), 0),
                 ];
                 generate_from_annotations_impl(sample_annotations)
@@ -2043,15 +2026,13 @@ fn generate_aura_wrapper(
                     if let Some(role) = parse_role_from_name(&role_name) {
                         match annotation_type.as_str() {
                             "guard_capability" => {
-                                let resource_type = map_capability_to_resource_type(&capability_or_value);
-                                builder = builder.validate_guard(role, capability_or_value, resource_type);
+                                builder = builder.validate_guard(role, capability_or_value, "relay");
                             },
                             "flow_cost" => {
                                 builder = builder.charge_flow_cost(role, flow_cost as i32);
                             },
                             "guard_with_flow" => {
-                                let resource_type = map_capability_to_resource_type(&capability_or_value);
-                                builder = builder.evaluate_guard_with_flow(role, capability_or_value, resource_type, flow_cost);
+                                builder = builder.evaluate_guard_with_flow(role, capability_or_value, "relay", flow_cost);
                             },
                             "journal_facts" => {
                                 let mut metadata = HashMap::new();

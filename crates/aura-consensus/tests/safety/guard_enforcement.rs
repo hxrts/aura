@@ -136,35 +136,35 @@ fn test_authorization_requirements() {
     let peer = AuthorityId::new_from_entropy([2u8; 32]);
 
     // From choreography annotations:
-    // Execute: guard_capability="initiate_consensus"
+    // Execute: guard_capability="consensus:initiate"
     let execute = ExecuteGuard::new(context, peer);
     assert_eq!(
         execute.create_guard_chain().authorization_requirement(),
         "consensus:initiate"
     );
 
-    // NonceCommit: guard_capability="witness_nonce"
+    // NonceCommit: guard_capability="consensus:witness_nonce"
     let nonce = NonceCommitGuard::new(context, peer);
     assert_eq!(
         nonce.create_guard_chain().authorization_requirement(),
         "consensus:witness_nonce"
     );
 
-    // SignRequest: guard_capability="aggregate_nonces"
+    // SignRequest: guard_capability="consensus:aggregate_nonces"
     let sign_req = SignRequestGuard::new(context, peer);
     assert_eq!(
         sign_req.create_guard_chain().authorization_requirement(),
         "consensus:aggregate_nonces"
     );
 
-    // SignShare: guard_capability="witness_sign"
+    // SignShare: guard_capability="consensus:witness_sign"
     let sign_share = SignShareGuard::new(context, peer);
     assert_eq!(
         sign_share.create_guard_chain().authorization_requirement(),
         "consensus:witness_sign"
     );
 
-    // ConsensusResult: guard_capability="finalize_consensus"
+    // ConsensusResult: guard_capability="consensus:finalize"
     let result = ConsensusResultGuard::new(context, peer);
     assert_eq!(
         result.create_guard_chain().authorization_requirement(),

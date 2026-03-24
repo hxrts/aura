@@ -6,11 +6,11 @@
 //! # Choreography Annotations
 //!
 //! From `choreography.choreo`:
-//! - Execute: guard_capability="initiate_consensus", flow_cost=100
-//! - NonceCommit: guard_capability="witness_nonce", flow_cost=50
-//! - SignRequest: guard_capability="aggregate_nonces", flow_cost=75
-//! - SignShare: guard_capability="witness_sign", flow_cost=50, leak="pipelined_commitment"
-//! - ConsensusResult: guard_capability="finalize_consensus", flow_cost=100, journal_facts="consensus_complete"
+//! - Execute: guard_capability="consensus:initiate", flow_cost=100
+//! - NonceCommit: guard_capability="consensus:witness_nonce", flow_cost=50
+//! - SignRequest: guard_capability="consensus:aggregate_nonces", flow_cost=75
+//! - SignShare: guard_capability="consensus:witness_sign", flow_cost=50, leak="pipelined_commitment"
+//! - ConsensusResult: guard_capability="consensus:finalize", flow_cost=100, journal_facts="consensus_complete"
 
 use crate::capabilities::ConsensusCapability;
 use aura_core::{AuraResult, AuthorityId, ContextId, FlowCost};
@@ -30,7 +30,7 @@ impl ExecuteGuard {
     }
 
     /// Create guard chain for Execute message
-    /// Annotations: guard_capability="initiate_consensus", flow_cost=100
+    /// Annotations: guard_capability="consensus:initiate", flow_cost=100
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
             ConsensusCapability::Initiate.as_name(),
@@ -63,7 +63,7 @@ impl NonceCommitGuard {
     }
 
     /// Create guard chain for NonceCommit message
-    /// Annotations: guard_capability="witness_nonce", flow_cost=50
+    /// Annotations: guard_capability="consensus:witness_nonce", flow_cost=50
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
             ConsensusCapability::WitnessNonce.as_name(),
@@ -96,7 +96,7 @@ impl SignRequestGuard {
     }
 
     /// Create guard chain for SignRequest message
-    /// Annotations: guard_capability="aggregate_nonces", flow_cost=75
+    /// Annotations: guard_capability="consensus:aggregate_nonces", flow_cost=75
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
             ConsensusCapability::AggregateNonces.as_name(),
@@ -129,7 +129,7 @@ impl SignShareGuard {
     }
 
     /// Create guard chain for SignShare message
-    /// Annotations: guard_capability="witness_sign", flow_cost=50, leak="pipelined_commitment"
+    /// Annotations: guard_capability="consensus:witness_sign", flow_cost=50, leak="pipelined_commitment"
     pub fn create_guard_chain(&self) -> SendGuardChain {
         // Leakage budget for pipelined commitment metadata
         // External: 0 bits (no external leakage)
@@ -169,7 +169,7 @@ impl ConsensusResultGuard {
     }
 
     /// Create guard chain for ConsensusResult message
-    /// Annotations: guard_capability="finalize_consensus", flow_cost=100, journal_facts="consensus_complete"
+    /// Annotations: guard_capability="consensus:finalize", flow_cost=100, journal_facts="consensus_complete"
     ///
     /// # Journal Coupling Pattern
     ///

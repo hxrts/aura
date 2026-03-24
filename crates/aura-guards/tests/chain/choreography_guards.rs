@@ -57,10 +57,10 @@ impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
 async fn test_guard_capability_annotation() {
     let interpreter = MockEffectInterpreter::new();
 
-    // Simulate what the macro generates for: Client[guard_capability = "send"] -> Server: Msg;
+    // Simulate what the macro generates for: Client[guard_capability = "chat:message:send"] -> Server: Msg;
     let command = EffectCommand::StoreMetadata {
         key: "guard_validated".to_string(),
-        value: "send".to_string(),
+        value: "chat:message:send".to_string(),
     };
 
     let result = interpreter.execute(command.clone()).await;
@@ -70,7 +70,7 @@ async fn test_guard_capability_annotation() {
     assert_eq!(executed.len(), 1);
     assert!(matches!(
         &executed[0],
-        EffectCommand::StoreMetadata { key, value } if key == "guard_validated" && value == "send"
+        EffectCommand::StoreMetadata { key, value } if key == "guard_validated" && value == "chat:message:send"
     ));
 }
 
@@ -151,7 +151,7 @@ async fn test_multiple_annotations() {
     let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Simulate what the macro generates for:
-    // Client[guard_capability = "send", flow_cost = 100, leak = "External"] -> Server: Msg;
+    // Client[guard_capability = "chat:message:send", flow_cost = 100, leak = "External"] -> Server: Msg;
     let commands = vec![
         EffectCommand::StoreMetadata {
             key: "guard_validated".to_string(),
