@@ -400,7 +400,7 @@ without turning Layer 7 startup code into a semantic owner.
 - [x] Run `cargo test -p aura-terminal --test demo`.
 - [x] Run `just ci-observed-layer-boundaries`.
 - [x] Confirm every targeted check is green before committing.
-- [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): split tui handler entrypoints"`.
+- [x] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): split tui handler entrypoints"`.
 
 ## Explicitly Deferred
 
