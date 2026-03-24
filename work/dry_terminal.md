@@ -367,7 +367,7 @@ coverage of boundary contracts.
 - [x] Run `cargo test -p aura-terminal --test verification_demo_itf`.
 - [x] Run `cargo test -p aura-terminal --test verification_generative`.
 - [x] Confirm every targeted check is green before committing.
-- [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): dry test and demo scaffolding"`.
+- [x] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): dry test and demo scaffolding"`.
 
 ## Workstream F — Handler and Entry-Point Decomposition
 
