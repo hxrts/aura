@@ -252,35 +252,35 @@ of their proper owner.
 
 ### C1. Modal Overlay Chrome Consolidation
 
-- [ ] Audit modal chrome repeated across `src/tui/screens/app/modal_overlays.rs` and `src/tui/components/*modal*.rs`.
-- [ ] Extract reusable chrome only for shared visibility, border, title, footer, and error presentation concerns.
-- [ ] Keep workflow-specific state transitions, owner tokens, and semantic lifecycle handling outside the shared modal wrapper.
+- [x] Audit modal chrome repeated across `src/tui/screens/app/modal_overlays.rs` and `src/tui/components/*modal*.rs`.
+- [x] Extract reusable chrome only for shared visibility, border, title, footer, and error presentation concerns.
+- [x] Keep workflow-specific state transitions, owner tokens, and semantic lifecycle handling outside the shared modal wrapper.
 
 ### C2. Props Shape Simplification
 
-- [ ] Audit prop structs and destructuring in `src/tui/props.rs`, `src/tui/screens/app/modal_overlays.rs`, and screen-specific modal files.
-- [ ] Replace repeated flat prop bundles with narrower typed prop structs or nested domain-specific prop groups where that reduces accidental mismatch.
-- [ ] Keep authoritative semantics out of prop assembly; this workstream is limited to layout and shape cleanup.
+- [x] Audit prop structs and destructuring in `src/tui/props.rs`, `src/tui/screens/app/modal_overlays.rs`, and screen-specific modal files.
+- [x] Replace repeated flat prop bundles with narrower typed prop structs or nested domain-specific prop groups where that reduces accidental mismatch.
+- [x] Keep authoritative semantics out of prop assembly; this workstream is limited to layout and shape cleanup.
 
 ### C3. Template Component Consolidation
 
-- [ ] Review `account_setup_modal_template.rs`, `contact_select_modal_template.rs`, `form_modal_template.rs`, `text_input_modal_template.rs`, and related shared components.
-- [ ] Unify template components around presentational chrome and layout primitives only.
-- [ ] Do not hide ownership requirements, workflow gating, or terminality transitions inside generic template abstractions.
+- [x] Review `account_setup_modal_template.rs`, `contact_select_modal_template.rs`, `form_modal_template.rs`, `text_input_modal_template.rs`, and related shared components.
+- [x] Unify template components around presentational chrome and layout primitives only.
+- [x] Do not hide ownership requirements, workflow gating, or terminality transitions inside generic template abstractions.
 
 ### C4. Props File Decomposition
 
-- [ ] Reduce `src/tui/props.rs` from 1054 LOC if it grows materially during cleanup; if it crosses 1500 LOC at any point, split it immediately into coherent files such as `screen_props.rs`, `modal_props.rs`, and `workflow_props.rs`.
-- [ ] Keep any newly introduced prop modules named after stable UI domains rather than temporary refactor phases.
+- [x] Reduce `src/tui/props.rs` from 1054 LOC if it grows materially during cleanup; if it crosses 1500 LOC at any point, split it immediately into coherent files such as `screen_props.rs`, `modal_props.rs`, and `workflow_props.rs`.
+- [x] Keep any newly introduced prop modules named after stable UI domains rather than temporary refactor phases.
 
 ### C5. Workstream C Verification and Commit
 
-- [ ] Run `cargo check -p aura-terminal`.
-- [ ] Run `cargo test -p aura-terminal --test integration_props`.
-- [ ] Run `cargo test -p aura-terminal --test e2e_guardian_display`.
-- [ ] Run `cargo test -p aura-terminal --test e2e_terminal_state`.
-- [ ] Run `just lint-arch-syntax`.
-- [ ] Confirm every targeted check is green before committing.
+- [x] Run `cargo check -p aura-terminal`.
+- [x] Run `cargo test -p aura-terminal --test integration_props`.
+- [x] Run `cargo test -p aura-terminal --test e2e_guardian_display`.
+- [x] Run `cargo test -p aura-terminal --test e2e_terminal_state`.
+- [x] Run `just lint-arch-syntax`.
+- [x] Confirm every targeted check is green before committing.
 - [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): simplify modal and props wiring"`.
 
 ## Workstream D — Terminal-Local Type Reduction

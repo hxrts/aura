@@ -25,48 +25,126 @@ use crate::tui::types::{Contact, InvitationType};
 // Global Modal Props
 // =============================================================================
 
+#[derive(Default, Clone)]
+pub struct AccountSetupOverlayProps {
+    pub visible: bool,
+    pub nickname_suggestion: String,
+    pub device_import_code: String,
+    pub name_focused: bool,
+    pub import_code_focused: bool,
+    pub creating: bool,
+    pub show_spinner: bool,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Default, Clone)]
+pub struct ContactPickerOverlayProps {
+    pub visible: bool,
+    pub title: String,
+    pub contacts: Vec<Contact>,
+    pub selected_index: usize,
+    pub error: Option<String>,
+    pub selected_ids: Vec<String>,
+    pub multi_select: bool,
+}
+
+#[derive(Default, Clone)]
+pub struct ConfirmOverlayProps {
+    pub visible: bool,
+    pub title: String,
+    pub message: String,
+}
+
+#[derive(Default, Clone)]
+pub struct HelpOverlayProps {
+    pub visible: bool,
+    pub current_screen_name: String,
+}
+
 /// Props for global modals (not screen-specific)
 #[derive(Default, Clone)]
 pub struct GlobalModalProps {
-    // Account setup modal
-    pub account_setup_visible: bool,
-    pub account_setup_nickname_suggestion: String,
-    pub account_setup_device_import_code: String,
-    pub account_setup_name_focused: bool,
-    pub account_setup_import_code_focused: bool,
-    pub account_setup_creating: bool,
-    pub account_setup_show_spinner: bool,
-    pub account_setup_success: bool,
-    pub account_setup_error: Option<String>,
+    pub account_setup: AccountSetupOverlayProps,
+    pub guardian_picker: ContactPickerOverlayProps,
+    pub contact_picker: ContactPickerOverlayProps,
+    pub confirm: ConfirmOverlayProps,
+    pub help: HelpOverlayProps,
+}
 
-    // Guardian selection modal
-    pub guardian_modal_visible: bool,
-    pub guardian_modal_title: String,
-    pub guardian_modal_contacts: Vec<Contact>,
-    pub guardian_modal_selected: usize,
-    pub guardian_modal_error: Option<String>,
+#[derive(Clone)]
+struct TextInputOverlayProps {
+    visible: bool,
+    focused: bool,
+    title: String,
+    value: String,
+    placeholder: String,
+    hint: String,
+    error: String,
+    submitting: bool,
+}
 
-    pub guardian_modal_selected_ids: Vec<String>,
-    pub guardian_modal_multi_select: bool,
+#[derive(Clone)]
+struct ContactSelectionOverlayProps {
+    visible: bool,
+    title: String,
+    contacts: Vec<Contact>,
+    selected_index: usize,
+    error: String,
+    selected_ids: Vec<String>,
+    multi_select: bool,
+}
 
-    // Generic contact selection modal
-    pub contact_modal_visible: bool,
-    pub contact_modal_title: String,
-    pub contact_modal_contacts: Vec<Contact>,
-    pub contact_modal_selected: usize,
-    pub contact_modal_error: Option<String>,
+fn modal_frame(child: AnyElement<'static>) -> AnyElement<'static> {
+    element! {
+        ModalFrame {
+            #(Some(child))
+        }
+    }
+    .into_any()
+}
 
-    pub contact_modal_selected_ids: Vec<String>,
-    pub contact_modal_multi_select: bool,
+fn render_modal(visible: bool, child: AnyElement<'static>) -> Option<AnyElement<'static>> {
+    visible.then(|| modal_frame(child))
+}
 
-    // Confirm dialog modal
-    pub confirm_visible: bool,
-    pub confirm_title: String,
-    pub confirm_message: String,
+fn render_text_input_modal(props: TextInputOverlayProps) -> Option<AnyElement<'static>> {
+    render_modal(
+        props.visible,
+        element! {
+            TextInputModal(
+                visible: true,
+                focused: props.focused,
+                title: props.title,
+                value: props.value,
+                placeholder: props.placeholder,
+                hint: props.hint,
+                error: props.error,
+                submitting: props.submitting,
+            )
+        }
+        .into_any(),
+    )
+}
 
-    // Help modal
-    pub help_modal_visible: bool,
-    pub current_screen_name: String,
+fn render_contact_selection_modal(
+    props: ContactSelectionOverlayProps,
+) -> Option<AnyElement<'static>> {
+    render_modal(
+        props.visible,
+        element! {
+            ContactSelectModal(
+                visible: true,
+                title: props.title,
+                contacts: props.contacts,
+                selected_index: props.selected_index,
+                error: props.error,
+                selected_ids: props.selected_ids,
+                multi_select: props.multi_select,
+            )
+        }
+        .into_any(),
+    )
 }
 
 // =============================================================================
@@ -74,111 +152,74 @@ pub struct GlobalModalProps {
 // =============================================================================
 
 pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElement<'static>> {
-    if global.account_setup_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    AccountSetupModal(
-                        visible: true,
-                        nickname_suggestion: global.account_setup_nickname_suggestion.clone(),
-                        device_import_code: global.account_setup_device_import_code.clone(),
-                        name_focused: global.account_setup_name_focused,
-                        import_code_focused: global.account_setup_import_code_focused,
-                        creating: global.account_setup_creating,
-                        show_spinner: global.account_setup_show_spinner,
-                        success: global.account_setup_success,
-                        error: global.account_setup_error.clone().unwrap_or_default(),
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    render_modal(
+        global.account_setup.visible,
+        element! {
+            AccountSetupModal(
+                visible: true,
+                nickname_suggestion: global.account_setup.nickname_suggestion.clone(),
+                device_import_code: global.account_setup.device_import_code.clone(),
+                name_focused: global.account_setup.name_focused,
+                import_code_focused: global.account_setup.import_code_focused,
+                creating: global.account_setup.creating,
+                show_spinner: global.account_setup.show_spinner,
+                success: global.account_setup.success,
+                error: global.account_setup.error.clone().unwrap_or_default(),
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_guardian_modal(global: &GlobalModalProps) -> Option<AnyElement<'static>> {
-    if global.guardian_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ContactSelectModal(
-                        visible: true,
-                        title: global.guardian_modal_title.clone(),
-                        contacts: global.guardian_modal_contacts.clone(),
-                        selected_index: global.guardian_modal_selected,
-                        error: global.guardian_modal_error.clone().unwrap_or_default(),
-                        selected_ids: global.guardian_modal_selected_ids.clone(),
-                        multi_select: global.guardian_modal_multi_select,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    render_contact_selection_modal(ContactSelectionOverlayProps {
+        visible: global.guardian_picker.visible,
+        title: global.guardian_picker.title.clone(),
+        contacts: global.guardian_picker.contacts.clone(),
+        selected_index: global.guardian_picker.selected_index,
+        error: global.guardian_picker.error.clone().unwrap_or_default(),
+        selected_ids: global.guardian_picker.selected_ids.clone(),
+        multi_select: global.guardian_picker.multi_select,
+    })
 }
 
 pub fn render_contact_modal(global: &GlobalModalProps) -> Option<AnyElement<'static>> {
-    if global.contact_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ContactSelectModal(
-                        visible: true,
-                        title: global.contact_modal_title.clone(),
-                        contacts: global.contact_modal_contacts.clone(),
-                        selected_index: global.contact_modal_selected,
-                        error: global.contact_modal_error.clone().unwrap_or_default(),
-                        selected_ids: global.contact_modal_selected_ids.clone(),
-                        multi_select: global.contact_modal_multi_select,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    render_contact_selection_modal(ContactSelectionOverlayProps {
+        visible: global.contact_picker.visible,
+        title: global.contact_picker.title.clone(),
+        contacts: global.contact_picker.contacts.clone(),
+        selected_index: global.contact_picker.selected_index,
+        error: global.contact_picker.error.clone().unwrap_or_default(),
+        selected_ids: global.contact_picker.selected_ids.clone(),
+        multi_select: global.contact_picker.multi_select,
+    })
 }
 
 pub fn render_confirm_modal(global: &GlobalModalProps) -> Option<AnyElement<'static>> {
-    if global.confirm_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ConfirmModal(
-                        visible: true,
-                        title: global.confirm_title.clone(),
-                        message: global.confirm_message.clone(),
-                        confirm_text: "Confirm".to_string(),
-                        cancel_text: "Cancel".to_string(),
-                        confirm_focused: true,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    render_modal(
+        global.confirm.visible,
+        element! {
+            ConfirmModal(
+                visible: true,
+                title: global.confirm.title.clone(),
+                message: global.confirm.message.clone(),
+                confirm_text: "Confirm".to_string(),
+                cancel_text: "Cancel".to_string(),
+                confirm_focused: true,
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_help_modal(global: &GlobalModalProps) -> Option<AnyElement<'static>> {
-    if global.help_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    HelpModal(visible: true, current_screen: Some(global.current_screen_name.clone()))
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    render_modal(
+        global.help.visible,
+        element! {
+            HelpModal(visible: true, current_screen: Some(global.help.current_screen_name.clone()))
+        }
+        .into_any(),
+    )
 }
 
 // =============================================================================
@@ -186,112 +227,90 @@ pub fn render_help_modal(global: &GlobalModalProps) -> Option<AnyElement<'static
 // =============================================================================
 
 pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
-    if contacts.nickname_modal_visible {
-        // Show hint with nickname suggestion if available
-        let hint = contacts
-            .nickname_modal_nickname_suggestion
-            .as_ref()
-            .map(|s| format!("Suggestion: {s}"))
-            .unwrap_or_default();
+    let modal = &contacts.modals.nickname;
+    let hint = modal
+        .nickname_suggestion
+        .as_ref()
+        .map(|suggestion| format!("Suggestion: {suggestion}"))
+        .unwrap_or_default();
 
-        Some(
-            element! {
-                ModalFrame {
-                    TextInputModal(
-                        visible: true,
-                        focused: true,
-                        title: "Edit Nickname".to_string(),
-                        value: contacts.nickname_modal_value.clone(),
-                        placeholder: "Enter nickname...".to_string(),
-                        hint: hint,
-                        error: String::new(),
-                        submitting: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    render_text_input_modal(TextInputOverlayProps {
+        visible: modal.visible,
+        focused: true,
+        title: "Edit Nickname".to_string(),
+        value: modal.value.clone(),
+        placeholder: "Enter nickname...".to_string(),
+        hint,
+        error: String::new(),
+        submitting: false,
+    })
 }
 
 pub fn render_contacts_import_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
-    if contacts.import_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    InvitationImportModal(
-                        visible: true,
-                        focused: true,
-                        code: contacts.import_modal_code.clone(),
-                        error: String::new(),
-                        importing: contacts.import_modal_importing,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &contacts.modals.import_invitation;
+    render_modal(
+        modal.visible,
+        element! {
+            InvitationImportModal(
+                visible: true,
+                focused: true,
+                code: modal.code.clone(),
+                error: String::new(),
+                importing: modal.importing,
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_contacts_create_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
-    if contacts.create_modal_visible {
-        let invitation_type = match contacts.create_modal_type_index {
-            0 => InvitationType::Guardian,
-            1 => InvitationType::Contact,
-            _ => InvitationType::Channel,
-        };
-        Some(
-            element! {
-                ModalFrame {
-                    InvitationCreateModal(
-                        visible: true,
-                        focused: true,
-                        focused_field: contacts.create_modal_focused_field,
-                        creating: false,
-                        error: String::new(),
-                        receiver_id: contacts.create_modal_receiver_id.clone(),
-                        receiver_name: contacts.create_modal_receiver_name.clone(),
-                        invitation_type: invitation_type,
-                        message: contacts.create_modal_message.clone(),
-                        ttl_hours: contacts.create_modal_ttl_hours as u32,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &contacts.modals.create_invitation;
+    let invitation_type = match modal.type_index {
+        0 => InvitationType::Guardian,
+        1 => InvitationType::Contact,
+        _ => InvitationType::Channel,
+    };
+    render_modal(
+        modal.visible,
+        element! {
+            InvitationCreateModal(
+                visible: true,
+                focused: true,
+                focused_field: modal.focused_field,
+                creating: false,
+                error: String::new(),
+                receiver_id: modal.receiver_id.clone(),
+                receiver_name: modal.receiver_name.clone(),
+                invitation_type: invitation_type,
+                message: modal.message.clone(),
+                ttl_hours: modal.ttl_hours as u32,
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_contacts_code_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
-    if contacts.code_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    InvitationCodeModal(
-                        visible: true,
-                        code: contacts.code_modal_code.clone(),
-                        invitation_type: "Invitation".to_string(),
-                        copied: contacts.code_modal_copied,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &contacts.modals.code_display;
+    render_modal(
+        modal.visible,
+        element! {
+            InvitationCodeModal(
+                visible: true,
+                code: modal.code.clone(),
+                invitation_type: "Invitation".to_string(),
+                copied: modal.copied,
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
-    if contacts.guardian_setup_modal_visible {
-        let guardian_contacts: Vec<GuardianCandidateProps> = contacts
-            .guardian_setup_modal_contacts
+    let modal = &contacts.modals.guardian_setup;
+    if modal.visible {
+        let guardian_contacts: Vec<GuardianCandidateProps> = modal
+            .contacts
             .iter()
             .map(|c| GuardianCandidateProps {
                 id: c.id.clone(),
@@ -306,16 +325,16 @@ pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyEl
                     GuardianSetupModal(
                         visible: true,
                         kind: GuardianSetupKind::Guardian,
-                        step: contacts.guardian_setup_modal_step.clone(),
+                        step: modal.step.clone(),
                         contacts: guardian_contacts,
-                        selected_indices: contacts.guardian_setup_modal_selected_indices.clone(),
-                        focused_index: contacts.guardian_setup_modal_focused_index,
-                        threshold_k: contacts.guardian_setup_modal_threshold_k,
-                        threshold_n: contacts.guardian_setup_modal_threshold_n,
-                        ceremony_responses: contacts.guardian_setup_modal_ceremony_responses.clone(),
-                        agreement_mode: contacts.guardian_setup_modal_agreement_mode,
-                        reversion_risk: contacts.guardian_setup_modal_reversion_risk,
-                        error: contacts.guardian_setup_modal_error.clone(),
+                        selected_indices: modal.selected_indices.clone(),
+                        focused_index: modal.focused_index,
+                        threshold_k: modal.threshold_k,
+                        threshold_n: modal.threshold_n,
+                        ceremony_responses: modal.ceremony_responses.clone(),
+                        agreement_mode: modal.agreement_mode,
+                        reversion_risk: modal.reversion_risk,
+                        error: modal.error.clone(),
                     )
                 }
             }
@@ -327,9 +346,10 @@ pub fn render_guardian_setup_modal(contacts: &ContactsViewProps) -> Option<AnyEl
 }
 
 pub fn render_mfa_setup_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.mfa_setup_modal_visible {
-        let device_candidates: Vec<GuardianCandidateProps> = settings
-            .mfa_setup_modal_contacts
+    let modal = &settings.modals.mfa_setup;
+    if modal.visible {
+        let device_candidates: Vec<GuardianCandidateProps> = modal
+            .contacts
             .iter()
             .map(|c| GuardianCandidateProps {
                 id: c.id.clone(),
@@ -344,16 +364,16 @@ pub fn render_mfa_setup_modal(settings: &SettingsViewProps) -> Option<AnyElement
                     GuardianSetupModal(
                         visible: true,
                         kind: GuardianSetupKind::Mfa,
-                        step: settings.mfa_setup_modal_step.clone(),
+                        step: modal.step.clone(),
                         contacts: device_candidates,
-                        selected_indices: settings.mfa_setup_modal_selected_indices.clone(),
-                        focused_index: settings.mfa_setup_modal_focused_index,
-                        threshold_k: settings.mfa_setup_modal_threshold_k,
-                        threshold_n: settings.mfa_setup_modal_threshold_n,
-                        ceremony_responses: settings.mfa_setup_modal_ceremony_responses.clone(),
-                        agreement_mode: settings.mfa_setup_modal_agreement_mode,
-                        reversion_risk: settings.mfa_setup_modal_reversion_risk,
-                        error: settings.mfa_setup_modal_error.clone(),
+                        selected_indices: modal.selected_indices.clone(),
+                        focused_index: modal.focused_index,
+                        threshold_k: modal.threshold_k,
+                        threshold_n: modal.threshold_n,
+                        ceremony_responses: modal.ceremony_responses.clone(),
+                        agreement_mode: modal.agreement_mode,
+                        reversion_risk: modal.reversion_risk,
+                        error: modal.error.clone(),
                     )
                 }
             }
@@ -369,76 +389,60 @@ pub fn render_mfa_setup_modal(settings: &SettingsViewProps) -> Option<AnyElement
 // =============================================================================
 
 pub fn render_chat_create_modal(chat: &ChatViewProps) -> Option<AnyElement<'static>> {
-    if chat.create_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ChatCreateModal(
-                        visible: true,
-                        focused: true,
-                        step: chat.create_modal_step.clone(),
-                        name: chat.create_modal_name.clone(),
-                        topic: chat.create_modal_topic.clone(),
-                        contacts: chat.create_modal_contacts.clone(),
-                        selected_indices: chat.create_modal_selected_indices.clone(),
-                        focused_index: chat.create_modal_focused_index,
-                        threshold_k: chat.create_modal_threshold_k,
-                        threshold_n: chat.create_modal_threshold_n,
-                        active_field: chat.create_modal_active_field,
-                        members_count: chat.create_modal_member_count,
-                        error: chat.create_modal_error.clone(),
-                        creating: false,
-                        status: chat.create_modal_status.clone(),
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &chat.modals.create;
+    render_modal(
+        modal.visible,
+        element! {
+            ChatCreateModal(
+                visible: true,
+                focused: true,
+                step: modal.step.clone(),
+                name: modal.name.clone(),
+                topic: modal.topic.clone(),
+                contacts: modal.contacts.clone(),
+                selected_indices: modal.selected_indices.clone(),
+                focused_index: modal.focused_index,
+                threshold_k: modal.threshold_k,
+                threshold_n: modal.threshold_n,
+                active_field: modal.active_field,
+                members_count: modal.member_count,
+                error: modal.error.clone(),
+                creating: false,
+                status: modal.status.clone(),
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_topic_modal(chat: &ChatViewProps) -> Option<AnyElement<'static>> {
-    if chat.topic_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    TextInputModal(
-                        visible: true,
-                        title: "Set Channel Topic".to_string(),
-                        value: chat.topic_modal_value.clone(),
-                        placeholder: "Enter topic...".to_string(),
-                        hint: String::new(),
-                        error: String::new(),
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &chat.modals.topic;
+    render_text_input_modal(TextInputOverlayProps {
+        visible: modal.visible,
+        focused: true,
+        title: "Set Channel Topic".to_string(),
+        value: modal.value.clone(),
+        placeholder: "Enter topic...".to_string(),
+        hint: String::new(),
+        error: String::new(),
+        submitting: false,
+    })
 }
 
 pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'static>> {
-    if chat.info_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ChannelInfoModal(
-                        visible: true,
-                        channel_name: chat.info_modal_channel_name.clone(),
-                        topic: chat.info_modal_topic.clone(),
-                        participants: chat.info_modal_participants.clone(),
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &chat.modals.info;
+    render_modal(
+        modal.visible,
+        element! {
+            ChannelInfoModal(
+                visible: true,
+                channel_name: modal.channel_name.clone(),
+                topic: modal.topic.clone(),
+                participants: modal.participants.clone(),
+            )
+        }
+        .into_any(),
+    )
 }
 
 // =============================================================================
@@ -448,150 +452,104 @@ pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'sta
 pub fn render_nickname_suggestion_modal(
     settings: &SettingsViewProps,
 ) -> Option<AnyElement<'static>> {
-    if settings.nickname_suggestion_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    TextInputModal(
-                        visible: true,
-                        focused: true,
-                        title: "Edit Nickname".to_string(),
-                        value: settings.nickname_suggestion_modal_value.clone(),
-                        placeholder: "Enter what you want to be called...".to_string(),
-                        hint: String::new(),
-                        error: String::new(),
-                        submitting: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &settings.modals.nickname_suggestion;
+    render_text_input_modal(TextInputOverlayProps {
+        visible: modal.visible,
+        focused: true,
+        title: "Edit Nickname".to_string(),
+        value: modal.value.clone(),
+        placeholder: "Enter what you want to be called...".to_string(),
+        hint: String::new(),
+        error: String::new(),
+        submitting: false,
+    })
 }
 
 pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.add_device_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    TextInputModal(
-                        visible: true,
-                        focused: true,
-                        title: "Add Device — Step 1 of 3".to_string(),
-                        value: settings.add_device_modal_name.clone(),
-                        placeholder: "e.g. Mobile, Laptop".to_string(),
-                        hint: "This is the device you're inviting (not the current device)."
-                            .to_string(),
-                        error: String::new(),
-                        submitting: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &settings.modals.add_device;
+    render_text_input_modal(TextInputOverlayProps {
+        visible: modal.visible,
+        focused: true,
+        title: "Add Device — Step 1 of 3".to_string(),
+        value: modal.name.clone(),
+        placeholder: "e.g. Mobile, Laptop".to_string(),
+        hint: "This is the device you're inviting (not the current device).".to_string(),
+        error: String::new(),
+        submitting: false,
+    })
 }
 
 pub fn render_device_import_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.device_import_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    TextInputModal(
-                        visible: true,
-                        focused: true,
-                        title: "Import Device Enrollment Code".to_string(),
-                        value: settings.device_import_modal_code.clone(),
-                        placeholder: "Paste enrollment code...".to_string(),
-                        hint: "Used by the new device to join this account".to_string(),
-                        error: String::new(),
-                        submitting: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &settings.modals.device_import;
+    render_text_input_modal(TextInputOverlayProps {
+        visible: modal.visible,
+        focused: true,
+        title: "Import Device Enrollment Code".to_string(),
+        value: modal.code.clone(),
+        placeholder: "Paste enrollment code...".to_string(),
+        hint: "Used by the new device to join this account".to_string(),
+        error: String::new(),
+        submitting: false,
+    })
 }
 
 pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.device_enrollment_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    DeviceEnrollmentModal(
-                        visible: true,
-                        nickname_suggestion: settings.device_enrollment_modal_nickname_suggestion.clone(),
-                        enrollment_code: settings.device_enrollment_modal_code.clone(),
-                        accepted_count: settings.device_enrollment_modal_accepted_count,
-                        total_count: settings.device_enrollment_modal_total_count,
-                        threshold: settings.device_enrollment_modal_threshold,
-                        is_complete: settings.device_enrollment_modal_is_complete,
-                        has_failed: settings.device_enrollment_modal_has_failed,
-                        error_message: settings.device_enrollment_modal_error_message.clone(),
-                        agreement_mode: settings.device_enrollment_modal_agreement_mode,
-                        reversion_risk: settings.device_enrollment_modal_reversion_risk,
-                        copied: settings.device_enrollment_modal_copied,
-                        is_demo_mode: settings.device_enrollment_modal_is_demo_mode,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &settings.modals.device_enrollment;
+    render_modal(
+        modal.visible,
+        element! {
+            DeviceEnrollmentModal(
+                visible: true,
+                nickname_suggestion: modal.nickname_suggestion.clone(),
+                enrollment_code: modal.code.clone(),
+                accepted_count: modal.accepted_count,
+                total_count: modal.total_count,
+                threshold: modal.threshold,
+                is_complete: modal.is_complete,
+                has_failed: modal.has_failed,
+                error_message: modal.error_message.clone(),
+                agreement_mode: modal.agreement_mode,
+                reversion_risk: modal.reversion_risk,
+                copied: modal.copied,
+                is_demo_mode: modal.is_demo_mode,
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_device_select_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.device_select_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    DeviceSelectModal(
-                        visible: true,
-                        title: "Select Device to Remove".to_string(),
-                        devices: settings.device_select_modal_devices.clone(),
-                        selected_index: settings.device_select_modal_selected_index,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &settings.modals.device_select;
+    render_modal(
+        modal.visible,
+        element! {
+            DeviceSelectModal(
+                visible: true,
+                title: "Select Device to Remove".to_string(),
+                devices: modal.devices.clone(),
+                selected_index: modal.selected_index,
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_remove_device_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.confirm_remove_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    ConfirmModal(
-                        visible: true,
-                        title: "Remove Device".to_string(),
-                        message: format!(
-                            "Are you sure you want to remove \"{}\"?",
-                            settings.confirm_remove_modal_display_name
-                        ),
-                        confirm_text: "Remove".to_string(),
-                        cancel_text: "Cancel".to_string(),
-                        confirm_focused: settings.confirm_remove_modal_confirm_focused,
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &settings.modals.confirm_remove;
+    render_modal(
+        modal.visible,
+        element! {
+            ConfirmModal(
+                visible: true,
+                title: "Remove Device".to_string(),
+                message: format!("Are you sure you want to remove \"{}\"?", modal.display_name),
+                confirm_text: "Remove".to_string(),
+                cancel_text: "Cancel".to_string(),
+                confirm_focused: modal.confirm_focused,
+            )
+        }
+        .into_any(),
+    )
 }
 
 // =============================================================================
@@ -601,61 +559,51 @@ pub fn render_remove_device_modal(settings: &SettingsViewProps) -> Option<AnyEle
 pub fn render_home_create_modal(
     neighborhood: &NeighborhoodViewProps,
 ) -> Option<AnyElement<'static>> {
-    if neighborhood.home_create_modal_visible {
-        Some(
-            element! {
-                ModalFrame {
-                    HomeCreateModal(
-                        state: crate::tui::state::views::HomeCreateModalState {
-                            name: neighborhood.home_create_modal_name.clone(),
-                            description: neighborhood.home_create_modal_description.clone(),
-                            active_field: neighborhood.home_create_modal_active_field,
-                            error: neighborhood.home_create_modal_error.clone(),
-                            creating: neighborhood.home_create_modal_creating,
-                        },
-                    )
-                }
-            }
-            .into_any(),
-        )
-    } else {
-        None
-    }
+    let modal = &neighborhood.modals.home_create;
+    render_modal(
+        modal.visible,
+        element! {
+            HomeCreateModal(
+                state: crate::tui::state::views::HomeCreateModalState {
+                    name: modal.name.clone(),
+                    description: modal.description.clone(),
+                    active_field: modal.active_field,
+                    error: modal.error.clone(),
+                    creating: modal.creating,
+                },
+            )
+        }
+        .into_any(),
+    )
 }
 
 pub fn render_moderator_assignment_modal(
     neighborhood: &NeighborhoodViewProps,
 ) -> Option<AnyElement<'static>> {
-    if neighborhood.moderator_modal_visible {
-        let title = if neighborhood.moderator_modal_assign {
+    let modal = &neighborhood.modals.moderator_assignment;
+    if modal.visible {
+        let title = if modal.assign {
             "Assign Moderator"
         } else {
             "Revoke Moderator"
         };
-        let hint = if neighborhood.moderator_modal_contacts.is_empty() {
+        let hint = if modal.contacts.is_empty() {
             "No candidates available".to_string()
-        } else if neighborhood.moderator_modal_assign {
+        } else if modal.assign {
             "Enter=apply • Tab=toggle revoke • Esc=cancel".to_string()
         } else {
             "Enter=apply • Tab=toggle assign • Esc=cancel".to_string()
         };
 
-        Some(
-            element! {
-                ModalFrame {
-                    ContactSelectModal(
-                        visible: true,
-                        title: title.to_string(),
-                        contacts: neighborhood.moderator_modal_contacts.clone(),
-                        selected_index: neighborhood.moderator_modal_selected_index,
-                        error: hint,
-                        selected_ids: Vec::new(),
-                        multi_select: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
+        render_contact_selection_modal(ContactSelectionOverlayProps {
+            visible: true,
+            title: title.to_string(),
+            contacts: modal.contacts.clone(),
+            selected_index: modal.selected_index,
+            error: hint,
+            selected_ids: Vec::new(),
+            multi_select: false,
+        })
     } else {
         None
     }
@@ -664,27 +612,21 @@ pub fn render_moderator_assignment_modal(
 pub fn render_access_override_modal(
     neighborhood: &NeighborhoodViewProps,
 ) -> Option<AnyElement<'static>> {
-    if neighborhood.access_override_modal_visible {
+    let modal = &neighborhood.modals.access_override;
+    if modal.visible {
         let hint = format!(
             "Override: {} • Enter=apply • Tab=toggle • Esc=cancel",
-            neighborhood.access_override_modal_level.label()
+            modal.level.label()
         );
-        Some(
-            element! {
-                ModalFrame {
-                    ContactSelectModal(
-                        visible: true,
-                        title: "Access Override".to_string(),
-                        contacts: neighborhood.access_override_modal_contacts.clone(),
-                        selected_index: neighborhood.access_override_modal_selected_index,
-                        error: hint,
-                        selected_ids: Vec::new(),
-                        multi_select: false,
-                    )
-                }
-            }
-            .into_any(),
-        )
+        render_contact_selection_modal(ContactSelectionOverlayProps {
+            visible: true,
+            title: "Access Override".to_string(),
+            contacts: modal.contacts.clone(),
+            selected_index: modal.selected_index,
+            error: hint,
+            selected_ids: Vec::new(),
+            multi_select: false,
+        })
     } else {
         None
     }
@@ -693,16 +635,14 @@ pub fn render_access_override_modal(
 pub fn render_capability_config_modal(
     neighborhood: &NeighborhoodViewProps,
 ) -> Option<AnyElement<'static>> {
-    if neighborhood.capability_config_modal_visible {
-        let current_field = match neighborhood.capability_config_modal_active_field {
+    let modal = &neighborhood.modals.capability_config;
+    if modal.visible {
+        let current_field = match modal.active_field {
             0 => "Full",
             1 => "Partial",
             _ => "Limited",
         };
-        let error = neighborhood
-            .capability_config_modal_error
-            .clone()
-            .unwrap_or_default();
+        let error = modal.error.clone().unwrap_or_default();
 
         Some(
             element! {
@@ -721,9 +661,9 @@ pub fn render_capability_config_modal(
                         Text(content: "Home Capability Configuration", weight: Weight::Bold, color: crate::tui::theme::Theme::PRIMARY)
                         Text(content: "Tab=next field • Enter=save • Esc=cancel", color: crate::tui::theme::Theme::TEXT_MUTED)
                         Text(content: format!("Editing: {}", current_field), color: crate::tui::theme::Theme::SECONDARY)
-                        Text(content: format!("Full: {}", neighborhood.capability_config_modal_full_caps), color: crate::tui::theme::Theme::TEXT)
-                        Text(content: format!("Partial: {}", neighborhood.capability_config_modal_partial_caps), color: crate::tui::theme::Theme::TEXT)
-                        Text(content: format!("Limited: {}", neighborhood.capability_config_modal_limited_caps), color: crate::tui::theme::Theme::TEXT)
+                        Text(content: format!("Full: {}", modal.full_caps), color: crate::tui::theme::Theme::TEXT)
+                        Text(content: format!("Partial: {}", modal.partial_caps), color: crate::tui::theme::Theme::TEXT)
+                        Text(content: format!("Limited: {}", modal.limited_caps), color: crate::tui::theme::Theme::TEXT)
                         #(if error.is_empty() {
                             None
                         } else {

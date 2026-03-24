@@ -1,11 +1,11 @@
 use super::*;
 use std::collections::HashSet;
 
+use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
     start_guardian_ceremony, CeremonyLifecycleState, CeremonyPollPolicy,
 };
-use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui_contract::SemanticOperationKind;
 use aura_core::types::FrostThreshold;
 
@@ -14,13 +14,11 @@ use crate::tui::screens::app::subscriptions::{
     SharedChannels, SharedContacts, SharedDiscoveredPeers, SharedInvitations, SharedMessages,
     SharedPendingRequests, SharedThreshold,
 };
-use crate::tui::semantic_lifecycle::{
-    LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
-};
+use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
+use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{
     publish_ui_update, UiOperation, UiOperationFailure, UiUpdatePublication,
 };
-use crate::tui::tasks::UiTaskOwner;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum NotificationSelection {
@@ -95,7 +93,9 @@ pub(super) fn authoritative_binding_for_requested_join(
     )
 }
 
-pub(super) fn terminal_error_to_toast_level(error: &TerminalError) -> crate::tui::state::ToastLevel {
+pub(super) fn terminal_error_to_toast_level(
+    error: &TerminalError,
+) -> crate::tui::state::ToastLevel {
     match error.category().toast_severity() {
         aura_app::errors::ToastLevel::Info => crate::tui::state::ToastLevel::Info,
         aura_app::errors::ToastLevel::Success => crate::tui::state::ToastLevel::Success,
@@ -749,7 +749,10 @@ fn open_chat_modal_from_authoritative_selection(
     let channels = shared_channels_for_dispatch.read().clone();
     match dispatch_cmd {
         DispatchCommand::OpenChatTopicModal => {
-            debug_assert!(matches!(contract, ModalOpenContract::AuthoritativeSelection));
+            debug_assert!(matches!(
+                contract,
+                ModalOpenContract::AuthoritativeSelection
+            ));
             if let Some(channel) = channels.get(idx) {
                 let modal_state = crate::tui::state::TopicModalState::for_channel(
                     &channel.id,
@@ -764,7 +767,10 @@ fn open_chat_modal_from_authoritative_selection(
             Some(EventCommandLoopAction::Handled)
         }
         DispatchCommand::OpenChatInfoModal => {
-            debug_assert!(matches!(contract, ModalOpenContract::AuthoritativeSelection));
+            debug_assert!(matches!(
+                contract,
+                ModalOpenContract::AuthoritativeSelection
+            ));
             if let Some(channel) = channels.get(idx) {
                 let mut modal_state = crate::tui::state::ChannelInfoModalState::for_channel(
                     &channel.id,
@@ -805,7 +811,9 @@ fn open_ceremony_setup_modal(
     match dispatch_cmd {
         DispatchCommand::OpenGuardianSetup => {
             debug_assert!(matches!(
-                ModalOpenContract::CeremonyBootstrap(CeremonySetupOwnerClass::ExplicitGuardianSelection),
+                ModalOpenContract::CeremonyBootstrap(
+                    CeremonySetupOwnerClass::ExplicitGuardianSelection
+                ),
                 ModalOpenContract::CeremonyBootstrap(_)
             ));
             let current_contacts = shared_contacts_for_dispatch.read().clone();
@@ -831,8 +839,7 @@ fn open_ceremony_setup_modal(
 
             let modal_state =
                 crate::tui::state::GuardianSetupModalState::from_contacts_with_selection(
-                    candidates,
-                    selected,
+                    candidates, selected,
                 );
             new_state
                 .modal_queue
@@ -841,7 +848,9 @@ fn open_ceremony_setup_modal(
         }
         DispatchCommand::OpenMfaSetup => {
             debug_assert!(matches!(
-                ModalOpenContract::CeremonyBootstrap(CeremonySetupOwnerClass::ExplicitDeviceSelection),
+                ModalOpenContract::CeremonyBootstrap(
+                    CeremonySetupOwnerClass::ExplicitDeviceSelection
+                ),
                 ModalOpenContract::CeremonyBootstrap(_)
             ));
             let current_devices = shared_devices_for_dispatch.read().clone();
@@ -938,9 +947,11 @@ fn open_observed_convenience_modal(
                 })
                 .collect();
             let modal_state = crate::tui::state::DeviceSelectModalState::with_devices(devices);
-            new_state.modal_queue.enqueue(
-                crate::tui::state::QueuedModal::SettingsDeviceSelect(modal_state),
-            );
+            new_state
+                .modal_queue
+                .enqueue(crate::tui::state::QueuedModal::SettingsDeviceSelect(
+                    modal_state,
+                ));
             Some(EventCommandLoopAction::Handled)
         }
         _ => None,

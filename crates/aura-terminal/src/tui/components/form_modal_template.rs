@@ -4,9 +4,9 @@
 
 use iocraft::prelude::*;
 
-use super::modal::ModalContent;
-use super::{labeled_input, LabeledInputProps};
-use crate::tui::theme::{Borders, Spacing, Theme};
+use super::{labeled_input, LabeledInputProps, ModalFooterProps, ModalHeaderProps, ModalScaffold};
+use crate::tui::theme::{Spacing, Theme};
+use crate::tui::types::KeyHint;
 
 /// A form field definition
 #[derive(Clone, Debug, Default)]
@@ -137,81 +137,59 @@ pub fn FormModal(props: &FormModalProps) -> impl Into<AnyElement<'static>> {
     };
     let can_submit = props.can_submit;
 
+    let header_props = ModalHeaderProps::new(title);
+    let footer_props = ModalFooterProps::new(vec![
+        KeyHint::new("Tab", "Next field"),
+        KeyHint::new("Esc", cancel_text.as_str()),
+        KeyHint::new("Enter", submit_text.as_str()),
+    ]);
+
     element! {
-        ModalContent(
-            flex_direction: FlexDirection::Column,
-            border_style: Borders::PRIMARY,
+        ModalScaffold(
+            header: header_props,
+            footer: footer_props,
+            status: super::ModalStatus::Idle,
             border_color: Some(Theme::BORDER_FOCUS),
+            body_overflow: Overflow::Hidden,
         ) {
-            // Title bar
-            View(
-                width: 100pct,
-                padding: Spacing::PANEL_PADDING,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::Center,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-            // Form fields - fills available space
-            View(
-                width: 100pct,
-                padding: Spacing::MODAL_PADDING,
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                overflow: Overflow::Hidden,
-            ) {
-                #(fields.into_iter().enumerate().map(|(idx, field)| {
-                    let is_focused = idx == focused_field;
-                    element! {
-                        FormFieldComponent(
-                            label: field.label,
-                            value: field.value,
-                            placeholder: field.placeholder,
-                            focused: is_focused,
-                            required: field.required,
-                            error: field.error.unwrap_or_default(),
-                        )
-                    }
-                }))
-            }
-            // Buttons and hints
-            View(
-                width: 100pct,
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                padding: Spacing::PANEL_PADDING,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Top,
-                border_color: Theme::BORDER,
-            ) {
-                View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
-                    Text(content: "Tab", weight: Weight::Bold, color: Theme::SECONDARY)
-                    Text(content: "Next field", color: Theme::TEXT_MUTED)
+            #(fields.into_iter().enumerate().map(|(idx, field)| {
+                let is_focused = idx == focused_field;
+                element! {
+                    FormFieldComponent(
+                        label: field.label,
+                        value: field.value,
+                        placeholder: field.placeholder,
+                        focused: is_focused,
+                        required: field.required,
+                        error: field.error.unwrap_or_default(),
+                    )
                 }
-                View(flex_direction: FlexDirection::Row, gap: Spacing::SM) {
-                    View(
-                        padding_left: Spacing::SM,
-                        padding_right: Spacing::SM,
-                        border_style: Borders::PRIMARY,
-                        border_color: Theme::BORDER,
-                    ) {
-                        Text(content: cancel_text, color: Theme::TEXT)
-                    }
-                    View(
-                        padding_left: Spacing::SM,
-                        padding_right: Spacing::SM,
-                        border_style: Borders::PRIMARY,
-                        border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
-                    ) {
-                        Text(
-                            content: submit_text,
-                            color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
-                        )
-                    }
+            }))
+
+            View(
+                margin_top: Spacing::SM,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::End,
+                gap: Spacing::SM,
+            ) {
+                View(
+                    padding_left: Spacing::SM,
+                    padding_right: Spacing::SM,
+                    border_style: crate::tui::theme::Borders::PRIMARY,
+                    border_color: Theme::BORDER,
+                ) {
+                    Text(content: cancel_text, color: Theme::TEXT)
+                }
+                View(
+                    padding_left: Spacing::SM,
+                    padding_right: Spacing::SM,
+                    border_style: crate::tui::theme::Borders::PRIMARY,
+                    border_color: if can_submit { Theme::PRIMARY } else { Theme::BORDER },
+                ) {
+                    Text(
+                        content: submit_text,
+                        color: if can_submit { Theme::PRIMARY } else { Theme::TEXT_MUTED },
+                    )
                 }
             }
         }

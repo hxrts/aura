@@ -5,11 +5,8 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use super::modal::ModalContent;
-use super::{
-    modal_footer, modal_header, status_message, ModalFooterProps, ModalHeaderProps, ModalStatus,
-};
-use crate::tui::theme::{Borders, Spacing, Theme};
+use super::{ModalFooterProps, ModalHeaderProps, ModalScaffold, ModalStatus};
+use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, KeyHint};
 
 /// Callback type for selecting a contact (contact_id: String)
@@ -90,83 +87,64 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     };
 
     element! {
-        ModalContent(
-            flex_direction: FlexDirection::Column,
-            border_style: Borders::PRIMARY,
+        ModalScaffold(
+            header: header_props,
+            footer: footer_props,
+            status: error_status,
             border_color: Some(border_color),
+            body_overflow: Overflow::Scroll,
         ) {
-            // Header
-            #(Some(modal_header(&header_props).into()))
+            #(if contacts.is_empty() {
+                vec![element! {
+                    View {
+                        Text(content: "No contacts available", color: Theme::TEXT_MUTED)
+                    }
+                }]
+            } else {
+                contacts.iter().enumerate().map(|(idx, contact)| {
+                    let is_selected = idx == selected_index;
+                    let is_checked =
+                        multi_select && selected_ids.iter().any(|selected_id| selected_id == &contact.id);
 
-            // Body - contact list
-            View(
-                width: 100pct,
-                padding: Spacing::MODAL_PADDING,
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                overflow: Overflow::Scroll,
-            ) {
-                #(if contacts.is_empty() {
-                    vec![element! {
-                        View {
-                            Text(content: "No contacts available", color: Theme::TEXT_MUTED)
+                    let bg = if is_selected {
+                        Theme::LIST_BG_SELECTED
+                    } else {
+                        Theme::LIST_BG_NORMAL
+                    };
+                    let text_color = if is_selected {
+                        Theme::LIST_TEXT_SELECTED
+                    } else {
+                        Theme::LIST_TEXT_NORMAL
+                    };
+                    let pointer_color = if is_selected {
+                        Theme::LIST_TEXT_SELECTED
+                    } else {
+                        Theme::PRIMARY
+                    };
+
+                    let name = contact.nickname.clone();
+                    let id = contact.id.clone();
+                    let pointer = if is_selected { "➤ " } else { "  " };
+                    let checkbox = if multi_select {
+                        if is_checked { "[x] " } else { "[ ] " }
+                    } else {
+                        ""
+                    };
+
+                    element! {
+                        View(
+                            key: id,
+                            flex_direction: FlexDirection::Row,
+                            background_color: bg,
+                            padding_left: Spacing::XS,
+                        ) {
+                            Text(content: pointer.to_string(), color: pointer_color)
+                            Text(content: checkbox.to_string(), color: pointer_color)
+                            Text(content: name, color: text_color)
                         }
-                    }]
-                } else {
-                                        contacts.iter().enumerate().map(|(idx, contact)| {
-                        let is_selected = idx == selected_index;
-                        let is_checked =
-                            multi_select && selected_ids.iter().any(|i| i == &contact.id);
-
-                        // Use consistent list item colors
-                        let bg = if is_selected {
-                            Theme::LIST_BG_SELECTED
-                        } else {
-                            Theme::LIST_BG_NORMAL
-                        };
-                        let text_color = if is_selected {
-                            Theme::LIST_TEXT_SELECTED
-                        } else {
-                            Theme::LIST_TEXT_NORMAL
-                        };
-                        let pointer_color = if is_selected {
-                            Theme::LIST_TEXT_SELECTED
-                        } else {
-                            Theme::PRIMARY
-                        };
-
-                        let name = contact.nickname.clone();
-                        let id = contact.id.clone();
-                        let pointer = if is_selected { "➤ " } else { "  " };
-                        let checkbox = if multi_select {
-                            if is_checked { "[x] " } else { "[ ] " }
-                        } else {
-                            ""
-                        };
-
-                        element! {
-                            View(
-                                key: id,
-                                flex_direction: FlexDirection::Row,
-                                background_color: bg,
-                                padding_left: Spacing::XS,
-                            ) {
-                                Text(content: pointer.to_string(), color: pointer_color)
-                                Text(content: checkbox.to_string(), color: pointer_color)
-                                Text(content: name, color: text_color)
-                            }
-                        }
-                    }).collect()
-
-                })
-
-                // Error message
-                #(Some(status_message(&error_status).into()))
-            }
-
-            // Footer
-            #(Some(modal_footer(&footer_props).into()))
+                    }
+                }).collect()
+            })
         }
     }
     .into_any()

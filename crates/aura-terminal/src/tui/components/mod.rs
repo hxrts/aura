@@ -70,8 +70,8 @@ pub use message_panel::MessagePanel;
 pub use modal::{ConfirmModal, InputModal, ModalContent, ModalFrame};
 pub use modal_primitives::{
     key_hint_group, labeled_input, modal_footer, modal_header, multi_select_list, status_message,
-    LabeledInputProps, ModalFooterProps, ModalHeaderProps, ModalStatus, MultiSelectListProps,
-    SelectableItem,
+    LabeledInputProps, ModalFooterProps, ModalHeaderProps, ModalScaffold, ModalScaffoldProps,
+    ModalStatus, MultiSelectListProps, SelectableItem,
 };
 pub use nav_bar::{NavBar, NavBarProps};
 pub use panel::{Panel, PanelStyle};

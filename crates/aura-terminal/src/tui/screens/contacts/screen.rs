@@ -210,7 +210,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
 /// The `view` field is a required struct that embeds all view state from TuiState.
 /// This makes it a **compile-time error** to forget any view state field, because
 /// the entire `ContactsViewProps` struct must be passed - you can't accidentally
-/// omit individual fields like `nickname_modal_visible`.
+/// omit grouped modal state such as `view.modals.nickname.visible`.
 ///
 /// ## Reactive Data Model
 ///

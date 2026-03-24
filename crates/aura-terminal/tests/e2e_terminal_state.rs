@@ -1761,7 +1761,7 @@ async fn test_moderator_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: Some(home_id.to_string()),
+            channel: None,
             target: member1_id.to_string(),
         })
         .await;
@@ -1791,7 +1791,7 @@ async fn test_moderator_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::RevokeModerator {
-            channel: Some(home_id.to_string()),
+            channel: None,
             target: member1_id.to_string(),
         })
         .await;
@@ -1822,7 +1822,7 @@ async fn test_moderator_role_flow() {
     // Creator is a threshold member, so granting moderator is allowed.
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: Some(home_id.to_string()),
+            channel: None,
             target: owner_id.to_string(),
         })
         .await;
@@ -1837,7 +1837,7 @@ async fn test_moderator_role_flow() {
     // Can't grant moderator to someone who is already a moderator.
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: Some(home_id.to_string()),
+            channel: None,
             target: owner_id.to_string(),
         })
         .await;
@@ -1857,7 +1857,7 @@ async fn test_moderator_role_flow() {
     // Can't revoke non-Moderator
     let result = ctx
         .dispatch(EffectCommand::RevokeModerator {
-            channel: Some(home_id.to_string()),
+            channel: None,
             target: member2_id.to_string(), // Still a Participant, not Moderator
         })
         .await;
@@ -1877,7 +1877,7 @@ async fn test_moderator_role_flow() {
     // Can't find non-existent member
     let result = ctx
         .dispatch(EffectCommand::GrantModerator {
-            channel: Some(home_id.to_string()),
+            channel: None,
             target: missing_id.to_string(),
         })
         .await;

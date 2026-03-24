@@ -16,6 +16,7 @@
 
 use iocraft::prelude::*;
 
+use super::modal::ModalContent;
 use crate::tui::theme::{Borders, Spacing, Theme};
 use crate::tui::types::KeyHint;
 
@@ -159,6 +160,55 @@ pub fn modal_footer(props: &ModalFooterProps) -> impl Into<AnyElement<'static>> 
                     }
                 }
             }))
+        }
+    }
+}
+
+// =============================================================================
+// ModalScaffold
+// =============================================================================
+
+/// Shared presentational scaffold for modal templates that use the standard
+/// header/body/footer chrome.
+#[derive(Default, Props)]
+pub struct ModalScaffoldProps<'a> {
+    pub children: Vec<AnyElement<'a>>,
+    pub header: ModalHeaderProps,
+    pub footer: ModalFooterProps,
+    pub status: ModalStatus,
+    pub border_color: Option<Color>,
+    pub body_overflow: Overflow,
+}
+
+#[component]
+pub fn ModalScaffold<'a>(props: &mut ModalScaffoldProps<'a>) -> impl Into<AnyElement<'a>> {
+    let header = props.header.clone();
+    let footer = props.footer.clone();
+    let status = props.status.clone();
+    let border_color = props.border_color.unwrap_or(Theme::BORDER_FOCUS);
+    let body_overflow = props.body_overflow;
+
+    element! {
+        ModalContent(
+            flex_direction: FlexDirection::Column,
+            border_style: Borders::PRIMARY,
+            border_color: Some(border_color),
+        ) {
+            #(Some(modal_header(&header).into()))
+
+            View(
+                width: 100pct,
+                padding: Spacing::MODAL_PADDING,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: body_overflow,
+            ) {
+                #(&mut props.children)
+                #(Some(status_message(&status).into()))
+            }
+
+            #(Some(modal_footer(&footer).into()))
         }
     }
 }

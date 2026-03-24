@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use aura_app::ui_contract::SemanticOperationKind;
 
 use crate::tui::components::copy_to_clipboard;
-use crate::tui::screens::app::subscriptions::{SharedChannels, SharedContacts, SharedMessages};
 use crate::tui::screens::app::shell::dispatch::format_ui_operation_failure;
+use crate::tui::screens::app::subscriptions::{SharedChannels, SharedContacts, SharedMessages};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum UiUpdateLoopAction {

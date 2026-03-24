@@ -207,9 +207,7 @@ use crate::tui::props::{
     extract_notifications_view_props, extract_settings_view_props,
 };
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
-use crate::tui::updates::{
-    UiUpdate, UiUpdateSender,
-};
+use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use std::sync::Mutex;
 
 mod dispatch;
@@ -1248,22 +1246,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         update_tx_for_events: &update_tx_for_events,
                                         update_tx_for_dispatch: &update_tx_for_dispatch,
                                         update_tx_for_ceremony: &update_tx_for_ceremony,
-                                        shared_channels_for_dispatch:
-                                            &shared_channels_for_dispatch,
+                                        shared_channels_for_dispatch: &shared_channels_for_dispatch,
                                         shared_neighborhood_homes_for_dispatch:
                                             &shared_neighborhood_homes_for_dispatch,
                                         shared_invitations_for_dispatch:
                                             &shared_invitations_for_dispatch,
                                         shared_pending_requests_for_dispatch:
                                             &shared_pending_requests_for_dispatch,
-                                        shared_contacts_for_dispatch:
-                                            &shared_contacts_for_dispatch,
+                                        shared_contacts_for_dispatch: &shared_contacts_for_dispatch,
                                         shared_discovered_peers_for_dispatch:
                                             &shared_discovered_peers_for_dispatch,
-                                        shared_messages_for_dispatch:
-                                            &shared_messages_for_dispatch,
-                                        shared_devices_for_dispatch:
-                                            &shared_devices_for_dispatch,
+                                        shared_messages_for_dispatch: &shared_messages_for_dispatch,
+                                        shared_devices_for_dispatch: &shared_devices_for_dispatch,
                                         shared_threshold_for_dispatch:
                                             &shared_threshold_for_dispatch,
                                         tui_selected_for_events: &tui_selected_for_events,
@@ -1300,7 +1294,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 }
                 if new_state.should_exit && !should_exit.get() {
                     should_exit.set(true);
-                    bg_shutdown.read().store(true, std::sync::atomic::Ordering::Release);
+                    bg_shutdown
+                        .read()
+                        .store(true, std::sync::atomic::Ordering::Release);
                 }
 
                 // Update TuiState (and always bump render version)
