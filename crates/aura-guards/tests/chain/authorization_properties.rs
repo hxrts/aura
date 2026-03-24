@@ -4,10 +4,9 @@
 //! system using proptest to exercise edge cases and boundary conditions.
 #![allow(missing_docs)]
 
-use aura_authorization::validate_capability_name;
-use aura_authorization::TokenAuthority;
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::types::scope::{AuthorityOp, ResourceScope};
+use aura_core::CapabilityName;
 use aura_guards::authorization::BiscuitAuthorizationBridge;
 use aura_guards::CapabilityId;
 use biscuit_auth::macros::*;
@@ -159,7 +158,7 @@ proptest! {
     #[test]
     fn valid_capability_names_always_pass(name in valid_cap_name_strategy()) {
         prop_assert!(
-            validate_capability_name(&name).is_ok(),
+            CapabilityName::parse(&name).is_ok(),
             "valid capability name rejected: {:?}",
             name
         );
@@ -174,7 +173,7 @@ proptest! {
     ) {
         let name: String = format!("{prefix}{bad_char}{suffix}");
         prop_assert!(
-            validate_capability_name(&name).is_err(),
+            CapabilityName::parse(&name).is_err(),
             "invalid capability name accepted: {:?}",
             name
         );
@@ -184,7 +183,7 @@ proptest! {
 /// Empty strings are always rejected.
 #[test]
 fn empty_capability_always_rejected() {
-    assert!(validate_capability_name("").is_err());
+    assert!(CapabilityName::parse("").is_err());
 }
 
 // ============================================================================
@@ -342,7 +341,7 @@ proptest! {
     /// evaluation without causing an internal error.
     #[test]
     fn validated_names_evaluate_without_error(name in valid_cap_name_strategy()) {
-        if validate_capability_name(&name).is_ok() {
+        if CapabilityName::parse(&name).is_ok() {
             let (bridge, token) = bridge_with_caps(&[]);
             let result = bridge.has_capability(&token, &name, 1000);
             prop_assert!(
@@ -374,7 +373,6 @@ proptest! {
         prop_assume!(cap_a != cap_b);
 
         // Build a token with ONLY cap_a
-        let cap_a_ref = cap_a.as_str();
         let (_, bridge, token) = bridge_with_caps_owned(&[cap_a.clone()]);
 
         // authorize() with cap_a passes

@@ -106,6 +106,8 @@ pub mod tree;
 
 /// Byzantine safety admission and attestation types
 pub mod byzantine;
+/// Canonical validated authorization capability names
+pub mod capability_name;
 /// Ceremony types for Category C operations (supersession, lifecycle)
 pub mod ceremony;
 /// Native/WASM conformance artifact schema and envelope classification registry
@@ -137,6 +139,7 @@ pub use byzantine::{
     ByzantineAdmissionRequirement, ByzantineSafetyAttestation, CapabilitySnapshot,
     CapabilitySnapshotEntry, BYZANTINE_ATTESTATION_SCHEMA_V1,
 };
+pub use capability_name::{CapabilityName, CapabilityNameError};
 #[doc = "stable: Core journal types with semver guarantees"]
 pub use domain::journal::{
     ActorId, AuthLevel, Cap, Fact, FactKey, FactOpId, FactTimestamp, FactValue, Journal,

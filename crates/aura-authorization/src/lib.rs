@@ -74,9 +74,7 @@ pub use facts::{WotFact, WotFactDelta, WotFactReducer, WOT_FACT_TYPE_ID};
 pub use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 // Biscuit authorization types
-pub use biscuit_authorization::{
-    validate_capability_name, AuthorizationResult, BiscuitAuthorizationBridge,
-};
+pub use biscuit_authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
 
 // Storage authorization types
 pub use storage_authorization::{

@@ -22,6 +22,7 @@
 )]
 use aura_authorization::{BiscuitError, ResourceScope};
 use aura_core::types::identifiers::AuthorityId;
+use aura_core::CapabilityName;
 use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
 use std::time::Duration;
 
@@ -253,7 +254,9 @@ impl BiscuitAuthorizationBridge {
         current_time_seconds: u64,
     ) -> Result<bool, BiscuitError> {
         // Validate capability name before passing to Datalog evaluation.
-        aura_authorization::validate_capability_name(capability)?;
+        let capability_name = CapabilityName::parse(capability)
+            .map_err(|error| BiscuitError::InvalidCapability(error.to_string()))?;
+        let capability = capability_name.as_str();
 
         // Create authorizer and verify token signature
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
