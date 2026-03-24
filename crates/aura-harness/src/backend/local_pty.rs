@@ -40,14 +40,6 @@ enum BackendState {
     Running,
 }
 
-fn selected_channel_ref(snapshot: &UiSnapshot) -> Option<String> {
-    snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Channels)
-        .map(|selection| selection.item_id.clone())
-}
-
 fn into_ui_operation_handle(
     handle: aura_app::ui_contract::HarnessUiOperationHandle,
 ) -> UiOperationHandle {
@@ -1002,21 +994,9 @@ impl InstanceBackend for LocalPtyBackend {
 
     fn authority_id(&mut self) -> Result<Option<String>> {
         let snapshot = self.ui_snapshot()?;
-        if let Some(selection) = snapshot
-            .selections
-            .iter()
-            .find(|selection| selection.list == ListId::Authorities)
-        {
-            return Ok(Some(selection.item_id.clone()));
-        }
-
-        let authority_id = snapshot
-            .lists
-            .iter()
-            .find(|list| list.id == ListId::Authorities)
-            .and_then(|list| list.items.iter().find(|item| item.selected))
-            .map(|item| item.id.clone());
-        Ok(authority_id)
+        Ok(snapshot
+            .selected_item_id(ListId::Authorities)
+            .map(str::to_string))
     }
 
     fn health_check(&self) -> Result<bool> {
@@ -1467,10 +1447,9 @@ impl RawUiBackend for LocalPtyBackend {
             .iter()
             .position(|item| item.id == item_id)
             .ok_or_else(|| anyhow::anyhow!("item {item_id} not found in list {list_id:?}"))?;
-        let current_index = list
-            .items
-            .iter()
-            .position(|item| item.selected)
+        let current_index = snapshot
+            .selected_item_id(list_id)
+            .and_then(|selected_id| list.items.iter().position(|item| item.id == selected_id))
             .unwrap_or(0);
         eprintln!(
             "[local_pty activate_list_item] instance={} list={:?} item_id={} current_index={} target_index={} focused_control={:?}",
@@ -1537,12 +1516,7 @@ impl RawUiBackend for LocalPtyBackend {
         let selection_deadline = Instant::now() + Duration::from_millis(1500);
         loop {
             let current_snapshot = self.ui_snapshot()?;
-            let selected_item = current_snapshot
-                .lists
-                .iter()
-                .find(|candidate| candidate.id == list_id)
-                .and_then(|candidate| candidate.items.iter().find(|item| item.selected))
-                .map(|item| item.id.as_str());
+            let selected_item = current_snapshot.selected_item_id(list_id);
             if selected_item == Some(item_id) {
                 return Ok(());
             }
@@ -1767,11 +1741,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
                 })
             }
             IntentAction::SendChatMessage { message } => {
-                if selected_channel_ref(&self.ui_snapshot()?).is_none() {
-                    anyhow::bail!(
-                        "submit_send_chat_message requires an authoritative selected channel reference"
-                    );
-                }
                 let handle = require_ui_operation_handle(
                     self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
                         content: message,
@@ -1891,13 +1860,6 @@ impl SharedSemanticBackend for LocalPtyBackend {
     }
 
     fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {
-        let snapshot = self.ui_snapshot()?;
-        if selected_channel_ref(&snapshot).is_none() {
-            anyhow::bail!(
-                "submit_send_chat_message requires an authoritative selected channel reference"
-            );
-        }
-
         let handle = require_ui_operation_handle(
             self.send_harness_command_receipt(&HarnessUiCommand::SendChatMessage {
                 content: message.to_string(),
@@ -2138,6 +2100,54 @@ mod tests {
                 .count(),
             1,
             "send_chat_message must not retry by issuing the semantic command twice"
+        );
+    }
+
+    #[test]
+    fn local_backend_selection_reads_use_canonical_snapshot_selections_only() {
+        let source = include_str!("local_pty.rs");
+        let authority_start = source
+            .find("fn authority_id(&mut self) -> Result<Option<String>> {")
+            .unwrap_or_else(|| panic!("missing authority_id"));
+        let health_check_start = source[authority_start..]
+            .find("fn health_check(&self) -> Result<bool> {")
+            .map(|offset| authority_start + offset)
+            .unwrap_or(source.len());
+        let authority_block = &source[authority_start..health_check_start];
+
+        assert!(
+            authority_block.contains(".selected_item_id(ListId::Authorities)"),
+            "authority_id must read the canonical exported authority selection"
+        );
+        assert!(
+            !authority_block.contains(".lists"),
+            "authority_id must not scan list rows as a fallback authority source"
+        );
+        assert!(
+            !authority_block.contains("item.selected"),
+            "authority_id must not infer selection from row highlight state"
+        );
+    }
+
+    #[test]
+    fn local_backend_send_message_issue_path_does_not_prevalidate_selected_channel_snapshot() {
+        let source = include_str!("local_pty.rs");
+        let send_start = source
+            .find("fn submit_send_chat_message(&mut self, message: &str) -> Result<SubmittedAction<()>> {")
+            .unwrap_or_else(|| panic!("missing submit_send_chat_message"));
+        let next_fn_after_send = source[send_start..]
+            .find("}\n}\n\n#[cfg(test)]")
+            .map(|offset| send_start + offset)
+            .unwrap_or(source.len());
+        let send_block = &source[send_start..next_fn_after_send];
+
+        assert!(
+            !send_block.contains("selected_channel_ref"),
+            "send_chat_message must not gate submission on harness-side snapshot repair logic"
+        );
+        assert!(
+            !send_block.contains("authoritative selected channel reference"),
+            "send_chat_message must defer selection validity to the command plane"
         );
     }
 

@@ -1178,6 +1178,10 @@ impl UiModel {
             .position(|contact| contact.authority_id == selected)
     }
 
+    pub fn selected_authority_id(&self) -> Option<AuthorityId> {
+        self.selected_authority_id
+    }
+
     pub fn selected_authority_index(&self) -> Option<usize> {
         let selected = self.selected_authority_id?;
         self.authorities
@@ -1730,6 +1734,16 @@ impl UiController {
     pub fn select_channel_by_id(&self, id: &str) {
         write_model(&self.model).select_channel_id(Some(id));
         self.request_rerender();
+    }
+
+    pub fn selected_channel_id(&self) -> Option<String> {
+        read_model(&self.model)
+            .selected_channel_id()
+            .map(str::to_string)
+    }
+
+    pub fn selected_authority_id(&self) -> Option<AuthorityId> {
+        read_model(&self.model).selected_authority_id()
     }
 
     pub fn select_home(&self, id: impl Into<String>, name: impl Into<String>) {

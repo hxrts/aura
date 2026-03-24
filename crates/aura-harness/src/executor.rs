@@ -1058,7 +1058,7 @@ fn execute_semantic_step(
                     )
                 }
                 _ => {
-                    let wait_step = semantic_expectation_wait_step(step, expectation)?;
+                    let wait_step = semantic_expectation_wait_step(step, expectation, context)?;
                     wait_for_semantic_state(
                         &wait_step,
                         tool_api,
@@ -1640,6 +1640,7 @@ fn resolve_required_semantic_instance(step: &SemanticStep) -> Result<String> {
 fn semantic_expectation_wait_step(
     step: &SemanticStep,
     expectation: &Expectation,
+    context: &ScenarioContext,
 ) -> Result<CompatibilityStep> {
     let mut wait_step = semantic_metadata_step(step);
     match expectation {
@@ -1670,7 +1671,7 @@ fn semantic_expectation_wait_step(
         Expectation::ListContains { list, item_id } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.list_id = Some(*list);
-            wait_step.item_id = Some(item_id.clone());
+            wait_step.item_id = Some(resolve_template(item_id, context)?);
         }
         Expectation::ListCountIs { list, count } => {
             wait_step.action = CompatibilityAction::WaitFor;
@@ -1684,13 +1685,13 @@ fn semantic_expectation_wait_step(
         } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.list_id = Some(*list);
-            wait_step.item_id = Some(item_id.clone());
+            wait_step.item_id = Some(resolve_template(item_id, context)?);
             wait_step.confirmation = Some(*confirmation);
         }
         Expectation::SelectionIs { list, item_id } => {
             wait_step.action = CompatibilityAction::WaitFor;
             wait_step.list_id = Some(*list);
-            wait_step.item_id = Some(item_id.clone());
+            wait_step.item_id = Some(resolve_template(item_id, context)?);
         }
         Expectation::ReadinessIs(readiness) => {
             wait_step.action = CompatibilityAction::WaitFor;
@@ -4386,6 +4387,37 @@ mod tests {
         };
 
         assert!(semantic_wait_matches(&step, &snapshot));
+    }
+
+    #[test]
+    fn semantic_expectation_wait_step_resolves_template_backed_selection_ids() {
+        let step = SemanticStep {
+            id: "wait-current-authority".to_string(),
+            action: ScenarioAction::Expect(Expectation::SelectionIs {
+                list: ListId::Authorities,
+                item_id: "${alice_authority_id}".to_string(),
+            }),
+            actor: Some(ActorId("alice".to_string())),
+            timeout_ms: Some(4000),
+        };
+        let mut context = ScenarioContext::default();
+        context.vars.insert(
+            "alice_authority_id".to_string(),
+            "authority-1234".to_string(),
+        );
+
+        let wait_step = semantic_expectation_wait_step(
+            &step,
+            match &step.action {
+                ScenarioAction::Expect(expectation) => expectation,
+                _ => unreachable!("test step uses an expectation action"),
+            },
+            &context,
+        )
+        .unwrap_or_else(|error| panic!("selection wait should resolve templates: {error}"));
+
+        assert_eq!(wait_step.list_id, Some(ListId::Authorities));
+        assert_eq!(wait_step.item_id.as_deref(), Some("authority-1234"));
     }
 
     #[test]

@@ -756,10 +756,10 @@ mod tests {
         };
 
         assert!(state.apply_runtime_facts_update(
-            Some(ProjectionRevision {
+            ProjectionRevision {
                 semantic_seq: 2,
                 render_seq: None,
-            }),
+            },
             vec![RuntimeEventKind::ChannelMembershipReady],
             vec![RuntimeFact::ChannelMembershipReady {
                 channel: channel.clone(),
@@ -767,10 +767,10 @@ mod tests {
             }],
         ));
         assert!(!state.apply_runtime_facts_update(
-            Some(ProjectionRevision {
+            ProjectionRevision {
                 semantic_seq: 1,
                 render_seq: None,
-            }),
+            },
             vec![RuntimeEventKind::ChannelMembershipReady],
             vec![RuntimeFact::ChannelMembershipReady {
                 channel: channel.clone(),
@@ -796,10 +796,10 @@ mod tests {
         };
 
         assert!(state.apply_runtime_facts_update(
-            Some(ProjectionRevision {
+            ProjectionRevision {
                 semantic_seq: 1,
                 render_seq: None,
-            }),
+            },
             vec![RuntimeEventKind::ChannelMembershipReady],
             vec![RuntimeFact::ChannelMembershipReady {
                 channel: channel.clone(),
@@ -807,10 +807,10 @@ mod tests {
             }],
         ));
         assert!(state.apply_runtime_facts_update(
-            Some(ProjectionRevision {
+            ProjectionRevision {
                 semantic_seq: 2,
                 render_seq: None,
-            }),
+            },
             vec![RuntimeEventKind::ChannelMembershipReady],
             vec![RuntimeFact::ChannelMembershipReady {
                 channel: channel.clone(),

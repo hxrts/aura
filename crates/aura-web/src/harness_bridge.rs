@@ -195,12 +195,8 @@ fn browser_settings_section(section: SettingsSection) -> aura_ui::model::Setting
 }
 
 fn selected_channel_id(controller: &UiController) -> Result<ChannelId, JsValue> {
-    let snapshot = controller.ui_snapshot();
-    let selected = snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Channels)
-        .map(|selection| selection.item_id.clone())
+    let selected = controller
+        .selected_channel_id()
         .ok_or_else(|| JsValue::from_str("no channel is selected"))?;
     selected
         .parse::<ChannelId>()
@@ -239,41 +235,13 @@ fn semantic_channel_result(
 fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
     let snapshot = controller.ui_snapshot();
     snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Devices)
-        .map(|selection| selection.item_id.clone())
-        .or_else(|| {
-            snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Devices)
-                .and_then(|list| {
-                    if list.items.len() == 1 {
-                        list.items.first().map(|item| item.id.clone())
-                    } else {
-                        None
-                    }
-                })
-        })
+        .selected_item_id(ListId::Devices)
+        .map(str::to_string)
         .ok_or_else(|| JsValue::from_str("no device is selected"))
 }
 
 fn selected_authority_id(controller: &UiController) -> Option<String> {
-    let snapshot = controller.ui_snapshot();
-    snapshot
-        .selections
-        .iter()
-        .find(|selection| selection.list == ListId::Authorities)
-        .map(|selection| selection.item_id.clone())
-        .or_else(|| {
-            snapshot
-                .lists
-                .iter()
-                .find(|list| list.id == ListId::Authorities)
-                .and_then(|list| list.items.iter().find(|item| item.selected))
-                .map(|item| item.id.clone())
-        })
+    controller.selected_authority_id().map(|id| id.to_string())
 }
 
 pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {
@@ -1524,4 +1492,65 @@ try {
     render_heartbeat.forget();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn harness_bridge_selection_helpers_use_canonical_snapshot_selections_only() {
+        let source = include_str!("harness_bridge.rs");
+
+        let channel_start = source
+            .find(
+                "fn selected_channel_id(controller: &UiController) -> Result<ChannelId, JsValue> {",
+            )
+            .unwrap_or_else(|| panic!("missing selected_channel_id"));
+        let channel_end = source[channel_start..]
+            .find("async fn selected_channel_binding(controller: &UiController)")
+            .map(|offset| channel_start + offset)
+            .unwrap_or(source.len());
+        let channel_block = &source[channel_start..channel_end];
+        assert!(
+            channel_block.contains(".selected_channel_id()"),
+            "selected_channel_id must use the controller-owned selected channel"
+        );
+        assert!(
+            !channel_block.contains(".selected_item_id(ListId::Channels)"),
+            "selected_channel_id command paths must not re-read observed channel selection"
+        );
+
+        let device_start = source
+            .find("fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {")
+            .unwrap_or_else(|| panic!("missing selected_device_id"));
+        let device_end = source[device_start..]
+            .find("fn selected_authority_id(controller: &UiController) -> Option<String> {")
+            .map(|offset| device_start + offset)
+            .unwrap_or(source.len());
+        let device_block = &source[device_start..device_end];
+        assert!(
+            device_block.contains(".selected_item_id(ListId::Devices)"),
+            "selected_device_id must use the canonical exported device selection"
+        );
+        assert!(
+            !device_block.contains("list.items.len() == 1"),
+            "selected_device_id must not infer selection from singleton device lists"
+        );
+
+        let authority_start = source
+            .find("fn selected_authority_id(controller: &UiController) -> Option<String> {")
+            .unwrap_or_else(|| panic!("missing selected_authority_id"));
+        let authority_end = source[authority_start..]
+            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {")
+            .map(|offset| authority_start + offset)
+            .unwrap_or(source.len());
+        let authority_block = &source[authority_start..authority_end];
+        assert!(
+            authority_block.contains(".selected_authority_id()"),
+            "selected_authority_id must use the controller-owned selected authority"
+        );
+        assert!(
+            !authority_block.contains(".selected_item_id(ListId::Authorities)"),
+            "selected_authority_id command paths must not re-read observed authority selection"
+        );
+    }
 }

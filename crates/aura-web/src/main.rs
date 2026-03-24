@@ -1707,6 +1707,49 @@ mod tests {
     }
 
     #[test]
+    fn web_harness_selection_helpers_use_canonical_snapshot_selections_only() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
+        let source = std::fs::read_to_string(&bridge_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", bridge_path.display()));
+
+        let channel_start = source
+            .find(
+                "fn selected_channel_id(controller: &UiController) -> Result<ChannelId, JsValue> {",
+            )
+            .unwrap_or_else(|| panic!("missing selected_channel_id"));
+        let channel_end = source[channel_start..]
+            .find("async fn selected_channel_binding(controller: &UiController)")
+            .map(|offset| channel_start + offset)
+            .unwrap_or(source.len());
+        let channel_block = &source[channel_start..channel_end];
+        assert!(channel_block.contains(".selected_channel_id()"));
+        assert!(!channel_block.contains(".selected_item_id(ListId::Channels)"));
+
+        let device_start = source
+            .find("fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {")
+            .unwrap_or_else(|| panic!("missing selected_device_id"));
+        let device_end = source[device_start..]
+            .find("fn selected_authority_id(controller: &UiController) -> Option<String> {")
+            .map(|offset| device_start + offset)
+            .unwrap_or(source.len());
+        let device_block = &source[device_start..device_end];
+        assert!(device_block.contains(".selected_item_id(ListId::Devices)"));
+        assert!(!device_block.contains("list.items.len() == 1"));
+
+        let authority_start = source
+            .find("fn selected_authority_id(controller: &UiController) -> Option<String> {")
+            .unwrap_or_else(|| panic!("missing selected_authority_id"));
+        let authority_end = source[authority_start..]
+            .find("pub(crate) fn publish_semantic_controller_snapshot(controller: &UiController) -> UiSnapshot {")
+            .map(|offset| authority_start + offset)
+            .unwrap_or(source.len());
+        let authority_block = &source[authority_start..authority_end];
+        assert!(authority_block.contains(".selected_authority_id()"));
+        assert!(!authority_block.contains(".selected_item_id(ListId::Authorities)"));
+    }
+
+    #[test]
     fn web_bootstrap_handoff_waits_for_completion() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let main_path = repo_root.join("crates/aura-web/src/main.rs");

@@ -3128,6 +3128,34 @@ impl UiSnapshot {
                     list.id
                 ));
             }
+
+            let selected_row = list.items.iter().find(|item| item.selected);
+            let exported_selection = self
+                .selections
+                .iter()
+                .find(|selection| selection.list == list.id);
+            match (selected_row, exported_selection) {
+                (Some(row), Some(selection)) if row.id == selection.item_id => {}
+                (Some(row), Some(selection)) => {
+                    return Err(format!(
+                        "list {:?} selected row {} diverges from exported selection {}",
+                        list.id, row.id, selection.item_id
+                    ));
+                }
+                (Some(row), None) => {
+                    return Err(format!(
+                        "list {:?} selected row {} without exported selection",
+                        list.id, row.id
+                    ));
+                }
+                (None, Some(selection)) => {
+                    return Err(format!(
+                        "list {:?} exported selection {} without matching selected row",
+                        list.id, selection.item_id
+                    ));
+                }
+                (None, None) => {}
+            }
         }
 
         for selection in &self.selections {
@@ -3190,6 +3218,14 @@ impl UiSnapshot {
         self.messages
             .iter()
             .any(|message| message.content.contains(needle))
+    }
+
+    #[must_use]
+    pub fn selected_item_id(&self, list: ListId) -> Option<&str> {
+        self.selections
+            .iter()
+            .find(|selection| selection.list == list)
+            .map(|selection| selection.item_id.as_str())
     }
 
     #[must_use]
@@ -3652,6 +3688,114 @@ mod tests {
             .validate_invariants()
             .expect_err("row-index ids must be rejected")
             .contains("row-index item"));
+    }
+
+    #[test]
+    fn snapshot_selected_item_id_reads_canonical_selection_only() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(8)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "channel:canonical".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "channel:canonical".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert_eq!(
+            snapshot.selected_item_id(ListId::Channels),
+            Some("channel:canonical")
+        );
+        assert_eq!(snapshot.selected_item_id(ListId::Authorities), None);
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_selected_row_without_exported_selection() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(9)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: Vec::new(),
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![ListItemSnapshot {
+                    id: "channel:canonical".to_string(),
+                    selected: true,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: false,
+                }],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("selected row without exported selection must be rejected")
+            .contains("without exported selection"));
+    }
+
+    #[test]
+    fn snapshot_invariants_reject_mismatched_selected_row_and_exported_selection() {
+        let snapshot = UiSnapshot {
+            screen: ScreenId::Chat,
+            focused_control: None,
+            open_modal: None,
+            readiness: UiReadiness::Ready,
+            revision: next_projection_revision(Some(10)),
+            quiescence: QuiescenceSnapshot::settled(),
+            selections: vec![SelectionSnapshot {
+                list: ListId::Channels,
+                item_id: "channel:canonical".to_string(),
+            }],
+            lists: vec![ListSnapshot {
+                id: ListId::Channels,
+                items: vec![
+                    ListItemSnapshot {
+                        id: "channel:canonical".to_string(),
+                        selected: false,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
+                    },
+                    ListItemSnapshot {
+                        id: "channel:other".to_string(),
+                        selected: true,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
+                    },
+                ],
+            }],
+            messages: Vec::new(),
+            operations: Vec::new(),
+            toasts: Vec::new(),
+            runtime_events: Vec::new(),
+        };
+
+        assert!(snapshot
+            .validate_invariants()
+            .expect_err("mismatched selected row must be rejected")
+            .contains("diverges from exported selection"));
     }
 
     #[test]

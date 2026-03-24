@@ -311,6 +311,8 @@ fn build_authoritative_ui_snapshot(
     );
 
     if state.settings.section == SettingsSection::Devices {
+        // The TUI does not own an inline device-list selection on the Settings screen.
+        // Do not fabricate one from visible rows; remove-device flow uses the modal-owned selector.
         let device_items = semantic_inputs
             .settings_devices
             .iter()
@@ -507,4 +509,40 @@ pub fn maybe_export_ui_snapshot(
     let snapshot =
         build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
     publish_snapshot(&snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tui_harness_snapshot_exports_canonical_selection_for_parity_lists() {
+        let source = include_str!("snapshot.rs");
+
+        assert!(source.contains("ListId::Channels"));
+        assert!(source.contains("selected_channel_id.clone()"));
+        assert!(source.contains("ListId::Contacts"));
+        assert!(source.contains("selected_contact_id"));
+        assert!(source.contains("ListId::Homes"));
+        assert!(source.contains("selected_by_index(&home_ids, state.neighborhood.selected_home)"));
+        assert!(source.contains("ListId::Authorities"));
+        assert!(source.contains("selected_by_index(&authority_ids, state.current_authority_index)"));
+        assert!(source.contains("ListId::SettingsSections"));
+        assert!(source.contains("settings_section_ids"));
+    }
+
+    #[test]
+    fn tui_harness_snapshot_does_not_fabricate_device_selection_without_owned_state() {
+        let source = include_str!("snapshot.rs");
+        let devices_start = source
+            .find("if state.settings.section == SettingsSection::Devices {")
+            .unwrap_or_else(|| panic!("missing device snapshot branch"));
+        let devices_end = source[devices_start..]
+            .find("let toasts = state")
+            .map(|offset| devices_start + offset)
+            .unwrap_or(source.len());
+        let devices_block = &source[devices_start..devices_end];
+
+        assert!(devices_block.contains("ListId::Devices"));
+        assert!(devices_block.contains("selected: false"));
+        assert!(devices_block.contains("None,"));
+    }
 }
