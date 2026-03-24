@@ -36,8 +36,8 @@ pub struct SendGuardChain {
 }
 
 impl SendGuardChain {
-    pub fn authorization_requirement(&self) -> &str {
-        self.message_authorization.as_str()
+    pub fn authorization_requirement(&self) -> &CapabilityId {
+        &self.message_authorization
     }
 
     pub fn cost(&self) -> FlowCost {

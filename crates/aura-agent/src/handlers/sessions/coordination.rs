@@ -2,6 +2,7 @@
 //!
 //! Session coordination operations using choreography macros instead of manual patterns.
 
+use super::capabilities::SessionCoordinationCapability;
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
@@ -18,7 +19,7 @@ use aura_core::effects::{
 use aura_core::hash;
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::util::serialization::to_vec;
-use aura_core::{CapabilityName, FlowCost};
+use aura_core::FlowCost;
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
 use serde::{Deserialize, Serialize};
@@ -247,7 +248,7 @@ impl SessionOperations {
     async fn enforce_guard(
         &self,
         effects: &AuraEffectSystem,
-        operation: &str,
+        capability: SessionCoordinationCapability,
         cost: FlowCost,
     ) -> AgentResult<()> {
         // Skip guard enforcement in test/simulation mode
@@ -255,8 +256,7 @@ impl SessionOperations {
             return Ok(());
         }
         let guard = aura_guards::chain::create_send_guard(
-            CapabilityName::parse(operation)
-                .map_err(|e| AgentError::effects(format!("invalid guard capability: {e}")))?,
+            capability.as_name(),
             self.guard_context(),
             self.authority_context.authority_id(),
             cost,
@@ -266,11 +266,9 @@ impl SessionOperations {
             .await
             .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
         if !result.authorized {
-            return Err(AgentError::effects(
-                result
-                    .denial_reason
-                    .unwrap_or_else(|| format!("{operation} not authorized")),
-            ));
+            return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
+                || format!("{} not authorized", capability.as_name()),
+            )));
         }
         Ok(())
     }
@@ -320,8 +318,12 @@ impl SessionOperations {
         participants: Vec<DeviceId>,
         metadata: HashMap<String, serde_json::Value>,
     ) -> AgentResult<SessionHandle> {
-        self.enforce_guard(&self.effects, "session:create", FlowCost::new(100))
-            .await?;
+        self.enforce_guard(
+            &self.effects,
+            SessionCoordinationCapability::Create,
+            FlowCost::new(100),
+        )
+        .await?;
         let device_id = self.device_id();
         let _timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
 
@@ -463,8 +465,12 @@ impl SessionOperations {
                 continue;
             }
 
-            self.enforce_guard(effects, "session:invite", FlowCost::new(50))
-                .await?;
+            self.enforce_guard(
+                effects,
+                SessionCoordinationCapability::InviteParticipants,
+                FlowCost::new(50),
+            )
+            .await?;
 
             let invitation = ParticipantInvitation {
                 session_id: request.session_id,

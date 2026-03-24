@@ -7,18 +7,18 @@
 
 use aura_core::types::identifiers::{ContextId, InvitationId};
 use aura_core::util::test_utils::test_authority_id;
-use aura_core::CapabilityName;
 use aura_core::FlowCost;
-use aura_invitation::{GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
+use aura_invitation::{
+    capabilities::InvitationCapability, GuardSnapshot, InvitationConfig, InvitationService,
+    InvitationType,
+};
 
-fn snapshot_with_caps(caps: &[&str]) -> GuardSnapshot {
+fn snapshot_with_caps(caps: &[InvitationCapability]) -> GuardSnapshot {
     GuardSnapshot::new(
         test_authority_id(10),
         ContextId::new_from_entropy([20u8; 32]),
         FlowCost::new(10),
-        caps.iter()
-            .map(|c| CapabilityName::parse(c).expect("valid invitation test capability"))
-            .collect(),
+        caps.iter().map(InvitationCapability::as_name).collect(),
         0,
         1,
     )
@@ -28,7 +28,7 @@ fn snapshot_with_caps(caps: &[&str]) -> GuardSnapshot {
 fn prepare_send_invitation_allows_with_capabilities() {
     let svc = InvitationService::new(test_authority_id(1), InvitationConfig::default());
 
-    let snap = snapshot_with_caps(&["invitation:send"]);
+    let snap = snapshot_with_caps(&[InvitationCapability::Send]);
     let outcome = svc.prepare_send_invitation(
         &snap,
         test_authority_id(2),
@@ -56,7 +56,7 @@ fn prepare_accept_invitation_requires_capability() {
         "accept should be denied without capability"
     );
 
-    let snap_ok = snapshot_with_caps(&["invitation:accept"]);
+    let snap_ok = snapshot_with_caps(&[InvitationCapability::Accept]);
     let outcome_ok = svc.prepare_accept_invitation(&snap_ok, &invitation_id);
     assert!(
         outcome_ok.is_allowed(),

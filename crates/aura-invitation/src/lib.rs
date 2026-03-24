@@ -126,12 +126,10 @@ impl FromStr for InvitationOperation {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "invitation:send" | "send_invitation" => Ok(InvitationOperation::SendInvitation),
-            "invitation:accept" | "accept_invitation" => Ok(InvitationOperation::AcceptInvitation),
-            "invitation:decline" | "decline_invitation" => {
-                Ok(InvitationOperation::DeclineInvitation)
-            }
-            "invitation:cancel" | "cancel_invitation" => Ok(InvitationOperation::CancelInvitation),
+            "invitation:send" => Ok(InvitationOperation::SendInvitation),
+            "invitation:accept" => Ok(InvitationOperation::AcceptInvitation),
+            "invitation:decline" => Ok(InvitationOperation::DeclineInvitation),
+            "invitation:cancel" => Ok(InvitationOperation::CancelInvitation),
             "invitation:ceremony" => Ok(InvitationOperation::Ceremony),
             _ => Err("unknown invitation operation"),
         }

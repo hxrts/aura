@@ -3,6 +3,7 @@
 //! These tests verify that guard chains are properly configured with
 //! correct capabilities, flow costs, and operation IDs.
 
+use aura_consensus::capabilities::ConsensusCapability;
 use aura_consensus::protocol::{
     ConsensusResultGuard, ExecuteGuard, NonceCommitGuard, SignRequestGuard, SignShareGuard,
 };
@@ -19,7 +20,10 @@ fn test_execute_guard_configuration() {
     let guard = ExecuteGuard::new(context, peer);
     let chain = guard.create_guard_chain();
 
-    assert_eq!(chain.authorization_requirement(), "consensus:initiate");
+    assert_eq!(
+        chain.authorization_requirement(),
+        &ConsensusCapability::Initiate.as_name()
+    );
     assert_eq!(chain.cost(), FlowCost::from(100u32));
     assert_eq!(chain.context(), context);
     assert_eq!(chain.peer(), peer);
@@ -33,7 +37,10 @@ fn test_nonce_commit_guard_configuration() {
     let guard = NonceCommitGuard::new(context, coordinator);
     let chain = guard.create_guard_chain();
 
-    assert_eq!(chain.authorization_requirement(), "consensus:witness_nonce");
+    assert_eq!(
+        chain.authorization_requirement(),
+        &ConsensusCapability::WitnessNonce.as_name()
+    );
     assert_eq!(chain.cost(), FlowCost::from(50u32));
     assert_eq!(chain.context(), context);
     assert_eq!(chain.peer(), coordinator);
@@ -49,7 +56,7 @@ fn test_sign_request_guard_configuration() {
 
     assert_eq!(
         chain.authorization_requirement(),
-        "consensus:aggregate_nonces"
+        &ConsensusCapability::AggregateNonces.as_name()
     );
     assert_eq!(chain.cost(), FlowCost::from(75u32));
     assert_eq!(chain.context(), context);
@@ -64,7 +71,10 @@ fn test_sign_share_guard_configuration() {
     let guard = SignShareGuard::new(context, coordinator);
     let chain = guard.create_guard_chain();
 
-    assert_eq!(chain.authorization_requirement(), "consensus:witness_sign");
+    assert_eq!(
+        chain.authorization_requirement(),
+        &ConsensusCapability::WitnessSign.as_name()
+    );
     assert_eq!(chain.cost(), FlowCost::from(50u32));
     assert_eq!(chain.context(), context);
     assert_eq!(chain.peer(), coordinator);
@@ -78,7 +88,10 @@ fn test_consensus_result_guard_configuration() {
     let guard = ConsensusResultGuard::new(context, witness);
     let chain = guard.create_guard_chain();
 
-    assert_eq!(chain.authorization_requirement(), "consensus:finalize");
+    assert_eq!(
+        chain.authorization_requirement(),
+        &ConsensusCapability::Finalize.as_name()
+    );
     assert_eq!(chain.cost(), FlowCost::from(100u32));
     assert_eq!(chain.context(), context);
     assert_eq!(chain.peer(), witness);
@@ -140,34 +153,34 @@ fn test_authorization_requirements() {
     let execute = ExecuteGuard::new(context, peer);
     assert_eq!(
         execute.create_guard_chain().authorization_requirement(),
-        "consensus:initiate"
+        &ConsensusCapability::Initiate.as_name()
     );
 
     // NonceCommit: guard_capability="consensus:witness_nonce"
     let nonce = NonceCommitGuard::new(context, peer);
     assert_eq!(
         nonce.create_guard_chain().authorization_requirement(),
-        "consensus:witness_nonce"
+        &ConsensusCapability::WitnessNonce.as_name()
     );
 
     // SignRequest: guard_capability="consensus:aggregate_nonces"
     let sign_req = SignRequestGuard::new(context, peer);
     assert_eq!(
         sign_req.create_guard_chain().authorization_requirement(),
-        "consensus:aggregate_nonces"
+        &ConsensusCapability::AggregateNonces.as_name()
     );
 
     // SignShare: guard_capability="consensus:witness_sign"
     let sign_share = SignShareGuard::new(context, peer);
     assert_eq!(
         sign_share.create_guard_chain().authorization_requirement(),
-        "consensus:witness_sign"
+        &ConsensusCapability::WitnessSign.as_name()
     );
 
     // ConsensusResult: guard_capability="consensus:finalize"
     let result = ConsensusResultGuard::new(context, peer);
     assert_eq!(
         result.create_guard_chain().authorization_requirement(),
-        "consensus:finalize"
+        &ConsensusCapability::Finalize.as_name()
     );
 }

@@ -208,6 +208,7 @@ impl ConsensusResultGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::ConsensusCapability;
 
     fn test_context() -> ContextId {
         ContextId::new_from_entropy([1u8; 32])
@@ -222,7 +223,10 @@ mod tests {
         let guard = ExecuteGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:initiate");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::Initiate.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(100u32));
         assert_eq!(chain.context(), test_context());
         assert_eq!(chain.peer(), test_authority());
@@ -233,7 +237,10 @@ mod tests {
         let guard = NonceCommitGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:witness_nonce");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::WitnessNonce.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(50u32));
     }
 
@@ -244,7 +251,7 @@ mod tests {
 
         assert_eq!(
             chain.authorization_requirement(),
-            "consensus:aggregate_nonces"
+            &ConsensusCapability::AggregateNonces.as_name()
         );
         assert_eq!(chain.cost(), FlowCost::from(75u32));
     }
@@ -254,7 +261,10 @@ mod tests {
         let guard = SignShareGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:witness_sign");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::WitnessSign.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(50u32));
     }
 
@@ -263,7 +273,10 @@ mod tests {
         let guard = ConsensusResultGuard::new(test_context(), test_authority());
         let chain = guard.create_guard_chain();
 
-        assert_eq!(chain.authorization_requirement(), "consensus:finalize");
+        assert_eq!(
+            chain.authorization_requirement(),
+            &ConsensusCapability::Finalize.as_name()
+        );
         assert_eq!(chain.cost(), FlowCost::from(100u32));
     }
 }

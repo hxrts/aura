@@ -579,7 +579,7 @@ pub fn convert_send_guard_to_request(
     send_guard: &SendGuardChain,
     authority: AuthorityId,
 ) -> Result<GuardRequest> {
-    let operation = GuardOperationId::from(send_guard.authorization_requirement());
+    let operation = GuardOperationId::from(send_guard.authorization_requirement().as_str());
     let cost = send_guard.cost();
 
     let request = GuardRequest::new(authority, operation, cost)
