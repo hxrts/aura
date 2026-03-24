@@ -5,10 +5,10 @@
 
 #![allow(missing_docs)]
 use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
+use aura_amp::capabilities::AmpCapability;
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::FlowCost;
 use aura_guards::chain::SendGuardChain;
-use aura_guards::types::CapabilityId;
 use aura_simulator::handlers::effect_composer::factory::create_deterministic_environment;
 use aura_testkit::DeviceTestFixture;
 use uuid::Uuid;
@@ -31,7 +31,7 @@ async fn simulator_amp_guard_chain_is_deterministic() {
     let peer = AuthorityId::new_from_entropy([2u8; 32]);
 
     let guard = SendGuardChain::new(
-        CapabilityId::from("amp:send"),
+        AmpCapability::Send.as_name(),
         context,
         peer,
         FlowCost::new(1),

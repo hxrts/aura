@@ -140,7 +140,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(AuthenticationCapability::Request.as_name()),
+            &AuthenticationCapability::Request.as_name(),
         ) {
             return outcome;
         }
@@ -197,9 +197,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(
-                AuthenticationCapability::SubmitProof.as_name(),
-            ),
+            &AuthenticationCapability::SubmitProof.as_name(),
         ) {
             return outcome;
         }
@@ -253,9 +251,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(
-                AuthenticationCapability::CreateSession.as_name(),
-            ),
+            &AuthenticationCapability::CreateSession.as_name(),
         ) {
             return outcome;
         }
@@ -326,9 +322,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(
-                GuardianAuthCapability::RequestApproval.as_name(),
-            ),
+            &GuardianAuthCapability::RequestApproval.as_name(),
         ) {
             return outcome;
         }
@@ -342,18 +336,18 @@ impl AuthService {
         if policy.require_recovery_capability {
             match context.operation_type {
                 RecoveryOperationType::GuardianSetModification => {
-                    if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
-                        RecoveryAuthorizationCapability::Approve.as_name(),
-                    )) {
+                    if !snapshot
+                        .has_capability(&RecoveryAuthorizationCapability::Approve.as_name())
+                    {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
                         ));
                     }
                 }
                 RecoveryOperationType::EmergencyFreeze if !context.is_emergency => {
-                    if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
-                        RecoveryAuthorizationCapability::Initiate.as_name(),
-                    )) {
+                    if !snapshot
+                        .has_capability(&RecoveryAuthorizationCapability::Initiate.as_name())
+                    {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::EmergencyFreezeRequiresInitiateCapability.to_string(),
                         ));
@@ -416,7 +410,7 @@ impl AuthService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(GuardianAuthCapability::Verify.as_name()),
+            &GuardianAuthCapability::Verify.as_name(),
         ) {
             return outcome;
         }
@@ -480,9 +474,7 @@ impl AuthService {
         // Session revocation uses the create_session capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &aura_guards::types::CapabilityId::from(
-                AuthenticationCapability::CreateSession.as_name(),
-            ),
+            &AuthenticationCapability::CreateSession.as_name(),
         ) {
             return outcome;
         }
@@ -613,18 +605,17 @@ mod tests {
     }
 
     fn test_snapshot() -> GuardSnapshot {
-        use aura_guards::types::CapabilityId;
         GuardSnapshot::new(
             test_authority(),
             None,
             None,
             FlowCost::new(100),
             vec![
-                CapabilityId::from(AuthenticationCapability::Request.as_name()),
-                CapabilityId::from(AuthenticationCapability::SubmitProof.as_name()),
-                CapabilityId::from(AuthenticationCapability::CreateSession.as_name()),
-                CapabilityId::from(GuardianAuthCapability::RequestApproval.as_name()),
-                CapabilityId::from(GuardianAuthCapability::Verify.as_name()),
+                AuthenticationCapability::Request.as_name(),
+                AuthenticationCapability::SubmitProof.as_name(),
+                AuthenticationCapability::CreateSession.as_name(),
+                GuardianAuthCapability::RequestApproval.as_name(),
+                GuardianAuthCapability::Verify.as_name(),
             ],
             1,
             1000,

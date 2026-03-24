@@ -27,7 +27,6 @@ use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::{CapabilityName, DeviceId};
-use aura_guards::types::CapabilityId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -317,7 +316,7 @@ impl InvitationService {
         // Check base capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &CapabilityId::from(InvitationCapability::Send.as_name()),
+            &InvitationCapability::Send.as_name(),
         ) {
             return outcome;
         }
@@ -332,7 +331,7 @@ impl InvitationService {
             };
 
             if require_check {
-                let type_capability = CapabilityId::from(type_cap);
+                let type_capability = type_cap;
                 if let Some(outcome) = check_capability(snapshot, &type_capability) {
                     return outcome;
                 }
@@ -436,7 +435,7 @@ impl InvitationService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &CapabilityId::from(InvitationCapability::Accept.as_name()),
+            &InvitationCapability::Accept.as_name(),
         ) {
             return outcome;
         }
@@ -473,7 +472,7 @@ impl InvitationService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &CapabilityId::from(InvitationCapability::Decline.as_name()),
+            &InvitationCapability::Decline.as_name(),
         ) {
             return outcome;
         }
@@ -510,7 +509,7 @@ impl InvitationService {
         // Check capability
         if let Some(outcome) = check_capability(
             snapshot,
-            &CapabilityId::from(InvitationCapability::Cancel.as_name()),
+            &InvitationCapability::Cancel.as_name(),
         ) {
             return outcome;
         }
@@ -556,12 +555,12 @@ mod tests {
 
     fn full_capabilities() -> Vec<aura_guards::types::CapabilityId> {
         vec![
-            aura_guards::types::CapabilityId::from(InvitationCapability::Send.as_name()),
-            aura_guards::types::CapabilityId::from(InvitationCapability::Accept.as_name()),
-            aura_guards::types::CapabilityId::from(InvitationCapability::Decline.as_name()),
-            aura_guards::types::CapabilityId::from(InvitationCapability::Cancel.as_name()),
-            aura_guards::types::CapabilityId::from(InvitationCapability::Guardian.as_name()),
-            aura_guards::types::CapabilityId::from(InvitationCapability::Channel.as_name()),
+            InvitationCapability::Send.as_name(),
+            InvitationCapability::Accept.as_name(),
+            InvitationCapability::Decline.as_name(),
+            InvitationCapability::Cancel.as_name(),
+            InvitationCapability::Guardian.as_name(),
+            InvitationCapability::Channel.as_name(),
         ]
     }
 

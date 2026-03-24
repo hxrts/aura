@@ -7,8 +7,8 @@
 
 use aura_core::types::identifiers::{ContextId, InvitationId};
 use aura_core::util::test_utils::test_authority_id;
+use aura_core::CapabilityName;
 use aura_core::FlowCost;
-use aura_guards::types::CapabilityId;
 use aura_invitation::{GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
 
 fn snapshot_with_caps(caps: &[&str]) -> GuardSnapshot {
@@ -16,7 +16,9 @@ fn snapshot_with_caps(caps: &[&str]) -> GuardSnapshot {
         test_authority_id(10),
         ContextId::new_from_entropy([20u8; 32]),
         FlowCost::new(10),
-        caps.iter().map(|c| CapabilityId::from(*c)).collect(),
+        caps.iter()
+            .map(|c| CapabilityName::parse(c).expect("valid invitation test capability"))
+            .collect(),
         0,
         1,
     )

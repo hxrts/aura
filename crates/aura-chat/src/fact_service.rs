@@ -33,7 +33,7 @@ impl ChatFactService {
     ) -> GuardOutcome {
         if let Some(outcome) = check_capability(
             snapshot,
-            &crate::guards::types::CapabilityId::from(ChatCapability::ChannelCreate.as_name()),
+            &ChatCapability::ChannelCreate.as_name(),
         ) {
             return outcome;
         }
@@ -73,7 +73,7 @@ impl ChatFactService {
     ) -> GuardOutcome {
         if let Some(outcome) = check_capability(
             snapshot,
-            &crate::guards::types::CapabilityId::from(ChatCapability::MessageSend.as_name()),
+            &ChatCapability::MessageSend.as_name(),
         ) {
             return outcome;
         }
@@ -146,9 +146,7 @@ mod tests {
             AuthorityId::new_from_entropy([1u8; 32]),
             ContextId::new_from_entropy([2u8; 32]),
             FlowCost::new(10),
-            vec![crate::guards::types::CapabilityId::from(
-                ChatCapability::MessageSend.as_name(),
-            )],
+            vec![ChatCapability::MessageSend.as_name()],
             123,
         );
 
@@ -179,9 +177,7 @@ mod tests {
             AuthorityId::new_from_entropy([5u8; 32]),
             ContextId::new_from_entropy([6u8; 32]),
             FlowCost::new(10),
-            vec![crate::guards::types::CapabilityId::from(
-                ChatCapability::MessageSend.as_name(),
-            )],
+            vec![ChatCapability::MessageSend.as_name()],
             123,
         )
         .with_moderation_status(false, true);

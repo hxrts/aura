@@ -9,62 +9,8 @@
 use aura_core::{CapabilityName, FlowCost};
 use serde::{Deserialize, Serialize};
 
-/// Typed identifier for guard capabilities.
-///
-/// Capability names use a restricted character set: lowercase ASCII letters,
-/// digits, `_`, `-`, `:`. Names are normalized to lowercase on construction
-/// so comparison is case-insensitive.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CapabilityId(String);
-
-impl CapabilityId {
-    /// Create a new capability identifier, normalizing to lowercase.
-    ///
-    /// Prefer [`CapabilityId::from`] for string literals that are already
-    /// lowercase. This constructor normalizes but does not reject invalid
-    /// characters — use capability name validation at the Biscuit evaluation
-    /// boundary for defense-in-depth.
-    pub fn new(value: impl Into<String>) -> Self {
-        let normalized = value.into().to_ascii_lowercase();
-        Self(normalized)
-    }
-
-    /// Get the underlying string.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for CapabilityId {
-    fn from(value: String) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<&str> for CapabilityId {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<CapabilityName> for CapabilityId {
-    fn from(value: CapabilityName) -> Self {
-        Self(value.as_str().to_owned())
-    }
-}
-
-impl From<&CapabilityName> for CapabilityId {
-    fn from(value: &CapabilityName) -> Self {
-        Self(value.as_str().to_owned())
-    }
-}
-
-impl std::fmt::Display for CapabilityId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+/// Guard capability identifiers are validated Aura capability names.
+pub type CapabilityId = CapabilityName;
 
 /// Structured guard violation reasons.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,7 +150,7 @@ impl<C> GuardOutcome<C> {
 /// Minimal capability query contract required by `check_capability`.
 pub trait CapabilitySnapshot {
     /// Returns `true` if the snapshot contains `cap`.
-    fn has_capability(&self, cap: &CapabilityId) -> bool;
+    fn has_capability(&self, cap: &CapabilityName) -> bool;
 }
 
 /// Minimal budget query contract required by `check_flow_budget`.
@@ -214,7 +160,10 @@ pub trait FlowBudgetSnapshot {
 }
 
 /// Check capability and return denied outcome if missing.
-pub fn check_capability<S, C>(snapshot: &S, required_cap: &CapabilityId) -> Option<GuardOutcome<C>>
+pub fn check_capability<S, C>(
+    snapshot: &S,
+    required_cap: &CapabilityName,
+) -> Option<GuardOutcome<C>>
 where
     S: CapabilitySnapshot,
 {

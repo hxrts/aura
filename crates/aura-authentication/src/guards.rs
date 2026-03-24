@@ -474,9 +474,7 @@ pub fn check_recovery_operation(
     match operation_type {
         RecoveryOperationType::GuardianSetModification => {
             // Guardian set modifications require explicit capability
-            if !snapshot.has_capability(&types::CapabilityId::from(
-                RecoveryAuthorizationCapability::Approve.as_name(),
-            )) {
+            if !snapshot.has_capability(&RecoveryAuthorizationCapability::Approve.as_name()) {
                 return Some(deny(GuardReject {
                     code: "guardian-set-approval-required",
                     category: "auth",
@@ -486,9 +484,7 @@ pub fn check_recovery_operation(
         }
         RecoveryOperationType::EmergencyFreeze => {
             // Emergency freeze requires emergency flag or explicit capability
-            if !snapshot.has_capability(&types::CapabilityId::from(
-                RecoveryAuthorizationCapability::Initiate.as_name(),
-            )) {
+            if !snapshot.has_capability(&RecoveryAuthorizationCapability::Initiate.as_name()) {
                 return Some(deny(GuardReject {
                     code: "emergency-freeze-requires-capability",
                     category: "auth",
@@ -515,7 +511,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             // Check capability
             if let Some(outcome) = check_capability(
                 snapshot,
-                &types::CapabilityId::from(AuthenticationCapability::Request.as_name()),
+                &AuthenticationCapability::Request.as_name(),
             ) {
                 return outcome;
             }
@@ -547,7 +543,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             // Check capability
             if let Some(outcome) = check_capability(
                 snapshot,
-                &types::CapabilityId::from(AuthenticationCapability::SubmitProof.as_name()),
+                &AuthenticationCapability::SubmitProof.as_name(),
             ) {
                 return outcome;
             }
@@ -577,7 +573,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             // Check capability
             if let Some(outcome) = check_capability(
                 snapshot,
-                &types::CapabilityId::from(AuthenticationCapability::Verify.as_name()),
+                &AuthenticationCapability::Verify.as_name(),
             ) {
                 return outcome;
             }
@@ -605,7 +601,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             // Check capability
             if let Some(outcome) = check_capability(
                 snapshot,
-                &types::CapabilityId::from(AuthenticationCapability::CreateSession.as_name()),
+                &AuthenticationCapability::CreateSession.as_name(),
             ) {
                 return outcome;
             }
@@ -643,7 +639,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             // Check capability
             if let Some(outcome) = check_capability(
                 snapshot,
-                &types::CapabilityId::from(GuardianAuthCapability::RequestApproval.as_name()),
+                &GuardianAuthCapability::RequestApproval.as_name(),
             ) {
                 return outcome;
             }
@@ -689,7 +685,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             // Check capability
             if let Some(outcome) = check_capability(
                 snapshot,
-                &types::CapabilityId::from(GuardianAuthCapability::Verify.as_name()),
+                &GuardianAuthCapability::Verify.as_name(),
             ) {
                 return outcome;
             }
@@ -744,10 +740,10 @@ mod tests {
             None,
             FlowCost::new(100),
             vec![
-                types::CapabilityId::from(AuthenticationCapability::Request.as_name()),
-                types::CapabilityId::from(AuthenticationCapability::SubmitProof.as_name()),
-                types::CapabilityId::from(AuthenticationCapability::Verify.as_name()),
-                types::CapabilityId::from(AuthenticationCapability::CreateSession.as_name()),
+                AuthenticationCapability::Request.as_name(),
+                AuthenticationCapability::SubmitProof.as_name(),
+                AuthenticationCapability::Verify.as_name(),
+                AuthenticationCapability::CreateSession.as_name(),
             ],
             1,
             1000,
@@ -757,15 +753,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(&types::CapabilityId::from(
-            AuthenticationCapability::Request.as_name()
-        )));
-        assert!(snapshot.has_capability(&types::CapabilityId::from(
-            AuthenticationCapability::SubmitProof.as_name()
-        )));
-        assert!(!snapshot.has_capability(&types::CapabilityId::from(
-            GuardianAuthCapability::RequestApproval.as_name()
-        )));
+        assert!(snapshot.has_capability(&AuthenticationCapability::Request.as_name()));
+        assert!(snapshot.has_capability(&AuthenticationCapability::SubmitProof.as_name()));
+        assert!(!snapshot.has_capability(&GuardianAuthCapability::RequestApproval.as_name()));
     }
 
     #[test]
@@ -816,7 +806,7 @@ mod tests {
         let snapshot = test_snapshot();
         let result = check_capability(
             &snapshot,
-            &types::CapabilityId::from(AuthenticationCapability::Request.as_name()),
+            &AuthenticationCapability::Request.as_name(),
         );
         assert!(result.is_none());
     }
@@ -826,7 +816,7 @@ mod tests {
         let snapshot = test_snapshot();
         let result = check_capability(
             &snapshot,
-            &types::CapabilityId::from(GuardianAuthCapability::RequestApproval.as_name()),
+            &GuardianAuthCapability::RequestApproval.as_name(),
         );
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());

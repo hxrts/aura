@@ -345,7 +345,17 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             }
         };
 
-        let capability = CapabilityId::from(request.operation.to_string());
+        let capability = match CapabilityId::try_from(request.operation.to_string()) {
+            Ok(capability) => capability,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Invalid guard capability name"
+                );
+                return false;
+            }
+        };
         match evaluator.check_guard(&token, &capability, &resource, now_secs) {
             Ok(authorized) => authorized,
             Err(err) => {
@@ -897,7 +907,8 @@ mod tests {
         let cost = FlowCost::new(42);
 
         let guard = SendGuardChain::new(
-            CapabilityId::from(message_authorization),
+            CapabilityId::try_from(message_authorization)
+                .expect("send guard authorization uses valid capability grammar"),
             context,
             peer,
             cost,

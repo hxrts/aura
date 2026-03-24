@@ -30,7 +30,7 @@ use aura_core::time::{OrderingPolicy, PhysicalTime, TimeOrdering, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::util::serialization::to_vec;
 use aura_core::{Hash32, Prestate};
-use aura_guards::{types::CapabilityId, GuardContextProvider};
+use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{
@@ -279,8 +279,8 @@ impl ChatServiceApi {
         // The current runtime treats guard capabilities as permissive; we provide the required
         // typed names so guards can evolve without reopening raw-string call sites.
         let capabilities = vec![
-            CapabilityId::from(ChatCapability::ChannelCreate.as_name()),
-            CapabilityId::from(ChatCapability::MessageSend.as_name()),
+            ChatCapability::ChannelCreate.as_name(),
+            ChatCapability::MessageSend.as_name(),
         ];
         let committed_facts = self
             .effects

@@ -1618,8 +1618,7 @@ mod tests {
     use aura_core::time::PhysicalTime;
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
-    use aura_guards::types::CapabilityId;
-    use aura_rendezvous::GuardSnapshot;
+    use aura_rendezvous::{capabilities::RendezvousCapability, GuardSnapshot};
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -1639,8 +1638,8 @@ mod tests {
             context_id: context,
             flow_budget_remaining: FlowCost::new(1000),
             capabilities: vec![
-                CapabilityId::from("rendezvous:publish"),
-                CapabilityId::from("rendezvous:connect"),
+                RendezvousCapability::Publish.as_name(),
+                RendezvousCapability::Connect.as_name(),
             ],
             epoch: 1,
         }

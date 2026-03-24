@@ -12,10 +12,10 @@
 //! - SignShare: guard_capability="witness_sign", flow_cost=50, leak="pipelined_commitment"
 //! - ConsensusResult: guard_capability="finalize_consensus", flow_cost=100, journal_facts="consensus_complete"
 
+use crate::capabilities::ConsensusCapability;
 use aura_core::{AuraResult, AuthorityId, ContextId, FlowCost};
 use aura_guards::{
-    CapabilityId, GuardContextProvider, GuardEffects, LeakageBudget, SendGuardChain,
-    SendGuardResult,
+    GuardContextProvider, GuardEffects, LeakageBudget, SendGuardChain, SendGuardResult,
 };
 
 /// Guard configuration for Execute message (Coordinator -> Witness)
@@ -33,7 +33,7 @@ impl ExecuteGuard {
     /// Annotations: guard_capability="initiate_consensus", flow_cost=100
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:initiate"),
+            ConsensusCapability::Initiate.as_name(),
             self.context,
             self.peer,
             FlowCost::from(100u32),
@@ -66,7 +66,7 @@ impl NonceCommitGuard {
     /// Annotations: guard_capability="witness_nonce", flow_cost=50
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:witness_nonce"),
+            ConsensusCapability::WitnessNonce.as_name(),
             self.context,
             self.peer,
             FlowCost::from(50u32),
@@ -99,7 +99,7 @@ impl SignRequestGuard {
     /// Annotations: guard_capability="aggregate_nonces", flow_cost=75
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:aggregate_nonces"),
+            ConsensusCapability::AggregateNonces.as_name(),
             self.context,
             self.peer,
             FlowCost::from(75u32),
@@ -138,7 +138,7 @@ impl SignShareGuard {
         let leakage = LeakageBudget::new(0, 32, 0);
 
         SendGuardChain::new(
-            CapabilityId::from("consensus:witness_sign"),
+            ConsensusCapability::WitnessSign.as_name(),
             self.context,
             self.peer,
             FlowCost::from(50u32),
@@ -187,7 +187,7 @@ impl ConsensusResultGuard {
     /// See: `aura-agent/src/runtime_bridge/consensus.rs` for the implementation.
     pub fn create_guard_chain(&self) -> SendGuardChain {
         SendGuardChain::new(
-            CapabilityId::from("consensus:finalize"),
+            ConsensusCapability::Finalize.as_name(),
             self.context,
             self.peer,
             FlowCost::from(100u32),

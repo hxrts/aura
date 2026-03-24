@@ -289,7 +289,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(RendezvousCapability::Publish.as_name()),
+            &RendezvousCapability::Publish.as_name(),
         ) {
             return outcome;
         }
@@ -369,7 +369,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
+            &RendezvousCapability::Connect.as_name(),
         ) {
             return Ok(outcome);
         }
@@ -480,7 +480,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
+            &RendezvousCapability::Connect.as_name(),
         ) {
             return Ok((outcome, None));
         }
@@ -640,7 +640,7 @@ impl RendezvousService {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
-            &types::CapabilityId::from(RendezvousCapability::Relay.as_name()),
+            &RendezvousCapability::Relay.as_name(),
         ) {
             return outcome;
         }
@@ -696,8 +696,8 @@ mod tests {
             context_id: test_context(),
             flow_budget_remaining: FlowCost::new(100),
             capabilities: vec![
-                types::CapabilityId::from(RendezvousCapability::Publish.as_name()),
-                types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
+                RendezvousCapability::Publish.as_name(),
+                RendezvousCapability::Connect.as_name(),
             ],
             epoch: 1,
         }

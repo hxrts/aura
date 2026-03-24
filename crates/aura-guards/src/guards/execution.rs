@@ -53,7 +53,8 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
     let mut total_flow_consumed = 0;
     let mut max_delegation_depth: Option<u32> = None;
     let mut context = GuardVerificationContext::new(
-        CapabilityId::from(guard.operation_id.to_string()),
+        CapabilityId::try_from(guard.operation_id.to_string())
+            .expect("guard operation ids use valid capability grammar"),
         ResourceScope::Authority {
             authority_id: guard.authority_id,
             operation: AuthorityOp::UpdateTree,

@@ -31,7 +31,7 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::FlowCost;
+use aura_core::{CapabilityName, FlowCost};
 use aura_core::TimeoutBudget;
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
@@ -528,12 +528,17 @@ where
                     "Evaluating guard chain for choreography send"
                 );
 
-                let mut guard = SendGuardChain::new(
-                    aura_guards::guards::CapabilityId::from(guard_req.capability.as_str()),
-                    context_id,
-                    peer,
-                    guard_req.flow_cost,
-                );
+                let capability = CapabilityName::parse(guard_req.capability.as_str()).map_err(
+                    |error| AuraChoreographyError::AuthorizationFailed {
+                        reason: format!(
+                            "invalid choreography guard capability {}: {error}",
+                            guard_req.capability
+                        ),
+                    },
+                )?;
+
+                let mut guard =
+                    SendGuardChain::new(capability, context_id, peer, guard_req.flow_cost);
 
                 if let Some(ref leakage) = guard_req.leakage_budget {
                     guard = guard.with_leakage_budget(leakage.clone());

@@ -18,7 +18,7 @@ use aura_core::effects::{
 use aura_core::hash;
 use aura_core::types::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::util::serialization::to_vec;
-use aura_core::FlowCost;
+use aura_core::{CapabilityName, FlowCost};
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
 use serde::{Deserialize, Serialize};
@@ -255,7 +255,8 @@ impl SessionOperations {
             return Ok(());
         }
         let guard = aura_guards::chain::create_send_guard(
-            aura_guards::types::CapabilityId::from(operation),
+            CapabilityName::parse(operation)
+                .map_err(|e| AgentError::effects(format!("invalid guard capability: {e}")))?,
             self.guard_context(),
             self.authority_context.authority_id(),
             cost,

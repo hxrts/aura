@@ -41,11 +41,13 @@ use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
 use aura_core::Receipt;
+use aura_core::CapabilityName;
 use aura_core::{
     execute_with_retry_budget, execute_with_timeout_budget, ExponentialBackoffPolicy,
     RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
 };
 use aura_guards::types::CapabilityId;
+use aura_invitation::capabilities::evaluation_candidates_for_invitation_guard;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
@@ -118,16 +120,6 @@ const INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS: u64 = 15_000;
 const INVITATION_ACCEPT_CHOREOGRAPHY_STAGE_TIMEOUT_MS: u64 = 30_000;
 const INVITATION_VM_LOOP_TIMEOUT_MS: u64 = 30_000;
 const DESCRIPTOR_VALIDITY_WINDOW_MS: u64 = 86_400_000; // 24h
-
-const INVITATION_CAPABILITY_NAMES: [&str; 7] = [
-    "invitation:send",
-    "invitation:accept",
-    "invitation:decline",
-    "invitation:cancel",
-    "invitation:guardian",
-    "invitation:channel",
-    "invitation:device",
-];
 
 fn invitation_timeout_profile(effects: &AuraEffectSystem) -> TimeoutExecutionProfile {
     if effects.is_testing() {
@@ -452,9 +444,9 @@ impl InvitationHandler {
     }
 
     fn full_invitation_capabilities() -> Vec<CapabilityId> {
-        INVITATION_CAPABILITY_NAMES
+        evaluation_candidates_for_invitation_guard()
             .iter()
-            .map(|capability| CapabilityId::from(*capability))
+            .map(|capability| capability.as_name())
             .collect()
     }
 
@@ -519,16 +511,21 @@ impl InvitationHandler {
         };
 
         let current_time_seconds = Self::invitation_capability_check_timestamp_seconds(now_ms);
-        INVITATION_CAPABILITY_NAMES
+        evaluation_candidates_for_invitation_guard()
             .iter()
             .filter_map(|capability| {
-                match bridge.has_capability_with_time(&token, capability, current_time_seconds) {
-                    Ok(true) => Some(CapabilityId::from(*capability)),
+                let capability_name: CapabilityName = capability.as_name();
+                match bridge.has_capability_with_time(
+                    &token,
+                    capability_name.as_str(),
+                    current_time_seconds,
+                ) {
+                    Ok(true) => Some(capability_name),
                     Ok(false) => None,
                     Err(error) => {
                         tracing::warn!(
                             authority = %self.context.authority.authority_id(),
-                            capability,
+                            capability = capability_name.as_str(),
                             error = %error,
                             "failed to evaluate invitation Biscuit capability"
                         );

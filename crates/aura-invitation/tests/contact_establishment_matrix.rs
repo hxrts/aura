@@ -7,8 +7,10 @@
 
 use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::FlowCost;
-use aura_guards::types::CapabilityId;
-use aura_invitation::{guards::GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
+use aura_invitation::{
+    capabilities::InvitationCapability, guards::GuardSnapshot, InvitationConfig, InvitationService,
+    InvitationType,
+};
 
 #[derive(Clone, Copy, Debug)]
 enum AuthorityClass {
@@ -47,7 +49,7 @@ fn snapshot_with_send_cap(auth: AuthorityId, ctx: ContextId) -> GuardSnapshot {
         auth,
         ctx,
         FlowCost::new(50),
-        vec![CapabilityId::from("invitation:send")],
+        vec![InvitationCapability::Send.as_name()],
         0,
         1_700_000_000_000,
     )

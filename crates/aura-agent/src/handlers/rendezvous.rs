@@ -23,8 +23,8 @@ use aura_core::hash::hash;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
+use aura_rendezvous::capabilities::RendezvousCapability;
 use aura_guards::chain::create_send_guard;
-use aura_guards::types::CapabilityId;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
@@ -139,7 +139,7 @@ impl RendezvousHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("rendezvous:publish_descriptor"),
+            RendezvousCapability::Publish.as_name(),
             context_id,
             self.context.authority.authority_id(),
             FlowCost::new(1), // Low cost for descriptor publication
@@ -288,7 +288,7 @@ impl RendezvousHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("rendezvous:initiate_channel"),
+            RendezvousCapability::Connect.as_name(),
             context_id,
             self.context.authority.authority_id(),
             FlowCost::new(2), // Handshake cost
@@ -427,7 +427,7 @@ impl RendezvousHandler {
 
         // Enforce guard chain
         let guard = create_send_guard(
-            CapabilityId::from("rendezvous:relay_request"),
+            RendezvousCapability::Relay.as_name(),
             context_id,
             self.context.authority.authority_id(),
             FlowCost::new(2), // Relay request cost
@@ -486,9 +486,9 @@ impl RendezvousHandler {
             context_id,
             flow_budget_remaining: FlowCost::new(1000), // Default budget
             capabilities: vec![
-                CapabilityId::from("rendezvous:publish"),
-                CapabilityId::from("rendezvous:connect"),
-                CapabilityId::from("rendezvous:relay"),
+                RendezvousCapability::Publish.as_name(),
+                RendezvousCapability::Connect.as_name(),
+                RendezvousCapability::Relay.as_name(),
             ],
             epoch: effects.current_timestamp().await.unwrap_or(0) / 1000, // Epoch in seconds
         })

@@ -48,9 +48,9 @@ fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
         context_id: context,
         flow_budget_remaining: FlowCost::new(1000),
         capabilities: vec![
-            aura_guards::types::CapabilityId::from(RendezvousCapability::Publish.as_name()),
-            aura_guards::types::CapabilityId::from(RendezvousCapability::Connect.as_name()),
-            aura_guards::types::CapabilityId::from(RendezvousCapability::Relay.as_name()),
+            RendezvousCapability::Publish.as_name(),
+            RendezvousCapability::Connect.as_name(),
+            RendezvousCapability::Relay.as_name(),
         ],
         epoch: 1,
     }
@@ -571,9 +571,7 @@ async fn test_missing_capability_blocks_connect() {
 
     // Snapshot WITHOUT connect capability
     let mut snapshot = test_snapshot(alice, context);
-    snapshot.capabilities = vec![aura_guards::types::CapabilityId::from(
-        RendezvousCapability::Publish.as_name(),
-    )]; // Only publish
+    snapshot.capabilities = vec![RendezvousCapability::Publish.as_name()]; // Only publish
     let mock_effects = MockNoise;
 
     let result = service

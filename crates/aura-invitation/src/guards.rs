@@ -272,8 +272,8 @@ mod tests {
             test_context(),
             FlowCost::new(100),
             vec![
-                types::CapabilityId::from(InvitationCapability::Send.as_name()),
-                types::CapabilityId::from(InvitationCapability::Accept.as_name()),
+                InvitationCapability::Send.as_name(),
+                InvitationCapability::Accept.as_name(),
             ],
             1,
             1000,
@@ -283,15 +283,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(&types::CapabilityId::from(
-            InvitationCapability::Send.as_name()
-        )));
-        assert!(snapshot.has_capability(&types::CapabilityId::from(
-            InvitationCapability::Accept.as_name()
-        )));
-        assert!(!snapshot.has_capability(&types::CapabilityId::from(
-            InvitationCapability::Guardian.as_name()
-        )));
+        assert!(snapshot.has_capability(&InvitationCapability::Send.as_name()));
+        assert!(snapshot.has_capability(&InvitationCapability::Accept.as_name()));
+        assert!(!snapshot.has_capability(&InvitationCapability::Guardian.as_name()));
     }
 
     #[test]
@@ -340,20 +334,14 @@ mod tests {
     #[test]
     fn test_check_capability_success() {
         let snapshot = test_snapshot();
-        let result = check_capability(
-            &snapshot,
-            &types::CapabilityId::from(InvitationCapability::Send.as_name()),
-        );
+        let result = check_capability(&snapshot, &InvitationCapability::Send.as_name());
         assert!(result.is_none()); // None means check passed
     }
 
     #[test]
     fn test_check_capability_failure() {
         let snapshot = test_snapshot();
-        let result = check_capability(
-            &snapshot,
-            &types::CapabilityId::from(InvitationCapability::Guardian.as_name()),
-        );
+        let result = check_capability(&snapshot, &InvitationCapability::Guardian.as_name());
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
     }

@@ -187,40 +187,33 @@ fn empty_capability_always_rejected() {
 }
 
 // ============================================================================
-// Contract 2: CapabilityId normalization
+// Contract 2: CapabilityId validation
 //
-// Security property: case differences cannot create distinct capabilities
-// that bypass equality checks in the guard snapshot.
+// Security property: invalid or mixed-case names are rejected rather than
+// normalized into a different capability.
 // ============================================================================
 
 proptest! {
-    /// CapabilityId normalizes to lowercase, so mixed-case inputs
-    /// compare equal to their lowercase equivalents.
+    /// Mixed-case capability names are rejected.
     #[test]
-    fn capability_id_normalizes_case(
+    fn capability_id_rejects_mixed_case(
         a in alpha_name(1, 8),
         b in alpha_name(1, 8),
     ) {
         let mixed = format!("{}:{}", a.to_uppercase(), b);
-        let lower = format!("{}:{}", a, b);
-        prop_assert_eq!(
-            CapabilityId::from(mixed.clone()),
-            CapabilityId::from(lower.clone()),
-            "CapabilityId({:?}) should equal CapabilityId({:?})",
-            mixed,
-            lower
+        prop_assert!(
+            CapabilityId::try_from(mixed.clone()).is_err(),
+            "CapabilityId({mixed:?}) should be rejected",
         );
     }
 
-    /// The stored string is always lowercase.
+    /// Uppercase capability names are rejected.
     #[test]
-    fn capability_id_stored_lowercase(name in alpha_name(1, 16)) {
+    fn capability_id_rejects_uppercase(name in alpha_name(1, 16)) {
         let upper = name.to_uppercase();
-        let id = CapabilityId::from(upper);
         prop_assert!(
-            id.as_str().chars().all(|c| !c.is_ascii_uppercase()),
-            "CapabilityId should be lowercase, got: {:?}",
-            id.as_str()
+            CapabilityId::try_from(upper.clone()).is_err(),
+            "CapabilityId should reject uppercase input, got: {upper:?}",
         );
     }
 }
