@@ -29,7 +29,7 @@ pub const MAX_AGENT_PAYLOAD_BYTES: usize = 65536;
 
 use crate::{
     types::identifiers::{AccountId, DeviceId, SessionId},
-    AuraResult as Result,
+    AuraResult as Result, CapabilityName,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -361,7 +361,7 @@ pub struct ChoreographyConfig {
     /// Protocol namespace
     pub namespace: String,
     /// Guard capabilities required
-    pub guard_capabilities: Vec<String>,
+    pub guard_capabilities: Vec<CapabilityName>,
     /// Flow budget limits
     pub flow_budget: Option<u64>,
     /// Journal facts to record
@@ -385,7 +385,7 @@ pub struct ChoreographicMessage {
     pub payload: Vec<u8>,
     pub timestamp: u64,
     pub sequence_number: u64,
-    pub guard_capabilities: Vec<String>,
+    pub guard_capabilities: Vec<CapabilityName>,
 }
 
 /// Configuration management effects for device settings

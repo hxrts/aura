@@ -1629,7 +1629,7 @@ mod tests {
 
     #[test]
     fn ownership_error_exposes_domain_code_and_aura_mapping() {
-        let error = OwnershipError::missing_capability("invitation:create");
+        let error = OwnershipError::missing_capability("invitation:send");
         assert_eq!(error.domain(), OwnershipErrorDomain::Capability);
         assert_eq!(error.code(), "missing_capability");
 

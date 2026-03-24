@@ -27,20 +27,20 @@ protocol GuardianMembershipChange =
 
   -- Phase 2: Guardians cast votes
   -- Link: imports proposal endpoint, exports vote endpoint
-  Guardian1 { guard_capability = "recovery:membership_change:vote,recovery:membership_change:verify_proposal"
+  Guardian1 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
             , journal_facts = "membership_vote_cast"
             , leakage_budget = "0, 1, 0"
             , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
-  Guardian2 { guard_capability = "recovery:membership_change:vote,recovery:membership_change:verify_proposal"
+  Guardian2 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
             , journal_facts = "membership_vote_cast"
             , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }
     -> ChangeInitiator : CastVote of crate.guardian_membership.GuardianVote
 
-  Guardian3 { guard_capability = "recovery:membership_change:vote,recovery:membership_change:verify_proposal"
+  Guardian3 { guard_capability = "recovery:membership_change:vote"
             , flow_cost = 220
             , journal_facts = "membership_vote_cast"
             , link = "bundle=guardian_handoff|exports=guardian_handoff.proposal,guardian_handoff.vote|imports=guardian_handoff.proposal" }

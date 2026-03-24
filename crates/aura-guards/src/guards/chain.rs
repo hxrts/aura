@@ -345,7 +345,7 @@ impl SendGuardChain {
 /// use aura_guards::send_guard::create_send_guard;
 ///
 /// let guard = create_send_guard(
-///     aura_core::capability_name!("message:send"), // authorization requirement
+///     aura_core::capability_name!("chat:message:send"), // authorization requirement
 ///     context_id,
 ///     peer_device,
 ///     100, // flow cost
@@ -397,7 +397,7 @@ mod tests {
     /// Constructor and builder populate all fields correctly.
     #[tokio::test]
     async fn test_send_guard_chain_creation() {
-        let authorization = aura_core::capability_name!("message:send");
+        let authorization = aura_core::capability_name!("chat:message:send");
         let context = test_context();
         let peer = test_peer();
         let cost: FlowCost = 100.into();
@@ -418,7 +418,7 @@ mod tests {
     /// Convenience factory produces the same result as the full constructor.
     #[tokio::test]
     async fn test_create_send_guard_convenience() {
-        let authorization = aura_core::capability_name!("message:send");
+        let authorization = aura_core::capability_name!("chat:message:send");
         let context = test_context();
         let peer = test_peer();
         let cost: FlowCost = 50.into();
@@ -434,7 +434,7 @@ mod tests {
     /// Denial reason string includes the correct failure cause(s).
     #[tokio::test]
     async fn test_denial_reason_formatting() {
-        let authorization = aura_core::capability_name!("message:send");
+        let authorization = aura_core::capability_name!("chat:message:send");
         let context = test_context();
         let peer = test_peer();
         let guard = SendGuardChain::new(authorization, context, peer, 100.into());

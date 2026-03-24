@@ -5,7 +5,7 @@ protocol SimpleSessionChoreography =
 
   -- Phase 1: Coordinator invites participants
   Coordinator { parallel = true
-              , guard_capability = "create_session"
+              , guard_capability = "example:create_session"
               , flow_cost = 100
               , journal_facts = "session_created" }
     -> Participants[*] : SessionInvitation of crate.SessionInvitation
@@ -14,21 +14,21 @@ protocol SimpleSessionChoreography =
   choice at Participants[*]
     | accept ->
         Participants[*] { parallel = true
-                        , guard_capability = "join_session"
+                        , guard_capability = "example:join_session"
                         , flow_cost = 50
                         , journal_facts = "session_joined" }
           -> Coordinator : SessionAccepted of crate.SessionAccepted
 
     | decline ->
         Participants[*] { parallel = true
-                        , guard_capability = "decline_session"
+                        , guard_capability = "example:decline_session"
                         , flow_cost = 25
                         , journal_facts = "session_declined" }
           -> Coordinator : SessionDeclined of crate.SessionDeclined
 
   -- Phase 3: Activate session
   Coordinator { parallel = true
-              , guard_capability = "activate_session"
+              , guard_capability = "example:activate_session"
               , flow_cost = 75
               , journal_facts = "session_activated" }
     -> Participants[*] : SessionActivated of crate.SessionActivated
@@ -38,24 +38,24 @@ protocol SimpleSessionChoreography =
     choice at Coordinator
       | broadcast ->
           Coordinator { parallel = true
-                       , guard_capability = "broadcast_message"
+                       , guard_capability = "example:broadcast_message"
                        , flow_cost = 25 }
             -> Participants[*] : BroadcastMessage of crate.BroadcastMessage
 
       | status_check ->
           Coordinator { parallel = true
-                       , guard_capability = "check_status"
+                       , guard_capability = "example:check_status"
                        , flow_cost = 10 }
             -> Participants[*] : StatusCheck of crate.StatusCheck
 
           Participants[*] { parallel = true
-                          , guard_capability = "report_status"
+                          , guard_capability = "example:report_status"
                           , flow_cost = 15 }
             -> Coordinator : StatusReport of crate.StatusReport
 
       | end_session ->
           Coordinator { parallel = true
-                       , guard_capability = "end_session"
+                       , guard_capability = "example:end_session"
                        , flow_cost = 100
                        , journal_facts = "session_ended" }
             -> Participants[*] : SessionEnded of crate.SessionEnded

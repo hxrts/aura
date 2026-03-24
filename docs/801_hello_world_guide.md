@@ -96,16 +96,17 @@ choreography! {
     protocol HelloWorld {
         roles: Alice, Bob;
 
-        Alice[guard_capability = "send_ping", flow_cost = 10]
+        Alice[guard_capability = "hello_world:send_ping", flow_cost = 10]
         -> Bob: SendPing(Ping);
 
-        Bob[guard_capability = "send_pong", flow_cost = 10, journal_facts = "pong_sent"]
+        Bob[guard_capability = "hello_world:send_pong", flow_cost = 10, journal_facts = "pong_sent"]
         -> Alice: SendPong(Pong);
     }
 }
 ```
 
 The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. [Guard capabilities](106_authorization.md) control access and flow costs manage rate limiting.
+Outside the choreography DSL boundary, first-party Rust code should use typed capability families or `capability_name!` rather than hand-written capability strings.
 
 Implement the Alice session:
 

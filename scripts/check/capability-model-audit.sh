@@ -30,13 +30,13 @@ run_group() {
 
 run_group \
   "Product Choreography Vocabulary Drift" \
-  'guard_capability = "session:[^"]+"|guard_capability = "[^"]*,[^"]+"' \
+  'guard_capability = "[^"]*,[^"]+"' \
   -g '*.choreo' \
   crates
 
 run_group \
   "Docs, Examples, and .claude Legacy Capability Guidance" \
-  '"send_ping"|"send_pong"|guard_capability = "send_request"|guard_capability = "respond"|permission_name|"create_session"|"join_session"|"decline_session"|"activate_session"|"broadcast_message"|"check_status"|"report_status"|"end_session"|`end_session`' \
+  '"send_ping"|"send_pong"|guard_capability = "send_request"|guard_capability = "respond"|permission_name|"create_session"|"join_session"|"decline_session"|"activate_session"|"broadcast_message"|"check_status"|"report_status"|"end_session"' \
   -g '*.md' \
   -g '*.rs' \
   -g '*.choreo' \

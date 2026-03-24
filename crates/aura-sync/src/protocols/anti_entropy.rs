@@ -461,16 +461,16 @@ impl AntiEntropyProtocol {
                 Ok(_) => {
                     tracing::warn!("Sync authorization denied for peer {}", peer);
                     Err(sync_biscuit_guard_error(
-                        "sync_journal",
+                        capability.as_str(),
                         peer,
                         GuardError::MissingCapability {
-                            capability: "sync.permission".to_string(),
+                            capability: capability.to_string(),
                         },
                     ))
                 }
                 Err(e) => {
                     tracing::error!("Sync authorization error for peer {}: {:?}", peer, e);
-                    Err(sync_biscuit_guard_error("sync_journal", peer, e))
+                    Err(sync_biscuit_guard_error(capability.as_str(), peer, e))
                 }
             }
         } else {
@@ -488,7 +488,7 @@ impl AntiEntropyProtocol {
     /// exchange, reconciliation planning, and operation transfer.
     ///
     /// # Authorization
-    /// - Checks Biscuit token permissions for "sync_journal" capability
+    /// - Checks Biscuit token permissions for `sync:request_digest`
     /// - Validates against peer-specific resource scope
     ///
     /// # Integration Points

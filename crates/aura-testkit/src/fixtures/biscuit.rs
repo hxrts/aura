@@ -117,12 +117,12 @@ impl BiscuitTestFixture {
             authority({guardian});
             role("guardian");
             capability("read");
-            capability("recovery_initiate");
-            capability("recovery_approve");
-            capability("threshold_sign");
+            capability("recovery:initiate");
+            capability("recovery:approve");
+            capability("recovery:finalize");
 
             // Guardian-specific constraints
-            check if operation($op), ["read", "recovery_initiate", "recovery_approve", "threshold_sign"].contains($op);
+            check if operation($op), ["read", "recovery:initiate", "recovery:approve", "recovery:finalize"].contains($op);
             check if resource($res), $res.starts_with("/recovery/") || $res.starts_with("/journal/");
         "#
         )

@@ -6,7 +6,7 @@
 use crate::facts::CeremonyRelationshipId;
 use crate::InvitationType;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
-use aura_core::DeviceId;
+use aura_core::{CapabilityName, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -118,7 +118,7 @@ pub struct GuardianRequest {
     /// Proposed guardian role description
     pub role_description: String,
     /// Recovery capabilities being granted
-    pub recovery_capabilities: Vec<String>,
+    pub recovery_capabilities: Vec<CapabilityName>,
     /// Expiration timestamp
     pub expires_at_ms: Option<u64>,
 }
@@ -501,7 +501,7 @@ mod tests {
             invitation_id: InvitationId::new("guard-456"),
             principal: test_authority(),
             role_description: "Primary guardian".to_string(),
-            recovery_capabilities: vec!["recover:device".to_string()],
+            recovery_capabilities: vec![aura_core::capability_name!("recovery:initiate")],
             expires_at_ms: Some(2000000),
         };
 
@@ -510,6 +510,10 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.role_description, "Primary guardian");
+        assert_eq!(
+            restored.recovery_capabilities,
+            vec![aura_core::capability_name!("recovery:initiate")]
+        );
     }
 
     #[test]

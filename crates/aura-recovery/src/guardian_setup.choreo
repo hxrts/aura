@@ -22,18 +22,18 @@ protocol GuardianSetup =
     -> Guardian3 : SendInvitation of crate.guardian_setup.GuardianInvitation
 
   -- Phase 2: Guardians accept invitations
-  Guardian1 { guard_capability = "recovery:guardian_setup:accept_invitation,recovery:guardian_setup:verify_invitation"
+  Guardian1 { guard_capability = "recovery:guardian_setup:accept_invitation"
             , flow_cost = 200
             , journal_facts = "guardian_setup_accepted"
             , leakage_budget = "0, 1, 0" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
-  Guardian2 { guard_capability = "recovery:guardian_setup:accept_invitation,recovery:guardian_setup:verify_invitation"
+  Guardian2 { guard_capability = "recovery:guardian_setup:accept_invitation"
             , flow_cost = 200
             , journal_facts = "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
 
-  Guardian3 { guard_capability = "recovery:guardian_setup:accept_invitation,recovery:guardian_setup:verify_invitation"
+  Guardian3 { guard_capability = "recovery:guardian_setup:accept_invitation"
             , flow_cost = 200
             , journal_facts = "guardian_setup_accepted" }
     -> SetupInitiator : AcceptInvitation of crate.guardian_setup.GuardianAcceptance
