@@ -327,6 +327,10 @@ lint-arch-syntax:
     cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- style crates
 
+ci-capability-model-audit:
+    cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
+    bash scripts/check/capability-model-audit.sh
+
 # Format code
 fmt:
     cargo fmt --all

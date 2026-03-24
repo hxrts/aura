@@ -1,0 +1,5 @@
+error: unexpected token
+ --> tests/boundaries/comma_joined_guard_capability_name.rs:5:14
+  |
+5 |     protocol ExampleProtocol {
+  |              ^^^^^^^^^^^^^^^

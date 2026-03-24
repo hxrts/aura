@@ -658,7 +658,92 @@ fn scan_capability_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<S
         );
     }
 
+    scan_line_patterns(
+        file,
+        source,
+        &[
+            (
+                "capability_name!(\"message:send\")",
+                "legacy `message:send` capability usage is forbidden; use the canonical owned capability family",
+            ),
+            (
+                "\"sync_journal\"",
+                "legacy `sync_journal` capability wording is forbidden; use canonical sync capability names",
+            ),
+            (
+                "\"sync.permission\"",
+                "stale sync capability placeholder is forbidden; use canonical sync capability names",
+            ),
+            (
+                "\"invitation:create\"",
+                "stale `invitation:create` capability wording is forbidden; use canonical invitation capability names",
+            ),
+            (
+                "\"recovery_initiate\"",
+                "legacy `recovery_initiate` capability wording is forbidden; use canonical recovery capability names",
+            ),
+            (
+                "\"recovery_approve\"",
+                "legacy `recovery_approve` capability wording is forbidden; use canonical recovery capability names",
+            ),
+        ],
+        &ignored_lines,
+        &mut violations,
+    );
+
+    for item in &syntax.items {
+        if let Item::Struct(item_struct) = item {
+            maybe_flag_raw_capability_string_fields(file, item_struct, &mut violations);
+        }
+    }
+
     violations
+}
+
+fn maybe_flag_raw_capability_string_fields(
+    file: &Path,
+    item_struct: &ItemStruct,
+    violations: &mut Vec<String>,
+) {
+    for field in &item_struct.fields {
+        let Some(ident) = &field.ident else {
+            continue;
+        };
+        let field_name = ident.to_string();
+        let expects_typed_capability_surface = matches!(
+            field_name.as_str(),
+            "guard_capabilities" | "recovery_capabilities"
+        );
+        if expects_typed_capability_surface && is_vec_of_string(&field.ty) {
+            violations.push(format_violation(
+                file,
+                field.ty.span(),
+                format!(
+                    "field `{}` on struct `{}` may not use Vec<String> for authorization vocabulary; use a typed capability surface",
+                    field_name, item_struct.ident
+                ),
+            ));
+        }
+    }
+}
+
+fn is_vec_of_string(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Vec" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    let Some(syn::GenericArgument::Type(syn::Type::Path(inner_type))) = args.args.first() else {
+        return false;
+    };
+    inner_type.path.is_ident("String")
 }
 
 fn maybe_flag_serialized_usize_fields(
@@ -946,6 +1031,7 @@ fn capability_name_parse_allowed(path: &str) -> bool {
         || path == "crates/aura-authorization/src/biscuit_authorization.rs"
         || path == "crates/aura-guards/src/authorization.rs"
         || path == "crates/aura-mpst/src/ast_extraction.rs"
+        || path == "crates/aura-mpst/src/composition.rs"
         || path == "crates/aura-macros/src/capability_family.rs"
         || path == "crates/aura-macros/src/bin/arch_lints.rs"
 }
