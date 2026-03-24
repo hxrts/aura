@@ -335,38 +335,38 @@ coverage of boundary contracts.
 
 ### E1. Canonical Test Harness Builder
 
-- [ ] Audit repeated setup across `tests/e2e_terminal_state.rs`, `tests/integration_comprehensive.rs`, `tests/integration_flow.rs`, `tests/wiring.rs`, and `tests/support/`.
-- [ ] Extract one expressive builder path in `tests/support/` for repeated terminal-state setup.
-- [ ] Keep the builder explicit about authoritative seed state, callback wiring, demo-mode toggles, and expected observed outputs.
-- [ ] Avoid test builders that hide ownership handoff, runtime readiness, or authoritative input setup behind magic defaults.
+- [x] Audit repeated setup across `tests/e2e_terminal_state.rs`, `tests/integration_comprehensive.rs`, `tests/integration_flow.rs`, `tests/wiring.rs`, and `tests/support/`.
+- [x] Extract one expressive builder path in `tests/support/` for repeated terminal-state setup.
+- [x] Keep the builder explicit about authoritative seed state, callback wiring, demo-mode toggles, and expected observed outputs.
+- [x] Avoid test builders that hide ownership handoff, runtime readiness, or authoritative input setup behind magic defaults.
 
 ### E2. Assertion Helpers
 
-- [ ] Introduce focused assertion helpers such as `assert_toast`, `assert_modal`, `assert_screen`, or `assert_semantic_status` only where they remove boilerplate without hiding important contract state.
-- [ ] Keep helpers domain-specific enough that failures still point to the relevant ownership or observed-state contract.
+- [x] Introduce focused assertion helpers such as `assert_toast`, `assert_modal`, `assert_screen`, or `assert_semantic_status` only where they remove boilerplate without hiding important contract state.
+- [x] Keep helpers domain-specific enough that failures still point to the relevant ownership or observed-state contract.
 
 ### E3. Demo Internal Cleanup
 
-- [ ] Audit repeated demo wiring in `src/demo/mod.rs`, `src/demo/simulator.rs`, and `src/demo/signal_coordinator.rs`.
-- [ ] Consolidate repeated agent-event handling and setup only if the demo path continues to exercise the same production-facing shell behavior where intended.
-- [ ] Do not let demo shortcuts become a second semantic execution model.
+- [x] Audit repeated demo wiring in `src/demo/mod.rs`, `src/demo/simulator.rs`, and `src/demo/signal_coordinator.rs`.
+- [x] Consolidate repeated agent-event handling and setup only if the demo path continues to exercise the same production-facing shell behavior where intended.
+- [x] Do not let demo shortcuts become a second semantic execution model.
 
 ### E4. Large Test File Decomposition
 
-- [ ] Reduce `tests/e2e_terminal_state.rs` from 3627 LOC to under 1500 LOC by moving coherent groups into supporting modules under `tests/e2e_terminal_state/`.
-- [ ] Reduce `tests/integration_comprehensive.rs` from 1526 LOC to under 1500 LOC by splitting scenario groups into descriptive modules under `tests/integration_comprehensive/`.
-- [ ] If new helper extraction causes `tests/verification_generative.rs`, `tests/integration_effect_commands.rs`, or any other test file to cross 1500 LOC, split them in the same workstream.
-- [ ] Keep split file names descriptive of scenario families rather than generic `part1`/`part2`.
+- [x] Reduce `tests/e2e_terminal_state.rs` from 3627 LOC to under 1500 LOC by moving coherent groups into supporting modules under `tests/e2e_terminal_state/`.
+- [x] Reduce `tests/integration_comprehensive.rs` from 1526 LOC to under 1500 LOC by splitting scenario groups into descriptive modules under `tests/integration_comprehensive/`.
+- [x] If new helper extraction causes `tests/verification_generative.rs`, `tests/integration_effect_commands.rs`, or any other test file to cross 1500 LOC, split them in the same workstream.
+- [x] Keep split file names descriptive of scenario families rather than generic `part1`/`part2`.
 
 ### E5. Workstream E Verification and Commit
 
-- [ ] Run `cargo check -p aura-terminal`.
-- [ ] Run `cargo test -p aura-terminal --test demo`.
-- [ ] Run `cargo test -p aura-terminal --test e2e_terminal_state`.
-- [ ] Run `cargo test -p aura-terminal --test integration_comprehensive`.
-- [ ] Run `cargo test -p aura-terminal --test verification_demo_itf`.
-- [ ] Run `cargo test -p aura-terminal --test verification_generative`.
-- [ ] Confirm every targeted check is green before committing.
+- [x] Run `cargo check -p aura-terminal`.
+- [x] Run `cargo test -p aura-terminal --test demo`.
+- [x] Run `cargo test -p aura-terminal --features testing --test e2e_terminal_state`.
+- [x] Run `cargo test -p aura-terminal --test integration_comprehensive`.
+- [x] Run `cargo test -p aura-terminal --test verification_demo_itf`.
+- [x] Run `cargo test -p aura-terminal --test verification_generative`.
+- [x] Confirm every targeted check is green before committing.
 - [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): dry test and demo scaffolding"`.
 
 ## Workstream F — Handler and Entry-Point Decomposition

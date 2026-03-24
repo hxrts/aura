@@ -23,6 +23,206 @@ use aura_terminal::ids;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_testkit::MockRuntimeBridge;
 
+enum TestRuntimeKind {
+    AppCoreOnly,
+    MockRuntime {
+        authority: Option<AuthorityId>,
+    },
+}
+
+/// Explicit builder for IoContext-based test environments.
+///
+/// This keeps runtime choice, account creation, device identity, and TUI mode
+/// visible at the call site rather than hiding them behind test-only defaults.
+pub struct IoContextTestEnvBuilder {
+    name: String,
+    directory_prefix: String,
+    base_path: Option<PathBuf>,
+    runtime: TestRuntimeKind,
+    existing_account: bool,
+    create_account_nickname: Option<String>,
+    device_id: Option<String>,
+    mode: TuiMode,
+}
+
+/// Built IoContext/AppCore pair with owned temp-directory cleanup.
+pub struct BuiltIoContextTestEnv {
+    pub ctx: Arc<IoContext>,
+    pub app_core: Arc<RwLock<AppCore>>,
+    pub test_dir: PathBuf,
+}
+
+impl IoContextTestEnvBuilder {
+    pub fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            directory_prefix: "aura-test".to_string(),
+            device_id: Some(format!("test-device-{name}")),
+            name,
+            base_path: None,
+            runtime: TestRuntimeKind::AppCoreOnly,
+            existing_account: false,
+            create_account_nickname: None,
+            mode: TuiMode::Production,
+        }
+    }
+
+    pub fn with_directory_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.directory_prefix = prefix.into();
+        self
+    }
+
+    pub fn with_base_path(mut self, base_path: PathBuf) -> Self {
+        self.base_path = Some(base_path);
+        self
+    }
+
+    pub fn with_mock_runtime(mut self) -> Self {
+        self.runtime = TestRuntimeKind::MockRuntime { authority: None };
+        self
+    }
+
+    pub fn with_mock_runtime_authority(mut self, authority: AuthorityId) -> Self {
+        self.runtime = TestRuntimeKind::MockRuntime {
+            authority: Some(authority),
+        };
+        self
+    }
+
+    pub fn with_existing_account(mut self, existing_account: bool) -> Self {
+        self.existing_account = existing_account;
+        self
+    }
+
+    pub fn with_mode(mut self, mode: TuiMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn with_device_id(mut self, device_id: impl Into<String>) -> Self {
+        self.device_id = Some(device_id.into());
+        self
+    }
+
+    pub fn create_account_as(mut self, nickname: impl Into<String>) -> Self {
+        self.create_account_nickname = Some(nickname.into());
+        self
+    }
+
+    pub async fn build(self) -> BuiltIoContextTestEnv {
+        let test_dir = if let Some(base_path) = self.base_path {
+            let _ = std::fs::remove_dir_all(&base_path);
+            std::fs::create_dir_all(&base_path).expect("Failed to create test dir");
+            base_path
+        } else {
+            unique_test_dir(&format!("{}-{}", self.directory_prefix, self.name))
+        };
+
+        let app_core = match self.runtime {
+            TestRuntimeKind::AppCoreOnly => {
+                AppCore::new(AppConfig::default()).expect("Failed to create AppCore")
+            }
+            TestRuntimeKind::MockRuntime { authority } => {
+                let runtime = authority
+                    .map(MockRuntimeBridge::with_authority)
+                    .unwrap_or_else(MockRuntimeBridge::new);
+                AppCore::with_runtime(AppConfig::default(), Arc::new(runtime))
+                    .expect("Failed to create AppCore")
+            }
+        };
+
+        let app_core = Arc::new(RwLock::new(app_core));
+        let initialized_app_core = InitializedAppCore::new(app_core.clone())
+            .await
+            .expect("Failed to init signals");
+
+        let ctx = IoContext::builder()
+            .with_app_core(initialized_app_core)
+            .with_existing_account(self.existing_account)
+            .with_base_path(test_dir.clone())
+            .with_device_id(
+                self.device_id
+                    .unwrap_or_else(|| format!("test-device-{}", self.name)),
+            )
+            .with_mode(self.mode)
+            .build()
+            .expect("IoContext builder should succeed for tests");
+        let ctx = Arc::new(ctx);
+
+        if let Some(nickname) = self.create_account_nickname {
+            ctx.create_account(&nickname)
+                .await
+                .expect("Failed to create account");
+        }
+
+        if let Some(runtime_authority) = {
+            let core = app_core.read().await;
+            core.runtime().map(|runtime| runtime.authority_id())
+        } {
+            app_core.write().await.set_authority(runtime_authority);
+            aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
+                .await
+                .expect("Failed to refresh settings from runtime");
+        }
+
+        BuiltIoContextTestEnv {
+            ctx,
+            app_core,
+            test_dir,
+        }
+    }
+}
+
+impl BuiltIoContextTestEnv {
+    pub fn cleanup(&self) {
+        let _ = std::fs::remove_dir_all(&self.test_dir);
+    }
+}
+
+impl Drop for BuiltIoContextTestEnv {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
+pub async fn read_account_config(
+    test_dir: &std::path::Path,
+) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+    use std::io;
+
+    use aura_core::effects::StorageCoreEffects;
+    use aura_effects::{
+        EncryptedStorage, EncryptedStorageConfig, FilesystemStorageHandler, RealCryptoHandler,
+        RealSecureStorageHandler,
+    };
+
+    let storage = EncryptedStorage::new(
+        FilesystemStorageHandler::from_path(test_dir.to_path_buf()),
+        Arc::new(RealCryptoHandler::new()),
+        Arc::new(RealSecureStorageHandler::with_base_path(
+            test_dir.to_path_buf(),
+        )),
+        EncryptedStorageConfig::default(),
+    );
+    let bytes = storage
+        .retrieve("account.json")
+        .await?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "account.json missing from storage"))?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+pub async fn read_account_authority_id(
+    test_dir: &std::path::Path,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use std::io;
+
+    let config = read_account_config(test_dir).await?;
+    Ok(config["authority_id"]
+        .as_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "authority_id should be a string"))?
+        .to_string())
+}
+
 // ============================================================================
 // Simple Test Environment (no agent)
 // ============================================================================
@@ -46,32 +246,15 @@ impl SimpleTestEnv {
     /// - An IoContext ready for testing
     /// - A test account
     pub async fn new(name: &str) -> Self {
-        let test_dir = unique_test_dir(&format!("aura-test-{name}"));
-
-        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
-        let app_core = Arc::new(RwLock::new(app_core));
-        let initialized_app_core = InitializedAppCore::new(app_core.clone())
-            .await
-            .expect("Failed to init signals");
-
-        let ctx = IoContext::builder()
-            .with_app_core(initialized_app_core)
-            .with_existing_account(false)
-            .with_base_path(test_dir.clone())
-            .with_device_id(format!("test-device-{name}"))
-            .with_mode(TuiMode::Production)
+        let built = IoContextTestEnvBuilder::new(name)
+            .create_account_as(format!("TestUser-{name}"))
             .build()
-            .expect("IoContext builder should succeed for tests");
-
-        // Create account for testing
-        ctx.create_account(&format!("TestUser-{name}"))
-            .await
-            .expect("Failed to create account");
+            .await;
 
         Self {
-            ctx: Arc::new(ctx),
-            app_core,
-            test_dir,
+            ctx: built.ctx.clone(),
+            app_core: built.app_core.clone(),
+            test_dir: built.test_dir.clone(),
         }
     }
 
@@ -106,45 +289,17 @@ impl MockRuntimeTestEnv {
     /// Create a new mock-runtime test environment under a deterministic prefix.
     pub async fn new(prefix: &str, name: &str) -> Self {
         let test_dir = std::env::temp_dir().join(format!("{prefix}-{name}"));
-        let _ = std::fs::remove_dir_all(&test_dir);
-        std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
-
-        let mock_bridge = Arc::new(MockRuntimeBridge::new());
-        let app_core = AppCore::with_runtime(AppConfig::default(), mock_bridge)
-            .expect("Failed to create AppCore");
-        let app_core = Arc::new(RwLock::new(app_core));
-        let initialized_app_core = InitializedAppCore::new(app_core.clone())
-            .await
-            .expect("Failed to init signals");
-
-        let ctx = IoContext::builder()
-            .with_app_core(initialized_app_core)
-            .with_existing_account(false)
-            .with_base_path(test_dir.clone())
-            .with_device_id(format!("test-device-{name}"))
-            .with_mode(TuiMode::Production)
+        let built = IoContextTestEnvBuilder::new(name)
+            .with_base_path(test_dir)
+            .with_mock_runtime()
+            .create_account_as(format!("TestUser-{name}"))
             .build()
-            .expect("IoContext builder should succeed for tests");
-
-        ctx.create_account(&format!("TestUser-{name}"))
-            .await
-            .expect("Failed to create account");
-
-        if let Some(runtime_authority) = {
-            let core = app_core.read().await;
-            core.runtime().map(|runtime| runtime.authority_id())
-        } {
-            app_core.write().await.set_authority(runtime_authority);
-        }
-
-        aura_app::ui::workflows::settings::refresh_settings_from_runtime(&app_core)
-            .await
-            .expect("Failed to refresh settings from runtime");
+            .await;
 
         Self {
-            ctx: Arc::new(ctx),
-            app_core,
-            test_dir,
+            ctx: built.ctx.clone(),
+            app_core: built.app_core.clone(),
+            test_dir: built.test_dir.clone(),
         }
     }
 
@@ -311,38 +466,14 @@ pub async fn setup_test_env_with_prefix(
     name: &str,
 ) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
     let test_dir = std::env::temp_dir().join(format!("{prefix}-{name}"));
-    let _ = std::fs::remove_dir_all(&test_dir);
-    std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
-
-    let runtime = Arc::new(MockRuntimeBridge::new());
-    let app_core =
-        AppCore::with_runtime(AppConfig::default(), runtime).expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let initialized_app_core = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
-
-    let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core)
-        .with_existing_account(false)
+    let built = IoContextTestEnvBuilder::new(name)
         .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{name}"))
-        .with_mode(TuiMode::Production)
+        .with_mock_runtime()
+        .create_account_as(format!("TestUser-{name}"))
         .build()
-        .expect("IoContext builder should succeed for tests");
+        .await;
 
-    ctx.create_account(&format!("TestUser-{name}"))
-        .await
-        .expect("Failed to create account");
-
-    if let Some(runtime_authority) = {
-        let core = app_core.read().await;
-        core.runtime().map(|runtime| runtime.authority_id())
-    } {
-        app_core.write().await.set_authority(runtime_authority);
-    }
-
-    (Arc::new(ctx), app_core)
+    (built.ctx.clone(), built.app_core.clone())
 }
 
 /// Clean up a deterministic test directory created with a custom prefix.

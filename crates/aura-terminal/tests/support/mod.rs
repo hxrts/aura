@@ -49,7 +49,8 @@ pub mod state_machine;
 // Environment types
 pub use env::{
     cleanup_test_dir, cleanup_test_dir_with_prefix, setup_test_env, setup_test_env_with_prefix,
-    FullTestEnv, FullTestEnvConfig, MockRuntimeTestEnv, SimpleTestEnv,
+    read_account_authority_id, read_account_config, BuiltIoContextTestEnv, FullTestEnv,
+    FullTestEnvConfig, IoContextTestEnvBuilder, MockRuntimeTestEnv, SimpleTestEnv,
 };
 
 // State machine testing
