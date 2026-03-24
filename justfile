@@ -324,6 +324,7 @@ lint-arch-syntax:
     cargo run -q -p aura-macros --bin arch_lints -- impure-escapes crates
     cargo run -q -p aura-macros --bin arch_lints -- concurrency crates
     cargo run -q -p aura-macros --bin arch_lints -- crypto-boundaries crates
+    cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- style crates
 
 # Format code

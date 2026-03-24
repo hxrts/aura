@@ -19,6 +19,7 @@ enum LintMode {
     ImpureEscapes,
     Concurrency,
     CryptoBoundaries,
+    CapabilityBoundaries,
     Style,
 }
 
@@ -30,6 +31,7 @@ impl LintMode {
             "impure-escapes" => Ok(Self::ImpureEscapes),
             "concurrency" => Ok(Self::Concurrency),
             "crypto-boundaries" => Ok(Self::CryptoBoundaries),
+            "capability-boundaries" => Ok(Self::CapabilityBoundaries),
             "style" => Ok(Self::Style),
             other => Err(format!("unknown lint mode: {other}")),
         }
@@ -42,6 +44,7 @@ impl LintMode {
             Self::ImpureEscapes => "impure-escapes",
             Self::Concurrency => "concurrency",
             Self::CryptoBoundaries => "crypto-boundaries",
+            Self::CapabilityBoundaries => "capability-boundaries",
             Self::Style => "style",
         }
     }
@@ -195,6 +198,7 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         LintMode::ImpureEscapes => scan_impure_escapes(file, source, syntax),
         LintMode::Concurrency => scan_concurrency(file, source, syntax),
         LintMode::CryptoBoundaries => scan_crypto_boundaries(file, source, syntax),
+        LintMode::CapabilityBoundaries => scan_capability_boundaries(file, source, syntax),
         LintMode::Style => scan_style(file, source, syntax),
     }
 }
@@ -593,6 +597,70 @@ fn scan_style(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     violations
 }
 
+fn scan_capability_boundaries(file: &Path, source: &str, syntax: &File) -> Vec<String> {
+    let path = display_path(file);
+    if is_test_like_path(&path) {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    let ignored_lines = ignored_test_lines(syntax);
+
+    if path != "crates/aura-macros/src/bin/arch_lints.rs" {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "CapabilityId::from(",
+                "CapabilityId raw-string construction is forbidden; use typed capability families or an explicit validated boundary",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    if !capability_name_parse_allowed(&path) {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "CapabilityName::parse(",
+                "CapabilityName::parse is restricted to approved boundary modules; use typed capability families elsewhere",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    if !capability_literal_allowed(&path) {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "capability_name!(",
+                "direct capability_name! construction is forbidden in protected modules; use typed capability families or approved fixtures",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    if path.starts_with("crates/aura-agent/src/runtime/") {
+        scan_line_patterns(
+            file,
+            source,
+            &[(
+                "\"module:",
+                "host runtime module capability references must come from admitted descriptors, not handwritten strings",
+            )],
+            &ignored_lines,
+            &mut violations,
+        );
+    }
+
+    violations
+}
+
 fn maybe_flag_serialized_usize_fields(
     file: &Path,
     item_struct: &ItemStruct,
@@ -871,6 +939,22 @@ fn crypto_allowed(path: &str) -> bool {
         || path.starts_with("crates/aura-testkit/")
         || path.starts_with("crates/aura-macros/")
         || is_test_like_path(path)
+}
+
+fn capability_name_parse_allowed(path: &str) -> bool {
+    path == "crates/aura-core/src/capability_name.rs"
+        || path == "crates/aura-authorization/src/biscuit_authorization.rs"
+        || path == "crates/aura-guards/src/authorization.rs"
+        || path == "crates/aura-mpst/src/ast_extraction.rs"
+        || path == "crates/aura-macros/src/capability_family.rs"
+        || path == "crates/aura-macros/src/bin/arch_lints.rs"
+}
+
+fn capability_literal_allowed(path: &str) -> bool {
+    path == "crates/aura-core/src/capability_name.rs"
+        || path == "crates/aura-macros/src/capability_family.rs"
+        || path.starts_with("crates/aura-testkit/")
+        || path == "crates/aura-macros/src/bin/arch_lints.rs"
 }
 
 fn infra_impl_allowed(path: &str) -> bool {

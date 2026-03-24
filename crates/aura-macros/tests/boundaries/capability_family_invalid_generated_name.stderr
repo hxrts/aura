@@ -1,0 +1,5 @@
+error: invalid capability token: chat:Message:Send
+ --> tests/boundaries/capability_family_invalid_generated_name.rs:5:18
+  |
+5 |     #[capability("Message:Send")]
+  |                  ^^^^^^^^^^^^^^

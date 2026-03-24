@@ -64,8 +64,10 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/incoherent_self_send.rs");
     t.compile_fail("tests/boundaries/missing_namespace.rs");
     t.compile_fail("tests/boundaries/capability_family_duplicate_local_name.rs");
+    t.compile_fail("tests/boundaries/capability_family_invalid_generated_name.rs");
     t.compile_fail("tests/boundaries/capability_family_invalid_namespace.rs");
     t.compile_fail("tests/boundaries/capability_family_missing_local_name.rs");
+    t.compile_fail("tests/boundaries/choreography_namespace_mismatch.rs");
     // Ownership macro rejection cases
     t.compile_fail("tests/boundaries/semantic_owner_missing_context.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_owner.rs");
