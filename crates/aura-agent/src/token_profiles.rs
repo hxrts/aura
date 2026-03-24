@@ -4,6 +4,7 @@ use aura_authorization::capabilities::GenericCapability;
 use aura_chat::capabilities::ChatCapability;
 use aura_core::CapabilityName;
 use aura_invitation::capabilities::InvitationCapability;
+use aura_rendezvous::capabilities::RendezvousCapability;
 use aura_sync::capabilities::SyncCapability;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,10 @@ impl TokenGrantProfile for TokenCapabilityProfile {
                 out.push(SyncCapability::PushOps.as_name());
                 out.push(SyncCapability::AnnounceOp.as_name());
                 out.push(SyncCapability::PushOp.as_name());
+                out.push(RendezvousCapability::Publish.as_name());
+                out.push(RendezvousCapability::Connect.as_name());
+                out.push(RendezvousCapability::Relay.as_name());
+                out.push(ChatCapability::ChannelCreate.as_name());
                 out.push(ChatCapability::MessageSend.as_name());
                 out.push(InvitationCapability::Send.as_name());
                 out.push(InvitationCapability::Accept.as_name());
@@ -76,6 +81,10 @@ mod tests {
             "sync:push_ops".to_string(),
             "sync:announce_op".to_string(),
             "sync:push_op".to_string(),
+            "rendezvous:publish".to_string(),
+            "rendezvous:connect".to_string(),
+            "rendezvous:relay".to_string(),
+            "chat:channel:create".to_string(),
             "chat:message:send".to_string(),
             "invitation:send".to_string(),
             "invitation:accept".to_string(),

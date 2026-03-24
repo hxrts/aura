@@ -847,6 +847,11 @@ impl AuraEffectSystem {
         *self.biscuit_cache.write() = Some(cache);
     }
 
+    #[cfg(test)]
+    pub(crate) fn clear_biscuit_cache(&self) {
+        *self.biscuit_cache.write() = None;
+    }
+
     /// Get the current biscuit cache (for guard chain metadata).
     pub fn biscuit_cache(&self) -> Option<BiscuitCache> {
         self.biscuit_cache.read().clone()

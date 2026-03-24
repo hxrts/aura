@@ -443,13 +443,6 @@ impl InvitationHandler {
             .unwrap_or(0)
     }
 
-    fn full_invitation_capabilities() -> Vec<CapabilityId> {
-        evaluation_candidates_for_invitation_guard()
-            .iter()
-            .map(|capability| capability.as_name())
-            .collect()
-    }
-
     fn decode_invitation_biscuit_frontier(
         &self,
         effects: &AuraEffectSystem,
@@ -507,7 +500,11 @@ impl InvitationHandler {
                 return Vec::new();
             }
         }) else {
-            return Self::full_invitation_capabilities();
+            tracing::debug!(
+                authority = %self.context.authority.authority_id(),
+                "no Biscuit frontier available for invitation guard snapshot"
+            );
+            return Vec::new();
         };
 
         let current_time_seconds = Self::invitation_capability_check_timestamp_seconds(now_ms);
@@ -3975,6 +3972,21 @@ mod tests {
             .await;
         assert_eq!(snapshot.flow_budget_remaining, FlowCost::new(23));
         assert_eq!(snapshot.epoch, 7);
+    }
+
+    #[tokio::test]
+    async fn build_snapshot_without_biscuit_frontier_has_empty_capability_frontier() {
+        let authority_context = create_test_authority(140);
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let handler = InvitationHandler::new(authority_context.clone()).unwrap();
+        effects.clear_biscuit_cache();
+
+        let snapshot = handler
+            .build_snapshot_for_context(effects.as_ref(), authority_context.default_context_id())
+            .await;
+
+        assert!(snapshot.capabilities.is_empty());
     }
 
     #[tokio::test]

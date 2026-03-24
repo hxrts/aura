@@ -13,7 +13,7 @@ use crate::runtime::vm_host_bridge::AuraVmRoundDisposition;
 use crate::runtime::{
     handle_owned_vm_round, open_owned_manifest_vm_session_admitted, AuraEffectSystem,
 };
-use aura_chat::capabilities::ChatCapability;
+use aura_chat::capabilities::evaluation_candidates_for_chat_guard;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
@@ -29,7 +29,7 @@ use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderingPolicy, PhysicalTime, TimeOrdering, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::util::serialization::to_vec;
-use aura_core::{Hash32, Prestate};
+use aura_core::{CapabilityName, Hash32, Prestate};
 use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
@@ -41,6 +41,7 @@ use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_social::{is_user_banned, is_user_muted};
+use base64::Engine;
 use std::fmt::Display;
 use uuid::Uuid;
 
@@ -82,6 +83,73 @@ impl std::fmt::Debug for ChatServiceApi {
 }
 
 impl ChatServiceApi {
+    fn decode_biscuit_frontier(
+        &self,
+    ) -> AgentResult<
+        Option<(
+            aura_authorization::Biscuit,
+            aura_authorization::BiscuitAuthorizationBridge,
+        )>,
+    > {
+        let Some(cache) = self.effects.biscuit_cache() else {
+            return Ok(None);
+        };
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        let token_bytes = engine
+            .decode(cache.token_b64)
+            .map_err(|error| AgentError::effects(format!("decode biscuit token cache: {error}")))?;
+        let root_pk_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
+            AgentError::effects(format!("decode biscuit root public key cache: {error}"))
+        })?;
+        let root_public_key =
+            aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
+                AgentError::effects(format!("parse biscuit root public key cache: {error}"))
+            })?;
+        let biscuit = aura_authorization::Biscuit::from(&token_bytes, root_public_key)
+            .map_err(|error| AgentError::effects(format!("parse biscuit token cache: {error}")))?;
+        let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
+            root_public_key,
+            self.effects.authority_id(),
+        );
+        Ok(Some((biscuit, bridge)))
+    }
+
+    async fn build_chat_capabilities(&self, now_ms: u64) -> AgentResult<Vec<CapabilityName>> {
+        let Some((token, bridge)) = self.decode_biscuit_frontier()? else {
+            tracing::debug!(
+                authority = %self.effects.authority_id(),
+                "no Biscuit frontier available for chat guard snapshot"
+            );
+            return Ok(Vec::new());
+        };
+
+        let current_time_seconds = (now_ms != 0).then_some(now_ms / 1_000);
+        Ok(evaluation_candidates_for_chat_guard()
+            .iter()
+            .filter_map(|capability| {
+                let capability_name = capability.as_name();
+                match bridge.has_capability_with_time(
+                    &token,
+                    capability_name.as_str(),
+                    current_time_seconds,
+                ) {
+                    Ok(true) => Some(capability_name),
+                    Ok(false) => None,
+                    Err(error) => {
+                        tracing::warn!(
+                            authority = %self.effects.authority_id(),
+                            capability = capability_name.as_str(),
+                            error = %error,
+                            "failed to evaluate chat Biscuit capability"
+                        );
+                        None
+                    }
+                }
+            })
+            .collect())
+    }
+
     /// Create a new chat service.
     pub fn new(effects: std::sync::Arc<AuraEffectSystem>) -> AgentResult<Self> {
         Ok(Self {
@@ -275,13 +343,7 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("time error: {e}")))?;
 
-        // NOTE: Authorization/capability integration for chat is not yet wired to Biscuit/WoT.
-        // The current runtime treats guard capabilities as permissive; we provide the required
-        // typed names so guards can evolve without reopening raw-string call sites.
-        let capabilities = vec![
-            ChatCapability::ChannelCreate.as_name(),
-            ChatCapability::MessageSend.as_name(),
-        ];
+        let capabilities = self.build_chat_capabilities(now.ts_ms).await?;
         let committed_facts = self
             .effects
             .load_committed_facts(self.effects.authority_id())
@@ -1284,7 +1346,11 @@ fn amp_session_uuid(context_id: &ContextId, sender: &AuthorityId, receiver: &Aut
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use aura_chat::capabilities::ChatCapability;
+    use aura_core::CapabilityName;
+    use aura_guards::GuardContextProvider;
     use aura_journal::DomainFact;
+    use base64::Engine;
     use std::sync::Arc;
 
     fn authority(byte: u8) -> AuthorityId {
@@ -1305,6 +1371,62 @@ mod tests {
             .await
             .unwrap();
         effects.await_next_view_update().await;
+    }
+
+    fn install_biscuit_cache(effects: &Arc<AuraEffectSystem>, capabilities: Vec<CapabilityName>) {
+        let authority = effects.authority_id();
+        let issuer = aura_authorization::TokenAuthority::new(authority);
+        let token = issuer
+            .create_token(authority, capabilities)
+            .expect("chat test token should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
+    }
+
+    #[tokio::test]
+    async fn build_snapshot_uses_evaluated_chat_capability_frontier() {
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let creator = authority(11);
+        let group_id = group_id(12);
+        let context_id = ChatServiceApi::context_id_for_group(&group_id);
+        let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
+
+        install_biscuit_cache(&effects, vec![ChatCapability::MessageSend.as_name()]);
+
+        let snapshot = service
+            .build_snapshot(creator, context_id, Some(channel_id))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            snapshot.capabilities,
+            vec![ChatCapability::MessageSend.as_name()]
+        );
+    }
+
+    #[tokio::test]
+    async fn build_snapshot_without_biscuit_frontier_has_empty_chat_capabilities() {
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let creator = authority(21);
+        let group_id = group_id(22);
+        let context_id = ChatServiceApi::context_id_for_group(&group_id);
+        let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
+
+        effects.clear_biscuit_cache();
+
+        let snapshot = service
+            .build_snapshot(creator, context_id, Some(channel_id))
+            .await
+            .unwrap();
+
+        assert!(snapshot.capabilities.is_empty());
     }
 
     #[tokio::test]
