@@ -378,13 +378,6 @@ impl DispatchHelper {
         }
     }
 
-    /// Dispatch a command and wait for completion.
-    ///
-    /// This is an alias for `dispatch()` with more explicit semantics.
-    pub async fn dispatch_and_wait(&self, command: EffectCommand) -> TerminalResult<()> {
-        self.dispatch(command).await
-    }
-
     async fn handle_op_response(&self, response: OpResponse) -> TerminalResult<()> {
         match response {
             OpResponse::ContextChanged { context_id } => {

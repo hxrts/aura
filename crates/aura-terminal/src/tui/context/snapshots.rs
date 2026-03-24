@@ -48,6 +48,16 @@ impl SnapshotHelper {
             None => StateSnapshotAvailability::Contended,
         }
     }
+
+    fn with_snapshot_or_default<T: Default>(
+        &self,
+        build: impl FnOnce(&aura_app::ui::types::StateSnapshot) -> T,
+    ) -> T {
+        match self.state_snapshot_availability() {
+            StateSnapshotAvailability::Available(snapshot) => build(&snapshot),
+            StateSnapshotAvailability::Contended => T::default(),
+        }
+    }
 }
 
 // ─── Snapshot Accessors ────────────────────────────────────────────────────
@@ -60,21 +70,19 @@ impl SnapshotHelper {
 impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_chat(&self) -> ChatSnapshot {
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
+        self.with_snapshot_or_default(|snapshot| {
             ChatSnapshot {
                 channels: snapshot.chat.all_channels().cloned().collect(),
                 // Selection and messages are managed at a different level now
                 selected_channel: None,
                 messages: Vec::new(),
             }
-        } else {
-            ChatSnapshot::default()
-        }
+        })
     }
 
     #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
+        self.with_snapshot_or_default(|snapshot| {
             let guardian_count = snapshot.recovery.guardian_count();
             GuardiansSnapshot {
                 guardians: snapshot.recovery.all_guardians().cloned().collect(),
@@ -84,14 +92,12 @@ impl SnapshotHelper {
                 )
                 .ok(),
             }
-        } else {
-            GuardiansSnapshot::default()
-        }
+        })
     }
 
     #[must_use]
     pub fn snapshot_recovery(&self) -> RecoverySnapshot {
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
+        self.with_snapshot_or_default(|snapshot| {
             let (progress_percent, is_in_progress) = snapshot
                 .recovery
                 .active_recovery()
@@ -108,18 +114,16 @@ impl SnapshotHelper {
                 .unwrap_or((0, false));
 
             RecoverySnapshot {
-                status: snapshot.recovery,
+                status: snapshot.recovery.clone(),
                 progress_percent,
                 is_in_progress,
             }
-        } else {
-            RecoverySnapshot::default()
-        }
+        })
     }
 
     #[must_use]
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
+        self.with_snapshot_or_default(|snapshot| {
             let pending_count = snapshot.invitations.pending_count();
             let invitations = snapshot
                 .invitations
@@ -133,16 +137,14 @@ impl SnapshotHelper {
                 invitations,
                 pending_count,
             }
-        } else {
-            InvitationsSnapshot::default()
-        }
+        })
     }
 
     #[must_use]
     pub fn snapshot_home(&self) -> HomeSnapshot {
         use aura_app::ui::types::home::HomeRole;
 
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
+        self.with_snapshot_or_default(|snapshot| {
             let home_state = snapshot.homes.current_home().cloned();
             let my_role = home_state.as_ref().map(|b| b.my_role);
             HomeSnapshot {
@@ -150,30 +152,24 @@ impl SnapshotHelper {
                 is_member: my_role.is_some(),
                 is_moderator: matches!(my_role, Some(HomeRole::Moderator | HomeRole::Member)),
             }
-        } else {
-            HomeSnapshot::default()
-        }
+        })
     }
 
     #[must_use]
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
-            ContactsSnapshot {
-                contacts: snapshot.contacts.all_contacts().cloned().collect(),
-            }
-        } else {
-            ContactsSnapshot::default()
-        }
+        self.with_snapshot_or_default(|snapshot| ContactsSnapshot {
+            contacts: snapshot.contacts.all_contacts().cloned().collect(),
+        })
     }
 
     #[must_use]
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
-        if let StateSnapshotAvailability::Available(snapshot) = self.state_snapshot_availability() {
+        self.with_snapshot_or_default(|snapshot| {
             let home_id = snapshot.neighborhood.home_home_id.clone();
             let home_name = snapshot.neighborhood.home_name.clone();
             // Collect neighbors first before moving position
             let homes: Vec<_> = snapshot.neighborhood.all_neighbors().cloned().collect();
-            let position = snapshot.neighborhood.position.unwrap_or_else(|| {
+            let position = snapshot.neighborhood.position.clone().unwrap_or_else(|| {
                 aura_app::ui::types::neighborhood::TraversalPosition {
                     current_home_id: home_id.clone(),
                     current_home_name: home_name.clone(),
@@ -187,9 +183,7 @@ impl SnapshotHelper {
                 homes,
                 position,
             }
-        } else {
-            NeighborhoodSnapshot::default()
-        }
+        })
     }
 
     #[must_use]

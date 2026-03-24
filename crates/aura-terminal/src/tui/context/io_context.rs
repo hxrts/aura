@@ -757,7 +757,7 @@ impl IoContext {
             }
         }
 
-        self.dispatch.dispatch_and_wait(command).await
+        self.dispatch.dispatch(command).await
     }
 
     pub async fn export_invitation_code(&self, invitation_id: &str) -> TerminalResult<String> {

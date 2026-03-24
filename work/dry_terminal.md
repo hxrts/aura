@@ -290,43 +290,43 @@ owner of the type.
 
 ### D1. Toast Model Simplification
 
-- [ ] Audit toast-related types in `src/tui/components/toast.rs`, `src/tui/context/toasts.rs`, and any queue or lifecycle adapters that shape toast state.
-- [ ] Separate render-facing payload, queued local state, and helper/context surfaces explicitly.
-- [ ] Unify types only when the resulting API still preserves the distinction between observed presentation and locally owned queue mechanics.
+- [x] Audit toast-related types in `src/tui/components/toast.rs`, `src/tui/context/toasts.rs`, and any queue or lifecycle adapters that shape toast state.
+- [x] Separate render-facing payload, queued local state, and helper/context surfaces explicitly.
+- [x] Unify types only when the resulting API still preserves the distinction between observed presentation and locally owned queue mechanics.
 
 ### D2. Mirror Type Elimination
 
-- [ ] Audit `src/tui/types.rs` and identify terminal-local types that mirror authoritative `aura-app` or `aura_app::ui_contract` concepts.
-- [ ] For each mirrored type, decide whether the terminal should:
-- [ ] consume the upstream authoritative type directly
-- [ ] wrap it in a thin presentation adapter
-- [ ] keep a terminal-local type because the terminal truly owns the concern
-- [ ] Prefer direct consumption of authoritative upstream types wherever the terminal is not the owner.
-- [ ] Replace `From`-shim chains and duplicated enums with typed adapters or extension traits when the shell only formats or groups upstream data.
+- [x] Audit `src/tui/types.rs` and identify terminal-local types that mirror authoritative `aura-app` or `aura_app::ui_contract` concepts.
+- [x] For each mirrored type, decide whether the terminal should:
+- [x] consume the upstream authoritative type directly
+- [x] wrap it in a thin presentation adapter
+- [x] keep a terminal-local type because the terminal truly owns the concern
+- [x] Prefer direct consumption of authoritative upstream types wherever the terminal is not the owner.
+- [x] Replace `From`-shim chains and duplicated enums with typed adapters or extension traits when the shell only formats or groups upstream data.
 
 ### D3. Snapshot and Delegation Wrapper Collapse
 
-- [ ] Audit wrappers in `src/tui/context/snapshots.rs`, `src/tui/context/dispatch.rs`, `src/tui/harness_state/snapshot.rs`, and related delegation surfaces.
-- [ ] Remove trivial pass-through wrappers that add no local contract.
-- [ ] Keep wrappers that protect Layer 7 boundaries, preserve ownership categories, or enforce stronger typed inputs.
+- [x] Audit wrappers in `src/tui/context/snapshots.rs`, `src/tui/context/dispatch.rs`, `src/tui/harness_state/snapshot.rs`, and related delegation surfaces.
+- [x] Remove trivial pass-through wrappers that add no local contract.
+- [x] Keep wrappers that protect Layer 7 boundaries, preserve ownership categories, or enforce stronger typed inputs.
 
 ### D4. Type File Decomposition
 
-- [ ] Reduce `src/tui/types.rs` from 1774 LOC to under 1500 LOC.
-- [ ] Split the file into coherent modules with descriptive names such as `channels.rs`, `contacts.rs`, `settings.rs`, `recovery.rs`, and `presentation.rs` where that matches the real ownership split.
-- [ ] If snapshot or toast cleanup grows a supporting file beyond 1500 LOC, split it in the same workstream rather than carrying the debt forward.
+- [x] Reduce `src/tui/types.rs` from 1774 LOC to under 1500 LOC.
+- [x] Split the file into coherent modules with descriptive names such as `channels.rs`, `contacts.rs`, `settings.rs`, `recovery.rs`, and `presentation.rs` where that matches the real ownership split.
+- [x] If snapshot or toast cleanup grows a supporting file beyond 1500 LOC, split it in the same workstream rather than carrying the debt forward.
 
 ### D5. Workstream D Verification and Commit
 
-- [ ] Run `cargo check -p aura-terminal`.
-- [ ] Run `cargo test -p aura-terminal --test integration_flow`.
-- [ ] Run `cargo test -p aura-terminal --test unit_dispatch_errors`.
-- [ ] Run `cargo test -p aura-terminal --test compile_fail`.
-- [ ] Run `cargo test -p aura-terminal --test integration_effect_commands`.
-- [ ] Run `just lint-arch-syntax`.
-- [ ] Run `just ci-observed-layer-boundaries`.
-- [ ] Confirm every targeted check is green before committing.
-- [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): reduce terminal-local mirror types"`.
+- [x] Run `cargo check -p aura-terminal`.
+- [x] Run `cargo test -p aura-terminal --test integration_flow`.
+- [x] Run `cargo test -p aura-terminal --test unit_dispatch_errors`.
+- [x] Run `cargo test -p aura-terminal --test compile_fail`.
+- [x] Run `cargo test -p aura-terminal --test integration_effect_commands`.
+- [x] Run `just lint-arch-syntax`.
+- [x] Run `just ci-observed-layer-boundaries`.
+- [x] Confirm every targeted check is green before committing.
+- [x] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): reduce terminal-local mirror types"`.
 
 ## Workstream E — Test and Demo DRY
 

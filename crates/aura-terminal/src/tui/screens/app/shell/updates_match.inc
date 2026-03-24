@@ -310,19 +310,7 @@
                         // Toast notifications
                         // =========================================================================
                         UiUpdate::ToastAdded(toast) => {
-                            // Convert ToastMessage to QueuedToast and enqueue.
-                            let level = match toast.level {
-                                ToastLevel::Info => crate::tui::state::ToastLevel::Info,
-                                ToastLevel::Success => {
-                                    crate::tui::state::ToastLevel::Success
-                                }
-                                ToastLevel::Warning => {
-                                    crate::tui::state::ToastLevel::Warning
-                                }
-                                ToastLevel::Error | ToastLevel::Conflict => {
-                                    crate::tui::state::ToastLevel::Error
-                                }
-                            };
+                            let level = toast.level.queue_level();
                             enqueue_toast!(toast.message, level);
                         }
                         UiUpdate::ToastDismissed { toast_id: _ } => {

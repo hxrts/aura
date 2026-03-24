@@ -40,7 +40,7 @@ use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     short_id, Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus,
-    InvitationType,
+    InvitationType, ReadReceiptPolicyExt,
 };
 use aura_app::ui::signals::DiscoveredPeerMethod;
 use aura_app::ui::types::format_relative_time_from;

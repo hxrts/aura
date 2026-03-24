@@ -9,15 +9,48 @@
 
 use std::sync::Arc;
 
+use std::collections::VecDeque;
+
 use async_lock::RwLock;
 
 use crate::tui::components::ToastMessage;
 
+const MAX_RENDER_TOASTS: usize = 5;
+
+#[derive(Clone, Debug, Default)]
+struct ToastRenderBuffer {
+    messages: VecDeque<ToastMessage>,
+}
+
+impl ToastRenderBuffer {
+    fn push(&mut self, toast: ToastMessage) {
+        self.messages.push_back(toast);
+        while self.messages.len() > MAX_RENDER_TOASTS {
+            let _ = self.messages.pop_front();
+        }
+    }
+
+    fn snapshot(&self) -> Vec<ToastMessage> {
+        self.messages.iter().cloned().collect()
+    }
+
+    fn clear(&mut self, id: &str) {
+        self.messages.retain(|toast| toast.id != id);
+    }
+
+    fn clear_all(&mut self) {
+        self.messages.clear();
+    }
+}
+
 /// Helper for managing toast notifications
 #[derive(Clone)]
 pub struct ToastHelper {
-    /// Toast notifications for displaying errors/info in the UI
-    toasts: Arc<RwLock<Vec<ToastMessage>>>,
+    /// Observed render payloads for non-shell contexts.
+    ///
+    /// Fullscreen shell queue ownership stays in `tui::state::ToastQueue`; this
+    /// helper only stores bounded render payloads for helper and test surfaces.
+    render_buffer: Arc<RwLock<ToastRenderBuffer>>,
 }
 
 impl ToastHelper {
@@ -25,23 +58,13 @@ impl ToastHelper {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            toasts: Arc::new(RwLock::new(Vec::new())),
+            render_buffer: Arc::new(RwLock::new(ToastRenderBuffer::default())),
         }
     }
 
     /// Add a toast notification
     pub async fn add(&self, toast: ToastMessage) {
-        // Limit toasts to prevent unbounded growth
-        const MAX_TOASTS: usize = 5;
-
-        let mut toasts = self.toasts.write().await;
-        toasts.push(toast);
-
-        // Keep only the most recent MAX_TOASTS
-        let len = toasts.len();
-        if len > MAX_TOASTS {
-            toasts.drain(0..(len - MAX_TOASTS));
-        }
+        self.render_buffer.write().await.push(toast);
     }
 
     /// Add an error toast
@@ -61,17 +84,17 @@ impl ToastHelper {
 
     /// Get all current toasts
     pub async fn get_all(&self) -> Vec<ToastMessage> {
-        self.toasts.read().await.clone()
+        self.render_buffer.read().await.snapshot()
     }
 
     /// Clear a specific toast by ID
     pub async fn clear(&self, id: &str) {
-        self.toasts.write().await.retain(|t| t.id != id);
+        self.render_buffer.write().await.clear(id);
     }
 
     /// Clear all toasts
     pub async fn clear_all(&self) {
-        self.toasts.write().await.clear();
+        self.render_buffer.write().await.clear_all();
     }
 }
 

@@ -47,9 +47,7 @@ use crate::tui::callbacks::CallbackRegistry;
 use crate::tui::channel_selection::{
     authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
 };
-use crate::tui::components::{
-    DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastLevel, ToastMessage,
-};
+use crate::tui::components::{DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastMessage};
 use crate::tui::context::{IoContext, ShellExitIntent};
 use crate::tui::harness_state::{
     accept_harness_command_submission, apply_harness_command, clear_harness_command_sender,
@@ -1129,19 +1127,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Extract toast state from queue (type-enforced single toast at a time)
     let queued_toast = tui_snapshot.toast_queue.current().cloned();
-    let toast_messages = queued_toast.map(|toast| {
-        let level = match toast.level {
-            crate::tui::state::ToastLevel::Info => ToastLevel::Info,
-            crate::tui::state::ToastLevel::Success => ToastLevel::Success,
-            crate::tui::state::ToastLevel::Warning => ToastLevel::Warning,
-            crate::tui::state::ToastLevel::Error => ToastLevel::Error,
-        };
-        vec![ToastMessage {
-            id: toast.id.to_string(),
-            message: toast.message,
-            level,
-        }]
-    });
+    let toast_messages = queued_toast.map(|toast| vec![ToastMessage::from(&toast)]);
 
     // Global/screen hints come from one shared keybinding registry.
     let global_hints = global_footer_hints();

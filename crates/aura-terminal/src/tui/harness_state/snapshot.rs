@@ -1,7 +1,8 @@
 //! Snapshot export for harness observation.
 
 use super::commands::{
-    map_modal, map_screen, map_toast_kind, push_list, selected_by_index, TuiSemanticInputs,
+    map_modal, map_screen, map_toast_kind, push_list, selected_by_index, visible_home_ids,
+    TuiSemanticInputs,
 };
 use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
@@ -204,19 +205,7 @@ fn build_authoritative_ui_snapshot(
         );
     }
 
-    let mut home_ids = Vec::new();
-    if app_snapshot.neighborhood.home_home_id != aura_core::types::identifiers::ChannelId::default()
-    {
-        home_ids.push(app_snapshot.neighborhood.home_home_id.to_string());
-    }
-    let neighbor_home_ids = app_snapshot
-        .neighborhood
-        .all_neighbors()
-        .filter(|home| home.id != aura_core::types::identifiers::ChannelId::default())
-        .map(|home| home.id.to_string())
-        .filter(|home_id| !home_ids.iter().any(|existing| existing == home_id))
-        .collect::<Vec<_>>();
-    home_ids.extend(neighbor_home_ids);
+    let home_ids = visible_home_ids(app_snapshot);
     let home_items = home_ids
         .iter()
         .enumerate()
@@ -401,19 +390,12 @@ fn build_authoritative_ui_snapshot(
     Ok(snapshot)
 }
 
-pub fn try_authoritative_ui_snapshot(
-    state: &TuiState,
-    semantic_inputs: TuiSemanticInputs<'_>,
-) -> Result<UiSnapshot, String> {
-    build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))
-}
-
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn authoritative_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,
 ) -> UiSnapshot {
-    try_authoritative_ui_snapshot(state, semantic_inputs)
+    build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))
         .unwrap_or_else(|error| panic!("invalid TUI semantic snapshot export: {error}"))
 }
 
