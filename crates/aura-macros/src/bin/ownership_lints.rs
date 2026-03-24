@@ -1974,16 +1974,19 @@ const FRONTEND_INTERNAL_OWNER_SUFFIXES: &[&str] =
     &["crates/aura-terminal/src/tui/semantic_lifecycle.rs"];
 const FRONTEND_SUBMIT_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
+    "crates/aura-terminal/src/tui/screens/app/shell/dispatch.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
 ];
 const FRONTEND_HANDOFF_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/callbacks/factories/chat.rs",
     "crates/aura-terminal/src/tui/callbacks/factories/contacts.rs",
+    "crates/aura-terminal/src/tui/callbacks/factories/invitation.rs",
     "crates/aura-terminal/src/tui/callbacks/factories/mod.rs",
     "crates/aura-terminal/src/tui/semantic_lifecycle.rs",
 ];
 const FRONTEND_AUTHORITATIVE_STATE_SUFFIXES: &[&str] = &[
     "crates/aura-terminal/src/tui/screens/app/shell.rs",
+    "crates/aura-terminal/src/tui/screens/app/shell/dispatch.rs",
     "crates/aura-terminal/src/tui/state/mod.rs",
     "crates/aura-terminal/src/tui/harness_state/mod.rs",
 ];

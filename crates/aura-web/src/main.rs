@@ -938,15 +938,34 @@ cfg_if! {
                 let controller = controller.clone();
                 move || {
                     if bootstrap_account_ready() {
-                        let snapshot = controller.semantic_model_snapshot();
-                        if snapshot.readiness != UiReadiness::Ready
-                            || snapshot.screen == ScreenId::Onboarding
-                        {
-                            controller.set_account_setup_state(true, "", None);
-                            if snapshot.screen == ScreenId::Onboarding {
-                                controller.set_screen(ScreenId::Neighborhood);
+                        let controller = controller.clone();
+                        shared_web_task_owner().spawn_local(async move {
+                            if let Err(error) = harness_bridge::schedule_browser_ui_mutation(
+                                controller.clone(),
+                                move |controller| {
+                                    let snapshot = controller.semantic_model_snapshot();
+                                    if snapshot.readiness != UiReadiness::Ready
+                                        || snapshot.screen == ScreenId::Onboarding
+                                    {
+                                        controller.set_account_setup_state(true, "", None);
+                                        if snapshot.screen == ScreenId::Onboarding {
+                                            controller.set_screen(ScreenId::Neighborhood);
+                                            let _ =
+                                                harness_bridge::publish_current_ui_snapshot(
+                                                    controller,
+                                                );
+                                        }
+                                    }
+                                },
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    error = ?error,
+                                    "failed to schedule browser bootstrap readiness mutation"
+                                );
                             }
-                        }
+                        });
                     }
                 }
             });

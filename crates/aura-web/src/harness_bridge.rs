@@ -253,6 +253,12 @@ pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>
     snapshot
 }
 
+pub(crate) fn publish_current_ui_snapshot(controller: &UiController) -> UiSnapshot {
+    let snapshot = controller.semantic_model_snapshot();
+    controller.publish_ui_snapshot(snapshot.clone());
+    snapshot
+}
+
 pub(crate) async fn schedule_browser_ui_mutation(
     controller: Arc<UiController>,
     action: impl FnOnce(&UiController) + 'static,
@@ -265,6 +271,7 @@ pub(crate) async fn schedule_browser_ui_mutation(
             controller.set_account_setup_state(true, "", None);
             if snapshot.screen == ScreenId::Onboarding {
                 controller.set_screen(ScreenId::Neighborhood);
+                let _ = publish_current_ui_snapshot(controller);
             }
         }
         action(controller.as_ref());

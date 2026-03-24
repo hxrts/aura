@@ -31,6 +31,7 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Parity-critical IDs, focus semantics, and action metadata must come from `aura-app::ui_contract`, not frontend-local derivation.
 - Harness mode may add instrumentation or render-stability hooks but must not bypass normal execution semantics for parity-critical flows.
 - The TUI must expose shared semantic command ingress through its real update/event loop; command handling may not depend on render-time polling.
+- `src/tui/screens/app/shell/dispatch.rs` is the sanctioned event-loop-owned command ingress boundary for shell dispatch preparation and owner allocation. Presentation-only shell composition and runtime props seeding may live beside it, but parity-critical submission ownership must stay in that event-loop path rather than moving into render helpers or callback-free utility modules.
 - Parity-critical semantic export must not depend on placeholder IDs, override-backed lists, or heuristic runtime-event inference.
 - The TUI is an `Observed` plus command-ingress surface for shared semantic flows. It may submit commands and render lifecycle, but it must not own terminal semantic truth for parity-critical operations.
 - Parity-critical callback families must require the appropriate owner type at the API boundary; ownerless callbacks are observed-only.
