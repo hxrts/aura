@@ -376,30 +376,30 @@ without turning Layer 7 startup code into a semantic owner.
 
 ### F1. TUI Handler Boundary Audit
 
-- [ ] Audit `src/handlers/tui.rs`, `src/handlers/tui_stdio.rs`, `src/tui/runtime.rs`, and `src/main.rs` for mixed concerns: startup wiring, stdio setup, runtime launch, demo selection, and shell handoff.
-- [ ] Identify areas where weakly typed mode switches, repeated startup tuples, or config branching can become typed structs or enums.
-- [ ] Keep handler code as shell composition and launch wiring; do not move business logic or semantic ownership into this layer.
+- [x] Audit `src/handlers/tui.rs`, `src/handlers/tui_stdio.rs`, `src/tui/runtime.rs`, and `src/main.rs` for mixed concerns: startup wiring, stdio setup, runtime launch, demo selection, and shell handoff.
+- [x] Identify areas where weakly typed mode switches, repeated startup tuples, or config branching can become typed structs or enums.
+- [x] Keep handler code as shell composition and launch wiring; do not move business logic or semantic ownership into this layer.
 
 ### F2. Handler Decomposition
 
-- [ ] Reduce `src/handlers/tui.rs` from 1776 LOC to under 1500 LOC.
-- [ ] Split it into coherent files with descriptive names such as `startup.rs`, `demo_mode.rs`, `stdio.rs`, `runtime_boot.rs`, or `launch.rs` where those match the actual responsibilities.
-- [ ] Preserve one clear startup path per mode instead of accumulating wrapper-on-wrapper composition.
+- [x] Reduce `src/handlers/tui.rs` from 1776 LOC to under 1500 LOC.
+- [x] Split it into coherent files with descriptive names such as `startup.rs`, `demo_mode.rs`, `stdio.rs`, `runtime_boot.rs`, or `launch.rs` where those match the actual responsibilities.
+- [x] Preserve one clear startup path per mode instead of accumulating wrapper-on-wrapper composition.
 
 ### F3. Entry-Point Typing Improvements
 
-- [ ] Replace repeated startup parameter clusters with typed config structs where they are currently threaded through multiple layers.
-- [ ] Prefer typed enums for launch mode and harness/demo options over string constants or bool combinations.
-- [ ] Keep ownership boundaries explicit when shell startup hands work off to runtime or app workflows.
+- [x] Replace repeated startup parameter clusters with typed config structs where they are currently threaded through multiple layers.
+- [x] Prefer typed enums for launch mode and harness/demo options over string constants or bool combinations.
+- [x] Keep ownership boundaries explicit when shell startup hands work off to runtime or app workflows.
 
 ### F4. Workstream F Verification and Commit
 
-- [ ] Run `cargo check -p aura-terminal`.
-- [ ] Run `cargo test -p aura-terminal --test integration_effect_commands`.
-- [ ] Run `cargo test -p aura-terminal --test e2e_terminal_state`.
-- [ ] Run `cargo test -p aura-terminal --test demo`.
-- [ ] Run `just ci-observed-layer-boundaries`.
-- [ ] Confirm every targeted check is green before committing.
+- [x] Run `cargo check -p aura-terminal`.
+- [x] Run `cargo test -p aura-terminal --test integration_effect_commands`.
+- [x] Run `cargo test -p aura-terminal --features testing --test e2e_terminal_state`.
+- [x] Run `cargo test -p aura-terminal --test demo`.
+- [x] Run `just ci-observed-layer-boundaries`.
+- [x] Confirm every targeted check is green before committing.
 - [ ] Create a commit such as `git add work/dry_terminal.md crates/aura-terminal && git commit -m "refactor(aura-terminal): split tui handler entrypoints"`.
 
 ## Explicitly Deferred
