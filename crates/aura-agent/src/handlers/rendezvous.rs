@@ -23,12 +23,12 @@ use aura_core::hash::hash;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
-use aura_rendezvous::capabilities::RendezvousCapability;
 use aura_guards::chain::create_send_guard;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::effects::TreeEffects;
+use aura_rendezvous::capabilities::RendezvousCapability;
 use aura_rendezvous::{
     EffectCommand, GuardOutcome, GuardSnapshot, RendezvousConfig, RendezvousDescriptor,
     RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,

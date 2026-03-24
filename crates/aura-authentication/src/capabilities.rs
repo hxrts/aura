@@ -58,8 +58,8 @@ pub fn evaluation_candidates_for_guardian_auth_protocol() -> &'static [GuardianA
     GuardianAuthCapability::declared_names()
 }
 
-pub fn evaluation_candidates_for_recovery_authorization() -> &'static [RecoveryAuthorizationCapability]
-{
+pub fn evaluation_candidates_for_recovery_authorization(
+) -> &'static [RecoveryAuthorizationCapability] {
     RecoveryAuthorizationCapability::declared_names()
 }
 

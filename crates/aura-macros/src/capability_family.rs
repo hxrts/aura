@@ -69,7 +69,9 @@ fn capability_family_impl_inner(attr: TokenStream, item: TokenStream) -> SynResu
 
         variant_idents.push(variant.ident.clone());
         canonical_literals.push(LitStr::new(&canonical, local_name.span()));
-        variant.attrs.retain(|attr| !attr.path().is_ident("capability"));
+        variant
+            .attrs
+            .retain(|attr| !attr.path().is_ident("capability"));
     }
 
     Ok(quote! {
@@ -101,9 +103,7 @@ fn validate_namespace(namespace_lit: &LitStr, namespace: &str) -> SynResult<()> 
         ));
     }
     aura_core::CapabilityName::parse(namespace).map_err(
-        |error: aura_core::CapabilityNameError| {
-            Error::new(namespace_lit.span(), error.to_string())
-        },
+        |error: aura_core::CapabilityNameError| Error::new(namespace_lit.span(), error.to_string()),
     )?;
     Ok(())
 }

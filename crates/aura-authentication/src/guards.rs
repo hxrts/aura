@@ -64,7 +64,6 @@ pub mod costs {
 
     /// Flow cost for submitting guardian approval decision
     pub const GUARDIAN_APPROVAL_DECISION_COST: FlowCost = FlowCost::new(2);
-
 }
 
 // =============================================================================
@@ -509,10 +508,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
     match request {
         GuardRequest::ChallengeRequest { scope: _ } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &AuthenticationCapability::Request.as_name(),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::Request.as_name())
+            {
                 return outcome;
             }
 
@@ -541,10 +539,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             proof_hash,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &AuthenticationCapability::SubmitProof.as_name(),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::SubmitProof.as_name())
+            {
                 return outcome;
             }
 
@@ -571,10 +568,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
 
         GuardRequest::ProofVerification { session_id } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &AuthenticationCapability::Verify.as_name(),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::Verify.as_name())
+            {
                 return outcome;
             }
 
@@ -599,10 +595,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             duration_seconds,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &AuthenticationCapability::CreateSession.as_name(),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
+            {
                 return outcome;
             }
 
@@ -637,10 +632,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             required_guardians,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &GuardianAuthCapability::RequestApproval.as_name(),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &GuardianAuthCapability::RequestApproval.as_name())
+            {
                 return outcome;
             }
 
@@ -683,10 +677,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             approved,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(
-                snapshot,
-                &GuardianAuthCapability::Verify.as_name(),
-            ) {
+            if let Some(outcome) =
+                check_capability(snapshot, &GuardianAuthCapability::Verify.as_name())
+            {
                 return outcome;
             }
 
@@ -804,10 +797,7 @@ mod tests {
     #[test]
     fn test_check_capability_success() {
         let snapshot = test_snapshot();
-        let result = check_capability(
-            &snapshot,
-            &AuthenticationCapability::Request.as_name(),
-        );
+        let result = check_capability(&snapshot, &AuthenticationCapability::Request.as_name());
         assert!(result.is_none());
     }
 
@@ -887,6 +877,9 @@ mod tests {
     fn test_guard_costs_defined() {
         assert_eq!(costs::CHALLENGE_REQUEST_COST.value(), 1);
         assert_eq!(costs::PROOF_SUBMISSION_COST.value(), 2);
-        assert_eq!(AuthenticationCapability::Request.as_name().as_str(), "auth:request");
+        assert_eq!(
+            AuthenticationCapability::Request.as_name().as_str(),
+            "auth:request"
+        );
     }
 }

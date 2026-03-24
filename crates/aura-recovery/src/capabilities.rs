@@ -51,7 +51,7 @@ pub fn evaluation_candidates_for_guardian_setup_protocol() -> &'static [Guardian
     GuardianSetupCapability::declared_names()
 }
 
-pub fn evaluation_candidates_for_membership_change_protocol() -> &'static [MembershipChangeCapability]
-{
+pub fn evaluation_candidates_for_membership_change_protocol(
+) -> &'static [MembershipChangeCapability] {
     MembershipChangeCapability::declared_names()
 }

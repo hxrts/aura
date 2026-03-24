@@ -365,6 +365,9 @@ mod tests {
     fn test_guard_costs_defined() {
         assert_eq!(costs::INVITATION_SEND_COST.value(), 1);
         assert_eq!(costs::INVITATION_ACCEPT_COST.value(), 1);
-        assert_eq!(InvitationCapability::Send.as_name().as_str(), "invitation:send");
+        assert_eq!(
+            InvitationCapability::Send.as_name().as_str(),
+            "invitation:send"
+        );
     }
 }

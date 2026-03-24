@@ -31,10 +31,8 @@ impl ChatFactService {
         topic: Option<String>,
         is_dm: bool,
     ) -> GuardOutcome {
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &ChatCapability::ChannelCreate.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &ChatCapability::ChannelCreate.as_name())
+        {
             return outcome;
         }
         if let Some(outcome) = check_flow_budget(snapshot, costs::CHAT_CHANNEL_CREATE_COST) {
@@ -71,10 +69,7 @@ impl ChatFactService {
         reply_to: Option<String>,
         epoch_hint: Option<u32>,
     ) -> GuardOutcome {
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &ChatCapability::MessageSend.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &ChatCapability::MessageSend.as_name()) {
             return outcome;
         }
         if let Some(outcome) = check_moderation(snapshot) {

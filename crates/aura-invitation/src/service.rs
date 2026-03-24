@@ -314,10 +314,7 @@ impl InvitationService {
     ) -> GuardOutcome {
         let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &InvitationCapability::Send.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Send.as_name()) {
             return outcome;
         }
 
@@ -433,10 +430,7 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &InvitationCapability::Accept.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Accept.as_name()) {
             return outcome;
         }
 
@@ -470,10 +464,8 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &InvitationCapability::Decline.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Decline.as_name())
+        {
             return outcome;
         }
 
@@ -507,10 +499,7 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &InvitationCapability::Cancel.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Cancel.as_name()) {
             return outcome;
         }
 

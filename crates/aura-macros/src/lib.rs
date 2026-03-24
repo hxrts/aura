@@ -29,8 +29,8 @@ use syn::{
     Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Token, Type, TypePath,
 };
 
-mod ceremony_facts;
 mod capability_family;
+mod ceremony_facts;
 mod choreography;
 mod domain_fact;
 mod effect_handlers;

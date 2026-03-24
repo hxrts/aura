@@ -603,8 +603,14 @@ mod tests {
     fn test_guard_constants() {
         assert_eq!(guards::INVITATION_SEND_COST, 1);
         assert_eq!(guards::GUARDIAN_REQUEST_COST, 2);
-        assert_eq!(guards::invitation_send_capability().as_str(), "invitation:send");
-        assert_eq!(guards::guardian_invite_capability().as_str(), "invitation:guardian");
+        assert_eq!(
+            guards::invitation_send_capability().as_str(),
+            "invitation:send"
+        );
+        assert_eq!(
+            guards::guardian_invite_capability().as_str(),
+            "invitation:guardian"
+        );
     }
 
     #[test]

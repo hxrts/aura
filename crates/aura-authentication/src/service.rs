@@ -138,10 +138,9 @@ impl AuthService {
     /// the challenge if allowed.
     pub fn request_challenge(&self, snapshot: &GuardSnapshot, scope: SessionScope) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &AuthenticationCapability::Request.as_name(),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::Request.as_name())
+        {
             return outcome;
         }
 
@@ -195,10 +194,9 @@ impl AuthService {
         proof_hash: [u8; 32],
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &AuthenticationCapability::SubmitProof.as_name(),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::SubmitProof.as_name())
+        {
             return outcome;
         }
 
@@ -249,10 +247,9 @@ impl AuthService {
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &AuthenticationCapability::CreateSession.as_name(),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
+        {
             return outcome;
         }
 
@@ -320,10 +317,9 @@ impl AuthService {
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &GuardianAuthCapability::RequestApproval.as_name(),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &GuardianAuthCapability::RequestApproval.as_name())
+        {
             return outcome;
         }
 
@@ -336,8 +332,7 @@ impl AuthService {
         if policy.require_recovery_capability {
             match context.operation_type {
                 RecoveryOperationType::GuardianSetModification => {
-                    if !snapshot
-                        .has_capability(&RecoveryAuthorizationCapability::Approve.as_name())
+                    if !snapshot.has_capability(&RecoveryAuthorizationCapability::Approve.as_name())
                     {
                         return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
@@ -408,10 +403,8 @@ impl AuthService {
         signature: Vec<u8>,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &GuardianAuthCapability::Verify.as_name(),
-        ) {
+        if let Some(outcome) = check_capability(snapshot, &GuardianAuthCapability::Verify.as_name())
+        {
             return outcome;
         }
 
@@ -472,10 +465,9 @@ impl AuthService {
         reason: String,
     ) -> GuardOutcome {
         // Session revocation uses the create_session capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &AuthenticationCapability::CreateSession.as_name(),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &AuthenticationCapability::CreateSession.as_name())
+        {
             return outcome;
         }
 

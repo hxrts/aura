@@ -4,8 +4,8 @@
 //! with correct capability and flow budget enforcement.
 
 #![allow(missing_docs)]
-use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
 use aura_amp::capabilities::AmpCapability;
+use aura_anti_entropy::{AntiEntropyConfig, AntiEntropyHandler};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::FlowCost;
 use aura_guards::chain::SendGuardChain;

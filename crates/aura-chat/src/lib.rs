@@ -74,12 +74,12 @@
 
 use aura_core::AuraError;
 
+/// Typed capability families owned by the chat domain.
+pub mod capabilities;
 pub mod fact_service;
 pub mod facts;
 pub mod group;
 pub mod guards;
-/// Typed capability families owned by the chat domain.
-pub mod capabilities;
 pub mod types;
 pub mod view;
 

@@ -23,7 +23,6 @@ pub mod costs {
 
     /// Flow cost for sending a message.
     pub const CHAT_MESSAGE_SEND_COST: FlowCost = FlowCost::new(1);
-
 }
 
 // =============================================================================

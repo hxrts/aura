@@ -287,10 +287,9 @@ impl RendezvousService {
         now_ms: u64,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &RendezvousCapability::Publish.as_name(),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Publish.as_name())
+        {
             return outcome;
         }
 
@@ -367,10 +366,9 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<GuardOutcome> {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &RendezvousCapability::Connect.as_name(),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Connect.as_name())
+        {
             return Ok(outcome);
         }
 
@@ -478,10 +476,9 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<(GuardOutcome, Option<SecureChannel>)> {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &RendezvousCapability::Connect.as_name(),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Connect.as_name())
+        {
             return Ok((outcome, None));
         }
 
@@ -638,10 +635,9 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(
-            snapshot,
-            &RendezvousCapability::Relay.as_name(),
-        ) {
+        if let Some(outcome) =
+            types::check_capability(snapshot, &RendezvousCapability::Relay.as_name())
+        {
             return outcome;
         }
 
