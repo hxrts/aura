@@ -169,8 +169,10 @@ impl<'a> InvitationCacheHandler<'a> {
             .map(|invitation| invitation.created_at)
             .unwrap_or(0);
 
-        // TODO(storage-migration): remove this legacy ShareableInvitation
-        // fallback after imported invitations are migrated to StoredImportedInvitation.
+        // Legacy path: older storage entries lack `status` and `created_at` fields
+        // and are stored as bare `ShareableInvitation`.  New writes always use
+        // `StoredImportedInvitation`, so this branch only fires for pre-migration
+        // data and can be removed once all local stores have been re-persisted.
         Some(StoredImportedInvitation {
             shareable,
             status: preserved_status,
