@@ -851,10 +851,12 @@ pub enum InvitationFactKind {
 pub enum SemanticOperationKind {
     CreateAccount,
     CreateHome,
+    CreateNeighborhood,
     CreateChannel,
     StartDeviceEnrollment,
     ImportDeviceEnrollmentCode,
     CreateContactInvitation,
+    CreateGuardianInvitation,
     AcceptContactInvitation,
     DeclineInvitation,
     RevokeInvitation,
@@ -862,6 +864,18 @@ pub enum SemanticOperationKind {
     AcceptPendingChannelInvitation,
     JoinChannel,
     SendChatMessage,
+    RetryChatMessage,
+    SetChannelTopic,
+    CloseChannel,
+    UpdateContactNickname,
+    StartDirectChat,
+    UpdateNicknameSuggestion,
+    UpdateMfaPolicy,
+    UpdateThreshold,
+    GrantModerator,
+    RevokeModerator,
+    AddHomeToNeighborhood,
+    LinkHomeOneHopLink,
     RemoveContact,
     StartRecovery,
     SubmitGuardianApproval,
@@ -1351,6 +1365,71 @@ impl OperationId {
     #[must_use]
     pub fn remove_contact() -> Self {
         Self("remove_contact".to_string())
+    }
+
+    #[must_use]
+    pub fn retry_message() -> Self {
+        Self("retry_message".to_string())
+    }
+
+    #[must_use]
+    pub fn set_channel_topic() -> Self {
+        Self("set_channel_topic".to_string())
+    }
+
+    #[must_use]
+    pub fn close_channel() -> Self {
+        Self("close_channel".to_string())
+    }
+
+    #[must_use]
+    pub fn update_contact_nickname() -> Self {
+        Self("update_contact_nickname".to_string())
+    }
+
+    #[must_use]
+    pub fn start_direct_chat() -> Self {
+        Self("start_direct_chat".to_string())
+    }
+
+    #[must_use]
+    pub fn update_nickname_suggestion() -> Self {
+        Self("update_nickname_suggestion".to_string())
+    }
+
+    #[must_use]
+    pub fn update_mfa_policy() -> Self {
+        Self("update_mfa_policy".to_string())
+    }
+
+    #[must_use]
+    pub fn update_threshold() -> Self {
+        Self("update_threshold".to_string())
+    }
+
+    #[must_use]
+    pub fn grant_moderator() -> Self {
+        Self("grant_moderator".to_string())
+    }
+
+    #[must_use]
+    pub fn revoke_moderator() -> Self {
+        Self("revoke_moderator".to_string())
+    }
+
+    #[must_use]
+    pub fn create_neighborhood() -> Self {
+        Self("create_neighborhood".to_string())
+    }
+
+    #[must_use]
+    pub fn add_home_to_neighborhood() -> Self {
+        Self("add_home_to_neighborhood".to_string())
+    }
+
+    #[must_use]
+    pub fn link_home_one_hop_link() -> Self {
+        Self("link_home_one_hop_link".to_string())
     }
 
     #[must_use]

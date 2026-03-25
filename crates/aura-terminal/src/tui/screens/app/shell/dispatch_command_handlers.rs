@@ -9,7 +9,9 @@ use aura_app::ui::workflows::ceremonies::{
 use aura_app::ui_contract::SemanticOperationKind;
 use aura_core::types::FrostThreshold;
 
-use crate::tui::channel_selection::authoritative_committed_selection;
+use crate::tui::channel_selection::{
+    authoritative_committed_selection, strongest_authoritative_binding_for_channel,
+};
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
 use crate::tui::updates::spawn_ui_update;
 use crate::tui::updates::UiOperation;
@@ -991,12 +993,12 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("No channel selected");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let selected_binding = tui_selected_for_events
-                .read()
-                .clone()
-                .map(|selection| selection.binding().clone())
-                .filter(|binding| binding.channel_id == channel.id);
-            let context_id = selected_binding.and_then(|binding| binding.context_id);
+            let selected = tui_selected_for_events.read().clone();
+            let context_id = strongest_authoritative_binding_for_channel(
+                channel,
+                selected.as_ref(),
+            )
+            .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 new_state.toast_error(format!(
                     "Selected channel lacks authoritative context: {}",
@@ -1038,12 +1040,12 @@ pub(super) fn handle_dispatch_command_match(
                 ));
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let selected_binding = tui_selected_for_events
-                .read()
-                .clone()
-                .map(|selection| selection.binding().clone())
-                .filter(|binding| binding.channel_id == channel.id);
-            let context_id = selected_binding.and_then(|binding| binding.context_id);
+            let selected = tui_selected_for_events.read().clone();
+            let context_id = strongest_authoritative_binding_for_channel(
+                channel,
+                selected.as_ref(),
+            )
+            .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 new_state.toast_error(format!(
                     "Selected channel lacks authoritative context: {}",

@@ -5556,7 +5556,20 @@ fn runtime_semantic_snapshot(
         settings_runtime,
         notifications_runtime,
     );
-    snapshot.readiness = readiness_owner::screen_readiness(model.screen);
+    snapshot.readiness = readiness_owner::screen_readiness(
+        model.screen,
+        readiness_owner::ScreenProjectionReadiness {
+            neighborhood_loaded: neighborhood_runtime.loaded,
+            neighborhood_home_bound: !neighborhood_runtime.active_home_id.is_empty(),
+            chat_loaded: chat_runtime.loaded,
+            contacts_loaded: contacts_runtime.loaded,
+            settings_loaded: settings_runtime.loaded,
+            settings_profile_bound: !settings_runtime.authority_id.is_empty(),
+            settings_devices_materialized: !settings_runtime.devices.is_empty(),
+            settings_authorities_materialized: !settings_runtime.authorities.is_empty(),
+            notifications_loaded: notifications_runtime.loaded,
+        },
+    );
 
     if let Some(add_device_state) = model.add_device_modal() {
         let operation_state = match add_device_state.step {
@@ -6692,5 +6705,80 @@ mod tests {
         assert_eq!(devices.items.len(), 1);
         assert!(devices.items[0].is_current);
         assert!(!devices.items[0].selected);
+    }
+
+    #[test]
+    fn runtime_semantic_snapshot_keeps_settings_loading_until_authoritative_projection_arrives() {
+        let mut model = UiModel::new("authority-test".to_string());
+        model.account_ready = true;
+        model.set_screen(ScreenId::Settings);
+
+        let loading_snapshot = runtime_semantic_snapshot(
+            &model,
+            &NeighborhoodRuntimeView::default(),
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView::default(),
+            &NotificationsRuntimeView::default(),
+        );
+        assert_eq!(loading_snapshot.readiness, UiReadiness::Loading);
+
+        let ready_snapshot = runtime_semantic_snapshot(
+            &model,
+            &NeighborhoodRuntimeView::default(),
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView {
+                loaded: true,
+                authority_id: "authority-test".to_string(),
+                devices: vec![SettingsRuntimeDevice {
+                    id: "device-1".to_string(),
+                    name: "Current Device".to_string(),
+                    is_current: true,
+                }],
+                authorities: vec![SettingsRuntimeAuthority {
+                    id: AuthorityId::new_from_entropy([7_u8; 32]),
+                    label: "Authority".to_string(),
+                    is_current: true,
+                }],
+                ..SettingsRuntimeView::default()
+            },
+            &NotificationsRuntimeView::default(),
+        );
+        assert_eq!(ready_snapshot.readiness, UiReadiness::Ready);
+    }
+
+    #[test]
+    fn runtime_semantic_snapshot_keeps_neighborhood_loading_until_home_projection_arrives() {
+        let mut model = UiModel::new("authority-test".to_string());
+        model.account_ready = true;
+        model.set_screen(ScreenId::Neighborhood);
+
+        let loading_snapshot = runtime_semantic_snapshot(
+            &model,
+            &NeighborhoodRuntimeView {
+                loaded: true,
+                ..NeighborhoodRuntimeView::default()
+            },
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView::default(),
+            &NotificationsRuntimeView::default(),
+        );
+        assert_eq!(loading_snapshot.readiness, UiReadiness::Loading);
+
+        let ready_snapshot = runtime_semantic_snapshot(
+            &model,
+            &NeighborhoodRuntimeView {
+                loaded: true,
+                active_home_id: "home-1".to_string(),
+                ..NeighborhoodRuntimeView::default()
+            },
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView::default(),
+            &NotificationsRuntimeView::default(),
+        );
+        assert_eq!(ready_snapshot.readiness, UiReadiness::Ready);
     }
 }

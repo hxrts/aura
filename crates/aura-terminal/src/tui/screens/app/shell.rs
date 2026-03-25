@@ -76,9 +76,13 @@ use crate::tui::props::{
     extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
     extract_notifications_view_props, extract_settings_view_props,
 };
+use crate::tui::timeout_support::{execute_with_terminal_timeout, TerminalTimeoutError};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
-use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use crate::tui::updates::{
+    harness_command_channel, ui_update_channel, UiUpdate, UiUpdateSender,
+};
 use std::sync::Mutex;
+use std::time::Duration;
 
 mod dispatch;
 mod dispatch_command_handlers;
@@ -99,15 +103,124 @@ use dispatch::{
 };
 use events::{handle_channel_selection_change, resolve_committed_selected_channel_id};
 use input::transition_from_terminal_event;
-use props::IoAppProps;
+use props::{IoAppProps, RuntimeShellPropsSeed};
 use render::{build_global_modals, state_indicator_label};
-pub use runtime::run_app_with_context;
+use runtime::build_runtime_app;
 use runtime_support::{
     authoritative_app_snapshot_with_retry, authoritative_settings_authorities_for_command,
     authoritative_settings_devices_for_command, effect_sleep, shell_retry_policy,
 };
 use state::{sync_neighborhood_navigation_state, TuiStateHandle};
 use updates::{process_ui_update, UiUpdateContext, UiUpdateLoopAction};
+
+///
+/// This version uses the IoContext to fetch actual data from the reactive
+/// views instead of mock data.
+pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIntent> {
+    let (update_tx, update_rx) = ui_update_channel();
+    let update_rx_holder = Arc::new(Mutex::new(Some(update_rx)));
+    let (harness_command_tx, harness_command_rx) = harness_command_channel();
+    let harness_command_rx_holder = Arc::new(Mutex::new(Some(harness_command_rx)));
+    let (bootstrap_handoff_tx, bootstrap_handoff_rx) = tokio::sync::oneshot::channel();
+    let bootstrap_handoff_tx_holder = Arc::new(Mutex::new(Some(bootstrap_handoff_tx)));
+    ctx.clear_bootstrap_runtime_handoff_committed()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    ensure_harness_command_listener().await?;
+    register_harness_command_sender(harness_command_tx).await?;
+
+    let ctx_arc = Arc::new(ctx);
+    let callbacks = CallbackRegistry::new(ctx_arc.clone(), update_tx.clone());
+    let callback_context = CallbackContext::new(callbacks.clone());
+    let show_account_setup = !ctx_arc.has_account();
+
+    let nickname_suggestion = {
+        let reactive = {
+            let core = ctx_arc.app_core_raw().read().await;
+            core.reactive().clone()
+        };
+        reactive
+            .read(&*SETTINGS_SIGNAL)
+            .await
+            .unwrap_or_default()
+            .nickname_suggestion
+    };
+
+    let app_context = AppCoreContext::new(ctx_arc.app_core().clone(), ctx_arc.clone());
+    let io_app_props = IoAppProps::from_runtime_seed(RuntimeShellPropsSeed {
+        nickname_suggestion,
+        show_account_setup,
+        pending_runtime_bootstrap: ctx_arc.pending_runtime_bootstrap(),
+        update_rx: update_rx_holder,
+        harness_command_rx: harness_command_rx_holder,
+        bootstrap_handoff_tx: bootstrap_handoff_tx_holder.clone(),
+        update_tx: update_tx.clone(),
+        callbacks,
+        #[cfg(feature = "development")]
+        demo_mode: ctx_arc.is_demo_mode(),
+        #[cfg(feature = "development")]
+        demo_alice_code: ctx_arc.demo_alice_code(),
+        #[cfg(feature = "development")]
+        demo_carol_code: ctx_arc.demo_carol_code(),
+        #[cfg(feature = "development")]
+        demo_mobile_device_id: ctx_arc.demo_mobile_device_id(),
+        #[cfg(feature = "development")]
+        demo_mobile_authority_id: ctx_arc.demo_mobile_authority_id(),
+    });
+    let mut app = build_runtime_app(app_context, callback_context, io_app_props);
+    let result = if show_account_setup {
+        let app_future = app.fullscreen();
+        tokio::pin!(app_future);
+        tokio::select! {
+            result = &mut app_future => result,
+            result = async {
+                bootstrap_handoff_rx.await.map_err(|error| {
+                    std::io::Error::other(format!(
+                        "bootstrap runtime handoff notification dropped before shell exit: {error}"
+                    ))
+                })
+            } => {
+                result?;
+                if !ctx_arc.bootstrap_runtime_handoff_committed() {
+                    return Err(std::io::Error::other(
+                        "bootstrap runtime handoff notified without committed marker",
+                    ));
+                }
+                match execute_with_terminal_timeout(
+                    "bootstrap_runtime_handoff_exit",
+                    Duration::from_secs(5),
+                    || async { app_future.as_mut().await },
+                )
+                .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(TerminalTimeoutError::Timeout { .. }) => Err(std::io::Error::other(
+                        "bootstrap runtime handoff committed but fullscreen generation did not exit within 5s",
+                    )),
+                    Err(TerminalTimeoutError::Setup { context, detail }) => {
+                        Err(std::io::Error::other(format!(
+                            "{context}: failed to configure bounded bootstrap exit wait: {detail}"
+                        )))
+                    }
+                    Err(TerminalTimeoutError::Operation(error)) => Err(error),
+                }
+            }
+        }
+    } else {
+        app.fullscreen().await
+    };
+    let _ = clear_harness_command_sender().await;
+    result?;
+    ctx_arc.take_shell_exit_intent().ok_or_else(|| {
+        std::io::Error::other(
+            "fullscreen generation exited without explicit ShellExitIntent; see docs/122_ownership_model.md",
+        )
+    })
+}
+
+pub(super) fn request_bootstrap_reload(io_ctx: &IoContext) {
+    io_ctx.request_bootstrap_reload();
+}
+
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let screen = hooks.use_state(|| Screen::Neighborhood);
@@ -697,10 +810,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
 
                     let updated_state = tui.read_clone();
+                    let updated_channels_for_command = shared_channels_for_commands.read().clone();
                     let committed_selection = tui_selected_for_commands.read().clone();
                     let immediate_join_binding = authoritative_binding_for_requested_join(
                         &submission.command,
-                        &harness_channels_for_command,
+                        &updated_channels_for_command,
                         Some(updated_state.chat.selected_channel),
                         committed_selection
                             .as_ref()

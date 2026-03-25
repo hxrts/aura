@@ -42,9 +42,20 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
+- Browser bootstrap storage is explicit and typed: the shell persists selected
+  runtime identity, pending bootstrap metadata, and browser-local
+  `AccountConfig` metadata separately so preserved-profile restarts can rebind
+  one active generation and recover the canonical runtime bootstrap path
+  without browser-local semantic repair.
 - Browser bootstrap/rebootstrap bridge promises resolve on completion of the
   owned bootstrap transition, not merely on enqueue, so harness/browser callers
   do not mistake acceptance for success.
+- Browser bootstrap/rebootstrap completion is generation-based: the promise
+  resolves only after the active web shell generation has published the new
+  generation's semantic snapshot through the canonical browser publication
+  path, and the page-owned `__AURA_UI_ACTIVE_GENERATION__` /
+  `__AURA_UI_READY_GENERATION__` diagnostics reflect that transition. Render
+  heartbeat remains the separate render-convergence signal.
 - Harness publication is semantic-first: pushed shared-contract state and render heartbeat are authoritative; DOM inspection is secondary diagnostics only.
 - Browser harness publication is render-aligned: semantic snapshot publication
   and render heartbeat emission must be scheduled through
@@ -57,11 +68,18 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Missing or degraded semantic snapshot/render-heartbeat publication must be
   surfaced explicitly through browser-side publication state, not just console
   logging or `null`/default fallbacks.
+- Browser generation rebinding must be surfaced explicitly through page-owned
+  generation diagnostics, so harness observation can distinguish rebinding from
+  stale or missing semantic publication.
 - Harness mode may change instrumentation and render stability, but not business-flow semantics.
 - Shared browser-flow execution must go through the semantic command bridge and real app workflows; DOM clicks and selector helpers are frontend-conformance-only.
 - Playwright-to-page semantic submission uses the page-owned semantic queue
   (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`) so the driver does not own
   browser semantic lifecycle or runtime/bootstrap state.
+- Browser semantic submit readiness publication is page-owned and must report
+  whether the page-owned enqueue surface is installed (`enqueue_ready`) so
+  driver startup/recovery waits bind to generation-owned readiness instead of
+  stale driver-local probes.
 - Long-lived browser maintenance tasks must surface terminal pause/failure
   through observed UI state or equivalent structured browser signals rather than
   relying on console logging alone.

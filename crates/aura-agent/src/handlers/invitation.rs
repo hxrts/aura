@@ -1406,13 +1406,11 @@ impl InvitationHandler {
                     })?;
             }
             InvitationType::DeviceEnrollment { .. } => {
-                self.execute_device_enrollment_invitee(effects.clone(), invitation)
-                    .await
-                    .map_err(|error| {
-                        AgentError::choreography(format!(
-                            "device enrollment accept follow-up failed for {invitation_id}: {error}"
-                        ))
-                    })?;
+                let _ = effects;
+                tracing::debug!(
+                    invitation_id = %invitation_id,
+                    "Skipping synchronous device enrollment invitee follow-up; invitation service owns the bounded post-accept task"
+                );
             }
             InvitationType::Channel { .. } => {
                 self.notify_channel_invitation_acceptance(effects.as_ref(), invitation_id)
@@ -2492,7 +2490,7 @@ impl InvitationHandler {
     /// 1. Receive DeviceEnrollmentRequest from Initiator
     /// 2. Send DeviceEnrollmentAccept to Initiator
     /// 3. Receive DeviceEnrollmentConfirm from Initiator
-    async fn execute_device_enrollment_invitee(
+    pub(crate) async fn execute_device_enrollment_invitee(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,

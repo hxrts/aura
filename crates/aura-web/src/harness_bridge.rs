@@ -4,8 +4,8 @@
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
 use aura_app::ui::contract::{
-    classify_screen_item_id, classify_semantic_settings_section_item_id, ListId, ModalId,
-    RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot,
+    ListId, ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot, classify_screen_item_id,
+    classify_semantic_settings_section_item_id,
 };
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
@@ -19,71 +19,173 @@ use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
+use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::RuntimeFact;
-use aura_core::{types::identifiers::ChannelId, AuthorityId, DeviceId};
+use aura_core::{AuthorityId, DeviceId, types::identifiers::ChannelId};
 use aura_effects::ReactiveEffects;
 use aura_ui::UiController;
 use futures::channel::oneshot;
-use js_sys::{Array, Function, Object, Reflect, JSON};
+use js_sys::{Array, Function, JSON, Object, Reflect};
 use serde_json::{from_str, to_string};
 use serde_wasm_bindgen::to_value;
-use std::cell::RefCell as StdRefCell;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell, RefCell as StdRefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::future_to_promise;
 
+use crate::bootstrap_storage::persist_runtime_account_config;
 use crate::{
-    active_storage_prefix, clear_pending_device_enrollment_code, load_selected_runtime_identity,
-    pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
-    persist_selected_runtime_identity, selected_runtime_identity_key,
-    submit_runtime_bootstrap_handoff, task_owner::shared_web_task_owner,
+    active_storage_prefix, clear_pending_device_enrollment_code, device_enrollment_bootstrap_name,
+    load_selected_runtime_identity, pending_device_enrollment_code_key,
+    persist_pending_device_enrollment_code, persist_selected_runtime_identity,
+    selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
+    task_owner::shared_web_task_owner,
 };
 
 thread_local! {
     static CONTROLLER: RefCell<Option<Arc<UiController>>> = const { RefCell::new(None) };
     static LAST_PUBLISHED_UI_STATE_JSON: RefCell<Option<String>> = const { RefCell::new(None) };
     static RENDER_SEQ: RefCell<u64> = const { RefCell::new(0) };
+    static ACTIVE_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static READY_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static BROWSER_SHELL_PHASE: Cell<BrowserShellPhase> = const { Cell::new(BrowserShellPhase::Bootstrapping) };
+    static GENERATION_READY_WAITERS: RefCell<Vec<(u64, oneshot::Sender<()>)>> = const { RefCell::new(Vec::new()) };
     static BOOTSTRAP_HANDOFF_SUBMITTER: RefCell<Option<Arc<dyn Fn(BootstrapHandoff) -> js_sys::Promise>>> = const { RefCell::new(None) };
     static RUNTIME_IDENTITY_STAGER: RefCell<Option<Arc<dyn Fn(String) -> js_sys::Promise>>> = const { RefCell::new(None) };
 }
 
 const UI_PUBLICATION_STATE_KEY: &str = "__AURA_UI_PUBLICATION_STATE__";
 const RENDER_HEARTBEAT_PUBLICATION_STATE_KEY: &str = "__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__";
+const SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY: &str = "__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__";
+const UI_ACTIVE_GENERATION_KEY: &str = "__AURA_UI_ACTIVE_GENERATION__";
+const UI_READY_GENERATION_KEY: &str = "__AURA_UI_READY_GENERATION__";
+const UI_GENERATION_PHASE_KEY: &str = "__AURA_UI_GENERATION_PHASE__";
 
-fn submit_create_account_in_background(controller: Arc<UiController>, nickname: String) {
-    shared_web_task_owner().spawn_local(async move {
-        web_sys::console::log_1(
-            &format!("[web-harness] create_account start nickname={nickname}").into(),
-        );
-        controller.set_account_setup_state(false, nickname.clone(), None);
-        let has_runtime = {
-            let core = controller.app_core().read().await;
-            core.runtime().is_some()
-        };
-        let result: Result<(), String> =
-            account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BrowserShellPhase {
+    Bootstrapping,
+    HandoffCommitted,
+    Rebinding,
+    Ready,
+}
+
+fn browser_shell_phase_label(phase: BrowserShellPhase) -> &'static str {
+    match phase {
+        BrowserShellPhase::Bootstrapping => "bootstrapping",
+        BrowserShellPhase::HandoffCommitted => "handoff_committed",
+        BrowserShellPhase::Rebinding => "rebinding",
+        BrowserShellPhase::Ready => "ready",
+    }
+}
+
+fn current_browser_shell_phase() -> BrowserShellPhase {
+    BROWSER_SHELL_PHASE.with(|slot| slot.get())
+}
+
+async fn initialize_runtime_account_for_web_shell(
+    controller: Arc<UiController>,
+    nickname: String,
+) -> Result<(), JsValue> {
+    web_sys::console::log_1(
+        &format!("[web-harness] create_account start nickname={nickname}").into(),
+    );
+    super::stage_runtime_bound_web_account_bootstrap(&nickname)
+        .await
+        .map_err(|error| JsValue::from_str(&error.user_message()))?;
+    controller.set_account_setup_state(false, nickname.clone(), None);
+    account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    persist_runtime_account_config(
+        controller.app_core(),
+        Some(nickname.clone()),
+        crate::WebUiOperation::CreateAccount,
+    )
+    .await
+    .map_err(|error| JsValue::from_str(&error.user_message()))?;
+    controller.finalize_account_setup(ScreenId::Neighborhood);
+    publish_semantic_controller_snapshot(controller);
+    web_sys::console::log_1(&format!("[web-harness] create_account ok nickname={nickname}").into());
+    Ok(())
+}
+
+async fn start_and_monitor_runtime_device_removal(
+    controller: Arc<UiController>,
+    device_id: String,
+) -> Result<(), JsValue> {
+    let app_core = controller.app_core().clone();
+    let ceremony_handle =
+        ceremony_workflows::start_device_removal_ceremony(&app_core, device_id)
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let status_handle = ceremony_handle.status_handle();
+    match ceremony_workflows::get_key_rotation_ceremony_status(&app_core, &status_handle).await {
+        Ok(status) if status.is_complete => {
+            settings_workflows::refresh_settings_from_runtime(&app_core)
                 .await
-                .map_err(|error| error.to_string());
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.request_rerender();
+            return Ok(());
+        }
+        Ok(_) => {}
+        Err(error) => {
+            return Err(JsValue::from_str(&error.to_string()));
+        }
+    }
+    shared_web_task_owner().spawn_local({
+        let controller = controller.clone();
+        let app_core = app_core.clone();
+        async move {
+            let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
+                &app_core,
+                &status_handle,
+                ceremony_workflows::CeremonyPollPolicy {
+                    interval: std::time::Duration::from_millis(250),
+                    max_attempts: 160,
+                    rollback_on_failure: true,
+                    refresh_settings_on_complete: true,
+                },
+                |_| {
+                    controller.request_rerender();
+                },
+                |duration| {
+                    let app_core = app_core.clone();
+                    async move {
+                        let sleep_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+                        let _ = time_workflows::sleep_ms(&app_core, sleep_ms).await;
+                    }
+                },
+            )
+            .await;
 
-        match result {
-            Ok(()) => {
-                if has_runtime {
-                    controller.set_account_setup_state(true, "", None);
+            match lifecycle {
+                Ok(lifecycle) => {
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-harness] device_removal_monitor state={:?};complete={};failed={};attempts={}",
+                            lifecycle.state,
+                            lifecycle.status.is_complete,
+                            lifecycle.status.has_failed,
+                            lifecycle.attempts
+                        )
+                        .into(),
+                    );
+                    controller.request_rerender();
                 }
-                web_sys::console::log_1(
-                    &format!("[web-harness] create_account ok nickname={nickname}").into(),
-                );
-            }
-            Err(error) => {
-                web_sys::console::error_1(
-                    &format!("[web-harness] create_account error {error}").into(),
-                );
+                Err(error) => {
+                    web_sys::console::warn_1(
+                        &format!(
+                            "[web-harness] device_removal_monitor failed: {error}"
+                        )
+                        .into(),
+                    );
+                }
             }
         }
     });
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -250,13 +352,177 @@ pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>
     set_controller(controller.clone());
     let snapshot = controller.semantic_model_snapshot();
     controller.publish_ui_snapshot(snapshot.clone());
+    web_sys::console::log_1(
+        &format!(
+            "[web-harness-publish] semantic screen={:?};readiness={:?};revision={:?}",
+            snapshot.screen, snapshot.readiness, snapshot.revision
+        )
+        .into(),
+    );
     snapshot
 }
 
-pub(crate) fn publish_current_ui_snapshot(controller: &UiController) -> UiSnapshot {
-    let snapshot = controller.semantic_model_snapshot();
-    controller.publish_ui_snapshot(snapshot.clone());
-    snapshot
+fn generation_js_value(generation_id: u64) -> JsValue {
+    if generation_id == 0 {
+        JsValue::NULL
+    } else {
+        JsValue::from_f64(generation_id as f64)
+    }
+}
+
+fn sync_generation_globals(window: &web_sys::Window) {
+    let active_generation = ACTIVE_GENERATION.with(|slot| slot.get());
+    let ready_generation = READY_GENERATION.with(|slot| slot.get());
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str(UI_ACTIVE_GENERATION_KEY),
+        &generation_js_value(active_generation),
+    );
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str(UI_READY_GENERATION_KEY),
+        &generation_js_value(ready_generation),
+    );
+}
+
+fn wake_page_owned_mutation_queues(window: &web_sys::Window) {
+    for key in [
+        "__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__",
+        "__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__",
+    ] {
+        if let Ok(function) = Reflect::get(window.as_ref(), &JsValue::from_str(key))
+            .and_then(|value| value.dyn_into::<Function>())
+        {
+            if let Err(error) = function.call0(window.as_ref()) {
+                log_js_callback_error("page-owned mutation queue wake", &error);
+            }
+        }
+    }
+}
+
+fn semantic_submit_surface_state() -> (&'static str, &'static str) {
+    let active_generation = ACTIVE_GENERATION.with(|slot| slot.get());
+    let has_controller = CONTROLLER.with(|slot| slot.borrow().is_some());
+    let phase = current_browser_shell_phase();
+    if active_generation == 0 {
+        return ("unavailable", "semantic_submit_surface_missing_generation");
+    }
+    if !has_controller {
+        return ("unavailable", "semantic_submit_surface_missing_controller");
+    }
+    match phase {
+        BrowserShellPhase::Ready => ("ready", "semantic_submit_surface_ready"),
+        BrowserShellPhase::Bootstrapping => {
+            ("unavailable", "semantic_submit_surface_bootstrapping")
+        }
+        BrowserShellPhase::HandoffCommitted => {
+            ("unavailable", "semantic_submit_surface_handoff_committed")
+        }
+        BrowserShellPhase::Rebinding => (
+            "unavailable",
+            "semantic_submit_surface_generation_rebinding",
+        ),
+    }
+}
+
+fn refresh_semantic_submit_surface(window: &web_sys::Window, binding_mode: &str) {
+    let (status, detail) = semantic_submit_surface_state();
+    web_sys::console::log_1(
+        &format!(
+            "[web-harness] semantic_submit_refresh status={status};detail={detail};generation={};phase={}",
+            ACTIVE_GENERATION.with(|slot| slot.get()),
+            browser_shell_phase_label(current_browser_shell_phase())
+        )
+        .into(),
+    );
+    publish_semantic_submit_state(window, status, detail, binding_mode);
+}
+
+pub fn set_browser_shell_phase(phase: BrowserShellPhase) {
+    BROWSER_SHELL_PHASE.with(|slot| {
+        slot.set(phase);
+    });
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let _ = Reflect::set(
+        window.as_ref(),
+        &JsValue::from_str(UI_GENERATION_PHASE_KEY),
+        &JsValue::from_str(browser_shell_phase_label(phase)),
+    );
+    refresh_semantic_submit_surface(&window, "semantic_bridge");
+}
+
+fn mark_generation_ready(generation_id: u64) {
+    if generation_id == 0 {
+        return;
+    }
+    READY_GENERATION.with(|slot| {
+        if slot.get() < generation_id {
+            slot.set(generation_id);
+        }
+    });
+    GENERATION_READY_WAITERS.with(|slot| {
+        let mut waiters = slot.borrow_mut();
+        let mut pending = Vec::with_capacity(waiters.len());
+        for (required_generation, sender) in waiters.drain(..) {
+            if generation_id >= required_generation {
+                let _ = sender.send(());
+            } else {
+                pending.push((required_generation, sender));
+            }
+        }
+        *waiters = pending;
+    });
+    if let Some(window) = web_sys::window() {
+        sync_generation_globals(&window);
+    }
+}
+
+fn snapshot_marks_generation_ready(snapshot: &UiSnapshot) -> bool {
+    snapshot.readiness == UiReadiness::Ready
+}
+
+pub fn set_active_generation(generation_id: u64) {
+    ACTIVE_GENERATION.with(|slot| {
+        slot.set(generation_id);
+    });
+    if let Some(window) = web_sys::window() {
+        sync_generation_globals(&window);
+        refresh_semantic_submit_surface(&window, "semantic_bridge");
+    }
+}
+
+pub async fn wait_for_generation_ready(generation_id: u64) -> Result<(), JsValue> {
+    if generation_id == 0 || READY_GENERATION.with(|slot| slot.get() >= generation_id) {
+        return Ok(());
+    }
+    let (tx, rx) = oneshot::channel();
+    GENERATION_READY_WAITERS.with(|slot| {
+        slot.borrow_mut().push((generation_id, tx));
+    });
+    rx.await
+        .map_err(|_| JsValue::from_str(&format!("generation_ready_wait_dropped:{generation_id}")))
+}
+
+pub(crate) fn schedule_browser_task_next_tick(
+    action: impl FnOnce() + 'static,
+) -> Result<(), JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("window unavailable"))?;
+    let action = Rc::new(StdRefCell::new(Some(Box::new(action) as Box<dyn FnOnce()>)));
+    let callback_action = action.clone();
+    let callback = Closure::once(move || {
+        if let Some(action) = callback_action.borrow_mut().take() {
+            action();
+        }
+    });
+    window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(callback.as_ref().unchecked_ref(), 0)
+        .map_err(|error| {
+            JsValue::from_str(&format!("failed to schedule browser task: {error:?}"))
+        })?;
+    callback.forget();
+    Ok(())
 }
 
 pub(crate) async fn schedule_browser_ui_mutation(
@@ -267,15 +533,22 @@ pub(crate) async fn schedule_browser_ui_mutation(
     let (tx, rx) = oneshot::channel::<()>();
     let action = Rc::new(StdRefCell::new(Some(Box::new(move || {
         let snapshot = controller.semantic_model_snapshot();
-        if snapshot.readiness != UiReadiness::Ready || snapshot.screen == ScreenId::Onboarding {
-            controller.set_account_setup_state(true, "", None);
-            if snapshot.screen == ScreenId::Onboarding {
-                controller.set_screen(ScreenId::Neighborhood);
-                let _ = publish_current_ui_snapshot(controller);
-            }
-        }
+        web_sys::console::log_1(
+            &format!(
+                "[web-ui-mutation] pre screen={:?};readiness={:?};focused={:?}",
+                snapshot.screen, snapshot.readiness, snapshot.focused_control
+            )
+            .into(),
+        );
         action(controller.as_ref());
-        let _ = publish_semantic_controller_snapshot(controller.clone());
+        let final_snapshot = publish_semantic_controller_snapshot(controller.clone());
+        web_sys::console::log_1(
+            &format!(
+                "[web-ui-mutation] post screen={:?};readiness={:?};focused={:?}",
+                final_snapshot.screen, final_snapshot.readiness, final_snapshot.focused_control
+            )
+            .into(),
+        );
     }) as Box<dyn FnOnce()>)));
     let callback_action = action.clone();
     let callback = Closure::once(move || {
@@ -295,29 +568,54 @@ pub(crate) async fn schedule_browser_ui_mutation(
     Ok(())
 }
 
+pub(crate) fn apply_browser_ui_mutation(
+    controller: Arc<UiController>,
+    action: impl FnOnce(&UiController),
+) {
+    let snapshot = controller.semantic_model_snapshot();
+    web_sys::console::log_1(
+        &format!(
+            "[web-ui-mutation] pre screen={:?};readiness={:?};focused={:?}",
+            snapshot.screen, snapshot.readiness, snapshot.focused_control
+        )
+        .into(),
+    );
+    action(controller.as_ref());
+    let final_snapshot = publish_semantic_controller_snapshot(controller);
+    web_sys::console::log_1(
+        &format!(
+            "[web-ui-mutation] post screen={:?};readiness={:?};focused={:?}",
+            final_snapshot.screen, final_snapshot.readiness, final_snapshot.focused_control
+        )
+        .into(),
+    );
+}
+
 async fn submit_semantic_command(
     controller: Arc<UiController>,
     request: SemanticCommandRequest,
 ) -> Result<SemanticCommandResponse, JsValue> {
     match request.intent {
         IntentAction::OpenScreen(screen) => {
-            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+            apply_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.set_screen(screen);
-            })
-            .await?;
+            });
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::CreateAccount { account_name } => {
             update_semantic_debug("create_account_begin", Some(&account_name));
-            controller.set_account_setup_state(false, account_name.clone(), None);
-            let has_runtime = controller
-                .app_core()
-                .try_read()
-                .map(|core| core.runtime().is_some())
-                .unwrap_or(false);
+            let staged_account_name = account_name.clone();
+            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.set_account_setup_state(false, staged_account_name, None);
+            })
+            .await?;
+            let has_runtime = {
+                let core = controller.app_core().read().await;
+                core.runtime().is_some()
+            };
             if has_runtime {
                 update_semantic_debug("create_account_runtime_path", Some(&account_name));
-                submit_create_account_in_background(controller, account_name.clone());
+                initialize_runtime_account_for_web_shell(controller, account_name.clone()).await?;
             } else {
                 update_semantic_debug("create_account_stage_start", Some(&account_name));
                 web_sys::console::log_1(
@@ -371,11 +669,10 @@ async fn submit_semantic_command(
             invitee_authority_id,
             ..
         } => {
-            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+            apply_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.set_screen(ScreenId::Settings);
                 controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
-            })
-            .await?;
+            });
             let invitee_authority_id =
                 invitee_authority_id
                     .parse::<AuthorityId>()
@@ -406,6 +703,7 @@ async fn submit_semantic_command(
             let InvitationBridgeType::DeviceEnrollment {
                 subject_authority,
                 device_id,
+                nickname_suggestion,
                 ..
             } = invitation_info.invitation_type.clone()
             else {
@@ -446,64 +744,64 @@ async fn submit_semantic_command(
                 return Ok(SemanticCommandResponse::accepted_without_value());
             }
 
+            if context_workflows::current_home_context(&app_core)
+                .await
+                .is_err()
+            {
+                account_workflows::initialize_runtime_account(
+                    &app_core,
+                    device_enrollment_bootstrap_name(nickname_suggestion.as_deref()),
+                )
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            }
+            invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation_info)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            persist_runtime_account_config(
+                &app_core,
+                Some(device_enrollment_bootstrap_name(
+                    nickname_suggestion.as_deref(),
+                )),
+                crate::WebUiOperation::ImportDeviceEnrollmentCode,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.user_message()))?;
+            apply_browser_ui_mutation(controller.clone(), move |controller| {
+                controller.finalize_account_setup(ScreenId::Neighborhood);
+            });
             if let Err(error) = clear_pending_device_enrollment_code(&pending_code_storage_key) {
                 web_sys::console::warn_1(
                     &format!("[web-harness] clear_pending_device_enrollment_code failed: {error}")
                         .into(),
                 );
             }
-
-            invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation_info)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let settings = settings_workflows::get_settings(&app_core)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let nickname = settings.nickname_suggestion.trim();
-            let bootstrap_name = if nickname.is_empty() {
-                "Aura User".to_string()
-            } else {
-                nickname.to_string()
-            };
-            account_workflows::initialize_runtime_account(&app_core, bootstrap_name)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            schedule_browser_ui_mutation(controller.clone(), move |controller| {
-                controller.set_account_setup_state(true, "", None);
-                controller.set_screen(ScreenId::Neighborhood);
-            })
-            .await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
-            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+            apply_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.set_screen(ScreenId::Settings);
                 controller.set_settings_section(browser_settings_section(section));
-            })
-            .await?;
+            });
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::RemoveSelectedDevice { device_id } => {
-            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+            apply_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.set_screen(ScreenId::Settings);
                 controller.set_settings_section(browser_settings_section(SettingsSection::Devices));
-            })
-            .await?;
+            });
             let device_id = match device_id {
                 Some(device_id) => device_id,
                 None => selected_device_id(&controller)?,
             };
-            ceremony_workflows::start_device_removal_ceremony(&controller.app_core(), device_id)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            start_and_monitor_runtime_device_removal(controller.clone(), device_id).await?;
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::SwitchAuthority { authority_id } => {
-            schedule_browser_ui_mutation(controller.clone(), move |controller| {
+            apply_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.set_screen(ScreenId::Settings);
                 controller.set_settings_section(aura_ui::model::SettingsSection::Authority);
-            })
-            .await?;
+            });
             if selected_authority_id(&controller).as_deref() == Some(authority_id.as_str()) {
                 return Ok(SemanticCommandResponse::accepted_without_value());
             }
@@ -714,6 +1012,12 @@ fn publish_ui_snapshot_now(
         &detail,
         binding_mode,
     );
+    web_sys::console::log_1(
+        &format!(
+            "[web-harness-publish] ui_state status={status};binding={binding_mode};screen={screen:?};modal={modal:?};ops={operation_count}"
+        )
+        .into(),
+    );
 
     has_observable_publication
 }
@@ -851,6 +1155,71 @@ fn update_publication_state(
     }
 }
 
+fn publish_semantic_submit_state(
+    window: &web_sys::Window,
+    status: &str,
+    detail: &str,
+    binding_mode: &str,
+) {
+    update_publication_state(
+        window,
+        SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
+        "semantic_submit",
+        status,
+        detail,
+        binding_mode,
+    );
+
+    let Ok(state) = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str(SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY),
+    ) else {
+        return;
+    };
+    if state.is_null() || state.is_undefined() {
+        return;
+    }
+
+    let generation_id = ACTIVE_GENERATION.with(|slot| slot.get());
+    let phase = Reflect::get(window.as_ref(), &JsValue::from_str(UI_GENERATION_PHASE_KEY))
+        .ok()
+        .and_then(|value| value.as_string())
+        .unwrap_or_else(|| browser_shell_phase_label(BrowserShellPhase::Rebinding).to_string());
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("generation_id"),
+        &generation_js_value(generation_id),
+    );
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("phase"),
+        &JsValue::from_str(&phase),
+    );
+    let enqueue_ready = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_DRIVER_SEMANTIC_ENQUEUE__"),
+    )
+    .ok()
+    .and_then(|candidate| candidate.dyn_into::<Function>().ok())
+    .is_some();
+    let _ = Reflect::set(
+        &state,
+        &JsValue::from_str("enqueue_ready"),
+        &JsValue::from_bool(enqueue_ready),
+    );
+    if let Ok(function) = Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE"),
+    )
+    .and_then(|candidate| candidate.dyn_into::<Function>())
+    {
+        if let Err(error) = function.call1(window.as_ref(), &state) {
+            log_js_callback_error("driver semantic submit state push", &error);
+        }
+    }
+    wake_page_owned_mutation_queues(window);
+}
+
 fn log_js_callback_error(context: &str, error: &JsValue) {
     let detail = js_value_detail(error);
     web_sys::console::error_1(&JsValue::from_str(&format!(
@@ -859,12 +1228,70 @@ fn log_js_callback_error(context: &str, error: &JsValue) {
 }
 
 pub fn set_controller(controller: Arc<UiController>) {
+    let controller_changed = CONTROLLER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let changed = slot
+            .as_ref()
+            .map(|current| !Arc::ptr_eq(current, &controller))
+            .unwrap_or(true);
+        *slot = Some(controller);
+        changed
+    });
+    if controller_changed {
+        LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+    if let Some(window) = web_sys::window() {
+        refresh_semantic_submit_surface(&window, "semantic_bridge");
+    }
+}
+
+pub fn clear_controller(reason: &str) {
     CONTROLLER.with(|slot| {
-        *slot.borrow_mut() = Some(controller);
+        *slot.borrow_mut() = None;
     });
     LAST_PUBLISHED_UI_STATE_JSON.with(|slot| {
         *slot.borrow_mut() = None;
     });
+    RENDER_SEQ.with(|slot| {
+        *slot.borrow_mut() = 0;
+    });
+    ACTIVE_GENERATION.with(|slot| {
+        slot.set(0);
+    });
+    set_browser_shell_phase(BrowserShellPhase::Rebinding);
+    if let Some(window) = web_sys::window() {
+        let window_ref = window.as_ref();
+        let _ = Reflect::set(
+            window_ref,
+            &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
+            &JsValue::NULL,
+        );
+        let _ = Reflect::set(
+            window_ref,
+            &JsValue::from_str("__AURA_UI_STATE_JSON__"),
+            &JsValue::NULL,
+        );
+        sync_generation_globals(&window);
+        update_publication_state(
+            &window,
+            UI_PUBLICATION_STATE_KEY,
+            "ui_state",
+            "unavailable",
+            reason,
+            "generation_rebinding",
+        );
+        update_publication_state(
+            &window,
+            RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+            "render_heartbeat",
+            "unavailable",
+            reason,
+            "generation_rebinding",
+        );
+        publish_semantic_submit_state(&window, "unavailable", reason, "generation_rebinding");
+    }
 }
 
 fn current_controller() -> Result<Arc<UiController>, JsValue> {
@@ -891,6 +1318,10 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let operation_count = snapshot.operations.len();
     if !publish_ui_snapshot_now(&window, value, json, screen, open_modal, operation_count) {
         return;
+    }
+    let generation_id = ACTIVE_GENERATION.with(|slot| slot.get());
+    if snapshot_marks_generation_ready(snapshot) {
+        mark_generation_ready(generation_id);
     }
 
     let callback_window = window.clone();
@@ -990,6 +1421,446 @@ fn update_semantic_debug(event: &str, detail: Option<&str>) {
         &JsValue::from_str("last_detail"),
         &detail.map(JsValue::from_str).unwrap_or(JsValue::NULL),
     );
+}
+
+fn install_page_owned_mutation_queues(window: &web_sys::Window) -> Result<(), JsValue> {
+    let installer = Function::new_no_args(
+        r#"
+const window = globalThis;
+if (window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED) {
+  window.__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE?.(
+    window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null,
+  );
+  window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
+  window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
+  return true;
+}
+
+window.__AURA_DRIVER_PENDING_NAV_SCREEN__ =
+  window.__AURA_DRIVER_PENDING_NAV_SCREEN__ ?? null;
+window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__ =
+  Array.isArray(window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__)
+    ? window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__
+    : [];
+window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__ =
+  Array.isArray(window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__)
+    ? window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__
+    : [];
+window.__AURA_DRIVER_SEMANTIC_QUEUE__ =
+  window.__AURA_DRIVER_SEMANTIC_QUEUE__ ?? [];
+window.__AURA_DRIVER_SEMANTIC_RESULTS__ =
+  window.__AURA_DRIVER_SEMANTIC_RESULTS__ ?? Object.create(null);
+window.__AURA_DRIVER_SEMANTIC_BUSY__ =
+  window.__AURA_DRIVER_SEMANTIC_BUSY__ ?? false;
+window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ =
+  window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ ?? false;
+window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__ =
+  window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__ ?? [];
+window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__ =
+  window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__ ?? Object.create(null);
+window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ =
+  window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ ?? false;
+window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ =
+  window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ ?? false;
+window.__AURA_DRIVER_SEMANTIC_DEBUG__ =
+  window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? {
+    last_event: "installed",
+    active_command_id: null,
+    last_error: null,
+    queue_depth: 0,
+    last_progress_at: Date.now(),
+  };
+window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ =
+  window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? {
+    last_event: "installed",
+    active_command_id: null,
+    last_error: null,
+    queue_depth: 0,
+    last_progress_at: Date.now(),
+  };
+
+window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__ = (delayMs = 0) => {
+  const effectiveDelay =
+    Number.isFinite(delayMs) && delayMs >= 0 ? Number(delayMs) : 0;
+  if (effectiveDelay === 0) {
+    if (Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
+      console.log(
+        `[driver-page] semantic queue wake depth=${window.__AURA_DRIVER_SEMANTIC_QUEUE__.length}`,
+      );
+    }
+    queueMicrotask(() => {
+      window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__?.();
+    });
+    return;
+  }
+  if (window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__) {
+    return;
+  }
+  window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = true;
+  window.setTimeout(() => {
+    window.__AURA_DRIVER_SEMANTIC_WAKE_SCHEDULED__ = false;
+    if (Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
+      console.log(
+        `[driver-page] semantic queue wake depth=${window.__AURA_DRIVER_SEMANTIC_QUEUE__.length}`,
+      );
+    }
+    window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__?.();
+  }, effectiveDelay);
+};
+
+window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__ = () => {
+  const semanticQueue = window.__AURA_DRIVER_SEMANTIC_QUEUE__;
+  const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
+  const semanticDebug = window.__AURA_DRIVER_SEMANTIC_DEBUG__;
+  if (semanticDebug) {
+    semanticDebug.queue_depth = Array.isArray(semanticQueue)
+      ? semanticQueue.length
+      : 0;
+  }
+  if (Array.isArray(semanticQueue) && semanticQueue.length > 0) {
+    console.log(
+      `[driver-page] semantic queue pump depth=${semanticQueue.length};busy=${window.__AURA_DRIVER_SEMANTIC_BUSY__ === true}`,
+    );
+  }
+  if (
+    window.__AURA_DRIVER_SEMANTIC_BUSY__ ||
+    !Array.isArray(semanticQueue) ||
+    semanticQueue.length === 0
+  ) {
+    return;
+  }
+  const harness = window.__AURA_HARNESS__;
+  const submitState = window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null;
+  const submitReady = submitState?.status === "ready";
+  if (!submitReady || typeof harness?.submit_semantic_command !== "function") {
+    const waitEvent = submitReady ? "queue_wait_bridge" : "queue_wait_ready";
+    if (semanticDebug?.last_event !== waitEvent) {
+      console.log(
+        `[driver-page] semantic queue wait event=${waitEvent};submit_ready=${submitReady};has_bridge=${typeof harness?.submit_semantic_command === "function"}`,
+      );
+    }
+    if (semanticDebug) {
+      semanticDebug.last_event = waitEvent;
+      semanticDebug.last_error = null;
+      semanticDebug.active_command_id = null;
+      semanticDebug.last_progress_at = Date.now();
+    }
+    window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.(25);
+    return;
+  }
+  const nextJson = semanticQueue.shift();
+  if (typeof nextJson !== "string" || nextJson.length === 0) {
+    queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
+    return;
+  }
+  let next = null;
+  try {
+    next = JSON.parse(nextJson);
+  } catch (error) {
+    if (semanticDebug) {
+      semanticDebug.last_event = "queue_parse_error";
+      semanticDebug.last_error = error?.message ?? String(error);
+      semanticDebug.active_command_id = null;
+      semanticDebug.last_progress_at = Date.now();
+    }
+    queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
+    return;
+  }
+  if (!next || typeof next.command_id !== "string") {
+    queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
+    return;
+  }
+  if (semanticDebug) {
+    semanticDebug.last_event = "queue_start";
+    semanticDebug.active_command_id = next.command_id;
+    semanticDebug.last_error = null;
+    semanticDebug.last_progress_at = Date.now();
+  }
+  window.__AURA_DRIVER_SEMANTIC_BUSY__ = true;
+  Promise.resolve()
+    .then(() => {
+      console.log(`[driver-page] semantic queue start id=${next.command_id}`);
+      const requestObject = JSON.parse(next.request_json);
+      if (semanticDebug) {
+        semanticDebug.last_event = "queue_invoke";
+        semanticDebug.last_progress_at = Date.now();
+      }
+      return harness.submit_semantic_command(requestObject);
+    })
+    .then((result) => {
+      console.log(`[driver-page] semantic queue ok id=${next.command_id}`);
+      semanticResults[next.command_id] = { ok: true, result };
+      Promise.resolve(
+        window.__AURA_DRIVER_PUSH_SEMANTIC_RESULT?.({
+          command_id: next.command_id,
+          ok: true,
+          result,
+        }),
+      ).catch(() => {});
+      if (semanticDebug) {
+        semanticDebug.last_event = "queue_ok";
+        semanticDebug.active_command_id = null;
+        semanticDebug.last_progress_at = Date.now();
+      }
+    })
+    .catch((error) => {
+      console.error(
+        `[driver-page] semantic queue error id=${next.command_id}: ${error?.message ?? String(error)}`,
+      );
+      semanticResults[next.command_id] = {
+        ok: false,
+        error: error?.message ?? String(error),
+      };
+      Promise.resolve(
+        window.__AURA_DRIVER_PUSH_SEMANTIC_RESULT?.({
+          command_id: next.command_id,
+          ok: false,
+          error: error?.message ?? String(error),
+        }),
+      ).catch(() => {});
+      if (semanticDebug) {
+        semanticDebug.last_event = "queue_error";
+        semanticDebug.last_error = error?.message ?? String(error);
+        semanticDebug.active_command_id = null;
+        semanticDebug.last_progress_at = Date.now();
+      }
+    })
+    .finally(() => {
+      window.__AURA_DRIVER_SEMANTIC_BUSY__ = false;
+      if (semanticDebug) {
+        semanticDebug.queue_depth = Array.isArray(semanticQueue)
+          ? semanticQueue.length
+          : 0;
+      }
+      queueMicrotask(window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__);
+    });
+};
+
+window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {
+  if (typeof payloadJson !== "string") {
+    return {
+      queue_depth: Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)
+        ? window.__AURA_DRIVER_SEMANTIC_QUEUE__.length
+        : null,
+      debug: window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null,
+    };
+  }
+  if (!Array.isArray(window.__AURA_DRIVER_SEMANTIC_QUEUE__)) {
+    throw new Error("window.__AURA_DRIVER_SEMANTIC_QUEUE__ is unavailable");
+  }
+  window.__AURA_DRIVER_SEMANTIC_QUEUE__.push(payloadJson);
+  if (window.__AURA_DRIVER_SEMANTIC_DEBUG__) {
+    window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_event = "enqueued";
+    window.__AURA_DRIVER_SEMANTIC_DEBUG__.active_command_id = null;
+    window.__AURA_DRIVER_SEMANTIC_DEBUG__.queue_depth =
+      window.__AURA_DRIVER_SEMANTIC_QUEUE__.length;
+    window.__AURA_DRIVER_SEMANTIC_DEBUG__.last_progress_at = Date.now();
+  }
+  window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
+  return {
+    queue_depth: window.__AURA_DRIVER_SEMANTIC_QUEUE__.length,
+    debug: window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null,
+  };
+};
+
+if (
+  Array.isArray(window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__) &&
+  window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__.length > 0
+) {
+  const seededCount = window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__.length;
+  for (const payloadJson of window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__) {
+    if (typeof payloadJson === "string" && payloadJson.length > 0) {
+      window.__AURA_DRIVER_SEMANTIC_QUEUE__.push(payloadJson);
+    }
+  }
+  console.log(`[driver-page] semantic queue seed count=${seededCount}`);
+  window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__ = [];
+}
+
+if (
+  Array.isArray(window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__) &&
+  window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__.length > 0
+) {
+  const seededCount = window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__.length;
+  for (const payloadJson of window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__) {
+    if (typeof payloadJson === "string" && payloadJson.length > 0) {
+      window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.push(payloadJson);
+    }
+  }
+  console.log(`[driver-page] runtime stage queue seed count=${seededCount}`);
+  window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__ = [];
+}
+
+window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__ = (delayMs = 0) => {
+  const effectiveDelay =
+    Number.isFinite(delayMs) && delayMs >= 0 ? Number(delayMs) : 0;
+  if (effectiveDelay === 0) {
+    queueMicrotask(() => {
+      window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__?.();
+    });
+    return;
+  }
+  if (window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__) {
+    return;
+  }
+  window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ = true;
+  window.setTimeout(() => {
+    window.__AURA_DRIVER_RUNTIME_STAGE_WAKE_SCHEDULED__ = false;
+    window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__?.();
+  }, effectiveDelay);
+};
+
+window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__ = () => {
+  const harness = window.__AURA_HARNESS__;
+  const runtimeStageQueue = window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__;
+  const runtimeStageResults = window.__AURA_DRIVER_RUNTIME_STAGE_RESULTS__;
+  const runtimeStageDebug = window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__;
+  if (runtimeStageDebug) {
+    runtimeStageDebug.queue_depth = Array.isArray(runtimeStageQueue)
+      ? runtimeStageQueue.length
+      : 0;
+  }
+  if (
+    window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ ||
+    !Array.isArray(runtimeStageQueue) ||
+    runtimeStageQueue.length === 0
+  ) {
+    return;
+  }
+  if (typeof harness?.stage_runtime_identity !== "function") {
+    if (runtimeStageDebug) {
+      runtimeStageDebug.last_event = "queue_wait_bridge";
+      runtimeStageDebug.last_error = null;
+      runtimeStageDebug.active_command_id = null;
+      runtimeStageDebug.last_progress_at = Date.now();
+    }
+    window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.(25);
+    return;
+  }
+  const nextJson = runtimeStageQueue.shift();
+  if (typeof nextJson !== "string" || nextJson.length === 0) {
+    queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
+    return;
+  }
+  let next = null;
+  try {
+    next = JSON.parse(nextJson);
+  } catch (error) {
+    if (runtimeStageDebug) {
+      runtimeStageDebug.last_event = "queue_parse_error";
+      runtimeStageDebug.last_error = error?.message ?? String(error);
+      runtimeStageDebug.active_command_id = null;
+      runtimeStageDebug.last_progress_at = Date.now();
+    }
+    queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
+    return;
+  }
+  if (!next || typeof next.command_id !== "string") {
+    queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
+    return;
+  }
+  if (runtimeStageDebug) {
+    runtimeStageDebug.last_event = "queue_start";
+    runtimeStageDebug.active_command_id = next.command_id;
+    runtimeStageDebug.last_error = null;
+    runtimeStageDebug.last_progress_at = Date.now();
+  }
+  window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ = true;
+  Promise.resolve()
+    .then(() => {
+      console.log(`[driver-page] runtime stage queue start id=${next.command_id}`);
+      if (runtimeStageDebug) {
+        runtimeStageDebug.last_event = "queue_invoke";
+        runtimeStageDebug.last_progress_at = Date.now();
+      }
+      return harness.stage_runtime_identity(next.runtime_identity_json);
+    })
+    .then((result) => {
+      console.log(`[driver-page] runtime stage queue ok id=${next.command_id}`);
+      runtimeStageResults[next.command_id] = { ok: true, result };
+      Promise.resolve(
+        window.__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT?.({
+          command_id: next.command_id,
+          ok: true,
+          result,
+        }),
+      ).catch(() => {});
+      if (runtimeStageDebug) {
+        runtimeStageDebug.last_event = "queue_ok";
+        runtimeStageDebug.active_command_id = null;
+        runtimeStageDebug.last_progress_at = Date.now();
+      }
+    })
+    .catch((error) => {
+      console.error(
+        `[driver-page] runtime stage queue error id=${next.command_id}: ${error?.message ?? String(error)}`,
+      );
+      runtimeStageResults[next.command_id] = {
+        ok: false,
+        error: error?.message ?? String(error),
+      };
+      Promise.resolve(
+        window.__AURA_DRIVER_PUSH_RUNTIME_STAGE_RESULT?.({
+          command_id: next.command_id,
+          ok: false,
+          error: error?.message ?? String(error),
+        }),
+      ).catch(() => {});
+      if (runtimeStageDebug) {
+        runtimeStageDebug.last_event = "queue_error";
+        runtimeStageDebug.last_error = error?.message ?? String(error);
+        runtimeStageDebug.active_command_id = null;
+        runtimeStageDebug.last_progress_at = Date.now();
+      }
+    })
+    .finally(() => {
+      window.__AURA_DRIVER_RUNTIME_STAGE_BUSY__ = false;
+      if (runtimeStageDebug) {
+        runtimeStageDebug.queue_depth = Array.isArray(runtimeStageQueue)
+          ? runtimeStageQueue.length
+          : 0;
+      }
+      queueMicrotask(window.__AURA_DRIVER_RUN_RUNTIME_STAGE_QUEUE__);
+    });
+};
+
+window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ = (payloadJson) => {
+  if (typeof payloadJson !== "string") {
+    return {
+      queue_depth: Array.isArray(window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__)
+        ? window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.length
+        : null,
+      debug: window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? null,
+    };
+  }
+  if (!Array.isArray(window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__)) {
+    throw new Error("window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__ is unavailable");
+  }
+  window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.push(payloadJson);
+  if (window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__) {
+    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.last_event = "enqueued";
+    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.active_command_id = null;
+    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.queue_depth =
+      window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.length;
+    window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__.last_progress_at = Date.now();
+  }
+  window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
+  return {
+    queue_depth: window.__AURA_DRIVER_RUNTIME_STAGE_QUEUE__.length,
+    debug: window.__AURA_DRIVER_RUNTIME_STAGE_DEBUG__ ?? null,
+  };
+};
+
+window.__AURA_DRIVER_MUTATION_QUEUE_INSTALLED = true;
+window.__AURA_DRIVER_PUSH_SEMANTIC_SUBMIT_STATE?.(
+  window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ ?? null,
+);
+window.__AURA_DRIVER_WAKE_SEMANTIC_QUEUE__?.();
+window.__AURA_DRIVER_WAKE_RUNTIME_STAGE_QUEUE__?.();
+return true;
+"#,
+    );
+    installer.call0(window.as_ref()).map(|_| ())
 }
 
 pub fn install_window_harness_api() -> Result<(), JsValue> {
@@ -1215,6 +2086,7 @@ pub fn install_window_harness_api() -> Result<(), JsValue> {
                         .into(),
                     );
                     let response = submit_semantic_command(controller, request).await?;
+                    web_sys::console::log_1(&"[web-harness] submit_semantic_command done".into());
                     to_string(&response)
                         .map(|response_json| JsValue::from_str(&response_json))
                         .map_err(|error| {
@@ -1438,6 +2310,7 @@ try {
     inject_message.forget();
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("window is not available"))?;
+    install_page_owned_mutation_queues(&window)?;
     Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_HARNESS__"),
@@ -1463,6 +2336,15 @@ try {
         "unavailable",
         "render_heartbeat_not_published_yet",
         "observation_only",
+    );
+    let (semantic_submit_status, _) = semantic_submit_surface_state();
+    refresh_semantic_submit_surface(&window, "semantic_bridge");
+    web_sys::console::log_1(
+        &format!(
+            "[web-harness] semantic submit surface status={semantic_submit_status};generation={}",
+            ACTIVE_GENERATION.with(|slot| slot.get())
+        )
+        .into(),
     );
     let read_only_ui_state = Closure::wrap(Box::new(move || -> JsValue {
         if current_controller().is_err() {
@@ -1565,6 +2447,90 @@ mod tests {
             "selected_authority_id command paths must not re-read observed authority selection"
         );
 
+        let create_account_start = source
+            .find("async fn initialize_runtime_account_for_web_shell(")
+            .unwrap_or_else(|| panic!("missing initialize_runtime_account_for_web_shell"));
+        let create_account_end = source[create_account_start..]
+            .find("#[derive(Clone, Debug)]")
+            .map(|offset| create_account_start + offset)
+            .unwrap_or(source.len());
+        let create_account_block = &source[create_account_start..create_account_end];
+        assert!(
+            create_account_block.contains("stage_runtime_bound_web_account_bootstrap(&nickname)"),
+            "runtime-backed web account creation must persist pending bootstrap metadata before awaited initialization"
+        );
+        assert!(
+            create_account_block.contains("controller.app_core().read().await"),
+            "runtime-backed web account creation must use an authoritative runtime presence read"
+        );
+        assert!(
+            !create_account_block.contains(".try_read()"),
+            "runtime-backed web account creation must not silently downgrade on a contended app_core read"
+        );
+        assert!(
+            create_account_block.contains("persist_runtime_account_config(\n        controller.app_core(),\n        Some(nickname.clone()),"),
+            "runtime-backed harness account creation must persist browser account metadata after initialization"
+        );
+
+        let import_start = source
+            .find("IntentAction::ImportDeviceEnrollmentCode { code } => {")
+            .unwrap_or_else(|| panic!("missing import device enrollment branch"));
+        let import_end = source[import_start..]
+            .find("IntentAction::OpenSettingsSection(section) => {")
+            .map(|offset| import_start + offset)
+            .unwrap_or(source.len());
+        let import_block = &source[import_start..import_end];
+        assert!(
+            import_block.contains("persist_runtime_account_config(\n                &app_core,\n                Some(device_enrollment_bootstrap_name("),
+            "bound-runtime harness device enrollment acceptance must persist browser account metadata before finalizing the UI"
+        );
+
+        let removal_helper_start = source
+            .find("async fn start_and_monitor_runtime_device_removal(")
+            .unwrap_or_else(|| panic!("missing start_and_monitor_runtime_device_removal"));
+        let removal_helper_end = source[removal_helper_start..]
+            .find("#[derive(Clone, Debug)]")
+            .map(|offset| removal_helper_start + offset)
+            .unwrap_or(source.len());
+        let removal_helper_block = &source[removal_helper_start..removal_helper_end];
+        assert!(
+            removal_helper_block.contains("monitor_key_rotation_ceremony_with_policy("),
+            "web device removal must retain ceremony ownership long enough to drive the shared completion monitor"
+        );
+        assert!(
+            removal_helper_block.contains("get_key_rotation_ceremony_status(&app_core, &status_handle).await"),
+            "web device removal must check for immediate ceremony completion on the authoritative app path"
+        );
+        assert!(
+            removal_helper_block.contains("settings_workflows::refresh_settings_from_runtime(&app_core)"),
+            "web device removal must refresh authoritative settings when removal completes immediately"
+        );
+        assert!(
+            removal_helper_block.contains("refresh_settings_on_complete: true"),
+            "web device removal monitoring must preserve the shared authoritative settings refresh contract"
+        );
+        assert!(
+            removal_helper_block.contains("shared_web_task_owner().spawn_local"),
+            "web device removal monitoring must run on the sanctioned browser task owner"
+        );
+
+        let removal_start = source
+            .find("IntentAction::RemoveSelectedDevice { device_id } => {")
+            .unwrap_or_else(|| panic!("missing remove selected device branch"));
+        let removal_end = source[removal_start..]
+            .find("IntentAction::SwitchAuthority { authority_id } => {")
+            .map(|offset| removal_start + offset)
+            .unwrap_or(source.len());
+        let removal_block = &source[removal_start..removal_end];
+        assert!(
+            removal_block.contains("start_and_monitor_runtime_device_removal(controller.clone(), device_id).await?;"),
+            "web remove-selected-device must delegate to the shared start-and-monitor helper"
+        );
+        assert!(
+            !removal_block.contains("start_device_removal_ceremony(&controller.app_core(), device_id)"),
+            "web remove-selected-device must not drop the ceremony handle immediately after start"
+        );
+
         let publish_start = source
             .find("pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>) -> UiSnapshot {")
             .unwrap_or_else(|| panic!("missing publish_semantic_controller_snapshot"));
@@ -1574,8 +2540,136 @@ mod tests {
             .unwrap_or(source.len());
         let publish_block = &source[publish_start..publish_end];
         assert!(
-            publish_block.contains("set_controller(Arc::new(controller.clone()));"),
+            publish_block.contains("set_controller(controller.clone());"),
             "published semantic controller snapshots must refresh the harness bridge controller owner"
+        );
+        assert!(
+            publish_block.contains("if snapshot_marks_generation_ready(snapshot) {\n        mark_generation_ready(generation_id);\n    }"),
+            "render-aligned semantic publication must only mark the active generation ready after a semantically ready snapshot"
+        );
+
+        let generation_start = source
+            .find("pub fn set_active_generation(generation_id: u64) {")
+            .unwrap_or_else(|| panic!("missing set_active_generation"));
+        let generation_end = source[generation_start..]
+            .find("pub async fn wait_for_generation_ready(generation_id: u64)")
+            .map(|offset| generation_start + offset)
+            .unwrap_or(source.len());
+        let generation_block = &source[generation_start..generation_end];
+        assert!(
+            generation_block.contains("ACTIVE_GENERATION"),
+            "set_active_generation must update the active browser shell generation"
+        );
+        assert!(
+            generation_block.contains("sync_generation_globals(&window);"),
+            "set_active_generation must keep page-owned generation diagnostics synchronized"
+        );
+        assert!(
+            source.contains("pub fn set_browser_shell_phase(phase: BrowserShellPhase)"),
+            "browser shell generations must publish an explicit phase diagnostic"
+        );
+        assert!(
+            source.contains("UI_GENERATION_PHASE_KEY"),
+            "browser shell phase publication must use a page-owned diagnostics key"
+        );
+
+        let wait_start = source
+            .find("pub async fn wait_for_generation_ready(generation_id: u64) -> Result<(), JsValue> {")
+            .unwrap_or_else(|| panic!("missing wait_for_generation_ready"));
+        let wait_end = source[wait_start..]
+            .find("pub(crate) async fn schedule_browser_ui_mutation(")
+            .map(|offset| wait_start + offset)
+            .unwrap_or(source.len());
+        let wait_block = &source[wait_start..wait_end];
+        assert!(
+            wait_block.contains("GENERATION_READY_WAITERS"),
+            "wait_for_generation_ready must wait on explicit generation-ready ownership, not ambient polling"
+        );
+        assert!(
+            source.contains("fn snapshot_marks_generation_ready(snapshot: &UiSnapshot) -> bool {")
+                && source.contains("snapshot.readiness == UiReadiness::Ready"),
+            "browser generation readiness must be derived from the shared UiReadiness contract"
+        );
+
+        let set_controller_start = source
+            .find("pub fn set_controller(controller: Arc<UiController>) {")
+            .unwrap_or_else(|| panic!("missing set_controller"));
+        let set_controller_end = source[set_controller_start..]
+            .find("fn current_controller() -> Result<Arc<UiController>, JsValue> {")
+            .map(|offset| set_controller_start + offset)
+            .unwrap_or(source.len());
+        let set_controller_block = &source[set_controller_start..set_controller_end];
+        assert!(
+            set_controller_block.contains("Arc::ptr_eq"),
+            "set_controller must only reset publication dedup when the controller owner changes"
+        );
+
+        let clear_controller_start = source
+            .find("pub fn clear_controller(reason: &str) {")
+            .unwrap_or_else(|| panic!("missing clear_controller"));
+        let clear_controller_end = source[clear_controller_start..]
+            .find("fn current_controller() -> Result<Arc<UiController>, JsValue> {")
+            .map(|offset| clear_controller_start + offset)
+            .unwrap_or(source.len());
+        let clear_controller_block = &source[clear_controller_start..clear_controller_end];
+        assert!(
+            clear_controller_block.contains("*slot.borrow_mut() = None;"),
+            "clear_controller must drop the active browser controller owner during generation rebinding"
+        );
+        assert!(
+            clear_controller_block.contains("generation_rebinding"),
+            "clear_controller must surface rebinding through explicit publication-state degradation"
+        );
+        assert!(
+            clear_controller_block.contains("ACTIVE_GENERATION.with"),
+            "clear_controller must drop the active generation during rebinding"
+        );
+        assert!(
+            clear_controller_block.contains("publish_semantic_submit_state(&window, \"unavailable\", reason, \"generation_rebinding\")"),
+            "clear_controller must degrade the semantic submit surface during generation rebinding"
+        );
+
+        let install_start = source
+            .find("pub fn install_window_harness_api() -> Result<(), JsValue> {")
+            .unwrap_or_else(|| panic!("missing install_window_harness_api"));
+        let install_end = source[install_start..]
+            .find("fn js_value_detail(value: &JsValue) -> String {")
+            .map(|offset| install_start + offset)
+            .unwrap_or(source.len());
+        let install_block = &source[install_start..install_end];
+        assert!(
+            source.contains("fn publish_semantic_submit_state("),
+            "browser harness installation must use an explicit semantic submit publication helper"
+        );
+        assert!(
+            install_block.contains("publish_semantic_submit_state("),
+            "browser harness installation must publish an explicit semantic submit readiness state"
+        );
+        assert!(
+            install_block.contains("semantic_submit_surface_ready"),
+            "browser harness installation must report a concrete semantic submit-ready detail"
+        );
+        assert!(
+            install_block.contains("install_page_owned_mutation_queues(&window)?;")
+                && source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {")
+                && source.contains("submitState?.status === \"ready\"")
+                && source.contains("window.__AURA_DRIVER_PENDING_SEMANTIC_QUEUE_SEED__")
+                && source.contains("window.__AURA_DRIVER_PENDING_RUNTIME_STAGE_QUEUE_SEED__")
+                && source.contains("&JsValue::from_str(\"enqueue_ready\")"),
+            "browser harness bridge must own a generation-aware page semantic queue instead of delegating semantic replay ownership to the driver"
+        );
+
+        let mutation_start = source
+            .find("pub(crate) async fn schedule_browser_ui_mutation(")
+            .unwrap_or_else(|| panic!("missing schedule_browser_ui_mutation"));
+        let mutation_end = source[mutation_start..]
+            .find("async fn submit_semantic_command(")
+            .map(|offset| mutation_start + offset)
+            .unwrap_or(source.len());
+        let mutation_block = &source[mutation_start..mutation_end];
+        assert!(
+            !mutation_block.contains("controller.finalize_account_setup(ScreenId::Neighborhood);"),
+            "browser ui mutation scheduling must not repair readiness locally during generation execution"
         );
     }
 

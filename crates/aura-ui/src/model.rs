@@ -12,8 +12,8 @@ use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
 use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
 use aura_app::ui_contract::{
-    next_projection_revision, InvitationFactKind, QuiescenceSnapshot, RuntimeFact,
-    SemanticOperationPhase, SemanticOperationStatus,
+    next_projection_revision, InvitationFactKind, ProjectionRevision, QuiescenceSnapshot,
+    RuntimeFact, SemanticOperationPhase, SemanticOperationStatus,
 };
 use aura_app::{
     ui::contract::{
@@ -569,6 +569,7 @@ impl AccessOverrideLevel {
 
 #[derive(Debug, Clone)]
 pub struct UiModel {
+    pub semantic_revision: ProjectionRevision,
     pub account_ready: bool,
     pub account_setup_name: String,
     pub account_setup_error: Option<String>,
@@ -613,6 +614,7 @@ pub struct UiModel {
 impl UiModel {
     pub fn new(authority_id: String) -> Self {
         Self {
+            semantic_revision: next_projection_revision(None),
             account_ready: true,
             account_setup_name: String::new(),
             account_setup_error: None,
@@ -653,6 +655,10 @@ impl UiModel {
             selected_notification_id: None,
             contact_details: false,
         }
+    }
+
+    fn advance_semantic_revision(&mut self) {
+        self.semantic_revision = next_projection_revision(None);
     }
 
     pub fn selected_channel_name(&self) -> Option<&str> {
@@ -726,19 +732,36 @@ impl UiModel {
 
     fn push_runtime_fact(&mut self, fact: RuntimeFact) {
         let fact_key = fact.key();
-        self.runtime_event_key = self.runtime_event_key.saturating_add(1);
-        self.runtime_events.retain(|event| event.key() != fact_key);
-        self.runtime_events.push(RuntimeEventSnapshot {
-            id: RuntimeEventId(format!("runtime-event-{}", self.runtime_event_key)),
-            fact,
+        let existing_id = self
+            .runtime_events
+            .iter()
+            .find(|event| event.key() == fact_key)
+            .map(|event| event.id.clone());
+        let id = existing_id.unwrap_or_else(|| {
+            self.runtime_event_key = self.runtime_event_key.saturating_add(1);
+            RuntimeEventId(format!("runtime-event-{}", self.runtime_event_key))
         });
+        self.runtime_events.retain(|event| event.key() != fact_key);
+        self.runtime_events.push(RuntimeEventSnapshot { id, fact });
         if self.runtime_events.len() > 32 {
             let drain = self.runtime_events.len().saturating_sub(32);
             self.runtime_events.drain(0..drain);
         }
     }
 
+    fn canonical_ready_screen(screen: ScreenId) -> ScreenId {
+        match screen {
+            ScreenId::Onboarding => ScreenId::Neighborhood,
+            other => other,
+        }
+    }
+
     pub fn set_screen(&mut self, screen: ScreenId) {
+        let screen = if self.account_ready {
+            Self::canonical_ready_screen(screen)
+        } else {
+            screen
+        };
         self.screen = screen;
         // Screen changes should always exit chat insert mode so global actions
         // (including settings buttons) are not swallowed as hidden text input.
@@ -1579,21 +1602,22 @@ impl UiModel {
         } else if let Some(open_modal) = open_modal {
             Some(ControlId::Modal(open_modal))
         } else if self.account_ready {
-            Some(ControlId::Screen(self.screen))
+            Some(ControlId::Screen(Self::canonical_ready_screen(self.screen)))
         } else {
             Some(ControlId::OnboardingRoot)
         };
+        let screen = if self.account_ready {
+            Self::canonical_ready_screen(self.screen)
+        } else {
+            ScreenId::Onboarding
+        };
 
         UiSnapshot {
-            screen: if self.account_ready {
-                self.screen
-            } else {
-                ScreenId::Onboarding
-            },
+            screen,
             focused_control,
             open_modal,
             readiness: readiness_owner::account_gate_readiness(self.account_ready),
-            revision: next_projection_revision(None),
+            revision: self.semantic_revision,
             quiescence: QuiescenceSnapshot::derive(
                 readiness_owner::account_gate_readiness(self.account_ready),
                 open_modal,
@@ -2283,8 +2307,23 @@ impl UiController {
     ) {
         let mut model = write_model(&self.model);
         model.account_ready = account_ready;
+        if account_ready && model.screen == ScreenId::Onboarding {
+            model.set_screen(ScreenId::Neighborhood);
+        }
         model.account_setup_name = account_setup_name.into();
         model.account_setup_error = account_setup_error;
+        let snapshot = model.semantic_snapshot();
+        drop(model);
+        self.publish_ui_snapshot(snapshot);
+        self.request_rerender();
+    }
+
+    pub fn finalize_account_setup(&self, screen: ScreenId) {
+        let mut model = write_model(&self.model);
+        model.account_ready = true;
+        model.account_setup_name.clear();
+        model.account_setup_error = None;
+        model.set_screen(screen);
         let snapshot = model.semantic_snapshot();
         drop(model);
         self.publish_ui_snapshot(snapshot);
@@ -2325,7 +2364,9 @@ fn read_model(model: &RwLock<UiModel>) -> RwLockReadGuard<'_, UiModel> {
 }
 
 fn write_model(model: &RwLock<UiModel>) -> RwLockWriteGuard<'_, UiModel> {
-    model.write().unwrap_or_else(|poison| poison.into_inner())
+    let mut guard = model.write().unwrap_or_else(|poison| poison.into_inner());
+    guard.advance_semantic_revision();
+    guard
 }
 
 #[cfg(test)]
@@ -2355,6 +2396,33 @@ mod tests {
         model.set_screen(ScreenId::Neighborhood);
 
         assert!(matches!(model.neighborhood_mode, NeighborhoodMode::Map));
+    }
+
+    #[test]
+    fn ready_models_canonicalize_onboarding_screen() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.account_ready = true;
+
+        model.set_screen(ScreenId::Onboarding);
+
+        assert!(matches!(model.screen, ScreenId::Neighborhood));
+        assert!(matches!(
+            model.semantic_snapshot().screen,
+            ScreenId::Neighborhood
+        ));
+    }
+
+    #[test]
+    fn semantic_snapshot_revision_only_advances_on_mutation() {
+        let mut model = UiModel::new("authority-local".to_string());
+
+        let initial = model.semantic_snapshot().revision;
+        let repeated = model.semantic_snapshot().revision;
+        assert_eq!(repeated, initial);
+
+        model.advance_semantic_revision();
+        let mutated = model.semantic_snapshot().revision;
+        assert!(mutated.is_newer_than(initial));
     }
 
     #[test]
@@ -2428,6 +2496,34 @@ mod tests {
         };
 
         assert_eq!(event.kind(), RuntimeEventKind::InvitationAccepted);
+    }
+
+    #[test]
+    fn repeated_runtime_fact_reuses_existing_runtime_event_id() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let fact = RuntimeFact::InvitationAccepted {
+            invitation_kind: InvitationFactKind::Contact,
+            authority_id: None,
+            operation_state: None,
+        };
+
+        model.push_runtime_fact(fact.clone());
+        let first_id = model
+            .semantic_snapshot()
+            .runtime_events
+            .last()
+            .map(|event| event.id.clone())
+            .expect("runtime event should exist after first push");
+
+        model.push_runtime_fact(fact);
+        let second_id = model
+            .semantic_snapshot()
+            .runtime_events
+            .last()
+            .map(|event| event.id.clone())
+            .expect("runtime event should exist after second push");
+
+        assert_eq!(second_id, first_id);
     }
 
     #[test]

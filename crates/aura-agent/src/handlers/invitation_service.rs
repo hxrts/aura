@@ -134,6 +134,41 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_device_enrollment_accept_follow_up(&self, invitation: &Invitation) {
+        let invitation = invitation.clone();
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.device_enrollment_accept.{}",
+            invitation.invitation_id
+        ));
+        let invitation_id = invitation.invitation_id.clone();
+        let sender_id = invitation.sender_id;
+        let receiver_id = invitation.receiver_id;
+        let fut = async move {
+            if let Err(error) = handler
+                .execute_device_enrollment_invitee(effects, &invitation)
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    sender_id = %sender_id,
+                    receiver_id = %receiver_id,
+                    error = %error,
+                    "device enrollment accept follow-up failed after local acceptance settlement"
+                );
+            }
+        };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = tasks.spawn_local_named("device_enrollment_accept", fut);
+            } else {
+                let _task_handle = tasks.spawn_named("device_enrollment_accept", fut);
+            }
+        }
+    }
+
     fn spawn_deferred_invitation_delivery(
         &self,
         invitation: &Invitation,
@@ -534,6 +569,12 @@ impl InvitationServiceApi {
         {
             if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
                 self.spawn_contact_acceptance_notification(invitation.invitation_id.clone());
+            }
+            if matches!(
+                invitation.invitation_type,
+                InvitationType::DeviceEnrollment { .. }
+            ) {
+                self.spawn_device_enrollment_accept_follow_up(&invitation);
             }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
                 self.spawn_invitation_acceptance_ceremony_progress(ceremony_id, &invitation);

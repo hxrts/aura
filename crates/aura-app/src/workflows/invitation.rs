@@ -12,6 +12,7 @@
 //! - 30 days (720 hours): Long-term invitations
 
 use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
+use crate::workflows::runtime::workflow_best_effort;
 
 // ============================================================================
 // TTL Constants
@@ -147,7 +148,7 @@ use crate::ui_contract::{
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
     execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
-    warn_workflow_timeout, workflow_best_effort, workflow_retry_policy, workflow_timeout_budget,
+    warn_workflow_timeout, workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -306,6 +307,14 @@ fn device_enrollment_accept_retry_policy() -> Result<RetryBudgetPolicy, AuraErro
 enum DeviceEnrollmentAcceptConvergenceError {
     Terminal(String),
     Workflow(AuraError),
+}
+
+fn log_device_enrollment_accept_progress(message: impl Into<String>) {
+    let message = message.into();
+    #[cfg(feature = "wasm")]
+    crate::platform::wasm::console_log(&format!("[device-enrollment-accept] {message}"));
+    #[cfg(not(feature = "wasm"))]
+    eprintln!("[device-enrollment-accept] {message}");
 }
 
 // OWNERSHIP: first-run-default
@@ -919,6 +928,14 @@ async fn drive_invitation_accept_convergence(
     Ok(())
 }
 
+async fn prime_device_enrollment_accept_connectivity(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+) {
+    trigger_runtime_discovery_with_timeout(runtime).await;
+    let _ = drive_invitation_accept_convergence(app_core, runtime).await;
+}
+
 async fn ensure_channel_invitation_context_and_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
@@ -1527,6 +1544,53 @@ pub async fn create_guardian_invitation_with_instance(
         ))
         .await?;
     Ok(InvitationHandle::new(invitation))
+}
+
+/// Create a guardian invitation and return the directly-settled terminal
+/// status for frontend handoff consumers.
+pub async fn create_guardian_invitation_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    subject: AuthorityId,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+    operation_instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationHandle> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        operation_instance_id.clone(),
+        SemanticOperationKind::CreateGuardianInvitation,
+    );
+    let result = async {
+        publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let runtime = require_runtime(app_core).await?;
+        let invitation = timeout_runtime_call(
+            &runtime,
+            "create_guardian_invitation",
+            "create_guardian_invitation",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.create_guardian_invitation(receiver, subject, message, ttl_ms),
+        )
+        .await
+        .map_err(|e| AuraError::from(super::error::runtime_call("create guardian invitation", e)))?
+        .map_err(|e| {
+            AuraError::from(super::error::runtime_call("create guardian invitation", e))
+        })?;
+        owner
+            .publish_success_with(issue_invitation_created_proof(
+                invitation.invitation_id.clone(),
+            ))
+            .await?;
+        Ok(InvitationHandle::new(invitation))
+    }
+    .await;
+
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 
 /// Create a channel invitation
@@ -2442,6 +2506,16 @@ pub async fn accept_device_enrollment_invitation(
     };
 
     let runtime = require_runtime(app_core).await?;
+    log_device_enrollment_accept_progress(format!(
+        "start invitation_id={};authority={}",
+        invitation.invitation_id,
+        runtime.authority_id()
+    ));
+    prime_device_enrollment_accept_connectivity(app_core, &runtime).await;
+    log_device_enrollment_accept_progress(format!(
+        "connectivity preflight complete invitation_id={}",
+        invitation.invitation_id
+    ));
     let accept_result = timeout_runtime_call(
         &runtime,
         "accept_device_enrollment_invitation",
@@ -2464,7 +2538,15 @@ pub async fn accept_device_enrollment_invitation(
         )
         .await;
     }
+    log_device_enrollment_accept_progress(format!(
+        "accept_invitation returned invitation_id={}",
+        invitation.invitation_id
+    ));
     converge_runtime(&runtime).await;
+    log_device_enrollment_accept_progress(format!(
+        "initial converge_runtime complete invitation_id={}",
+        invitation.invitation_id
+    ));
 
     let expected_min_devices = 2_usize;
     let policy = device_enrollment_accept_retry_policy()?;
@@ -2482,6 +2564,9 @@ pub async fn accept_device_enrollment_invitation(
             };
             #[cfg(not(feature = "instrumented"))]
             let _ = &invitation_id;
+            log_device_enrollment_accept_progress(format!(
+                "convergence attempt={attempt} invitation_id={invitation_id}"
+            ));
 
             if let Err(error) = timeout_runtime_call(
                 &runtime,
@@ -2498,6 +2583,9 @@ pub async fn accept_device_enrollment_invitation(
                     "device enrollment ceremony processing failed during convergence: {error}"
                 )));
             }
+            log_device_enrollment_accept_progress(format!(
+                "process_ceremony_messages ok attempt={attempt} invitation_id={invitation_id}"
+            ));
 
             converge_runtime(&runtime).await;
             if let Err(error) = settings::refresh_settings_from_runtime(app_core).await {
@@ -2529,6 +2617,9 @@ pub async fn accept_device_enrollment_invitation(
                 Ok(settings) => settings.devices.len(),
                 Err(error) => break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error)),
             };
+            log_device_enrollment_accept_progress(format!(
+                "counts attempt={attempt} invitation_id={invitation_id} runtime_devices={runtime_device_count} settings_devices={settings_device_count} expected_min_devices={expected_min_devices}"
+            ));
             #[cfg(feature = "instrumented")]
             tracing::info!(
                 invitation_id = %invitation_id,
@@ -2542,6 +2633,9 @@ pub async fn accept_device_enrollment_invitation(
                 || settings_device_count >= expected_min_devices
             {
                 settings::refresh_settings_from_runtime(app_core).await?;
+                log_device_enrollment_accept_progress(format!(
+                    "converged attempt={attempt} invitation_id={invitation_id}"
+                ));
                 if let Err(_error) =
                     ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
                 {
@@ -2576,6 +2670,7 @@ pub async fn accept_device_enrollment_invitation(
     };
     match enrollment_result {
         Ok(()) => {
+            log_device_enrollment_accept_progress(format!("success invitation_id={invitation_id}"));
             owner
                 .publish_success_with(issue_device_enrollment_imported_proof(invitation_id))
                 .await?;

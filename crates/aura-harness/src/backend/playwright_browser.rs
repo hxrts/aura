@@ -7,20 +7,18 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use aura_app::ui::contract::{
-    classify_screen_item_id, list_item_selector, nav_control_id_for_screen, screen_item_id,
-    semantic_settings_section_item_id, ControlId, FieldId, ListId, UiSnapshot,
+    ControlId, FieldId, ListId, UiSnapshot, classify_screen_item_id, list_item_selector,
+    nav_control_id_for_screen, screen_item_id, semantic_settings_section_item_id,
 };
-use aura_app::ui::scenarios::{
-    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
-};
+use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse, SettingsSection};
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
-use nix::poll::{poll, PollFd, PollFlags};
-use serde::de::DeserializeOwned;
+use nix::poll::{PollFd, PollFlags, poll};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
@@ -35,6 +33,8 @@ const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 15_000;
 const WAIT_RPC_TIMEOUT_MARGIN_MS: u64 = 5_000;
+const SUBMIT_SEMANTIC_COMMAND_RPC_TIMEOUT_MS: u64 = 30_000 + WAIT_RPC_TIMEOUT_MARGIN_MS;
+const STAGE_RUNTIME_IDENTITY_RPC_TIMEOUT_MS: u64 = 60_000 + WAIT_RPC_TIMEOUT_MARGIN_MS;
 const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
 const DEFAULT_START_RETRY_BACKOFF_MS: u64 = 1_200;
 const MAX_START_ATTEMPTS: u32 = 10;
@@ -382,12 +382,13 @@ impl PlaywrightBrowserBackend {
             serde_json::to_string(&BootstrapRuntimeIdentity::new(authority_id, device_id))
                 .context("failed to encode staged runtime identity")?;
         self.with_session(|session| {
-            session.rpc_call(
+            session.rpc_call_with_timeout(
                 "stage_runtime_identity",
                 json!({
                     "instance_id": self.config.id,
                     "runtime_identity_json": runtime_identity_json,
                 }),
+                STAGE_RUNTIME_IDENTITY_RPC_TIMEOUT_MS,
             )?;
             Ok(())
         })
@@ -397,46 +398,16 @@ impl PlaywrightBrowserBackend {
         &mut self,
         request: SemanticCommandRequest,
     ) -> Result<SemanticCommandResponse> {
-        match &request.intent {
-            IntentAction::OpenScreen(screen) => {
-                let screen = screen_item_id(*screen);
-                self.with_session(|session| {
-                    session.rpc_call(
-                        "navigate_screen",
-                        json!({
-                            "instance_id": self.config.id,
-                            "screen": screen,
-                        }),
-                    )?;
-                    Ok(())
-                })?;
-                return Ok(SemanticCommandResponse::accepted_without_value());
-            }
-            IntentAction::OpenSettingsSection(section) => {
-                let section = semantic_settings_section_item_id(*section);
-                self.with_session(|session| {
-                    session.rpc_call(
-                        "open_settings_section",
-                        json!({
-                            "instance_id": self.config.id,
-                            "section": section,
-                        }),
-                    )?;
-                    Ok(())
-                })?;
-                return Ok(SemanticCommandResponse::accepted_without_value());
-            }
-            _ => {}
-        }
         let payload = serde_json::to_value(&request)
             .context("failed to encode browser semantic command request")?;
         let response = self.with_session(|session| {
-            session.rpc_call(
+            session.rpc_call_with_timeout(
                 "submit_semantic_command",
                 json!({
                     "instance_id": self.config.id,
                     "request": payload,
                 }),
+                SUBMIT_SEMANTIC_COMMAND_RPC_TIMEOUT_MS,
             )
         })?;
         serde_json::from_value(response)
@@ -1233,8 +1204,8 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        browser_app_url, control_selector, field_selector, navigation_control_id,
-        parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
+        DEFAULT_PAGE_GOTO_TIMEOUT_MS, browser_app_url, control_selector, field_selector,
+        navigation_control_id, parse_bool_setting, parse_u64_setting, tool_key_name,
     };
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId};
@@ -1276,9 +1247,10 @@ mod tests {
         match error {
             Ok(value) => panic!("expected out-of-range error, got value {value}"),
             Err(err) => {
-                assert!(err
-                    .to_string()
-                    .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range"));
+                assert!(
+                    err.to_string()
+                        .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range")
+                );
             }
         }
     }
@@ -1402,7 +1374,18 @@ mod tests {
     fn playwright_shared_semantic_bridge_replaces_shortcut_bypasses() {
         let source = include_str!("playwright_browser.rs");
         assert!(source.contains("fn submit_semantic_command("));
-        assert!(source.contains("session.rpc_call(\n                \"submit_semantic_command\","));
+        assert!(
+            source.contains(
+                "session.rpc_call_with_timeout(\n                \"submit_semantic_command\","
+            ),
+            "browser backend should give semantic submissions an explicit long-lived RPC timeout because preserved-profile restart is part of the owned path"
+        );
+        assert!(
+            source.contains(
+                "session.rpc_call_with_timeout(\n                \"stage_runtime_identity\","
+            ),
+            "browser backend should give runtime-identity staging the explicit longer RPC timeout budget required by generation-changing restart flows"
+        );
         assert!(!source.contains("session.rpc_call(\n                \"create_account\","));
         assert!(!source.contains("session.rpc_call(\n                \"create_home\","));
         assert!(
@@ -1456,7 +1439,8 @@ mod tests {
         );
         assert!(
             bridge_source.contains("classify_screen_item_id(&screen_name)")
-                && bridge_source.contains("classify_semantic_settings_section_item_id(&section_name)"),
+                && bridge_source
+                    .contains("classify_semantic_settings_section_item_id(&section_name)"),
             "browser bridge should classify screen and settings item ids through the shared ui contract helpers"
         );
         assert!(
@@ -1464,24 +1448,55 @@ mod tests {
             "browser bridge should cover the typed semantic intent surface directly instead of keeping a generic unsupported-intent fallback"
         );
         assert!(
-            driver_source.contains("resetObservationState(session, \"submit_semantic_command\")"),
-            "browser driver should invalidate stale observation state after semantic submission"
+            driver_source.contains("markObservationMutation(session, \"submit_semantic_command\")"),
+            "browser driver should advance the semantic observation baseline after semantic submission"
         );
         assert!(
-            driver_source.contains("window.__AURA_HARNESS__?.stage_runtime_identity"),
-            "browser driver should stage runtime identity through the explicit owned bridge entrypoint"
+            bridge_source.contains("typeof harness?.stage_runtime_identity !== \"function\"")
+                && bridge_source
+                    .contains("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ = (payloadJson) => {"),
+            "browser harness bridge should own the runtime-stage queue and invoke the explicit runtime identity staging entrypoint inside the page"
+        );
+        assert!(
+            driver_source.contains("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__"),
+            "browser driver should submit runtime-identity staging through the page-owned in-page queue instead of a direct long-lived Playwright evaluate await"
+        );
+        assert!(
+            !driver_source.contains("await stageRuntimeIdentity(serializedIdentity);"),
+            "browser driver should not hold a direct page-evaluate await open across a generation-changing runtime staging handoff"
         );
         assert!(
             !driver_source.contains("window.localStorage?.setItem"),
             "browser driver must not own browser runtime-identity storage layout"
         );
         assert!(
+            bridge_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {")
+                && bridge_source.contains("submitState?.status === \"ready\""),
+            "browser harness bridge should own a generation-aware page semantic queue instead of leaving semantic replay ownership to the driver"
+        );
+        assert!(
             driver_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__"),
-            "browser driver should submit semantic commands through the owned in-page semantic queue"
+            "browser driver should submit semantic commands through the page-owned in-page semantic queue"
         );
         assert!(
             backend_source.contains("failed to decode browser semantic command response"),
             "browser backend should preserve semantic bridge decode failures diagnostically"
+        );
+        let submit_start = backend_source
+            .find("fn submit_semantic_command(")
+            .unwrap_or_else(|| panic!("missing submit_semantic_command"));
+        let submit_end = backend_source[submit_start..]
+            .find("impl InstanceBackend for PlaywrightBrowserBackend {")
+            .map(|offset| submit_start + offset)
+            .unwrap_or(backend_source.len());
+        let submit_block = &backend_source[submit_start..submit_end];
+        assert!(
+            !submit_block
+                .contains("session.rpc_call(\n                        \"navigate_screen\",")
+                && !submit_block.contains(
+                    "session.rpc_call(\n                        \"open_settings_section\","
+                ),
+            "browser shared semantic submission should use submit_semantic_command instead of bypassing the page-owned semantic queue for navigation intents"
         );
     }
 

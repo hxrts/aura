@@ -49,17 +49,20 @@ mod time;
 pub mod types;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{ConnectionStatus, SyncStatus, ERROR_SIGNAL};
 use aura_core::effects::reactive::ReactiveEffects;
+use std::convert::Infallible;
 
 pub use types::{OpError, OpFailureCode, OpResponse, OpResult};
 
 use super::EffectCommand;
 use crate::error::TerminalError;
 use crate::tui::tasks::UiTaskOwner;
+use crate::tui::timeout_support::{execute_with_terminal_timeout, TerminalTimeoutError};
 
 /// Handles operational commands that don't create journal facts.
 ///
@@ -240,36 +243,63 @@ impl OperationalHandler {
     /// warning so the failure is observable.
     pub async fn emit_error(&self, error: TerminalError) {
         let mapped = map_terminal_error(&error);
-        match tokio::time::timeout(std::time::Duration::from_millis(500), self.app_core.read())
-            .await
+        match execute_with_terminal_timeout(
+            "error_signal_emit",
+            Duration::from_millis(500),
+            || async { Ok::<_, Infallible>(self.app_core.read().await) },
+        )
+        .await
         {
             Ok(core) => {
                 let _ = core.emit(&*ERROR_SIGNAL, Some(mapped)).await;
             }
-            Err(_) => {
+            Err(TerminalTimeoutError::Timeout { .. }) => {
                 tracing::warn!(
                     error_code = "ERROR_SIGNAL_CONTENDED",
                     original_error = %error,
                     "failed to emit ERROR_SIGNAL: AppCore write-locked for >500ms"
                 );
             }
+            Err(TerminalTimeoutError::Setup { context, detail }) => {
+                tracing::warn!(
+                    error_code = "ERROR_SIGNAL_TIMEOUT_SETUP_FAILED",
+                    timeout_context = context,
+                    %detail,
+                    original_error = %error,
+                    "failed to emit ERROR_SIGNAL because terminal timeout setup failed"
+                );
+            }
+            Err(TerminalTimeoutError::Operation(error)) => match error {},
         }
     }
 
     /// Clear the error signal.
     pub async fn clear_error(&self) {
-        match tokio::time::timeout(std::time::Duration::from_millis(500), self.app_core.read())
-            .await
+        match execute_with_terminal_timeout(
+            "error_signal_clear",
+            Duration::from_millis(500),
+            || async { Ok::<_, Infallible>(self.app_core.read().await) },
+        )
+        .await
         {
             Ok(core) => {
                 let _ = core.emit(&*ERROR_SIGNAL, None).await;
             }
-            Err(_) => {
+            Err(TerminalTimeoutError::Timeout { .. }) => {
                 tracing::warn!(
                     error_code = "ERROR_SIGNAL_CONTENDED",
                     "failed to clear ERROR_SIGNAL: AppCore write-locked for >500ms"
                 );
             }
+            Err(TerminalTimeoutError::Setup { context, detail }) => {
+                tracing::warn!(
+                    error_code = "ERROR_SIGNAL_TIMEOUT_SETUP_FAILED",
+                    timeout_context = context,
+                    %detail,
+                    "failed to clear ERROR_SIGNAL because terminal timeout setup failed"
+                );
+            }
+            Err(TerminalTimeoutError::Operation(error)) => match error {},
         }
     }
 

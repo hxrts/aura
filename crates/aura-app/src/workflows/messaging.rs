@@ -322,6 +322,9 @@ impl ChannelReadinessCoordinator {
         resolve_recipients: bool,
     ) -> Result<Self, AuraError> {
         let facts = authoritative_semantic_facts_snapshot(app_core).await?;
+        // OWNERSHIP: fact-backed. Authoritative readiness seeds come from the
+        // semantic fact snapshot; the observed chat snapshot only enriches those
+        // seeds with display metadata and already-materialized context.
         let observed_chat = observed_chat_snapshot(app_core).await;
         let (runtime, self_authority) = {
             let core = app_core.read().await;

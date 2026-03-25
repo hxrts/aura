@@ -64,6 +64,9 @@ pub const TUI_LOG_QUEUE_CAPACITY: usize = 256;
 /// Web storage key suffix for pending first-run bootstrap metadata.
 pub const WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX: &str = "pending_account_bootstrap";
 
+/// Web storage key suffix for persisted account bootstrap metadata.
+pub const WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX: &str = "account_config";
+
 /// Web storage key suffix for the selected bootstrap runtime identity.
 pub const WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX: &str = "selected_runtime_identity";
 

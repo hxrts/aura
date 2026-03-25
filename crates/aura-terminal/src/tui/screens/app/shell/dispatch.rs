@@ -1,7 +1,9 @@
 use super::*;
 use std::collections::HashSet;
 
-use crate::tui::channel_selection::authoritative_committed_selection;
+use crate::tui::channel_selection::{
+    authoritative_committed_selection, strongest_authoritative_binding_for_channel,
+};
 use crate::tui::screens::app::subscriptions::{
     SharedChannels, SharedContacts, SharedDiscoveredPeers, SharedInvitations, SharedMessages,
     SharedPendingRequests, SharedThreshold,
@@ -25,6 +27,9 @@ pub(super) async fn complete_ready_join_binding_submissions(
     ready_instances: &Arc<Mutex<HashSet<String>>>,
     binding: &ChannelBindingWitness,
 ) {
+    if binding.context_id.is_none() {
+        return;
+    }
     let ready_instance_ids = {
         let mut ready = ready_instances.lock().unwrap();
         ready.drain().collect::<Vec<_>>()
@@ -535,12 +540,12 @@ pub(super) fn execute_harness_followup_command(
             let Some(channel) = channels.get(channel_idx) else {
                 return Err("No channel selected".to_string());
             };
-            let context_id = selected_channel
-                .read()
-                .clone()
-                .map(|selection| selection.binding().clone())
-                .filter(|binding| binding.channel_id == channel.id)
-                .and_then(|binding| binding.context_id);
+            let selected = selected_channel.read().clone();
+            let context_id = strongest_authoritative_binding_for_channel(
+                channel,
+                selected.as_ref(),
+            )
+            .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",
@@ -584,12 +589,12 @@ pub(super) fn execute_harness_followup_command(
                     "Selected channel is stale or unavailable: {channel_id}"
                 ));
             };
-            let context_id = selected_channel
-                .read()
-                .clone()
-                .map(|selection| selection.binding().clone())
-                .filter(|binding| binding.channel_id == channel.id)
-                .and_then(|binding| binding.context_id);
+            let selected = selected_channel.read().clone();
+            let context_id = strongest_authoritative_binding_for_channel(
+                channel,
+                selected.as_ref(),
+            )
+            .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",

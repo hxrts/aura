@@ -9,19 +9,21 @@ use cfg_if::cfg_if;
 
 cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
+        mod bootstrap_storage;
         mod error;
         mod harness_bridge;
+        mod shell_host;
         mod task_owner;
         mod web_clipboard;
 
         use async_lock::{Mutex, RwLock};
-        use aura_agent::{AgentBuilder, AuraAgent};
-        use aura_app::{AppConfig, AppCore};
+        use aura_app::{AppCore};
         use aura_app::ui::workflows::account as account_workflows;
+        use aura_app::ui::workflows::context as context_workflows;
         use aura_app::ui::workflows::invitation as invitation_workflows;
         use aura_app::ui::workflows::network as network_workflows;
         use aura_app::ui::workflows::runtime as runtime_workflows;
-        use aura_app::ui::workflows::settings as settings_workflows;
+        use aura_app::ui::workflows::system as system_workflows;
         use aura_app::ui::workflows::time as time_workflows;
         use aura_app::ui::types::{
             BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
@@ -29,7 +31,7 @@ cfg_if! {
             WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
             WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
         };
-        use aura_core::types::identifiers::AuthorityId;
+        use bootstrap_storage::persist_runtime_account_config;
         use aura_app::ui::contract::{
             ControlId, FieldId, ScreenId, UiReadiness,
         };
@@ -42,10 +44,8 @@ cfg_if! {
         use std::future::Future;
         use std::rc::Rc;
         use std::sync::Arc;
+        use shell_host::{BootstrapState, WebShellHost};
         use task_owner::shared_web_task_owner;
-        use wasm_bindgen::JsValue;
-        use wasm_bindgen_futures::future_to_promise;
-        use web_clipboard::WebClipboardAdapter;
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
@@ -60,7 +60,7 @@ cfg_if! {
             format!("{storage_prefix}pending_device_enrollment_code")
         }
 
-        fn pending_account_bootstrap_key(storage_prefix: &str) -> String {
+        pub(crate) fn pending_account_bootstrap_key(storage_prefix: &str) -> String {
             format!(
                 "{storage_prefix}{}",
                 WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX
@@ -79,7 +79,7 @@ cfg_if! {
                 .collect()
         }
 
-        fn harness_instance_id() -> Option<String> {
+        pub(crate) fn harness_instance_id() -> Option<String> {
             let window = web_sys::window()?;
             let search = window.location().search().ok()?;
             let query = search.strip_prefix('?').unwrap_or(&search);
@@ -93,7 +93,7 @@ cfg_if! {
             None
         }
 
-        fn harness_mode_enabled() -> bool {
+        pub(crate) fn harness_mode_enabled() -> bool {
             harness_instance_id().is_some()
         }
 
@@ -107,7 +107,7 @@ cfg_if! {
             WEB_STORAGE_PREFIX.to_string()
         }
 
-        fn logged_optional<T>(result: Result<Option<T>, WebUiError>) -> Option<T> {
+        pub(crate) fn logged_optional<T>(result: Result<Option<T>, WebUiError>) -> Option<T> {
             match result {
                 Ok(value) => value,
                 Err(error) => {
@@ -256,7 +256,7 @@ cfg_if! {
             })
         }
 
-        fn load_pending_account_bootstrap(
+        pub(crate) fn load_pending_account_bootstrap(
             storage_key: &str,
         ) -> Result<Option<PendingAccountBootstrap>, WebUiError> {
             let Some(window) = web_sys::window() else {
@@ -334,24 +334,19 @@ cfg_if! {
                 })
         }
 
-        async fn stage_initial_web_account_bootstrap(nickname: &str) -> Result<(), WebUiError> {
+        async fn persist_pending_web_account_bootstrap(
+            nickname: &str,
+        ) -> Result<PendingAccountBootstrap, WebUiError> {
             let pending_bootstrap = account_workflows::prepare_pending_account_bootstrap(nickname)
                 .map_err(|error| {
                     WebUiError::input(
-                        WebUiOperation::StageInitialAccountBootstrap,
+                        WebUiOperation::PersistPendingAccountBootstrap,
                         "WEB_PENDING_BOOTSTRAP_PREPARE_FAILED",
                         error.to_string(),
                     )
                 })?;
             let storage_prefix = active_storage_prefix();
-            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
             let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
-            let random = RealRandomHandler::new();
-            let authority_id = new_authority_id(&random).await;
-            let device_id = new_device_id(&random).await;
-            let runtime_identity = BootstrapRuntimeIdentity::new(authority_id, device_id);
-
-            persist_selected_runtime_identity(&runtime_identity_key, &runtime_identity)?;
             persist_pending_account_bootstrap(&pending_account_key, &pending_bootstrap)?;
 
             let staged_event = BootstrapEvent::new(
@@ -359,6 +354,33 @@ cfg_if! {
                 BootstrapEventKind::PendingBootstrapStaged,
             );
             web_sys::console::log_1(&staged_event.to_string().into());
+            Ok(pending_bootstrap)
+        }
+
+        pub(crate) async fn stage_runtime_bound_web_account_bootstrap(
+            nickname: &str,
+        ) -> Result<(), WebUiError> {
+            let pending_bootstrap = persist_pending_web_account_bootstrap(nickname).await?;
+            web_sys::console::log_1(
+                &format!(
+                    "[web-bootstrap] staged_runtime_bound_account nickname={}",
+                    pending_bootstrap.nickname_suggestion
+                )
+                .into(),
+            );
+            Ok(())
+        }
+
+        async fn stage_initial_web_account_bootstrap(nickname: &str) -> Result<(), WebUiError> {
+            let pending_bootstrap = persist_pending_web_account_bootstrap(nickname).await?;
+            let storage_prefix = active_storage_prefix();
+            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
+            let random = RealRandomHandler::new();
+            let authority_id = new_authority_id(&random).await;
+            let device_id = new_device_id(&random).await;
+            let runtime_identity = BootstrapRuntimeIdentity::new(authority_id, device_id);
+
+            persist_selected_runtime_identity(&runtime_identity_key, &runtime_identity)?;
             web_sys::console::log_1(
                 &format!(
                     "[web-bootstrap] staged_initial_account authority={authority_id};device={device_id};nickname={}",
@@ -369,29 +391,18 @@ cfg_if! {
             Ok(())
         }
 
-        fn install_harness_instrumentation(controller: Arc<UiController>) {
-            if !harness_mode_enabled() {
-                return;
+        pub(crate) fn device_enrollment_bootstrap_name(
+            nickname_suggestion: Option<&str>,
+        ) -> String {
+            let nickname_suggestion = nickname_suggestion.unwrap_or("").trim();
+            if nickname_suggestion.is_empty() {
+                "Aura User".to_string()
+            } else {
+                nickname_suggestion.to_string()
             }
-            controller.set_ui_snapshot_sink(Arc::new(|snapshot| {
-                harness_bridge::publish_ui_snapshot(&snapshot);
-            }));
-
-            harness_bridge::set_controller(controller.clone());
-            if let Err(error) = harness_bridge::install_window_harness_api() {
-                log_web_error(
-                    "error",
-                    &WebUiError::operation(
-                        WebUiOperation::InstallHarnessInstrumentation,
-                        "WEB_HARNESS_API_INSTALL_FAILED",
-                        format!("failed to install harness API: {error:?}"),
-                    ),
-                );
-            }
-            let _ = harness_bridge::publish_semantic_controller_snapshot(controller.clone());
         }
 
-        fn load_pending_device_enrollment_code(
+        pub(crate) fn load_pending_device_enrollment_code(
             storage_key: &str,
         ) -> Result<Option<String>, WebUiError> {
             let Some(window) = web_sys::window() else {
@@ -500,294 +511,6 @@ cfg_if! {
             })
         }
 
-        #[derive(Clone, PartialEq)]
-        struct BootstrapState {
-            controller: Arc<UiController>,
-            account_ready: bool,
-        }
-
-        async fn bootstrap_controller() -> Result<BootstrapState, WebUiError> {
-            let storage_prefix = active_storage_prefix();
-            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-            let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
-            let selected_runtime_identity =
-                logged_optional(load_selected_runtime_identity(&runtime_identity_key));
-            let pending_account_bootstrap =
-                logged_optional(load_pending_account_bootstrap(&pending_account_key));
-            web_sys::console::log_1(
-                &format!(
-                    "[web-bootstrap] storage_prefix={storage_prefix};selected_runtime_identity={:?};pending_account_bootstrap={:?}",
-                    selected_runtime_identity, pending_account_bootstrap
-                )
-                .into(),
-            );
-            let harness_instance = harness_instance_id();
-            let clipboard = Arc::new(WebClipboardAdapter::default());
-            if let Some(runtime_identity) = selected_runtime_identity {
-                let authority_id = runtime_identity.authority_id;
-                let device_id = runtime_identity.device_id;
-                let config = aura_agent::core::AgentConfig {
-                    device_id,
-                    ..Default::default()
-                };
-                let agent = Arc::new(
-                    AgentBuilder::web()
-                        .storage_prefix(&storage_prefix)
-                        .authority(authority_id)
-                        .with_config(config)
-                        .build()
-                        .await
-                        .map_err(|error| {
-                            WebUiError::operation(
-                                WebUiOperation::BootstrapController,
-                                "WEB_RUNTIME_BUILD_FAILED",
-                                format!("failed to build web runtime: {error}"),
-                            )
-                        })?,
-                );
-                web_sys::console::log_1(
-                    &format!(
-                        "[web-bootstrap] runtime_authority={};runtime_device={}",
-                        agent.authority_id(),
-                        agent.runtime().device_id()
-                    )
-                    .into(),
-                );
-
-                let app_core = Arc::new(RwLock::new(
-                    AppCore::with_runtime(AppConfig::default(), agent.clone().as_runtime_bridge())
-                        .map_err(|error| {
-                            WebUiError::operation(
-                                WebUiOperation::BootstrapController,
-                                "WEB_APP_CORE_INIT_FAILED",
-                                format!("failed to initialize AppCore: {error}"),
-                            )
-                        })?,
-                ));
-
-                AppCore::init_signals_with_hooks(&app_core)
-                    .await
-                    .map_err(|error| {
-                        WebUiError::operation(
-                            WebUiOperation::BootstrapController,
-                            "WEB_SIGNAL_INIT_FAILED",
-                            format!("failed to initialize app signals: {error}"),
-                        )
-                    })?;
-
-                let bootstrap_resolution =
-                    account_workflows::reconcile_pending_runtime_account_bootstrap(
-                        &app_core,
-                        pending_account_bootstrap.clone(),
-                    )
-                    .await
-                    .map_err(|error| {
-                        WebUiError::operation(
-                            WebUiOperation::BootstrapController,
-                            "WEB_PENDING_BOOTSTRAP_RECONCILE_FAILED",
-                            format!("failed to reconcile pending web account bootstrap: {error}"),
-                        )
-                    })?;
-                let account_ready = bootstrap_resolution.account_ready;
-
-                if bootstrap_resolution.action
-                    != account_workflows::PendingRuntimeBootstrapAction::None
-                {
-                    let reconciled_event = BootstrapEvent::new(
-                        BootstrapSurface::Web,
-                        BootstrapEventKind::PendingBootstrapReconciled,
-                    );
-                    web_sys::console::log_1(&reconciled_event.to_string().into());
-                    clear_storage_key(&pending_account_key)?;
-                }
-
-                let current_runtime_identity = BootstrapRuntimeIdentity::new(
-                    agent.authority_id().clone(),
-                    agent.runtime().device_id(),
-                );
-                if let Err(error) = persist_selected_runtime_identity(
-                    &runtime_identity_key,
-                    &current_runtime_identity,
-                ) {
-                    log_web_error("warn", &error);
-                }
-
-                let current_device_id = current_runtime_identity.device_id;
-                let controller = Arc::new(UiController::with_authority_switcher(
-                    app_core.clone(),
-                    clipboard,
-                    Some(Arc::new(move |authority_id: AuthorityId| {
-                        let storage_prefix = active_storage_prefix();
-                        let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-                        let runtime_identity = load_selected_runtime_identity(&runtime_identity_key);
-                        let runtime_identity =
-                            logged_optional(runtime_identity).unwrap_or_else(|| {
-                                BootstrapRuntimeIdentity::new(
-                                    authority_id,
-                                    current_device_id.clone(),
-                                )
-                            });
-                        let updated_identity = BootstrapRuntimeIdentity::new(
-                            authority_id,
-                            runtime_identity.device_id,
-                        );
-                        if let Err(error) = persist_selected_runtime_identity(
-                            &runtime_identity_key,
-                            &updated_identity,
-                        ) {
-                            log_web_error("error", &error);
-                            return;
-                        }
-                        shared_web_task_owner().spawn_local(async move {
-                            if let Err(error) = submit_runtime_bootstrap_handoff(
-                                harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
-                                    authority_id,
-                                    device_id: updated_identity.device_id,
-                                    source: harness_bridge::RuntimeIdentityStageSource::AuthoritySwitch,
-                                },
-                            )
-                            .await
-                            {
-                                log_web_error("error", &error);
-                            }
-                        });
-                    })),
-                ));
-                controller.set_account_setup_state(account_ready, "", None);
-                install_harness_instrumentation(controller.clone());
-                spawn_ceremony_acceptance_loop(
-                    controller.clone(),
-                    app_core.clone(),
-                    agent.clone(),
-                );
-
-                if account_ready {
-                    if let Err(error) = settings_workflows::refresh_settings_from_runtime(
-                        controller.app_core(),
-                    )
-                    .await
-                    {
-                        log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::RefreshBootstrapSettings,
-                                "WEB_BOOTSTRAP_SETTINGS_REFRESH_FAILED",
-                                error.to_string(),
-                            ),
-                        );
-                    }
-                    match runtime_workflows::require_runtime(controller.app_core()).await {
-                        Ok(runtime) => {
-                            let runtime_devices = runtime
-                                .try_list_devices()
-                                .await
-                                .unwrap_or_default();
-                            match settings_workflows::get_settings(controller.app_core()).await {
-                                Ok(settings) => web_sys::console::log_1(
-                                    &format!(
-                                        "[web-bootstrap] settings_seeded runtime_devices={:?};settings_devices={:?}",
-                                        runtime_devices
-                                            .iter()
-                                            .map(|device| device.id.to_string())
-                                            .collect::<Vec<_>>(),
-                                        settings
-                                            .devices
-                                            .iter()
-                                            .map(|device| device.id.clone())
-                                            .collect::<Vec<_>>()
-                                    )
-                                    .into(),
-                                ),
-                                Err(error) => log_web_error(
-                                    "warn",
-                                    &WebUiError::operation(
-                                        WebUiOperation::InspectBootstrapRuntime,
-                                        "WEB_BOOTSTRAP_SETTINGS_INSPECT_FAILED",
-                                        format!(
-                                            "failed to inspect seeded settings for runtime devices {:?}: {error}",
-                                            runtime_devices
-                                                .iter()
-                                                .map(|device| device.id.to_string())
-                                                .collect::<Vec<_>>()
-                                        ),
-                                    ),
-                                ),
-                            }
-                        }
-                        Err(error) => log_web_error(
-                            "warn",
-                            &WebUiError::operation(
-                                WebUiOperation::InspectBootstrapRuntime,
-                                "WEB_BOOTSTRAP_RUNTIME_INSPECT_FAILED",
-                                error.to_string(),
-                            ),
-                        ),
-                    }
-                }
-
-                let finalized_event = BootstrapEvent::new(
-                    BootstrapSurface::Web,
-                    BootstrapEventKind::RuntimeBootstrapFinalized,
-                );
-                let final_snapshot =
-                    harness_bridge::publish_semantic_controller_snapshot(controller.clone());
-                web_sys::console::log_1(
-                    &format!(
-                        "[web-bootstrap] final_snapshot screen={:?};readiness={:?};revision={:?}",
-                        final_snapshot.screen, final_snapshot.readiness, final_snapshot.revision
-                    )
-                    .into(),
-                );
-                controller.push_log(&finalized_event.to_string());
-                if let Some(instance_id) = harness_instance {
-                    controller.push_log(&format!(
-                        "web harness instance {instance_id} booted in testing mode"
-                    ));
-                }
-                Ok(BootstrapState {
-                    controller,
-                    account_ready,
-                })
-            } else {
-                let app_core = Arc::new(RwLock::new(
-                    AppCore::new(AppConfig::default())
-                        .map_err(|error| {
-                            WebUiError::operation(
-                                WebUiOperation::BootstrapController,
-                                "WEB_BOOTSTRAP_APP_CORE_INIT_FAILED",
-                                format!("failed to initialize bootstrap AppCore: {error}"),
-                            )
-                        })?,
-                ));
-                AppCore::init_signals_with_hooks(&app_core)
-                    .await
-                    .map_err(|error| {
-                        WebUiError::operation(
-                            WebUiOperation::BootstrapController,
-                            "WEB_BOOTSTRAP_SIGNAL_INIT_FAILED",
-                            format!("failed to initialize bootstrap app signals: {error}"),
-                        )
-                    })?;
-                let controller = Arc::new(UiController::new(app_core, clipboard));
-                controller.set_account_setup_state(false, "", None);
-                install_harness_instrumentation(controller.clone());
-                let waiting_event = BootstrapEvent::new(
-                    BootstrapSurface::Web,
-                    BootstrapEventKind::ShellAwaitingAccount,
-                );
-                controller.push_log(&waiting_event.to_string());
-                if let Some(instance_id) = harness_instance {
-                    controller.push_log(&format!(
-                        "web harness instance {instance_id} booted without runtime"
-                    ));
-                }
-                Ok(BootstrapState {
-                    controller,
-                    account_ready: false,
-                })
-            }
-        }
-
         fn main() {
             aura_app::platform::wasm::initialize();
             apply_harness_mode_document_flags();
@@ -806,6 +529,14 @@ cfg_if! {
             let committed_bootstrap = use_signal(|| Option::<BootstrapState>::None);
             let bootstrap_error = use_signal(|| Option::<WebUiError>::None);
             let rebootstrap_lock = use_hook(|| Arc::new(Mutex::new(())));
+            let shell_host = use_hook(move || {
+                WebShellHost::new(
+                    bootstrap_epoch,
+                    committed_bootstrap,
+                    bootstrap_error,
+                    rebootstrap_lock.clone(),
+                )
+            });
 
             use_effect(|| {
                 if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -814,66 +545,11 @@ cfg_if! {
             });
 
             use_effect(move || {
-                let submitter: Arc<
-                    dyn Fn(harness_bridge::BootstrapHandoff) -> js_sys::Promise,
-                > = Arc::new({
-                    let rebootstrap_lock = rebootstrap_lock.clone();
-                    let bootstrap_epoch = bootstrap_epoch;
-                    let committed_bootstrap = committed_bootstrap;
-                    let bootstrap_error = bootstrap_error;
-                    move |handoff| {
-                        let rebootstrap_lock = rebootstrap_lock.clone();
-                        let mut bootstrap_epoch = bootstrap_epoch;
-                        let mut committed_bootstrap = committed_bootstrap;
-                        let mut bootstrap_error = bootstrap_error;
-                        future_to_promise(async move {
-                            complete_bootstrap_handoff(
-                                rebootstrap_lock,
-                                bootstrap_epoch,
-                                committed_bootstrap,
-                                bootstrap_error,
-                                handoff,
-                            )
-                            .await
-                            .map_err(|error| JsValue::from_str(&error.user_message()))?;
-                            Ok(JsValue::UNDEFINED)
-                        })
-                    }
-                });
-
+                let submitter = shell_host.bootstrap_submitter();
                 harness_bridge::set_bootstrap_handoff_submitter(submitter.clone());
-                let runtime_identity_submitter = submitter.clone();
-                harness_bridge::set_runtime_identity_stager(Arc::new(move |serialized_identity| {
-                    let runtime_identity_submitter = runtime_identity_submitter.clone();
-                    future_to_promise(async move {
-                        let runtime_identity: BootstrapRuntimeIdentity =
-                            serde_json::from_str(&serialized_identity).map_err(|error| {
-                                JsValue::from_str(&format!(
-                                    "failed to parse staged runtime identity: {error}"
-                                ))
-                            })?;
-                        let storage_prefix = active_storage_prefix();
-                        let runtime_identity_key =
-                            selected_runtime_identity_key(&storage_prefix);
-                        persist_selected_runtime_identity(
-                            &runtime_identity_key,
-                            &runtime_identity,
-                        )
-                        .map_err(|error| JsValue::from_str(&error.user_message()))?;
-                        let handoff =
-                            harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
-                                authority_id: runtime_identity.authority_id,
-                                device_id: runtime_identity.device_id,
-                                source:
-                                    harness_bridge::RuntimeIdentityStageSource::HarnessStaging,
-                            };
-                        let _ = wasm_bindgen_futures::JsFuture::from(
-                            runtime_identity_submitter(handoff),
-                        )
-                        .await?;
-                        Ok(JsValue::UNDEFINED)
-                    })
-                }));
+                harness_bridge::set_runtime_identity_stager(
+                    shell_host.runtime_identity_stager(submitter.clone()),
+                );
 
                 if !bootstrap_started.get() {
                     bootstrap_started.set(true);
@@ -884,6 +560,7 @@ cfg_if! {
             if let Some(state) = committed_bootstrap() {
                 return rsx! {
                     BootstrappedApp {
+                        key: "{state.generation_id}",
                         state,
                     }
                 };
@@ -921,7 +598,6 @@ cfg_if! {
             let rerender = schedule_update();
             controller.set_rerender_callback(rerender.clone());
             let mut sync_loop_started = use_signal(|| false);
-            let bootstrap_account_ready = use_signal(|| state.account_ready);
             let mut account_name = use_signal(String::new);
             let mut account_error = use_signal(|| Option::<WebUiError>::None);
             let creating_account = use_signal(|| false);
@@ -932,43 +608,7 @@ cfg_if! {
             let controller_snapshot = controller.semantic_model_snapshot();
             let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
                 && controller_snapshot.screen != ScreenId::Onboarding;
-            let account_ready = bootstrap_account_ready() || controller_account_ready;
-
-            use_effect({
-                let controller = controller.clone();
-                move || {
-                    if bootstrap_account_ready() {
-                        let controller = controller.clone();
-                        shared_web_task_owner().spawn_local(async move {
-                            if let Err(error) = harness_bridge::schedule_browser_ui_mutation(
-                                controller.clone(),
-                                move |controller| {
-                                    let snapshot = controller.semantic_model_snapshot();
-                                    if snapshot.readiness != UiReadiness::Ready
-                                        || snapshot.screen == ScreenId::Onboarding
-                                    {
-                                        controller.set_account_setup_state(true, "", None);
-                                        if snapshot.screen == ScreenId::Onboarding {
-                                            controller.set_screen(ScreenId::Neighborhood);
-                                            let _ =
-                                                harness_bridge::publish_current_ui_snapshot(
-                                                    controller,
-                                                );
-                                        }
-                                    }
-                                },
-                            )
-                            .await
-                            {
-                                tracing::warn!(
-                                    error = ?error,
-                                    "failed to schedule browser bootstrap readiness mutation"
-                                );
-                            }
-                        });
-                    }
-                }
-            });
+            let account_ready = state.account_ready || controller_account_ready;
 
             if account_ready && !sync_loop_started() {
                 sync_loop_started.set(true);
@@ -987,7 +627,6 @@ cfg_if! {
                 let controller = controller.clone();
                 let import_error = import_error.clone();
                 let importing_code = importing_code.clone();
-                let mut bootstrap_account_ready = bootstrap_account_ready.clone();
                 move |code: String| {
                     let mut import_error = import_error.clone();
                     let mut importing_code = importing_code.clone();
@@ -1003,9 +642,11 @@ cfg_if! {
                     import_error.set(None);
 
                     let controller = controller.clone();
-                    shared_web_task_owner().spawn_local(async move {
-                        let app_core = controller.app_core().clone();
-                        let result = async {
+                    let scheduled_controller = controller.clone();
+                    if let Err(error) = harness_bridge::schedule_browser_task_next_tick(move || {
+                        shared_web_task_owner().spawn_local(async move {
+                            let app_core = scheduled_controller.app_core().clone();
+                            let result = async {
                             let mut requires_rebootstrap = false;
                             let invitation = invitation_workflows::import_invitation_details(
                                 &app_core, &code,
@@ -1022,6 +663,7 @@ cfg_if! {
                             let InvitationBridgeType::DeviceEnrollment {
                                 subject_authority,
                                 device_id,
+                                nickname_suggestion,
                                 ..
                             } = invitation_info.invitation_type.clone()
                             else {
@@ -1104,11 +746,6 @@ cfg_if! {
                                 return Ok(requires_rebootstrap);
                             }
 
-                            if let Err(error) =
-                                clear_pending_device_enrollment_code(&pending_code_storage_key)
-                            {
-                                log_web_error("warn", &error);
-                            }
                             web_sys::console::log_1(
                                 &format!(
                                     "[web-import-device] accepting_on_bound_runtime authority={};selected_runtime_identity={:?};invited_device={}",
@@ -1118,6 +755,32 @@ cfg_if! {
                                 )
                                 .into(),
                             );
+
+                            let bootstrap_name =
+                                device_enrollment_bootstrap_name(nickname_suggestion.as_deref());
+                            if context_workflows::current_home_context(&app_core)
+                                .await
+                                .is_err()
+                            {
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-import-device] initializing_runtime_account nickname={bootstrap_name}"
+                                    )
+                                    .into(),
+                                );
+                                account_workflows::initialize_runtime_account(
+                                    &app_core,
+                                    bootstrap_name.clone(),
+                                )
+                                .await
+                                .map_err(|error| {
+                                    WebUiError::operation(
+                                        WebUiOperation::ImportDeviceEnrollmentCode,
+                                        "WEB_DEVICE_ENROLLMENT_ACCOUNT_INIT_FAILED",
+                                        error.to_string(),
+                                    )
+                                })?;
+                            }
 
                             invitation_workflows::accept_device_enrollment_invitation(
                                 &app_core,
@@ -1131,10 +794,8 @@ cfg_if! {
                                     error.to_string(),
                                 )
                             })?;
-                            let runtime_devices_after_accept = runtime
-                                .try_list_devices()
-                                .await
-                                .unwrap_or_default();
+                            let runtime_devices_after_accept =
+                                runtime.try_list_devices().await.unwrap_or_default();
                             web_sys::console::log_1(
                                 &format!(
                                     "[web-import-device] accepted runtime_devices={:?}",
@@ -1145,122 +806,83 @@ cfg_if! {
                                 )
                                 .into(),
                             );
-                            let settings = settings_workflows::get_settings(&app_core)
-                                .await
-                                .map_err(|error| {
-                                    WebUiError::operation(
-                                        WebUiOperation::ImportDeviceEnrollmentCode,
-                                        "WEB_DEVICE_ENROLLMENT_SETTINGS_FETCH_FAILED",
-                                        error.to_string(),
-                                    )
-                                })?;
-                            web_sys::console::log_1(
-                                &format!(
-                                    "[web-import-device] accepted settings_devices={:?}",
-                                    settings
-                                        .devices
-                                        .iter()
-                                        .map(|device| device.id.clone())
-                                        .collect::<Vec<_>>()
-                                )
-                                .into(),
-                            );
-                            let nickname = settings.nickname_suggestion.trim();
-                            let bootstrap_name = if nickname.is_empty() {
-                                "Aura User".to_string()
-                            } else {
-                                nickname.to_string()
-                            };
-                            account_workflows::initialize_runtime_account(
+                            persist_runtime_account_config(
                                 &app_core,
-                                bootstrap_name,
+                                Some(bootstrap_name.clone()),
+                                WebUiOperation::ImportDeviceEnrollmentCode,
                             )
-                            .await
-                            .map_err(|error| {
-                                WebUiError::operation(
-                                    WebUiOperation::ImportDeviceEnrollmentCode,
-                                    "WEB_DEVICE_ENROLLMENT_ACCOUNT_INIT_FAILED",
-                                    error.to_string(),
-                                )
-                            })?;
+                            .await?;
                             Ok(requires_rebootstrap)
-                        }
-                        .await;
+                            }
+                            .await;
 
-                        match result {
-                            Ok(requires_rebootstrap) => {
-                                if !requires_rebootstrap {
-                                    controller.info_toast("Device enrollment complete");
-                                    bootstrap_account_ready.set(true);
-                                    if let Err(error) = harness_bridge::schedule_browser_ui_mutation(
-                                        controller.clone(),
-                                        move |controller| {
-                                            controller.set_account_setup_state(true, "", None);
-                                            controller.set_screen(ScreenId::Neighborhood);
-                                        },
-                                    )
-                                    .await
-                                    {
-                                        let error = WebUiError::operation(
-                                            WebUiOperation::ImportDeviceEnrollmentCode,
-                                            "WEB_DEVICE_ENROLLMENT_FINALIZE_UI_MUTATION_FAILED",
-                                            format!("{error:?}"),
+                            match result {
+                                Ok(requires_rebootstrap) => {
+                                    if !requires_rebootstrap {
+                                        web_sys::console::log_1(
+                                            &"[web-import-device] finalizing_ui".into(),
                                         );
-                                        let message = error.user_message();
-                                        bootstrap_account_ready.set(false);
-                                        controller.set_account_setup_state(
-                                            false,
-                                            "",
-                                            Some(message.clone()),
+                                        scheduled_controller.info_toast("Device enrollment complete");
+                                        scheduled_controller
+                                            .finalize_account_setup(ScreenId::Neighborhood);
+                                        harness_bridge::publish_semantic_controller_snapshot(
+                                            scheduled_controller.clone(),
                                         );
-                                        import_error.set(Some(error));
+                                        if let Err(clear_error) =
+                                            clear_pending_device_enrollment_code(
+                                                &pending_code_storage_key,
+                                            )
+                                        {
+                                            log_web_error("warn", &clear_error);
+                                        }
+                                        web_sys::console::log_1(
+                                            &"[web-import-device] finalized_ui".into(),
+                                        );
+                                    } else {
+                                        scheduled_controller
+                                            .info_toast("Switching runtime to finish import");
                                     }
-                                } else {
-                                    controller.info_toast("Switching runtime to finish import");
+                                    importing_code.set(false);
                                 }
-                                importing_code.set(false);
-                            }
-                            Err(error) => {
-                                if let Err(clear_error) =
-                                    clear_pending_device_enrollment_code(&pending_code_storage_key)
-                                {
-                                    log_web_error("warn", &clear_error);
+                                Err(error) => {
+                                    if let Err(clear_error) = clear_pending_device_enrollment_code(
+                                        &pending_code_storage_key,
+                                    ) {
+                                        log_web_error("warn", &clear_error);
+                                    }
+                                    let message = error.user_message();
+                                    scheduled_controller.set_account_setup_state(
+                                        false,
+                                        "",
+                                        Some(message.clone()),
+                                    );
+                                    import_error.set(Some(error));
+                                    importing_code.set(false);
                                 }
-                                let message = error.user_message();
-                                controller.set_account_setup_state(
-                                    false,
-                                    "",
-                                    Some(message.clone()),
-                                );
-                                import_error.set(Some(error));
-                                importing_code.set(false);
                             }
-                        }
-                    });
-                }
-            });
-
-            let pending_code_storage_key =
-                pending_device_enrollment_code_key(&active_storage_prefix());
-            if !auto_import_started() {
-                if let Some(pending_code) = logged_optional(
-                    load_pending_device_enrollment_code(&pending_code_storage_key),
-                )
-                {
-                    if !pending_code.is_empty() {
-                        auto_import_started.set(true);
-                        import_code.set(pending_code.clone());
-                        run_import(pending_code);
+                        });
+                    }) {
+                        let error = WebUiError::operation(
+                            WebUiOperation::ImportDeviceEnrollmentCode,
+                            "WEB_DEVICE_ENROLLMENT_SCHEDULE_FAILED",
+                            format!("{error:?}"),
+                        );
+                        controller.set_account_setup_state(
+                            false,
+                            "",
+                            Some(error.user_message()),
+                        );
+                        import_error.set(Some(error));
+                        importing_code.set(false);
                     }
                 }
-            }
+            });
 
             let submit_account = {
                 let controller = controller.clone();
                 let account_name = account_name.clone();
                 let mut account_error = account_error.clone();
                 let mut creating_account = creating_account.clone();
-                let mut bootstrap_account_ready = bootstrap_account_ready.clone();
                 move |_| {
                     if creating_account() {
                         return;
@@ -1285,18 +907,33 @@ cfg_if! {
                             core.runtime().is_some()
                         };
                         let result = if has_runtime {
-                            account_workflows::initialize_runtime_account(
-                                controller.app_core(),
-                                nickname.clone(),
-                            )
-                            .await
-                            .map_err(|error| {
-                                WebUiError::operation(
-                                    WebUiOperation::CreateAccount,
-                                    "WEB_CREATE_ACCOUNT_INIT_FAILED",
-                                    error.to_string(),
-                                )
-                            })
+                            match stage_runtime_bound_web_account_bootstrap(&nickname).await {
+                                Ok(()) => {
+                                    let init_result = account_workflows::initialize_runtime_account(
+                                        controller.app_core(),
+                                        nickname.clone(),
+                                    )
+                                    .await
+                                    .map_err(|error| {
+                                        WebUiError::operation(
+                                            WebUiOperation::CreateAccount,
+                                            "WEB_CREATE_ACCOUNT_INIT_FAILED",
+                                            error.to_string(),
+                                        )
+                                    });
+                                    match init_result {
+                                        Ok(()) => persist_runtime_account_config(
+                                            controller.app_core(),
+                                            Some(nickname.clone()),
+                                            WebUiOperation::CreateAccount,
+                                        )
+                                        .await
+                                        .map(|_| ()),
+                                        Err(error) => Err(error),
+                                    }
+                                }
+                                Err(error) => Err(error),
+                            }
                         } else {
                             match stage_initial_web_account_bootstrap(&nickname).await {
                                 Ok(()) => {
@@ -1318,8 +955,8 @@ cfg_if! {
                                     &"[web-onboarding] submit_account ok".into(),
                                 );
                                 if has_runtime {
-                                    bootstrap_account_ready.set(true);
-                                    controller.set_account_setup_state(true, "", None);
+                                    controller
+                                        .finalize_account_setup(ScreenId::Neighborhood);
                                 } else {
                                     controller.info_toast("Finishing account bootstrap");
                                 }
@@ -1349,6 +986,30 @@ cfg_if! {
                     run_import(code);
                 }
             };
+
+            if !auto_import_started() {
+                if let Some(pending_code) = state.pending_device_enrollment_code.clone() {
+                    if !pending_code.is_empty() {
+                        auto_import_started.set(true);
+                        import_code.set(pending_code.clone());
+                        let run_import = run_import.clone();
+                        if let Err(error) =
+                            harness_bridge::schedule_browser_task_next_tick(move || {
+                                run_import(pending_code);
+                            })
+                        {
+                            log_web_error(
+                                "error",
+                                &WebUiError::operation(
+                                    WebUiOperation::ImportDeviceEnrollmentCode,
+                                    "WEB_DEVICE_ENROLLMENT_AUTOSTART_SCHEDULE_FAILED",
+                                    format!("{error:?}"),
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
 
             rsx! {
                 main {
@@ -1449,7 +1110,7 @@ cfg_if! {
             }
         }
 
-        fn spawn_browser_maintenance_loop<F, Fut>(
+        pub(crate) fn spawn_browser_maintenance_loop<F, Fut>(
             controller: Arc<UiController>,
             app_core: Arc<RwLock<AppCore>>,
             interval_ms: u64,
@@ -1518,6 +1179,24 @@ cfg_if! {
                             if let Err(error) = runtime_workflows::timeout_runtime_call(
                                 &runtime,
                                 "web_background_sync",
+                                "process_ceremony_messages_before_sync",
+                                std::time::Duration::from_secs(3),
+                                || runtime.process_ceremony_messages(),
+                            )
+                            .await
+                            {
+                                log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::BackgroundSync,
+                                        "WEB_CEREMONY_MESSAGES_BEFORE_SYNC_FAILED",
+                                        error.to_string(),
+                                    ),
+                                );
+                            }
+                            if let Err(error) = runtime_workflows::timeout_runtime_call(
+                                &runtime,
+                                "web_background_sync",
                                 "trigger_sync",
                                 std::time::Duration::from_secs(3),
                                 || runtime.trigger_sync(),
@@ -1533,6 +1212,35 @@ cfg_if! {
                                     ),
                                 );
                             }
+                            if let Err(error) = runtime_workflows::timeout_runtime_call(
+                                &runtime,
+                                "web_background_sync",
+                                "process_ceremony_messages_after_sync",
+                                std::time::Duration::from_secs(3),
+                                || runtime.process_ceremony_messages(),
+                            )
+                            .await
+                            {
+                                log_web_error(
+                                    "warn",
+                                    &WebUiError::operation(
+                                        WebUiOperation::BackgroundSync,
+                                        "WEB_CEREMONY_MESSAGES_AFTER_SYNC_FAILED",
+                                        error.to_string(),
+                                    ),
+                                );
+                            }
+                        }
+                        if let Err(error) = system_workflows::refresh_account(&tick_app_core).await
+                        {
+                            log_web_error(
+                                "warn",
+                                &WebUiError::operation(
+                                    WebUiOperation::BackgroundSync,
+                                    "WEB_REFRESH_ACCOUNT_FAILED",
+                                    error.to_string(),
+                                ),
+                            );
                         }
                         if let Err(error) =
                             network_workflows::refresh_discovered_peers(&tick_app_core).await
@@ -1551,93 +1259,6 @@ cfg_if! {
             );
         }
 
-        fn spawn_ceremony_acceptance_loop(
-            controller: Arc<UiController>,
-            app_core: Arc<RwLock<AppCore>>,
-            agent: Arc<AuraAgent>,
-        ) {
-            spawn_browser_maintenance_loop(
-                controller,
-                app_core,
-                500,
-                "Ceremony acceptance paused; refresh to resume",
-                WebUiOperation::ProcessCeremonyAcceptances,
-                "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
-                move || {
-                    let agent = agent.clone();
-                    async move {
-                        if let Err(error) = agent.process_ceremony_acceptances().await {
-                            log_web_error(
-                                "warn",
-                                &WebUiError::operation(
-                                    WebUiOperation::ProcessCeremonyAcceptances,
-                                    "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                                    format!("{error}"),
-                                ),
-                            );
-                        }
-                    }
-                },
-            );
-        }
-
-        async fn complete_bootstrap_handoff(
-            rebootstrap_lock: Arc<Mutex<()>>,
-            mut bootstrap_epoch: Signal<u64>,
-            mut committed_bootstrap: Signal<Option<BootstrapState>>,
-            mut bootstrap_error: Signal<Option<WebUiError>>,
-            handoff: harness_bridge::BootstrapHandoff,
-        ) -> Result<(), WebUiError> {
-            let _guard = rebootstrap_lock.lock().await;
-            let epoch = bootstrap_epoch() + 1;
-            web_sys::console::log_1(
-                &format!(
-                    "[web-bootstrap] handoff start epoch={epoch} detail={}",
-                    handoff.detail()
-                )
-                .into(),
-            );
-            bootstrap_epoch.set(epoch);
-
-            web_sys::console::log_1(
-                &format!(
-                    "[web-bootstrap] runner start epoch={epoch} detail={}",
-                    handoff.detail()
-                )
-                .into(),
-            );
-
-            match bootstrap_controller().await {
-                Ok(state) => {
-                    web_sys::console::log_1(
-                        &format!(
-                            "[web-bootstrap] runner ok epoch={epoch} detail={}",
-                            handoff.detail()
-                        )
-                        .into(),
-                    );
-                    bootstrap_error.set(None);
-                    committed_bootstrap.set(Some(state));
-                    Ok(())
-                }
-                Err(error) => {
-                    web_sys::console::error_1(
-                        &format!(
-                            "[web-bootstrap] runner error epoch={epoch} detail={} error={}",
-                            handoff.detail(),
-                            error.user_message()
-                        )
-                        .into(),
-                    );
-                    if committed_bootstrap().is_none() {
-                        bootstrap_error.set(Some(error.clone()));
-                    } else {
-                        log_web_error("error", &error);
-                    }
-                    Err(error)
-                }
-            }
-        }
     } else {
         fn main() {
             eprintln!("aura-web is a wasm32 frontend. Build with target wasm32-unknown-unknown.");
@@ -1701,18 +1322,15 @@ mod tests {
     #[test]
     fn web_ceremony_acceptance_exit_is_structurally_visible() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let main_path = repo_root.join("crates/aura-web/src/main.rs");
-        let source = std::fs::read_to_string(&main_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+        let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");
+        let source = std::fs::read_to_string(&shell_host_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", shell_host_path.display())
+        });
 
         let helper_start = source
             .find("fn spawn_ceremony_acceptance_loop")
             .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
-        let helper_end = source[helper_start..]
-            .find("async fn complete_bootstrap_handoff")
-            .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing complete_bootstrap_handoff"));
-        let helper = &source[helper_start..helper_end];
+        let helper = &source[helper_start..];
 
         assert!(helper.contains("spawn_browser_maintenance_loop("));
         assert!(helper.contains("\"Ceremony acceptance paused; refresh to resume\""));
@@ -1723,9 +1341,13 @@ mod tests {
     fn web_semantic_snapshot_publication_is_centralized() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let main_path = repo_root.join("crates/aura-web/src/main.rs");
+        let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");
         let bridge_path = repo_root.join("crates/aura-web/src/harness_bridge.rs");
         let main_source = std::fs::read_to_string(&main_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+        let shell_host_source = std::fs::read_to_string(&shell_host_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", shell_host_path.display())
+        });
         let bridge_source = std::fs::read_to_string(&bridge_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", bridge_path.display()));
         let production_main = main_source
@@ -1735,7 +1357,9 @@ mod tests {
 
         assert!(bridge_source.contains("pub(crate) fn publish_semantic_controller_snapshot"));
         assert!(bridge_source.contains("controller.publish_ui_snapshot(snapshot.clone())"));
-        assert!(production_main
+        assert!(shell_host_source
+            .contains("harness_bridge::publish_semantic_controller_snapshot(controller.clone())"));
+        assert!(!production_main
             .contains("harness_bridge::publish_semantic_controller_snapshot(controller.clone())"));
         assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&final_snapshot)"));
         assert!(!production_main.contains("harness_bridge::publish_ui_snapshot(&initial_snapshot)"));
@@ -1744,9 +1368,10 @@ mod tests {
     #[test]
     fn web_bootstrap_sets_account_gate_before_initial_harness_publication() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let main_path = repo_root.join("crates/aura-web/src/main.rs");
-        let source = std::fs::read_to_string(&main_path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
+        let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");
+        let source = std::fs::read_to_string(&shell_host_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", shell_host_path.display())
+        });
 
         let runtime_branch_start = source
             .find("let controller = Arc::new(UiController::with_authority_switcher(")
@@ -1760,7 +1385,7 @@ mod tests {
             .find("controller.set_account_setup_state(account_ready, \"\", None);")
             .unwrap_or_else(|| panic!("missing runtime bootstrap account gate"));
         let runtime_install_index = runtime_branch
-            .find("install_harness_instrumentation(controller.clone());")
+            .find("install_harness_instrumentation(controller.clone(), generation_id);")
             .unwrap_or_else(|| panic!("missing runtime bootstrap harness install"));
         assert!(
             runtime_gate_index < runtime_install_index,
@@ -1779,7 +1404,7 @@ mod tests {
             .find("controller.set_account_setup_state(false, \"\", None);")
             .unwrap_or_else(|| panic!("missing shell bootstrap account gate"));
         let shell_install_index = shell_branch
-            .find("install_harness_instrumentation(controller.clone());")
+            .find("install_harness_instrumentation(controller.clone(), generation_id);")
             .unwrap_or_else(|| panic!("missing shell bootstrap harness install"));
         assert!(
             shell_gate_index < shell_install_index,
@@ -1833,21 +1458,47 @@ mod tests {
     #[test]
     fn web_bootstrap_handoff_waits_for_completion() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");
+        let source = std::fs::read_to_string(&shell_host_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", shell_host_path.display())
+        });
+
+        let helper_start = source
+            .find("pub(crate) async fn complete_handoff")
+            .unwrap_or_else(|| panic!("missing complete_handoff"));
+        let helper_end = source[helper_start..]
+            .find("fn install_harness_instrumentation")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing install_harness_instrumentation"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(helper.contains("bootstrap_generation(epoch).await"));
+        assert!(helper.contains("committed_bootstrap.set(None);"));
+        assert!(helper.contains("harness_bridge::clear_controller("));
+        assert!(helper.contains("harness_bridge::wait_for_generation_ready(generation_id)"));
+        assert!(helper.contains("set_browser_shell_phase(BrowserShellPhase::Ready)"));
+        assert!(helper.contains("Err(error)"));
+        assert!(!helper.contains("spawn_local(async move"));
+    }
+
+    #[test]
+    fn web_runtime_account_paths_persist_browser_account_config() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let main_path = repo_root.join("crates/aura-web/src/main.rs");
         let source = std::fs::read_to_string(&main_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
 
-        let helper_start = source
-            .find("async fn complete_bootstrap_handoff")
-            .unwrap_or_else(|| panic!("missing complete_bootstrap_handoff"));
-        let helper_end = source[helper_start..]
-            .find("} else {")
-            .map(|offset| helper_start + offset)
-            .unwrap_or_else(|| panic!("missing non-wasm cfg branch"));
-        let helper = &source[helper_start..helper_end];
-
-        assert!(helper.contains("bootstrap_controller().await"));
-        assert!(helper.contains("Err(error)"));
-        assert!(!helper.contains("spawn_local(async move"));
+        assert!(
+            source.contains("persist_runtime_account_config(")
+                && source.contains("Some(bootstrap_name.clone())")
+                && source.contains("WebUiOperation::ImportDeviceEnrollmentCode"),
+            "bound-runtime device enrollment acceptance must persist browser account metadata before the next preserved-profile restart"
+        );
+        assert!(
+            source.contains("persist_runtime_account_config(")
+                && source.contains("Some(nickname.clone())")
+                && source.contains("WebUiOperation::CreateAccount"),
+            "runtime-backed onboarding must persist browser account metadata after account bootstrap succeeds"
+        );
     }
 }

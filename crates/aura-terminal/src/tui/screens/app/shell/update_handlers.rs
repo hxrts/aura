@@ -1134,7 +1134,7 @@ pub(super) async fn process_ui_update_match(
                 );
             }
             if show_setup {
-                io_ctx.request_bootstrap_reload();
+                request_bootstrap_reload(&io_ctx);
                 if let Err(error) = io_ctx.mark_bootstrap_runtime_handoff_committed() {
                     enqueue_toast!(error.to_string(), crate::tui::state::ToastLevel::Error);
                     return UiUpdateLoopAction::ContinueLoop;

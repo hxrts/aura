@@ -3750,20 +3750,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let invitation_id =
             aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
-        let result = execute_with_effect_timeout(
-            &self.agent.runtime().effects(),
-            Duration::from_millis(INVITATION_BRIDGE_STAGE_TIMEOUT_MS),
-            || invitation_service.accept(&invitation_id),
-        )
-        .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
-                "invitation_service.accept timed out after {INVITATION_BRIDGE_STAGE_TIMEOUT_MS}ms"
-            )),
-            TimeoutRunError::Operation(e) => {
-                IntentError::internal_error(format!("Failed to accept invitation: {}", e))
-            }
-        })?;
+        // Invitation acceptance already owns its deadline budgeting inside the
+        // workflow and handler layers. Adding a second fixed bridge timeout
+        // creates competing timeout policies and can fail a valid acceptance
+        // path before the canonical owner budget expires.
+        let result = invitation_service
+            .accept(&invitation_id)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("Failed to accept invitation: {error}"))
+            })?;
 
         Ok(InvitationMutationOutcome {
             invitation_id,

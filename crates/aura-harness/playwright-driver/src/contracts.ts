@@ -49,6 +49,16 @@ export interface TailLogResult {
   lines: string[];
 }
 
+export interface SemanticSubmitPublicationState {
+  surface?: string;
+  status?: string;
+  detail?: string;
+  binding_mode?: string;
+  generation_id?: number | null;
+  phase?: string | null;
+  enqueue_ready?: boolean;
+}
+
 export interface DriverRequest {
   id: number | null;
   method: DriverMethod;
@@ -75,6 +85,10 @@ export interface StartPageParams extends Record<string, unknown> {
   data_dir?: string;
   artifact_dir?: string;
   headless?: boolean;
+  startup_readiness?: string;
+  require_semantic_ready?: boolean;
+  pending_semantic_payload?: string;
+  pending_runtime_stage_payload?: string;
 }
 
 export interface InstanceParams extends Record<string, unknown> {
@@ -130,6 +144,11 @@ export interface DriverSession {
   domState: { text: string; ids: Set<string> | string[] };
   renderHeartbeat: Record<string, unknown> | null;
   requiredUiStateRevision: number | null;
+  requiredUiGeneration?: number | null;
+  currentUiGeneration?: number | null;
+  semanticSubmitState?: SemanticSubmitPublicationState | null;
+  semanticQueueInstalled?: boolean;
+  lastMainFrameNavigationAt?: number;
   lastObservationResetReason?: string;
   observationEpoch?: number;
   clipboardCache?: string;

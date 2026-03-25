@@ -111,7 +111,7 @@ See [Effects and Handlers Guide](802_effects_guide.md) for guard chain integrati
 
 ## Authorization Scenarios
 
-All authorization scenarios -- local device operations, cross-authority delegation, API access control, guardian recovery, storage, and relaying -- are handled through Biscuit token attenuation and sovereign policy integration. Token scope and restrictions vary by scenario but follow the same meet-monotone evaluation path.
+All authorization scenarios (local device operations, cross-authority delegation, API access control, guardian recovery, storage, and relaying) are handled through Biscuit token attenuation and sovereign policy integration. Token scope and restrictions vary by scenario but follow the same meet-monotone evaluation path.
 
 See [Effects and Handlers Guide](802_effects_guide.md) for authorization scenario patterns.
 
