@@ -15,11 +15,11 @@ mod support;
 
 #[path = "e2e_terminal_state/account_recovery.rs"]
 mod account_recovery;
-#[path = "e2e_terminal_state/component_states.rs"]
-mod component_states;
-#[path = "e2e_terminal_state/command_dispatch.rs"]
-mod command_dispatch;
-#[path = "e2e_terminal_state/messaging_and_help.rs"]
-mod messaging_and_help;
 #[path = "e2e_terminal_state/backup_and_persistence.rs"]
 mod backup_and_persistence;
+#[path = "e2e_terminal_state/command_dispatch.rs"]
+mod command_dispatch;
+#[path = "e2e_terminal_state/component_states.rs"]
+mod component_states;
+#[path = "e2e_terminal_state/messaging_and_help.rs"]
+mod messaging_and_help;

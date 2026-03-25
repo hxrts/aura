@@ -1,10 +1,14 @@
 use super::updates::*;
 use super::*;
 
+use aura_app::ui_contract::ChannelBindingWitness;
 use aura_app::ui_contract::SemanticOperationKind;
 
+use crate::tui::channel_selection::authoritative_committed_selection;
 use crate::tui::components::copy_to_clipboard;
-use crate::tui::screens::app::shell::dispatch::format_ui_operation_failure;
+use crate::tui::screens::app::shell::dispatch::{
+    format_ui_operation_failure, set_authoritative_operation_state_sanctioned,
+};
 
 pub(super) async fn process_ui_update_match(
     update: UiUpdate,
@@ -25,7 +29,6 @@ pub(super) async fn process_ui_update_match(
     let shared_devices_for_updates = &ctx.shared_devices_for_updates;
     let shared_messages_for_updates = &ctx.shared_messages_for_updates;
     let tui_selected_for_updates = &ctx.tui_selected_for_updates;
-    let selected_channel_binding_for_updates = &ctx.selected_channel_binding_for_updates;
     let ready_join_channel_instances_for_updates = &ctx.ready_join_channel_instances_for_updates;
 
     macro_rules! enqueue_toast {
@@ -425,17 +428,16 @@ pub(super) async fn process_ui_update_match(
                 });
             *tui_selected_for_updates.write() =
                 Some(CommittedChannelSelection::from_binding(&binding));
-            {
-                let mut guard = selected_channel_binding_for_updates.write();
-                *guard = Some(binding.clone());
-            }
             if let Some((idx, _channel)) = selected_channel {
                 tui.with_mut(|state| {
                     state.chat.selected_channel = idx;
                     state.chat.message_scroll = 0;
                 });
             }
-            let selected_binding = { selected_channel_binding_for_updates.read().clone() };
+            let selected_binding = tui_selected_for_updates
+                .read()
+                .clone()
+                .map(|selection| selection.binding().clone());
             if let Some(binding) = selected_binding {
                 complete_ready_join_binding_submissions(
                     &ready_join_channel_instances_for_updates,
@@ -450,11 +452,8 @@ pub(super) async fn process_ui_update_match(
             context_id,
             name,
         } => {
-            *tui_selected_for_updates.write() =
-                Some(CommittedChannelSelection::new(channel_id.clone()));
-            *selected_channel_binding_for_updates.write() = Some(ChannelBindingWitness::new(
-                channel_id.clone(),
-                context_id.clone(),
+            *tui_selected_for_updates.write() = Some(CommittedChannelSelection::from_binding(
+                &ChannelBindingWitness::new(channel_id.clone(), context_id.clone()),
             ));
             {
                 let mut channels = shared_channels_for_updates.write();
@@ -534,14 +533,7 @@ pub(super) async fn process_ui_update_match(
                 *tui_selected_for_updates.write() = shared_channels_for_updates
                     .read()
                     .get(state.chat.selected_channel)
-                    .map(|channel| CommittedChannelSelection::new(channel.id.clone()));
-                {
-                    let mut guard = selected_channel_binding_for_updates.write();
-                    *guard = shared_channels_for_updates
-                        .read()
-                        .get(state.chat.selected_channel)
-                        .map(authoritative_channel_binding);
-                }
+                    .map(authoritative_committed_selection);
 
                 // Auto-scroll to bottom when new messages arrive, but only if
                 // user was already at the bottom (hasn't scrolled up to read history)
@@ -556,7 +548,10 @@ pub(super) async fn process_ui_update_match(
                     state.chat.message_scroll = max_scroll;
                 }
             });
-            let selected_binding = { selected_channel_binding_for_updates.read().clone() };
+            let selected_binding = tui_selected_for_updates
+                .read()
+                .clone()
+                .map(|selection| selection.binding().clone());
             if let Some(binding) = selected_binding {
                 complete_ready_join_binding_submissions(
                     &ready_join_channel_instances_for_updates,
@@ -736,8 +731,12 @@ pub(super) async fn process_ui_update_match(
                             .lock()
                             .unwrap()
                             .insert(instance_id.0.clone());
-                        let selected_binding =
-                            { selected_channel_binding_for_updates.read().clone() };
+                        let selected_binding = {
+                            tui_selected_for_updates
+                                .read()
+                                .clone()
+                                .map(|selection| selection.binding().clone())
+                        };
                         if let Some(binding) = selected_binding {
                             complete_ready_join_binding_submissions(
                                 &ready_join_channel_instances_for_updates,
@@ -804,7 +803,8 @@ pub(super) async fn process_ui_update_match(
                 _ => OperationState::Submitting,
             };
             tui.with_mut(|state| {
-                state.set_authoritative_operation_state(
+                set_authoritative_operation_state_sanctioned(
+                    state,
                     operation_id,
                     instance_id,
                     causality,
@@ -1113,7 +1113,8 @@ pub(super) async fn process_ui_update_match(
                     .operation_state(&OperationId::account_create())
                     .is_some()
                 {
-                    state.set_authoritative_operation_state(
+                    set_authoritative_operation_state_sanctioned(
+                        state,
                         OperationId::account_create(),
                         None,
                         None,

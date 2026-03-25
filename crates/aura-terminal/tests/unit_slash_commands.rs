@@ -8,7 +8,7 @@ use async_lock::RwLock;
 use aura_app::ui::workflows::messaging::create_channel;
 use aura_app::{AppConfig, AppCore};
 use aura_terminal::handlers::tui::TuiMode;
-use aura_terminal::tui::callbacks::ChatCallbacks;
+use aura_terminal::tui::callbacks::CallbackRegistry;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
 use aura_terminal::tui::updates::{ui_update_channel, UiUpdate, UiUpdateReceiver, UiUpdateSender};
 use tempfile::TempDir;
@@ -63,7 +63,7 @@ async fn ensure_chat_channel(ctx: &Arc<IoContext>) {
 #[tokio::test]
 async fn slash_who_emits_participants_toast() {
     let (ctx, tx, mut rx, _dir) = setup_ctx("who").await;
-    let callbacks = ChatCallbacks::new(ctx.clone(), tx, ctx.app_core_raw().clone());
+    let callbacks = CallbackRegistry::new(ctx.clone(), tx).chat;
     ensure_chat_channel(&ctx).await;
 
     callbacks.send("general".to_string(), "/who".to_string());
@@ -83,7 +83,7 @@ async fn slash_who_emits_participants_toast() {
 #[tokio::test]
 async fn slash_whois_emits_whois_toast() {
     let (ctx, tx, mut rx, _dir) = setup_ctx("whois").await;
-    let callbacks = ChatCallbacks::new(ctx.clone(), tx, ctx.app_core_raw().clone());
+    let callbacks = CallbackRegistry::new(ctx.clone(), tx).chat;
     ensure_chat_channel(&ctx).await;
 
     callbacks.send("general".to_string(), "/whois test-user".to_string());

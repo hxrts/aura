@@ -56,8 +56,8 @@ async fn test_retry_message_command() {
         CommandAuthorizationLevel::Basic
     );
 
-    let failed_msg =
-        Message::sending("msg-456", "general", "Me", "This will fail").with_status(DeliveryStatus::Failed);
+    let failed_msg = Message::sending("msg-456", "general", "Me", "This will fail")
+        .with_status(DeliveryStatus::Failed);
     let retry_msg = Message::sending("msg-456-retry", "general", "Me", &failed_msg.content);
     assert_eq!(failed_msg.delivery_status, DeliveryStatus::Failed);
     assert_eq!(retry_msg.delivery_status, DeliveryStatus::Sending);
@@ -226,8 +226,10 @@ async fn test_help_screen_shortcuts() {
     let commands = get_help_commands();
     assert!(!commands.is_empty());
 
-    let categories: std::collections::HashSet<_> =
-        commands.iter().map(|command| command.category.as_str()).collect();
+    let categories: std::collections::HashSet<_> = commands
+        .iter()
+        .map(|command| command.category.as_str())
+        .collect();
     assert!(categories.contains("Navigation"));
     assert!(categories.contains("Chat"));
     assert!(categories.contains("Contacts"));
@@ -276,8 +278,10 @@ async fn test_context_sensitive_help() {
         .count();
     assert_eq!(neighborhood_commands[nav_count].category, "Neighborhood");
 
-    let chat_categories: std::collections::HashSet<_> =
-        chat_commands.iter().map(|command| command.category.as_str()).collect();
+    let chat_categories: std::collections::HashSet<_> = chat_commands
+        .iter()
+        .map(|command| command.category.as_str())
+        .collect();
     assert!(chat_categories.contains("Navigation"));
     assert!(chat_categories.contains("Chat"));
     assert!(chat_categories.contains("Slash Commands"));
@@ -336,19 +340,13 @@ async fn test_error_toast_display() {
     io_ctx.add_error_toast("e2", "Error 2").await;
     io_ctx.add_error_toast("e3", "Error 3").await;
     let toast_state = io_ctx.get_toasts().await;
-    let ids: Vec<_> = toast_state
-        .iter()
-        .map(|toast| toast.id.as_str())
-        .collect();
+    let ids: Vec<_> = toast_state.iter().map(|toast| toast.id.as_str()).collect();
     assert!(ids.len() <= 5);
     assert!(!ids.contains(&"send-error"));
 
     io_ctx.clear_toast("e3").await;
     let toast_state = io_ctx.get_toasts().await;
-    let ids: Vec<_> = toast_state
-        .iter()
-        .map(|toast| toast.id.as_str())
-        .collect();
+    let ids: Vec<_> = toast_state.iter().map(|toast| toast.id.as_str()).collect();
     assert!(!ids.contains(&"e3"));
 
     io_ctx.clear_toasts().await;
@@ -371,13 +369,19 @@ async fn test_authorization_checking() {
         .await;
 
     let ping_cmd = EffectCommand::Ping;
-    assert_eq!(ping_cmd.authorization_level(), CommandAuthorizationLevel::Public);
+    assert_eq!(
+        ping_cmd.authorization_level(),
+        CommandAuthorizationLevel::Public
+    );
 
     let send_cmd = EffectCommand::SendMessage {
         channel: "test".to_string(),
         content: "hello".to_string(),
     };
-    assert_eq!(send_cmd.authorization_level(), CommandAuthorizationLevel::Basic);
+    assert_eq!(
+        send_cmd.authorization_level(),
+        CommandAuthorizationLevel::Basic
+    );
 
     let recovery_cmd = EffectCommand::StartRecovery;
     assert_eq!(
@@ -390,31 +394,42 @@ async fn test_authorization_checking() {
         target: "spammer".to_string(),
         reason: Some("spam".to_string()),
     };
-    assert_eq!(ban_cmd.authorization_level(), CommandAuthorizationLevel::Admin);
+    assert_eq!(
+        ban_cmd.authorization_level(),
+        CommandAuthorizationLevel::Admin
+    );
 
     let kick_cmd = EffectCommand::KickUser {
         channel: "test".to_string(),
         target: "user".to_string(),
         reason: None,
     };
-    assert_eq!(kick_cmd.authorization_level(), CommandAuthorizationLevel::Admin);
+    assert_eq!(
+        kick_cmd.authorization_level(),
+        CommandAuthorizationLevel::Admin
+    );
 
     let grant_cmd = EffectCommand::GrantModerator {
         channel: None,
         target: "user".to_string(),
     };
-    assert_eq!(grant_cmd.authorization_level(), CommandAuthorizationLevel::Admin);
+    assert_eq!(
+        grant_cmd.authorization_level(),
+        CommandAuthorizationLevel::Admin
+    );
 
     assert!(env.ctx.check_authorization(&EffectCommand::Ping).is_ok());
-    assert!(
-        env.ctx
-            .check_authorization(&EffectCommand::SendMessage {
-                channel: "test".to_string(),
-                content: "hello".to_string(),
-            })
-            .is_ok()
-    );
-    assert!(env.ctx.check_authorization(&EffectCommand::StartRecovery).is_ok());
+    assert!(env
+        .ctx
+        .check_authorization(&EffectCommand::SendMessage {
+            channel: "test".to_string(),
+            content: "hello".to_string(),
+        })
+        .is_ok());
+    assert!(env
+        .ctx
+        .check_authorization(&EffectCommand::StartRecovery)
+        .is_ok());
 
     let ban_result = env.ctx.check_authorization(&EffectCommand::BanUser {
         channel: None,
@@ -427,23 +442,21 @@ async fn test_authorization_checking() {
     assert!(ban_err_text.contains("Permission denied"));
     assert!(ban_err_text.contains("Ban user") || ban_err_text.contains("administrator"));
 
-    assert!(
-        env.ctx
-            .check_authorization(&EffectCommand::KickUser {
-                channel: String::new(),
-                target: "user".to_string(),
-                reason: None,
-            })
-            .is_err()
-    );
-    assert!(
-        env.ctx
-            .check_authorization(&EffectCommand::GrantModerator {
-                channel: None,
-                target: "user".to_string(),
-            })
-            .is_err()
-    );
+    assert!(env
+        .ctx
+        .check_authorization(&EffectCommand::KickUser {
+            channel: String::new(),
+            target: "user".to_string(),
+            reason: None,
+        })
+        .is_err());
+    assert!(env
+        .ctx
+        .check_authorization(&EffectCommand::GrantModerator {
+            channel: None,
+            target: "user".to_string(),
+        })
+        .is_err());
 
     let dispatch_result = env
         .ctx

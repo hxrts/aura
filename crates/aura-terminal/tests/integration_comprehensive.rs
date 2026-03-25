@@ -52,23 +52,23 @@ fn terminal_event_strategy() -> impl Strategy<Value = TerminalEvent> {
     ]
 }
 
-#[path = "integration_comprehensive/neighborhood_screen_map.rs"]
-mod neighborhood_screen_map;
 #[path = "integration_comprehensive/chat_screen.rs"]
 mod chat_screen;
 #[path = "integration_comprehensive/contacts_screen.rs"]
 mod contacts_screen;
-#[path = "integration_comprehensive/settings_screen.rs"]
-mod settings_screen;
-#[path = "integration_comprehensive/neighborhood_screen.rs"]
-mod neighborhood_screen;
-#[path = "integration_comprehensive/modals.rs"]
-mod modals;
 #[path = "integration_comprehensive/global_behavior.rs"]
 mod global_behavior;
-#[path = "integration_comprehensive/stress.rs"]
-mod stress;
-#[path = "integration_comprehensive/property_tests.rs"]
-mod property_tests;
 #[path = "integration_comprehensive/integration_workflows.rs"]
 mod integration_workflows;
+#[path = "integration_comprehensive/modals.rs"]
+mod modals;
+#[path = "integration_comprehensive/neighborhood_screen.rs"]
+mod neighborhood_screen;
+#[path = "integration_comprehensive/neighborhood_screen_map.rs"]
+mod neighborhood_screen_map;
+#[path = "integration_comprehensive/property_tests.rs"]
+mod property_tests;
+#[path = "integration_comprehensive/settings_screen.rs"]
+mod settings_screen;
+#[path = "integration_comprehensive/stress.rs"]
+mod stress;

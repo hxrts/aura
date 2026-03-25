@@ -105,12 +105,13 @@ impl TestAgent {
             .with_mode(TuiMode::Production)
             .build()
             .await;
+        let (ctx, app_core, test_dir) = built.into_parts();
 
         Self {
             name: name.to_string(),
-            ctx: built.ctx,
-            app_core: built.app_core,
-            test_dir: built.test_dir,
+            ctx,
+            app_core,
+            test_dir,
         }
     }
 

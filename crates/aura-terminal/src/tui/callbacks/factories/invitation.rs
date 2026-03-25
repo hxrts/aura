@@ -119,8 +119,13 @@ impl InvitationsCallbacks {
                     operation,
                     "DeclineInvitation callback",
                     move |ctx| async move {
-                        ctx.dispatch(EffectCommand::DeclineInvitation { invitation_id })
-                            .await
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::invitation::decline_invitation_by_str(
+                            &app_core,
+                            &invitation_id,
+                        )
+                        .await
+                        .map_err(Into::into)
                     },
                     move |tx, ()| async move {
                         send_ui_update_reliable(
@@ -153,8 +158,13 @@ impl InvitationsCallbacks {
                     operation,
                     "CancelInvitation callback",
                     move |ctx| async move {
-                        ctx.dispatch(EffectCommand::CancelInvitation { invitation_id })
-                            .await
+                        let app_core = ctx.app_core_raw().clone();
+                        aura_app::ui::workflows::invitation::cancel_invitation_by_str(
+                            &app_core,
+                            &invitation_id,
+                        )
+                        .await
+                        .map_err(Into::into)
                     },
                     |_tx, ()| async {},
                     |tx, error| async move {

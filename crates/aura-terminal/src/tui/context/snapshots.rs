@@ -49,7 +49,9 @@ impl SnapshotHelper {
         }
     }
 
-    fn with_snapshot_or_default<T: Default>(
+    // This helper is observed-only. Authoritative paths must use
+    // `state_snapshot_availability()` and surface contention explicitly.
+    fn with_observed_snapshot_or_default<T: Default>(
         &self,
         build: impl FnOnce(&aura_app::ui::types::StateSnapshot) -> T,
     ) -> T {
@@ -70,7 +72,7 @@ impl SnapshotHelper {
 impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_chat(&self) -> ChatSnapshot {
-        self.with_snapshot_or_default(|snapshot| {
+        self.with_observed_snapshot_or_default(|snapshot| {
             ChatSnapshot {
                 channels: snapshot.chat.all_channels().cloned().collect(),
                 // Selection and messages are managed at a different level now
@@ -82,7 +84,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
-        self.with_snapshot_or_default(|snapshot| {
+        self.with_observed_snapshot_or_default(|snapshot| {
             let guardian_count = snapshot.recovery.guardian_count();
             GuardiansSnapshot {
                 guardians: snapshot.recovery.all_guardians().cloned().collect(),
@@ -97,7 +99,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_recovery(&self) -> RecoverySnapshot {
-        self.with_snapshot_or_default(|snapshot| {
+        self.with_observed_snapshot_or_default(|snapshot| {
             let (progress_percent, is_in_progress) = snapshot
                 .recovery
                 .active_recovery()
@@ -123,7 +125,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
-        self.with_snapshot_or_default(|snapshot| {
+        self.with_observed_snapshot_or_default(|snapshot| {
             let pending_count = snapshot.invitations.pending_count();
             let invitations = snapshot
                 .invitations
@@ -144,7 +146,7 @@ impl SnapshotHelper {
     pub fn snapshot_home(&self) -> HomeSnapshot {
         use aura_app::ui::types::home::HomeRole;
 
-        self.with_snapshot_or_default(|snapshot| {
+        self.with_observed_snapshot_or_default(|snapshot| {
             let home_state = snapshot.homes.current_home().cloned();
             let my_role = home_state.as_ref().map(|b| b.my_role);
             HomeSnapshot {
@@ -157,14 +159,14 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
-        self.with_snapshot_or_default(|snapshot| ContactsSnapshot {
+        self.with_observed_snapshot_or_default(|snapshot| ContactsSnapshot {
             contacts: snapshot.contacts.all_contacts().cloned().collect(),
         })
     }
 
     #[must_use]
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
-        self.with_snapshot_or_default(|snapshot| {
+        self.with_observed_snapshot_or_default(|snapshot| {
             let home_id = snapshot.neighborhood.home_home_id.clone();
             let home_name = snapshot.neighborhood.home_name.clone();
             // Collect neighbors first before moving position
@@ -208,5 +210,36 @@ impl Default for SnapshotHelper {
         let core = aura_app::ui::types::AppCore::new(aura_app::ui::types::AppConfig::default())
             .expect("Failed to create default AppCore for SnapshotHelper");
         Self::new(Arc::new(RwLock::new(core)), "default-device")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SnapshotHelper, StateSnapshotAvailability};
+
+    #[test]
+    fn snapshot_availability_surfaces_contention() {
+        let helper = SnapshotHelper::default();
+        let _guard = helper
+            .app_core
+            .try_write()
+            .unwrap_or_else(|| panic!("expected uncontended write lock for test setup"));
+
+        assert!(matches!(
+            helper.state_snapshot_availability(),
+            StateSnapshotAvailability::Contended
+        ));
+    }
+
+    #[test]
+    fn observed_snapshot_helpers_default_under_contention() {
+        let helper = SnapshotHelper::default();
+        let _guard = helper
+            .app_core
+            .try_write()
+            .unwrap_or_else(|| panic!("expected uncontended write lock for test setup"));
+
+        assert!(helper.snapshot_contacts().contacts.is_empty());
+        assert!(helper.snapshot_chat().channels.is_empty());
     }
 }

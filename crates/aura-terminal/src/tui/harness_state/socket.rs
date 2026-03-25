@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -23,11 +23,11 @@ use tokio::sync::{mpsc, oneshot, watch};
 const COMMAND_SOCKET_ENV: &str = "AURA_TUI_COMMAND_SOCKET";
 
 static COMMAND_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
-static HARNESS_COMMAND_PLANE_CONTROL: OnceLock<mpsc::Sender<HarnessCommandPlaneControl>> =
-    OnceLock::new();
+static HARNESS_COMMAND_PLANE_CONTROL: OnceLock<
+    Mutex<Option<mpsc::Sender<HarnessCommandPlaneControl>>>,
+> = OnceLock::new();
 static HARNESS_COMMAND_PLANE_STATE: OnceLock<watch::Sender<HarnessCommandPlaneLifecycle>> =
     OnceLock::new();
-static HARNESS_COMMAND_PLANE_STARTED: OnceLock<()> = OnceLock::new();
 static HARNESS_COMMAND_PLANE_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
 static HARNESS_COMMAND_LISTENER_STARTED: OnceLock<()> = OnceLock::new();
 static HARNESS_COMMAND_LISTENER_TASKS: OnceLock<UiTaskOwner> = OnceLock::new();
@@ -127,6 +127,11 @@ fn harness_command_plane_tasks() -> &'static UiTaskOwner {
     HARNESS_COMMAND_PLANE_TASKS.get_or_init(UiTaskOwner::new)
 }
 
+fn harness_command_plane_control_slot(
+) -> &'static Mutex<Option<mpsc::Sender<HarnessCommandPlaneControl>>> {
+    HARNESS_COMMAND_PLANE_CONTROL.get_or_init(|| Mutex::new(None))
+}
+
 fn harness_command_listener_tasks() -> &'static UiTaskOwner {
     HARNESS_COMMAND_LISTENER_TASKS.get_or_init(UiTaskOwner::new)
 }
@@ -138,25 +143,43 @@ fn harness_command_plane_state_sender() -> &'static watch::Sender<HarnessCommand
     })
 }
 
-fn harness_command_plane_control() -> io::Result<&'static mpsc::Sender<HarnessCommandPlaneControl>>
-{
-    HARNESS_COMMAND_PLANE_CONTROL
-        .get()
-        .ok_or_else(|| io::Error::other("harness command plane owner not started"))
+fn harness_command_plane_control() -> io::Result<mpsc::Sender<HarnessCommandPlaneControl>> {
+    let control = harness_command_plane_control_slot()
+        .lock()
+        .map_err(|_| io::Error::other("harness command plane control lock poisoned"))?
+        .clone();
+    let Some(control) = control else {
+        return Err(io::Error::other("harness command plane owner not started"));
+    };
+    if control.is_closed() {
+        return Err(io::Error::other(
+            "harness command plane owner stopped before control access",
+        ));
+    }
+    Ok(control)
 }
 
 fn ensure_harness_command_plane_owner_started() {
-    if HARNESS_COMMAND_PLANE_STARTED.get().is_some() {
-        return;
+    {
+        let guard = harness_command_plane_control_slot()
+            .lock()
+            .expect("harness command plane control lock poisoned");
+        if guard.as_ref().is_some_and(|control| !control.is_closed()) {
+            return;
+        }
     }
 
     let (control_tx, control_rx) = mpsc::channel(128);
-    let _ = HARNESS_COMMAND_PLANE_CONTROL.set(control_tx);
+    {
+        let mut guard = harness_command_plane_control_slot()
+            .lock()
+            .expect("harness command plane control lock poisoned");
+        *guard = Some(control_tx);
+    }
     let state_tx = harness_command_plane_state_sender().clone();
     harness_command_plane_tasks().spawn(async move {
         drive_harness_command_plane(control_rx, state_tx).await;
     });
-    let _ = HARNESS_COMMAND_PLANE_STARTED.set(());
 }
 
 pub(crate) async fn ensure_harness_command_listener() -> io::Result<()> {
@@ -167,7 +190,7 @@ pub(crate) async fn ensure_harness_command_listener() -> io::Result<()> {
     let Some((listener, guard)) = bind_harness_command_listener()? else {
         return Ok(());
     };
-    let control_tx = harness_command_plane_control()?.clone();
+    let control_tx = harness_command_plane_control()?;
     harness_command_listener_tasks().spawn(async move {
         let _guard = guard;
         forward_harness_commands_from_listener(listener, control_tx).await;
@@ -201,11 +224,20 @@ pub(crate) async fn register_harness_command_sender(
 }
 
 pub(crate) async fn clear_harness_command_sender() -> io::Result<()> {
-    if HARNESS_COMMAND_PLANE_STARTED.get().is_none() {
+    let control = {
+        let guard = harness_command_plane_control_slot()
+            .lock()
+            .map_err(|_| io::Error::other("harness command plane control lock poisoned"))?;
+        guard.clone()
+    };
+    let Some(control) = control else {
+        return Ok(());
+    };
+    if control.is_closed() {
         return Ok(());
     }
     let (ack_tx, ack_rx) = oneshot::channel();
-    harness_command_plane_control()?
+    control
         .send(HarnessCommandPlaneControl::Deactivate { ack: ack_tx })
         .await
         .map_err(|error| {
@@ -524,6 +556,14 @@ async fn drive_harness_command_plane(
             "harness command plane stopped before semantic value settlement",
         );
     }
+    if let Ok(mut guard) = harness_command_plane_control_slot().lock() {
+        if guard
+            .as_ref()
+            .is_some_and(tokio::sync::mpsc::Sender::is_closed)
+        {
+            *guard = None;
+        }
+    }
     let _ = state_tx.send(HarnessCommandPlaneLifecycle::Stopped);
 }
 
@@ -545,8 +585,7 @@ async fn forward_harness_commands_from_listener(
 pub(super) async fn forward_test_harness_commands_from_listener(listener: UnixListener) {
     ensure_harness_command_plane_owner_started();
     let control_tx = harness_command_plane_control()
-        .unwrap_or_else(|error| panic!("failed to get harness command plane control: {error}"))
-        .clone();
+        .unwrap_or_else(|error| panic!("failed to get harness command plane control: {error}"));
     forward_harness_commands_from_listener(listener, control_tx).await;
 }
 

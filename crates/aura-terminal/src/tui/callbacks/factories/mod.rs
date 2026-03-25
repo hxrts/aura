@@ -22,7 +22,7 @@ use std::sync::Arc;
 use crate::tui::components::copy_to_clipboard;
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
-use crate::tui::effects::{EffectCommand, OpResponse};
+use crate::tui::effects::EffectCommand;
 use crate::tui::semantic_lifecycle::{
     apply_handed_off_terminal_status, LocalTerminalOperationOwner, SemanticOperationTransferScope,
     WorkflowHandoffOperationOwner,
@@ -44,7 +44,7 @@ use futures::FutureExt;
 
 use super::types::*;
 
-use crate::tui::updates::{send_ui_update_lossy, send_ui_update_required};
+use crate::tui::updates::send_ui_update_required;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -190,7 +190,9 @@ fn spawn_local_terminal_result_callback<
     });
 }
 
-fn spawn_observed_dispatch_callback<Success, SuccessFut, Failure, FailureFut>(
+// Observed callbacks may only use this helper for terminal-local adaptation.
+// Parity-critical ownership handoff belongs in shell dispatch or owner-typed callbacks.
+fn spawn_observed_adaptation_dispatch_callback<Success, SuccessFut, Failure, FailureFut>(
     ctx: Arc<IoContext>,
     tx: UiUpdateSender,
     command: EffectCommand,

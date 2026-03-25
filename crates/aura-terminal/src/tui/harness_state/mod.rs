@@ -47,11 +47,14 @@ mod tests {
     use std::os::unix::net::UnixListener as StdUnixListener;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{UnixListener, UnixStream};
+    use tokio::sync::Mutex;
 
     static TEST_SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
+    static HARNESS_BRIDGE_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
 
     fn test_socket_path(label: &str) -> std::path::PathBuf {
         let suffix = TEST_SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -59,6 +62,13 @@ mod tests {
             "aura-terminal-{label}-{}-{suffix}.sock",
             std::process::id()
         ))
+    }
+
+    async fn lock_harness_bridge_test() -> tokio::sync::MutexGuard<'static, ()> {
+        HARNESS_BRIDGE_TEST_GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .await
     }
 
     #[test]
@@ -695,6 +705,7 @@ mod tests {
 
     #[tokio::test]
     async fn harness_command_bridge_acknowledges_submission_and_emits_update() {
+        let _guard = lock_harness_bridge_test().await;
         let socket_path = test_socket_path("command-bridge");
         let _ = std::fs::remove_file(&socket_path);
         let listener = StdUnixListener::bind(&socket_path)
@@ -800,6 +811,7 @@ mod tests {
 
     #[tokio::test]
     async fn harness_command_bridge_tracks_pending_contact_invitation_value() {
+        let _guard = lock_harness_bridge_test().await;
         let socket_path = test_socket_path("pending-contact-invitation");
         let _ = std::fs::remove_file(&socket_path);
         let listener = StdUnixListener::bind(&socket_path)

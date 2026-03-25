@@ -1,6 +1,6 @@
 //! Shared error type for Aura Terminal (CLI + TUI).
 //!
-//! This consolidates disparate ad-hoc errors (anyhow, DispatchError, OpError)
+//! This consolidates disparate ad-hoc errors (anyhow, OpError)
 //! into a single user-facing taxonomy so we can format/log/emit through the
 //! reactive signal pipeline uniformly.
 //!
@@ -141,23 +141,6 @@ impl From<aura_core::effects::TestingError> for TerminalError {
 impl From<aura_simulator::handlers::effect_composer::SimulationComposerError> for TerminalError {
     fn from(err: aura_simulator::handlers::effect_composer::SimulationComposerError) -> Self {
         TerminalError::Operation(err.to_string())
-    }
-}
-
-#[cfg(feature = "terminal")]
-impl From<crate::tui::effects::DispatchError> for TerminalError {
-    fn from(err: crate::tui::effects::DispatchError) -> Self {
-        match err {
-            crate::tui::effects::DispatchError::NotFound { resource } => {
-                TerminalError::NotFound(resource)
-            }
-            crate::tui::effects::DispatchError::InvalidParameter { param, reason } => {
-                TerminalError::Input(format!("{param}: {reason}"))
-            }
-            crate::tui::effects::DispatchError::HandledLocally { command } => {
-                TerminalError::Operation(format!("command '{command}' is handled locally"))
-            }
-        }
     }
 }
 

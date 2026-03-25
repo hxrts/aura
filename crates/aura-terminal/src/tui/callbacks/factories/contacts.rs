@@ -6,8 +6,8 @@ use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 /// All callbacks for the contacts screen
 #[derive(Clone)]
 pub struct ContactsCallbacks {
-    pub on_update_nickname: UpdateNicknameCallback,
-    pub on_start_chat: StartChatCallback,
+    pub(crate) on_update_nickname: UpdateNicknameCallback,
+    pub(crate) on_start_chat: StartChatCallback,
     pub(crate) on_invite_to_channel: TwoStringContextHandoffCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
     pub(crate) on_remove_contact: IdLocalOwnedCallback,
@@ -28,56 +28,96 @@ impl ContactsCallbacks {
     }
 
     fn make_update_nickname(ctx: Arc<IoContext>, tx: UiUpdateSender) -> UpdateNicknameCallback {
-        Arc::new(move |contact_id: String, new_nickname: String| {
-            let contact_id_clone = contact_id.clone();
-            let nickname_clone = new_nickname.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::UpdateContactNickname {
-                    contact_id,
-                    nickname: new_nickname,
-                },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::NicknameUpdated {
-                            contact_id: contact_id_clone,
-                            nickname: nickname_clone,
-                        },
-                    )
-                    .await;
-                },
-                |error| async move {
-                    tracing::debug!(error = %error, "dispatch error (surfaced via ERROR_SIGNAL)");
-                },
-            );
-        })
+        Arc::new(
+            move |contact_id: String,
+                  new_nickname: String,
+                  operation: LocalTerminalOperationOwner| {
+                let contact_id_clone = contact_id.clone();
+                let nickname_clone = new_nickname.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "UpdateContactNickname callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::contacts::update_contact_nickname(
+                            &app_core,
+                            &contact_id,
+                            &new_nickname,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::NicknameUpdated {
+                                contact_id: contact_id_clone,
+                                nickname: nickname_clone,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(
+                            &tx,
+                            "contacts",
+                            format!("Update nickname failed: {error}"),
+                        )
+                        .await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_start_chat(ctx: Arc<IoContext>, tx: UiUpdateSender) -> StartChatCallback {
-        Arc::new(move |contact_id: String| {
-            let success_contact_id = contact_id.clone();
-            let error_contact_id = contact_id.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::StartDirectChat { contact_id },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::ChatStarted {
-                            contact_id: success_contact_id,
-                        },
-                    )
-                    .await;
-                },
-                move |error| async move {
-                    tracing::error!(error = %error, contact_id = %error_contact_id, "StartDirectChat dispatch failed");
-                    // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                },
-            );
-        })
+        Arc::new(
+            move |contact_id: String, operation: LocalTerminalOperationOwner| {
+                let success_contact_id = contact_id.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "StartDirectChat callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::messaging::start_direct_chat(
+                            &app_core,
+                            &contact_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::ChatStarted {
+                                contact_id: success_contact_id,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(&tx, "chat", format!("Start chat failed: {error}")).await;
+                    },
+                );
+            },
+        )
     }
 
     fn make_invite_to_channel(
@@ -136,8 +176,19 @@ impl ContactsCallbacks {
                     operation,
                     "RemoveContact callback",
                     move |ctx| async move {
-                        ctx.dispatch(EffectCommand::RemoveContact { contact_id })
-                            .await
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::contacts::remove_contact(
+                            &app_core,
+                            &contact_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
                     },
                     |_tx, ()| async {},
                     |tx, error| async move {
@@ -168,7 +219,7 @@ impl ContactsCallbacks {
                     return;
                 }
             };
-            spawn_observed_dispatch_callback(
+            spawn_observed_adaptation_dispatch_callback(
                 ctx.clone(),
                 tx,
                 EffectCommand::InviteLanPeer {

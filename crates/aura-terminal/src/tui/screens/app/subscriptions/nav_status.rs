@@ -1,4 +1,5 @@
 use super::*;
+use aura_core::AuthorityId;
 
 use crate::tui::screens::app::subscriptions::contracts::{
     subscribe_lifecycle_signal, subscribe_update_bridge_signal, StructuralDegradationSink,
@@ -63,10 +64,15 @@ pub fn use_authority_id_subscription(
                                 }
                             })
                             .collect::<Vec<_>>();
-                        let _ = tx.try_send(UiUpdate::AuthoritiesUpdated {
-                            authorities,
-                            current_index,
-                        });
+                        spawn_ui_update(
+                            &tasks,
+                            tx,
+                            UiUpdate::AuthoritiesUpdated {
+                                authorities,
+                                current_index,
+                            },
+                            UiUpdatePublication::RequiredUnordered,
+                        );
                     }
                 },
                 degradation,

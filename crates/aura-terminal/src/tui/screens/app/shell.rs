@@ -33,20 +33,14 @@ use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_app::ui::workflows::system as system_workflows;
-use aura_app::ui_contract::{ChannelBindingWitness, RuntimeEventKind, RuntimeFact};
+use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::{
-    execute_with_retry_budget, ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError,
-    TimeoutExecutionProfile,
-};
+use aura_core::{execute_with_retry_budget, RetryRunError};
 use aura_effects::time::PhysicalTimeHandler;
 
 use crate::error::TerminalError;
 use crate::tui::callbacks::CallbackRegistry;
-use crate::tui::channel_selection::{
-    authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
-};
+use crate::tui::channel_selection::{CommittedChannelSelection, SharedCommittedChannelSelection};
 use crate::tui::components::{DiscoveredPeerInfo, Footer, NavBar, ToastContainer, ToastMessage};
 use crate::tui::context::{IoContext, ShellExitIntent};
 use crate::tui::harness_state::{
@@ -68,128 +62,6 @@ use crate::tui::screens::app::subscriptions::{
     use_neighborhood_homes_subscription, use_notifications_subscription,
     use_pending_requests_subscription, use_threshold_subscription, SharedDevices,
 };
-
-async fn effect_sleep(duration: std::time::Duration) {
-    let _ = PhysicalTimeHandler::new()
-        .sleep_ms(duration.as_millis() as u64)
-        .await;
-}
-
-#[allow(clippy::expect_used)]
-fn shell_retry_policy() -> RetryBudgetPolicy {
-    let profile = if harness_mode_enabled() {
-        TimeoutExecutionProfile::harness()
-    } else {
-        TimeoutExecutionProfile::production()
-    };
-    let base = RetryBudgetPolicy::new(
-        200,
-        ExponentialBackoffPolicy::new(
-            std::time::Duration::from_millis(50),
-            std::time::Duration::from_secs(2),
-            profile.jitter(),
-        )
-        .expect("shell backoff policy must be valid"),
-    );
-    profile
-        .apply_retry_policy(&base)
-        .expect("shell retry policy must scale")
-}
-
-async fn authoritative_app_snapshot_with_retry(
-    app_ctx: &AppCoreContext,
-    context: &'static str,
-) -> Result<Box<aura_app::ui::types::StateSnapshot>, String> {
-    let retry_policy = shell_retry_policy();
-    let time = PhysicalTimeHandler::new();
-    execute_with_retry_budget(&time, &retry_policy, |_attempt| {
-        let app_ctx = app_ctx.clone();
-        async move {
-            match app_ctx.snapshot() {
-                AppSnapshotAvailability::Available(snapshot) => Ok(snapshot),
-                AppSnapshotAvailability::Contended => Err("state lock contended".to_string()),
-            }
-        }
-    })
-    .await
-    .map_err(|error| format!("{context}: {error}"))
-}
-
-async fn authoritative_settings_devices_for_command(
-    app_ctx: &AppCoreContext,
-    shared_devices: &SharedDevices,
-) -> Vec<Device> {
-    let shared = shared_devices.read().clone();
-    let mut from_signal = {
-        let core = app_ctx.app_core.raw().read().await;
-        core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
-    };
-
-    if from_signal
-        .as_ref()
-        .map_or(true, |settings_state| settings_state.devices.is_empty())
-    {
-        let _ = refresh_settings_from_runtime(app_ctx.app_core.raw()).await;
-        from_signal = {
-            let core = app_ctx.app_core.raw().read().await;
-            core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
-        };
-    }
-
-    if let Some(settings_state) = from_signal {
-        let devices = settings_state
-            .devices
-            .iter()
-            .map(|device| Device {
-                id: device.id.to_string(),
-                name: device.name.clone(),
-                is_current: device.is_current,
-                last_seen: device.last_seen,
-            })
-            .collect::<Vec<_>>();
-        if !devices.is_empty() {
-            *shared_devices.write() = devices.clone();
-        }
-        return devices;
-    }
-
-    shared
-}
-
-async fn authoritative_settings_authorities_for_command(
-    app_ctx: &AppCoreContext,
-) -> (Vec<crate::tui::types::AuthorityInfo>, usize) {
-    let from_signal = {
-        let core = app_ctx.app_core.raw().read().await;
-        core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
-    };
-
-    if let Some(settings_state) = from_signal {
-        let current_index = settings_state
-            .authorities
-            .iter()
-            .position(|authority| authority.is_current)
-            .unwrap_or(0);
-        let authorities = settings_state
-            .authorities
-            .iter()
-            .map(|authority| {
-                let info = crate::tui::types::AuthorityInfo::new(
-                    authority.id.to_string(),
-                    authority.nickname_suggestion.clone(),
-                );
-                if authority.is_current {
-                    info.current()
-                } else {
-                    info
-                }
-            })
-            .collect::<Vec<_>>();
-        return (authorities, current_index);
-    }
-
-    (Vec::new(), 0)
-}
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreen, NotificationsScreen, SettingsScreen,
@@ -210,11 +82,13 @@ use std::sync::Mutex;
 
 mod dispatch;
 mod dispatch_command_handlers;
+mod dispatch_handlers_neighborhood;
 mod events;
 mod input;
 mod props;
 mod render;
 mod runtime;
+mod runtime_support;
 mod state;
 mod update_handlers;
 mod updates;
@@ -228,6 +102,10 @@ use input::transition_from_terminal_event;
 use props::IoAppProps;
 use render::{build_global_modals, state_indicator_label};
 pub use runtime::run_app_with_context;
+use runtime_support::{
+    authoritative_app_snapshot_with_retry, authoritative_settings_authorities_for_command,
+    authoritative_settings_devices_for_command, effect_sleep, shell_retry_policy,
+};
 use state::{sync_neighborhood_navigation_state, TuiStateHandle};
 use updates::{process_ui_update, UiUpdateContext, UiUpdateLoopAction};
 #[component]
@@ -340,11 +218,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         std::sync::Arc::new(parking_lot::RwLock::new(None::<CommittedChannelSelection>))
     });
     let tui_selected: SharedCommittedChannelSelection = tui_selected_ref.read().clone();
-    let selected_channel_binding_ref = hooks
-        .use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(None::<ChannelBindingWitness>)));
-    let selected_channel_binding: std::sync::Arc<
-        parking_lot::RwLock<Option<ChannelBindingWitness>>,
-    > = selected_channel_binding_ref.read().clone();
     let last_exported_devices_ref =
         hooks.use_ref(|| std::sync::Arc::new(parking_lot::RwLock::new(Vec::<Device>::new())));
     let last_exported_devices: std::sync::Arc<parking_lot::RwLock<Vec<Device>>> =
@@ -379,7 +252,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Clone for ChatScreen to compute per-channel message counts
     let tui_selected_for_chat_screen = tui_selected.clone();
-    let selected_channel_binding_for_chat_screen = selected_channel_binding.clone();
 
     // =========================================================================
     // Devices subscription: SharedDevices for dispatch handlers to read
@@ -711,8 +583,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_messages_for_commands = shared_messages.clone();
             let last_exported_devices_for_commands = last_exported_devices.clone();
             let tui_selected_for_commands = tui_selected_for_chat_screen.clone();
-            let selected_channel_binding_for_commands =
-                selected_channel_binding_for_chat_screen.clone();
             async move {
                 let Some(command_rx_holder) = command_rx_holder else {
                     return;
@@ -801,7 +671,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     shared_messages: &shared_messages_for_commands,
                                     last_exported_devices: &last_exported_devices_for_commands,
                                     selected_channel: &tui_selected_for_commands,
-                                    selected_channel_binding: &selected_channel_binding_for_commands,
                                 },
                             )? {
                                 operation_handle = Some(handle);
@@ -828,11 +697,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
 
                     let updated_state = tui.read_clone();
+                    let committed_selection = tui_selected_for_commands.read().clone();
                     let immediate_join_binding = authoritative_binding_for_requested_join(
                         &submission.command,
                         &harness_channels_for_command,
                         Some(updated_state.chat.selected_channel),
-                        selected_channel_binding_for_commands.read().as_ref(),
+                        committed_selection
+                            .as_ref()
+                            .map(CommittedChannelSelection::binding),
                     );
                     let settlement = match operation_handle {
                         Some(operation)
@@ -955,7 +827,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_messages_for_updates = shared_messages.clone();
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
-            let selected_channel_binding_for_updates = selected_channel_binding;
             let ready_join_channel_instances_for_updates = ready_join_channel_instances;
             async move {
                 let Some(rx_holder) = rx_holder else {
@@ -996,8 +867,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             shared_devices_for_updates: shared_devices_for_updates.clone(),
                             shared_messages_for_updates: shared_messages_for_updates.clone(),
                             tui_selected_for_updates: tui_selected_for_updates.clone(),
-                            selected_channel_binding_for_updates:
-                                selected_channel_binding_for_updates.clone(),
                             ready_join_channel_instances_for_updates:
                                 ready_join_channel_instances_for_updates.clone(),
                         },
@@ -1075,7 +944,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Extract individual callbacks from registry for screen component props
     // (Screen components still use individual callback props for now)
-    let on_send = callbacks.as_ref().map(|cb| cb.chat.on_send.clone());
+    let on_run_slash_command = callbacks
+        .as_ref()
+        .map(|cb| cb.chat.on_run_slash_command.clone());
     let on_retry_message = callbacks
         .as_ref()
         .map(|cb| cb.chat.on_retry_message.clone());
@@ -1167,7 +1038,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_devices_for_dispatch = shared_devices;
         // Clone shared selection state for immediate sync on channel navigation
         let tui_selected_for_events = tui_selected_for_chat_screen.clone();
-        let selected_channel_binding_for_events = selected_channel_binding_for_chat_screen;
         // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
             if let Some(input_transition) = transition_from_terminal_event(
@@ -1188,7 +1058,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         &new_state,
                         &shared_channels_for_dispatch,
                         &tui_selected_for_events,
-                        &selected_channel_binding_for_events,
                     );
                     for cmd in commands {
                         match cmd {
@@ -1249,8 +1118,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         shared_threshold_for_dispatch:
                                             &shared_threshold_for_dispatch,
                                         tui_selected_for_events: &tui_selected_for_events,
-                                        selected_channel_binding_for_events:
-                                            &selected_channel_binding_for_events,
                                     },
                                 );
                                 if matches!(outcome, EventCommandLoopAction::ContinueCommand) {
@@ -1342,7 +1209,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 selected_channel: Some(tui_selected_for_chat_screen),
                                 shared_channels: Some(shared_channels),
                                 shared_messages: Some(shared_messages),
-                                on_send: on_send.clone(),
+                                on_run_slash_command: on_run_slash_command.clone(),
                                 on_retry_message: on_retry_message.clone(),
                                 on_create_channel: on_create_channel.clone(),
                                 on_set_topic: on_set_topic.clone(),

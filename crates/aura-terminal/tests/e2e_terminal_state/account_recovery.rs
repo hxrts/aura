@@ -24,12 +24,22 @@ async fn test_account_creation_callback_flow() {
     let account_file = test_dir.join("account.json.dat");
 
     assert!(!env.ctx.has_account(), "Should not have account initially");
-    assert!(!account_file.exists(), "account.json.dat should not exist before creation");
+    assert!(
+        !account_file.exists(),
+        "account.json.dat should not exist before creation"
+    );
 
     let create_result = env.ctx.create_account("Bob").await;
-    assert!(create_result.is_ok(), "create_account should succeed: {:?}", create_result);
+    assert!(
+        create_result.is_ok(),
+        "create_account should succeed: {:?}",
+        create_result
+    );
     assert!(env.ctx.has_account(), "Should have account after creation");
-    assert!(account_file.exists(), "account.json.dat MUST exist after create_account");
+    assert!(
+        account_file.exists(),
+        "account.json.dat MUST exist after create_account"
+    );
 
     let storage = EncryptedStorage::new(
         FilesystemStorageHandler::from_path(test_dir.clone()),
@@ -42,8 +52,12 @@ async fn test_account_creation_callback_flow() {
         .await
         .expect("Should be able to read account config from storage")
         .expect("account.json should exist in storage");
-    assert!(content.windows(b"authority_id".len()).any(|window| window == b"authority_id"));
-    assert!(content.windows(b"context_id".len()).any(|window| window == b"context_id"));
+    assert!(content
+        .windows(b"authority_id".len())
+        .any(|window| window == b"authority_id"));
+    assert!(content
+        .windows(b"context_id".len())
+        .any(|window| window == b"context_id"));
 
     let app_core2 = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core2 = Arc::new(RwLock::new(app_core2));

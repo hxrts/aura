@@ -38,9 +38,12 @@ async fn build_mock_runtime_env(
 
 #[tokio::test]
 async fn test_moderation_commands_dispatch() {
-    let env =
-        build_production_env("moderation-test", "test-device-moderation", "ModerationTester")
-            .await;
+    let env = build_production_env(
+        "moderation-test",
+        "test-device-moderation",
+        "ModerationTester",
+    )
+    .await;
 
     let ban_result = env
         .ctx
@@ -97,8 +100,14 @@ async fn test_lan_peer_invitation_flow() {
         .await;
     assert!(invite_result.is_ok() || invite_result.is_err());
 
-    env.ctx.mark_peer_invited(&test_authority_id.to_string()).await;
-    assert!(env.ctx.is_peer_invited(&test_authority_id.to_string()).await);
+    env.ctx
+        .mark_peer_invited(&test_authority_id.to_string())
+        .await;
+    assert!(
+        env.ctx
+            .is_peer_invited(&test_authority_id.to_string())
+            .await
+    );
     assert!(!env.ctx.is_peer_invited("unknown_peer").await);
 
     let invited_peers = env.ctx.get_invited_peer_ids().await;
@@ -112,7 +121,9 @@ async fn test_lan_peer_invitation_flow() {
     assert!(all_invited.contains(&test_authority_id.to_string()));
     assert!(all_invited.contains(&second_authority));
 
-    env.ctx.mark_peer_invited(&test_authority_id.to_string()).await;
+    env.ctx
+        .mark_peer_invited(&test_authority_id.to_string())
+        .await;
     assert_eq!(env.ctx.get_invited_peer_ids().await.len(), 2);
 }
 
@@ -228,35 +239,32 @@ async fn test_set_context_flow() {
     assert!(env.ctx.get_current_context().await.is_none());
 
     let home_context = "home:main".to_string();
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::SetContext {
-                context_id: home_context.clone(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::SetContext {
+            context_id: home_context.clone(),
+        })
+        .await
+        .is_ok());
     assert_eq!(env.ctx.get_current_context().await, Some(home_context));
 
     let channel_context = "channel:general".to_string();
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::SetContext {
-                context_id: channel_context.clone(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::SetContext {
+            context_id: channel_context.clone(),
+        })
+        .await
+        .is_ok());
     assert_eq!(env.ctx.get_current_context().await, Some(channel_context));
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::SetContext {
-                context_id: String::new(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::SetContext {
+            context_id: String::new(),
+        })
+        .await
+        .is_ok());
     assert!(env.ctx.get_current_context().await.is_none());
 
     env.ctx
@@ -278,8 +286,7 @@ async fn test_moderator_role_flow() {
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 
     let env =
-        build_mock_runtime_env("moderator-test", "test-device-moderator", "ModeratorTester")
-            .await;
+        build_mock_runtime_env("moderator-test", "test-device-moderator", "ModeratorTester").await;
 
     let home_id = ChannelId::from_bytes([0x41; 32]);
     let home_context_id = ContextId::new_from_entropy([9u8; 32]);
@@ -327,47 +334,54 @@ async fn test_moderator_role_flow() {
             .expect("Failed to emit homes state");
     }
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::GrantModerator {
-                channel: None,
-                target: member1_id.to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::GrantModerator {
+            channel: None,
+            target: member1_id.to_string(),
+        })
+        .await
+        .is_ok());
     {
         let core = env.app_core.read().await;
-        let home = core.views().get_homes().current_home().cloned().expect("home exists");
+        let home = core
+            .views()
+            .get_homes()
+            .current_home()
+            .cloned()
+            .expect("home exists");
         let member = home.member(&member1_id).expect("member exists");
         assert!(matches!(member.role, HomeRole::Moderator));
     }
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::RevokeModerator {
-                channel: None,
-                target: member1_id.to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::RevokeModerator {
+            channel: None,
+            target: member1_id.to_string(),
+        })
+        .await
+        .is_ok());
     {
         let core = env.app_core.read().await;
-        let home = core.views().get_homes().current_home().cloned().expect("home exists");
+        let home = core
+            .views()
+            .get_homes()
+            .current_home()
+            .cloned()
+            .expect("home exists");
         let member = home.member(&member1_id).expect("member exists");
         assert!(matches!(member.role, HomeRole::Member));
     }
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::GrantModerator {
-                channel: None,
-                target: owner_id.to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::GrantModerator {
+            channel: None,
+            target: owner_id.to_string(),
+        })
+        .await
+        .is_ok());
 
     let already_moderator = env
         .ctx
@@ -423,7 +437,8 @@ async fn test_neighborhood_navigation_flow() {
     };
     use aura_core::types::identifiers::ChannelId;
 
-    let env = build_production_env("neighborhood-test", "test-device-nav", "NavigationTester").await;
+    let env =
+        build_production_env("neighborhood-test", "test-device-nav", "NavigationTester").await;
 
     let home_home_id = ChannelId::from_bytes([0x51; 32]);
     let alice_home_id = ChannelId::from_bytes([0x52; 32]);
@@ -473,16 +488,15 @@ async fn test_neighborhood_navigation_flow() {
         core.views().set_neighborhood(neighborhood);
     }
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id: alice_home_id.to_string(),
-                depth: "Full".to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::MovePosition {
+            neighborhood_id: "current".to_string(),
+            home_id: alice_home_id.to_string(),
+            depth: "Full".to_string(),
+        })
+        .await
+        .is_ok());
     {
         let core = env.app_core.read().await;
         let position = core
@@ -495,16 +509,15 @@ async fn test_neighborhood_navigation_flow() {
         assert_eq!(position.depth, 2);
     }
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id: "home".to_string(),
-                depth: "Full".to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::MovePosition {
+            neighborhood_id: "current".to_string(),
+            home_id: "home".to_string(),
+            depth: "Full".to_string(),
+        })
+        .await
+        .is_ok());
     {
         let core = env.app_core.read().await;
         let neighborhood = core.views().get_neighborhood();
@@ -521,16 +534,15 @@ async fn test_neighborhood_navigation_flow() {
         })
         .await
         .expect("Should enter Bob's home");
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id: "current".to_string(),
-                depth: "Limited".to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::MovePosition {
+            neighborhood_id: "current".to_string(),
+            home_id: "current".to_string(),
+            depth: "Limited".to_string(),
+        })
+        .await
+        .is_ok());
     {
         let core = env.app_core.read().await;
         let position = core
@@ -542,16 +554,15 @@ async fn test_neighborhood_navigation_flow() {
         assert_eq!(position.depth, 0);
     }
 
-    assert!(
-        env.ctx
-            .dispatch(EffectCommand::MovePosition {
-                neighborhood_id: "current".to_string(),
-                home_id: "current".to_string(),
-                depth: "Partial".to_string(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::MovePosition {
+            neighborhood_id: "current".to_string(),
+            home_id: "current".to_string(),
+            depth: "Partial".to_string(),
+        })
+        .await
+        .is_ok());
     {
         let core = env.app_core.read().await;
         let position = core

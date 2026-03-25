@@ -16,7 +16,6 @@
 //! All event handling is done by the parent TuiShell (IoApp) via the state machine.
 
 use iocraft::prelude::*;
-use std::sync::Arc;
 
 use aura_app::ui::signals::{
     DiscoveredPeerMethod, NetworkStatus, SyncStatus, DISCOVERED_PEERS_SIGNAL,
@@ -26,7 +25,7 @@ use aura_app::ui::signals::{
 use aura_app::ui::types::format_relative_time_from;
 
 use crate::tui::callbacks::{
-    AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback,
+    AddDeviceCallback, RemoveDeviceCallback, UpdateMfaCallback, UpdateNicknameSuggestionCallback,
     UpdateThresholdCallback,
 };
 use crate::tui::components::SimpleSelectableItem;
@@ -35,14 +34,11 @@ use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::screens::app::subscriptions::use_display_clock_state;
 use crate::tui::theme::Theme;
-use crate::tui::types::{AuthorityInfo, Device, MfaPolicy, RecoveryStatus, SettingsSection};
+use crate::tui::types::{AuthorityInfo, Device, RecoveryStatus, SettingsSection};
 
 // =============================================================================
 // Callback Types (specialized, kept local)
 // =============================================================================
-
-/// MFA callback takes MfaPolicy type - kept local due to specialized parameter
-pub type MfaCallback = Arc<dyn Fn(MfaPolicy) + Send + Sync>;
 
 // =============================================================================
 // Settings Screen Props
@@ -68,9 +64,9 @@ pub struct SettingsScreenProps {
     pub view: SettingsViewProps,
 
     // === Callbacks ===
-    pub on_update_mfa: Option<MfaCallback>,
-    pub on_update_nickname_suggestion: Option<UpdateNicknameSuggestionCallback>,
-    pub on_update_threshold: Option<UpdateThresholdCallback>,
+    pub(crate) on_update_mfa: Option<UpdateMfaCallback>,
+    pub(crate) on_update_nickname_suggestion: Option<UpdateNicknameSuggestionCallback>,
+    pub(crate) on_update_threshold: Option<UpdateThresholdCallback>,
     pub(crate) on_add_device: Option<AddDeviceCallback>,
     pub on_remove_device: Option<RemoveDeviceCallback>,
 }

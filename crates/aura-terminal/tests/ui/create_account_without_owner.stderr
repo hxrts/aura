@@ -4,5 +4,5 @@ error[E0432]: unresolved import `aura_terminal::tui::callbacks::CreateAccountCal
 3 | use aura_terminal::tui::callbacks::CreateAccountCallback;
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^---------------------
   |     |                              |
-  |     |                              help: a similar name exists in the module: `CreateHomeCallback`
+  |     |                              help: a similar name exists in the module: `CreateChannelCallback`
   |     no `CreateAccountCallback` in `tui::callbacks`

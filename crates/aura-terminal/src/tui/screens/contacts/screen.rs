@@ -229,9 +229,9 @@ pub struct ContactsScreenProps {
 
     // === Callbacks ===
     /// Callback when updating a contact's nickname
-    pub on_update_nickname: Option<UpdateNicknameCallback>,
+    pub(crate) on_update_nickname: Option<UpdateNicknameCallback>,
     /// Callback when starting a direct chat with a contact
-    pub on_start_chat: Option<StartChatCallback>,
+    pub(crate) on_start_chat: Option<StartChatCallback>,
     /// Callback when inviting a discovered LAN peer
     pub on_invite_lan_peer: Option<InvitePeerCallback>,
 }

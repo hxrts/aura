@@ -1,8 +1,7 @@
 use super::*;
 use crate::tui::channel_selection::{
-    authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
+    authoritative_committed_selection, CommittedChannelSelection, SharedCommittedChannelSelection,
 };
-use aura_app::ui_contract::ChannelBindingWitness;
 
 pub(super) fn resolve_committed_selected_channel_id(
     state: &TuiState,
@@ -10,7 +9,7 @@ pub(super) fn resolve_committed_selected_channel_id(
 ) -> Option<CommittedChannelSelection> {
     shared_channels
         .get(state.chat.selected_channel)
-        .map(|channel| CommittedChannelSelection::new(channel.id.clone()))
+        .map(authoritative_committed_selection)
 }
 
 pub(super) fn handle_channel_selection_change(
@@ -18,14 +17,11 @@ pub(super) fn handle_channel_selection_change(
     new_state: &TuiState,
     shared_channels: &Arc<parking_lot::RwLock<Vec<Channel>>>,
     selected_channel_id: &SharedCommittedChannelSelection,
-    selected_channel_binding: &Arc<parking_lot::RwLock<Option<ChannelBindingWitness>>>,
 ) {
     let idx = new_state.chat.selected_channel;
 
     let channels = shared_channels.read().clone();
-    let next_selected = channels
-        .get(idx)
-        .map(|channel| CommittedChannelSelection::new(channel.id.clone()));
+    let next_selected = channels.get(idx).map(authoritative_committed_selection);
     let current_selected = selected_channel_id.read().clone();
 
     if new_state.chat.selected_channel == current.chat.selected_channel
@@ -38,10 +34,6 @@ pub(super) fn handle_channel_selection_change(
         let mut guard = selected_channel_id.write();
         *guard = next_selected;
     }
-    {
-        let mut guard = selected_channel_binding.write();
-        *guard = channels.get(idx).map(authoritative_channel_binding);
-    }
 }
 
 #[cfg(test)]
@@ -50,7 +42,6 @@ mod tests {
     use crate::tui::channel_selection::CommittedChannelSelection;
     use crate::tui::state::TuiState;
     use crate::tui::types::Channel;
-    use aura_app::ui_contract::ChannelBindingWitness;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -94,26 +85,22 @@ mod tests {
             "channel-1",
             "General",
         )]));
-        let selected_channel_id = Arc::new(parking_lot::RwLock::new(None));
-        let selected_channel_binding = Arc::new(parking_lot::RwLock::new(Some(
-            ChannelBindingWitness::new("channel-1", Some("ctx-123".to_string())),
+        let selected_channel_id = Arc::new(parking_lot::RwLock::new(Some(
+            CommittedChannelSelection::from_binding(
+                &aura_app::ui_contract::ChannelBindingWitness::new(
+                    "channel-1",
+                    Some("ctx-123".to_string()),
+                ),
+            ),
         )));
 
-        handle_channel_selection_change(
-            &current,
-            &next,
-            &channels,
-            &selected_channel_id,
-            &selected_channel_binding,
-        );
+        handle_channel_selection_change(&current, &next, &channels, &selected_channel_id);
 
         assert_eq!(
             *selected_channel_id.read(),
-            Some(CommittedChannelSelection::new("channel-1"))
-        );
-        assert_eq!(
-            *selected_channel_binding.read(),
-            Some(ChannelBindingWitness::new("channel-1", None))
+            Some(CommittedChannelSelection::from_binding(
+                &aura_app::ui_contract::ChannelBindingWitness::new("channel-1", None)
+            ))
         );
     }
 
@@ -295,6 +282,52 @@ mod tests {
         assert!(
             helper_source.contains("rollback was incomplete; manual intervention may be required")
         );
+    }
+
+    #[test]
+    fn ceremony_monitors_use_required_publication() {
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
+
+        let guardian_start = shell_source
+            .find("DispatchCommand::StartGuardianCeremony")
+            .unwrap_or_else(|| panic!("missing StartGuardianCeremony dispatch arm"));
+        let cancel_start = shell_source[guardian_start..]
+            .find("DispatchCommand::CancelGuardianCeremony")
+            .map(|offset| guardian_start + offset)
+            .unwrap_or_else(|| panic!("missing CancelGuardianCeremony dispatch arm"));
+        let guardian_branch = &shell_source[guardian_start..cancel_start];
+
+        assert!(guardian_branch.contains("send_optional_ui_update_required("));
+        assert!(guardian_branch.contains("spawn_ui_update("));
+        assert!(guardian_branch.contains("UiUpdatePublication::RequiredUnordered"));
+        assert!(!guardian_branch.contains("try_send("));
+    }
+
+    #[test]
+    fn authority_updates_use_required_publication() {
+        let source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/subscriptions/nav_status.rs",
+        );
+
+        assert!(source.contains("spawn_ui_update("));
+        assert!(source.contains("UiUpdatePublication::RequiredUnordered"));
+        assert!(!source.contains("try_send(UiUpdate::AuthoritiesUpdated"));
+    }
+
+    #[test]
+    fn device_enrollment_monitor_uses_required_publication() {
+        let source =
+            read_repo_source("crates/aura-terminal/src/tui/callbacks/factories/settings.rs");
+
+        let monitor_start = source
+            .find("monitor_key_rotation_ceremony_with_policy(")
+            .unwrap_or_else(|| panic!("missing monitor_key_rotation_ceremony_with_policy"));
+        let monitor_branch = &source[monitor_start..];
+
+        assert!(monitor_branch.contains("send_ui_update_required_blocking("));
+        assert!(!monitor_branch.contains("send_ui_update_lossy("));
     }
 
     #[test]

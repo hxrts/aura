@@ -411,8 +411,6 @@ pub struct RecoveryScreenProps {
     // === Callbacks ===
     /// Callback when starting recovery
     pub on_start_recovery: Option<RecoveryCallback>,
-    /// Callback when adding a guardian
-    pub on_add_guardian: Option<RecoveryCallback>,
     /// Callback when approving a pending request (takes request_id)
     pub on_submit_approval: Option<ApprovalCallback>,
 }

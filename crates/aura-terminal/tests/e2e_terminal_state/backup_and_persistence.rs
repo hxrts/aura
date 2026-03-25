@@ -57,19 +57,23 @@ async fn test_account_backup_restore_flow() {
         .await;
     assert!(env_b.ctx.has_account());
 
-    assert!(env_a.ctx.dispatch(EffectCommand::ExportAccountBackup).await.is_ok());
-    assert!(
-        env_b
-            .ctx
-            .dispatch(EffectCommand::ImportAccountBackup {
-                backup_code: backup_code.clone(),
-            })
-            .await
-            .is_ok()
-    );
+    assert!(env_a
+        .ctx
+        .dispatch(EffectCommand::ExportAccountBackup)
+        .await
+        .is_ok());
+    assert!(env_b
+        .ctx
+        .dispatch(EffectCommand::ImportAccountBackup {
+            backup_code: backup_code.clone(),
+        })
+        .await
+        .is_ok());
 
     assert!(export_account_backup(&test_dir_c, None).await.is_err());
-    assert!(import_account_backup(&test_dir_c, "invalid-code", false).await.is_err());
+    assert!(import_account_backup(&test_dir_c, "invalid-code", false)
+        .await
+        .is_err());
     let no_overwrite_result = import_account_backup(&test_dir_b, &backup_code, false).await;
     assert!(no_overwrite_result.is_err());
     assert!(no_overwrite_result
@@ -142,9 +146,10 @@ async fn test_snapshot_data_accuracy() {
         .await
         .expect("Failed to init signals");
     let app_core = Arc::new(RwLock::new(app_core));
-    let initialized_app_core = aura_terminal::tui::context::InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("Failed to init signals");
+    let initialized_app_core =
+        aura_terminal::tui::context::InitializedAppCore::new(app_core.clone())
+            .await
+            .expect("Failed to init signals");
     let authority_id = AuthorityId::new_from_entropy([42u8; 32]);
     app_core.write().await.set_authority(authority_id);
 

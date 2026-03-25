@@ -6,14 +6,14 @@ use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 /// All callbacks for the chat screen
 #[derive(Clone)]
 pub struct ChatCallbacks {
-    pub(crate) on_send: SendCallback,
+    pub(crate) on_run_slash_command: SlashCommandCallback,
     pub(crate) on_send_owned: SendOwnedCallback,
     pub(crate) on_accept_pending_channel_invitation: NoArgOwnedCallback,
     pub(crate) on_join_channel: JoinChannelCallback,
-    pub on_retry_message: RetryMessageCallback,
+    pub(crate) on_retry_message: RetryMessageCallback,
     pub(crate) on_create_channel: CreateChannelCallback,
-    pub on_set_topic: SetTopicCallback,
-    pub on_close_channel: IdCallback,
+    pub(crate) on_set_topic: SetTopicCallback,
+    pub(crate) on_close_channel: IdLocalOwnedCallback,
     pub on_list_participants: IdCallback,
 }
 
@@ -23,7 +23,7 @@ impl ChatCallbacks {
         let ctx = runtime.ctx();
         let tx = runtime.tx();
         Self {
-            on_send: Self::make_send_command(ctx.clone(), tx.clone()),
+            on_run_slash_command: Self::make_run_slash_command(ctx.clone(), tx.clone()),
             on_send_owned: Self::make_send_owned(ctx.clone(), tx.clone()),
             on_accept_pending_channel_invitation: Self::make_accept_pending_channel_invitation(
                 ctx.clone(),
@@ -39,7 +39,7 @@ impl ChatCallbacks {
     }
 
     pub fn send(&self, channel_id: String, content: String) {
-        (self.on_send)(channel_id, content);
+        (self.on_run_slash_command)(channel_id, content);
     }
 
     fn make_accept_pending_channel_invitation(
@@ -87,7 +87,7 @@ impl ChatCallbacks {
         })
     }
 
-    fn make_send_command(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SendCallback {
+    fn make_run_slash_command(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SlashCommandCallback {
         let strong_resolver =
             Arc::new(aura_app::ui::workflows::strong_command::CommandResolver::default());
         Arc::new(move |channel_id: String, content: String| {
@@ -427,33 +427,90 @@ impl ChatCallbacks {
 
     fn make_retry_message(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RetryMessageCallback {
         Arc::new(
-            move |message_id: String, channel: String, content: String| {
+            move |message_id: String,
+                  channel: String,
+                  content: String,
+                  operation: WorkflowHandoffOperationOwner| {
                 let msg_id = message_id.clone();
-                let error_tx = tx.clone();
-                spawn_observed_dispatch_callback(
-                    ctx.clone(),
-                    tx.clone(),
-                    EffectCommand::RetryMessage {
-                        message_id,
-                        channel,
-                        content,
-                    },
-                    move |tx| async move {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::MessageRetried { message_id: msg_id },
-                        )
-                        .await;
-                    },
-                    move |error| async move {
-                        emit_error_toast(
-                            &error_tx,
-                            "chat",
-                            format!("Retry message failed: {error}"),
-                        )
-                        .await;
-                    },
-                );
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let app_core = ctx.app_core_raw().clone();
+                spawn_ctx(ctx, async move {
+                    let operation_instance_id = operation.harness_handle().instance_id().clone();
+                    let transfer = operation
+                        .handoff_to_app_workflow(SemanticOperationTransferScope::SendChatMessage);
+
+                    let result = match channel.parse() {
+                        Ok(channel_id) => {
+                            aura_app::ui::workflows::messaging::send_message_now_with_instance(
+                                &app_core,
+                                channel_id,
+                                &content,
+                                Some(operation_instance_id.clone()),
+                            )
+                            .await
+                        }
+                        Err(_) => {
+                            aura_app::ui::workflows::messaging::send_message_by_name_now_with_instance(
+                                &app_core,
+                                &channel,
+                                &content,
+                                Some(operation_instance_id.clone()),
+                            )
+                            .await
+                        }
+                    };
+
+                    match result {
+                        Ok(_) => {
+                            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                                causality: None,
+                                status: SemanticOperationStatus::new(
+                                    transfer.kind(),
+                                    SemanticOperationPhase::Succeeded,
+                                ),
+                            };
+                            let _ = apply_handed_off_terminal_status(
+                                &app_core,
+                                &tx,
+                                transfer.operation_id().clone(),
+                                operation_instance_id,
+                                transfer.kind(),
+                                Some(terminal),
+                            )
+                            .await;
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::MessageRetried { message_id: msg_id },
+                            )
+                            .await;
+                        }
+                        Err(error) => {
+                            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
+                                causality: None,
+                                status: SemanticOperationStatus::failed(
+                                    transfer.kind(),
+                                    SemanticOperationError::new(
+                                        SemanticFailureDomain::Command,
+                                        SemanticFailureCode::InternalError,
+                                    )
+                                    .with_detail(error.to_string()),
+                                ),
+                            };
+                            let _ = apply_handed_off_terminal_status(
+                                &app_core,
+                                &tx,
+                                transfer.operation_id().clone(),
+                                operation_instance_id,
+                                transfer.kind(),
+                                Some(terminal),
+                            )
+                            .await;
+                            emit_error_toast(&tx, "chat", format!("Retry message failed: {error}"))
+                                .await;
+                        }
+                    }
+                });
             },
         )
     }
@@ -543,24 +600,26 @@ impl ChatCallbacks {
                     operation,
                     "CreateChannel callback",
                     move |ctx| async move {
-                        match ctx
-                            .dispatch_with_response(EffectCommand::CreateChannel {
-                                name,
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        let created =
+                            aura_app::ui::workflows::messaging::create_channel_with_authoritative_binding(
+                                &app_core,
+                                &name,
                                 topic,
-                                members,
+                                &members,
                                 threshold_k,
-                            })
-                            .await
-                        {
-                            Ok(OpResponse::ChannelCreated {
-                                channel_id,
-                                context_id,
-                            }) => Ok((channel_id, context_id)),
-                            Ok(other) => Err(crate::error::TerminalError::Operation(format!(
-                                "Create channel returned unexpected response: {other:?}"
-                            ))),
-                            Err(error) => Err(error),
-                        }
+                                timestamp_ms,
+                            )
+                            .await?;
+                        Ok((
+                            created.channel_id.to_string(),
+                            created.context_id.map(|context_id| context_id.to_string()),
+                        ))
                     },
                     move |tx, (channel_id, context_id)| async move {
                         send_ui_update_required(
@@ -590,49 +649,79 @@ impl ChatCallbacks {
     }
 
     fn make_set_topic(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SetTopicCallback {
-        Arc::new(move |channel_id: String, topic: String| {
-            let ch = channel_id.clone();
-            let t = topic.clone();
-            let error_tx = tx.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::SetTopic {
-                    channel: channel_id,
-                    text: topic,
-                },
-                move |tx| async move {
-                    send_ui_update_required(
-                        &tx,
-                        UiUpdate::TopicSet {
-                            channel: ch,
-                            topic: t,
-                        },
-                    )
-                    .await;
-                },
-                move |error| async move {
-                    emit_error_toast(&error_tx, "chat", format!("Set topic failed: {error}")).await;
-                },
-            );
-        })
+        Arc::new(
+            move |channel_id: String, topic: String, operation: LocalTerminalOperationOwner| {
+                let ch = channel_id.clone();
+                let t = topic.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "SetTopic callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::messaging::set_topic_by_name(
+                            &app_core,
+                            &channel_id,
+                            &topic,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::TopicSet {
+                                channel: ch,
+                                topic: t,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(&tx, "chat", format!("Set topic failed: {error}")).await;
+                    },
+                );
+            },
+        )
     }
 
-    fn make_close_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
-        Arc::new(move |channel_id: String| {
-            let error_tx = tx.clone();
-            spawn_observed_dispatch_callback(
-                ctx.clone(),
-                tx.clone(),
-                EffectCommand::CloseChannel {
-                    channel: channel_id,
-                },
-                |_| async {},
-                move |error| async move {
-                    emit_error_toast(&error_tx, "chat", format!("Close channel failed: {error}"))
-                        .await;
-                },
-            );
-        })
+    fn make_close_channel(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdLocalOwnedCallback {
+        Arc::new(
+            move |channel_id: String, operation: LocalTerminalOperationOwner| {
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "CloseChannel callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::messaging::close_channel_by_name(
+                            &app_core,
+                            &channel_id,
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    |_tx, ()| async move {},
+                    |tx, error| async move {
+                        emit_error_toast(&tx, "chat", format!("Close channel failed: {error}"))
+                            .await;
+                    },
+                );
+            },
+        )
     }
 }

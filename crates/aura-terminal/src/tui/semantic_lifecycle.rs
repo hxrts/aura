@@ -23,6 +23,7 @@ pub(crate) enum SemanticOperationOwner {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationTransferScope {
     InvitationImport,
+    CreateGuardianInvitation,
     AcceptInvitation,
     InviteActorToChannel,
     AcceptPendingChannelInvitation,
@@ -164,10 +165,10 @@ struct SubmittedOperationOwner {
 }
 
 #[must_use]
-pub(crate) struct LocalTerminalOperationOwner(SubmittedOperationOwner);
+pub struct LocalTerminalOperationOwner(SubmittedOperationOwner);
 
 #[must_use]
-pub(crate) struct WorkflowHandoffOperationOwner(SubmittedOperationOwner);
+pub struct WorkflowHandoffOperationOwner(SubmittedOperationOwner);
 
 impl SubmittedOperationOwner {
     fn submit(

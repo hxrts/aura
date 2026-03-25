@@ -196,7 +196,9 @@ impl TestTui {
 
     /// Check whether an exit command was emitted.
     pub fn has_exit(&self) -> bool {
-        self.commands.iter().any(|command| matches!(command, TuiCommand::Exit))
+        self.commands
+            .iter()
+            .any(|command| matches!(command, TuiCommand::Exit))
     }
 
     /// Clear collected commands.

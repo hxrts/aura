@@ -1,6 +1,7 @@
 use super::*;
 use std::collections::HashSet;
 
+use crate::tui::channel_selection::authoritative_committed_selection;
 use crate::tui::screens::app::subscriptions::{
     SharedChannels, SharedContacts, SharedDiscoveredPeers, SharedInvitations, SharedMessages,
     SharedPendingRequests, SharedThreshold,
@@ -8,6 +9,7 @@ use crate::tui::screens::app::subscriptions::{
 use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{publish_ui_update, UiOperationFailure, UiUpdatePublication};
+use aura_app::ui_contract::ChannelBindingWitness;
 use aura_app::ui_contract::SemanticOperationKind;
 
 use super::dispatch_command_handlers::handle_dispatch_command_match;
@@ -116,6 +118,36 @@ pub(super) async fn send_optional_ui_update_required(
     }
 }
 
+pub(super) fn submit_local_terminal_operation(
+    app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+    tasks: Arc<UiTaskOwner>,
+    update_tx: UiUpdateSender,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+) -> LocalTerminalOperationOwner {
+    LocalTerminalOperationOwner::submit(app_core, tasks, update_tx, operation_id, kind)
+}
+
+pub(super) fn submit_workflow_handoff_operation(
+    app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+    tasks: Arc<UiTaskOwner>,
+    update_tx: UiUpdateSender,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+) -> WorkflowHandoffOperationOwner {
+    WorkflowHandoffOperationOwner::submit(app_core, tasks, update_tx, operation_id, kind)
+}
+
+pub(super) fn set_authoritative_operation_state_sanctioned(
+    state: &mut TuiState,
+    operation_id: OperationId,
+    instance_id: Option<aura_app::ui_contract::OperationInstanceId>,
+    causality: Option<aura_app::ui_contract::SemanticOperationCausality>,
+    next_state: OperationState,
+) {
+    state.set_authoritative_operation_state(operation_id, instance_id, causality, next_state);
+}
+
 pub(super) fn read_selected_notification(
     selected_index: usize,
     invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
@@ -196,8 +228,6 @@ pub(super) struct HarnessDispatchContext<'a> {
     pub shared_messages: &'a SharedMessages,
     pub last_exported_devices: &'a std::sync::Arc<parking_lot::RwLock<Vec<Device>>>,
     pub selected_channel: &'a SharedCommittedChannelSelection,
-    pub selected_channel_binding:
-        &'a std::sync::Arc<parking_lot::RwLock<Option<ChannelBindingWitness>>>,
 }
 
 pub(super) fn execute_harness_followup_command(
@@ -216,7 +246,6 @@ pub(super) fn execute_harness_followup_command(
     let _shared_messages = ctx.shared_messages;
     let last_exported_devices = ctx.last_exported_devices;
     let selected_channel = ctx.selected_channel;
-    let selected_channel_binding = ctx.selected_channel_binding;
     match command {
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
             let Some(cb) = callbacks.as_ref() else {
@@ -225,7 +254,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -233,7 +262,8 @@ pub(super) fn execute_harness_followup_command(
                 SemanticOperationKind::CreateAccount,
             );
             let handle = operation.harness_handle();
-            state.set_authoritative_operation_state(
+            set_authoritative_operation_state_sanctioned(
+                state,
                 handle.operation_id().clone(),
                 Some(handle.instance_id().clone()),
                 None,
@@ -246,8 +276,19 @@ pub(super) fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Neighborhood callbacks are unavailable".to_string());
             };
-            (cb.neighborhood.on_create_home)(name, description);
-            Ok(None)
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = submit_local_terminal_operation(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::create_home(),
+                SemanticOperationKind::CreateHome,
+            );
+            let handle = operation.harness_handle();
+            (cb.neighborhood.on_create_home)(name, description, operation);
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::CreateChannel {
             name,
@@ -262,7 +303,7 @@ pub(super) fn execute_harness_followup_command(
                 return Err("UI update sender is unavailable".to_string());
             };
             state.router.go_to(Screen::Chat);
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -284,11 +325,8 @@ pub(super) fn execute_harness_followup_command(
             if let Some(idx) = channels.iter().position(|channel| channel.id == channel_id) {
                 state.router.go_to(Screen::Chat);
                 state.chat.selected_channel = idx;
-                *selected_channel.write() = Some(CommittedChannelSelection::new(channel_id));
-                {
-                    let mut guard = selected_channel_binding.write();
-                    *guard = channels.get(idx).map(authoritative_channel_binding);
-                }
+                *selected_channel.write() =
+                    channels.get(idx).map(authoritative_committed_selection);
             } else {
                 return Err("Selected channel is no longer visible".to_string());
             }
@@ -301,7 +339,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -329,7 +367,7 @@ pub(super) fn execute_harness_followup_command(
                 InvitationKind::Guardian => SemanticOperationKind::CreateContactInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -354,7 +392,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -381,7 +419,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected else {
                 return Err("Select a received invitation to accept".to_string());
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -400,7 +438,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -419,7 +457,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -443,7 +481,7 @@ pub(super) fn execute_harness_followup_command(
                 let Some(update_tx) = update_tx.clone() else {
                     return Err("UI update sender is unavailable".to_string());
                 };
-                Some(WorkflowHandoffOperationOwner::submit(
+                Some(submit_workflow_handoff_operation(
                     app_ctx.app_core.raw().clone(),
                     app_ctx.tasks(),
                     update_tx,
@@ -472,7 +510,7 @@ pub(super) fn execute_harness_followup_command(
                 if let Some(operation) = operation {
                     (cb.chat.on_send_owned)(channel_id, content, operation);
                 } else {
-                    (cb.chat.on_send)(channel_id, content);
+                    (cb.chat.on_run_slash_command)(channel_id, content);
                 }
                 Ok(handle)
             } else {
@@ -497,9 +535,10 @@ pub(super) fn execute_harness_followup_command(
             let Some(channel) = channels.get(channel_idx) else {
                 return Err("No channel selected".to_string());
             };
-            let context_id = selected_channel_binding
+            let context_id = selected_channel
                 .read()
                 .clone()
+                .map(|selection| selection.binding().clone())
                 .filter(|binding| binding.channel_id == channel.id)
                 .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
@@ -511,7 +550,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -545,9 +584,10 @@ pub(super) fn execute_harness_followup_command(
                     "Selected channel is stale or unavailable: {channel_id}"
                 ));
             };
-            let context_id = selected_channel_binding
+            let context_id = selected_channel
                 .read()
                 .clone()
+                .map(|selection| selection.binding().clone())
                 .filter(|binding| binding.channel_id == channel.id)
                 .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
@@ -559,7 +599,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -586,7 +626,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -713,8 +753,6 @@ pub(super) struct EventDispatchContext<'a> {
     pub shared_devices_for_dispatch: &'a SharedDevices,
     pub shared_threshold_for_dispatch: &'a SharedThreshold,
     pub tui_selected_for_events: &'a SharedCommittedChannelSelection,
-    pub selected_channel_binding_for_events:
-        &'a std::sync::Arc<parking_lot::RwLock<Option<ChannelBindingWitness>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

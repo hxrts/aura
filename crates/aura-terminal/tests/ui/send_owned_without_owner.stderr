@@ -2,7 +2,4 @@ error[E0432]: unresolved import `aura_terminal::tui::callbacks::SendOwnedCallbac
  --> tests/ui/send_owned_without_owner.rs:3:5
   |
 3 | use aura_terminal::tui::callbacks::SendOwnedCallback;
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-----------------
-  |     |                              |
-  |     |                              help: a similar name exists in the module: `SendCallback`
-  |     no `SendOwnedCallback` in `tui::callbacks`
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `SendOwnedCallback` in `tui::callbacks`

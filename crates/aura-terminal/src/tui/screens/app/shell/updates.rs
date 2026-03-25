@@ -25,8 +25,6 @@ pub(super) struct UiUpdateContext {
     pub shared_devices_for_updates: SharedDevices,
     pub shared_messages_for_updates: SharedMessages,
     pub tui_selected_for_updates: SharedCommittedChannelSelection,
-    pub selected_channel_binding_for_updates:
-        std::sync::Arc<parking_lot::RwLock<Option<ChannelBindingWitness>>>,
     pub ready_join_channel_instances_for_updates: Arc<Mutex<HashSet<String>>>,
 }
 

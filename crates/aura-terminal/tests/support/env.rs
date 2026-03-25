@@ -25,9 +25,7 @@ use aura_testkit::MockRuntimeBridge;
 
 enum TestRuntimeKind {
     AppCoreOnly,
-    MockRuntime {
-        authority: Option<AuthorityId>,
-    },
+    MockRuntime { authority: Option<AuthorityId> },
 }
 
 /// Explicit builder for IoContext-based test environments.
@@ -50,6 +48,7 @@ pub struct BuiltIoContextTestEnv {
     pub ctx: Arc<IoContext>,
     pub app_core: Arc<RwLock<AppCore>>,
     pub test_dir: PathBuf,
+    cleanup_on_drop: bool,
 }
 
 impl IoContextTestEnvBuilder {
@@ -169,6 +168,7 @@ impl IoContextTestEnvBuilder {
             ctx,
             app_core,
             test_dir,
+            cleanup_on_drop: true,
         }
     }
 }
@@ -177,11 +177,22 @@ impl BuiltIoContextTestEnv {
     pub fn cleanup(&self) {
         let _ = std::fs::remove_dir_all(&self.test_dir);
     }
+
+    pub fn into_parts(mut self) -> (Arc<IoContext>, Arc<RwLock<AppCore>>, PathBuf) {
+        self.cleanup_on_drop = false;
+        (
+            self.ctx.clone(),
+            self.app_core.clone(),
+            self.test_dir.clone(),
+        )
+    }
 }
 
 impl Drop for BuiltIoContextTestEnv {
     fn drop(&mut self) {
-        self.cleanup();
+        if self.cleanup_on_drop {
+            self.cleanup();
+        }
     }
 }
 
@@ -204,10 +215,9 @@ pub async fn read_account_config(
         )),
         EncryptedStorageConfig::default(),
     );
-    let bytes = storage
-        .retrieve("account.json")
-        .await?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "account.json missing from storage"))?;
+    let bytes = storage.retrieve("account.json").await?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, "account.json missing from storage")
+    })?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -219,7 +229,12 @@ pub async fn read_account_authority_id(
     let config = read_account_config(test_dir).await?;
     Ok(config["authority_id"]
         .as_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "authority_id should be a string"))?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "authority_id should be a string",
+            )
+        })?
         .to_string())
 }
 

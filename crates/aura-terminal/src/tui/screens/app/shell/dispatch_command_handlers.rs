@@ -1,7 +1,7 @@
 use super::dispatch::*;
+use super::dispatch_handlers_neighborhood::handle_neighborhood_dispatch;
 use super::*;
 
-use aura_app::ui::workflows::access as access_workflows;
 use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
     start_guardian_ceremony, CeremonyLifecycleState, CeremonyPollPolicy,
@@ -9,9 +9,11 @@ use aura_app::ui::workflows::ceremonies::{
 use aura_app::ui_contract::SemanticOperationKind;
 use aura_core::types::FrostThreshold;
 
+use crate::tui::channel_selection::authoritative_committed_selection;
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
-use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
+use crate::tui::updates::spawn_ui_update;
 use crate::tui::updates::UiOperation;
+use crate::tui::updates::UiUpdatePublication;
 
 fn handle_recovery_and_ceremonies_dispatch(
     dispatch_cmd: DispatchCommand,
@@ -59,7 +61,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -86,7 +88,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = LocalTerminalOperationOwner::submit(
+                let operation = submit_local_terminal_operation(
                     app_core_for_events.clone(),
                     tasks_for_events.clone(),
                     update_tx,
@@ -151,15 +153,19 @@ fn handle_recovery_and_ceremonies_dispatch(
                             "Guardian ceremony initiated, waiting for guardian responses"
                         );
 
-                        if let Some(tx) = update_tx.clone() {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
+                        send_optional_ui_update_required(
+                            &update_tx,
+                            UiUpdate::ToastAdded(ToastMessage::info(
                                 "guardian-ceremony-started",
                                 format!(
                                     "Guardian ceremony started! Waiting for {k}-of-{n} guardians to respond"
                                 ),
-                            )));
-
-                            let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
+                            )),
+                        )
+                        .await;
+                        send_optional_ui_update_required(
+                            &update_tx,
+                            UiUpdate::KeyRotationCeremonyStatus {
                                 ceremony_id: status_handle.ceremony_id().to_string(),
                                 kind: aura_app::ui::types::CeremonyKind::GuardianRotation,
                                 accepted_count: 0,
@@ -175,11 +181,13 @@ fn handle_recovery_and_ceremonies_dispatch(
                                 )
                                 .initial_mode(),
                                 reversion_risk: true,
-                            });
-                        }
+                            },
+                        )
+                        .await;
 
                         let app_core_monitor = app.clone();
                         let update_tx_monitor = update_tx.clone();
+                        let tasks_for_status_updates = tasks.clone();
                         let tasks = tasks.clone();
                         let tasks_handle = tasks;
                         tasks_handle.spawn(async move {
@@ -192,7 +200,12 @@ fn handle_recovery_and_ceremonies_dispatch(
                                 policy,
                                 |status| {
                                     if let Some(tx) = update_tx_monitor.clone() {
-                                        let _ = tx.try_send(key_rotation_status_update(status));
+                                        spawn_ui_update(
+                                            &tasks_for_status_updates,
+                                            &tx,
+                                            key_rotation_status_update(status),
+                                            UiUpdatePublication::RequiredUnordered,
+                                        );
                                     }
                                 },
                                 effect_sleep,
@@ -201,19 +214,21 @@ fn handle_recovery_and_ceremonies_dispatch(
                             {
                                 Ok(lifecycle) => {
                                     if lifecycle.state == CeremonyLifecycleState::TimedOut {
-                                        if let Some(tx) = update_tx_monitor.clone() {
-                                            let _ = tx.try_send(key_rotation_status_update(
-                                                &lifecycle.status,
-                                            ));
-                                        }
+                                        send_optional_ui_update_required(
+                                            &update_tx_monitor,
+                                            key_rotation_status_update(&lifecycle.status),
+                                        )
+                                        .await;
                                     }
                                     if let Some(toast) = key_rotation_lifecycle_toast(
                                         lifecycle.status.kind,
                                         lifecycle.state,
                                     ) {
-                                        if let Some(tx) = update_tx_monitor.clone() {
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(toast));
-                                        }
+                                        send_optional_ui_update_required(
+                                            &update_tx_monitor,
+                                            UiUpdate::ToastAdded(toast),
+                                        )
+                                        .await;
                                     }
                                 }
                                 Err(error) => {
@@ -304,15 +319,17 @@ fn handle_recovery_and_ceremonies_dispatch(
                             n
                         );
 
-                        if let Some(tx) = update_tx.clone() {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
+                        send_optional_ui_update_required(
+                            &update_tx,
+                            UiUpdate::ToastAdded(ToastMessage::info(
                                 "mfa-ceremony-started",
                                 format!("Multifactor ceremony started ({k}-of-{n})"),
-                            )));
-                        }
-
-                        if let Some(tx) = update_tx.clone() {
-                            let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
+                            )),
+                        )
+                        .await;
+                        send_optional_ui_update_required(
+                            &update_tx,
+                            UiUpdate::KeyRotationCeremonyStatus {
                                 ceremony_id: status_handle.ceremony_id().to_string(),
                                 kind: aura_app::ui::types::CeremonyKind::DeviceRotation,
                                 accepted_count: 0,
@@ -328,11 +345,13 @@ fn handle_recovery_and_ceremonies_dispatch(
                                 )
                                 .initial_mode(),
                                 reversion_risk: true,
-                            });
-                        }
+                            },
+                        )
+                        .await;
 
                         let app_core_monitor = app.clone();
                         let update_tx_monitor = update_tx.clone();
+                        let tasks_for_status_updates = tasks.clone();
                         let tasks = tasks.clone();
                         let tasks_handle = tasks;
                         tasks_handle.spawn(async move {
@@ -345,7 +364,12 @@ fn handle_recovery_and_ceremonies_dispatch(
                                 policy,
                                 |status| {
                                     if let Some(tx) = update_tx_monitor.clone() {
-                                        let _ = tx.try_send(key_rotation_status_update(status));
+                                        spawn_ui_update(
+                                            &tasks_for_status_updates,
+                                            &tx,
+                                            key_rotation_status_update(status),
+                                            UiUpdatePublication::RequiredUnordered,
+                                        );
                                     }
                                 },
                                 effect_sleep,
@@ -354,19 +378,21 @@ fn handle_recovery_and_ceremonies_dispatch(
                             {
                                 Ok(lifecycle) => {
                                     if lifecycle.state == CeremonyLifecycleState::TimedOut {
-                                        if let Some(tx) = update_tx_monitor.clone() {
-                                            let _ = tx.try_send(key_rotation_status_update(
-                                                &lifecycle.status,
-                                            ));
-                                        }
+                                        send_optional_ui_update_required(
+                                            &update_tx_monitor,
+                                            key_rotation_status_update(&lifecycle.status),
+                                        )
+                                        .await;
                                     }
                                     if let Some(toast) = key_rotation_lifecycle_toast(
                                         lifecycle.status.kind,
                                         lifecycle.state,
                                     ) {
-                                        if let Some(tx) = update_tx_monitor.clone() {
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(toast));
-                                        }
+                                        send_optional_ui_update_required(
+                                            &update_tx_monitor,
+                                            UiUpdate::ToastAdded(toast),
+                                        )
+                                        .await;
                                     }
                                 }
                                 Err(error) => {
@@ -438,12 +464,14 @@ fn handle_recovery_and_ceremonies_dispatch(
                 }
                 io_ctx.forget_key_rotation_ceremony(&ceremony_id).await;
 
-                if let Some(tx) = update_tx {
-                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
+                send_optional_ui_update_required(
+                    &update_tx,
+                    UiUpdate::ToastAdded(ToastMessage::info(
                         "guardian-ceremony-canceled",
                         "Guardian ceremony canceled",
-                    )));
-                }
+                    )),
+                )
+                .await;
             });
         }
         DispatchCommand::CancelKeyRotationCeremony { ceremony_id } => {
@@ -488,12 +516,14 @@ fn handle_recovery_and_ceremonies_dispatch(
                 }
                 io_ctx.forget_key_rotation_ceremony(&ceremony_id).await;
 
-                if let Some(tx) = update_tx {
-                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
+                send_optional_ui_update_required(
+                    &update_tx,
+                    UiUpdate::ToastAdded(ToastMessage::info(
                         "ceremony-canceled",
                         "Ceremony canceled",
-                    )));
-                }
+                    )),
+                )
+                .await;
             });
         }
         _ => unreachable!("unexpected dispatch command routed to ceremonies module"),
@@ -510,20 +540,16 @@ pub(super) fn handle_dispatch_command_match(
     let cb = event_ctx.callbacks;
     let app_ctx_for_dispatch = event_ctx.app_ctx.clone();
     let app_core_for_events = event_ctx.app_ctx.app_core.raw().clone();
-    let app_core_for_ceremony = event_ctx.app_ctx.app_core.clone();
     let update_tx_for_events = event_ctx.update_tx_for_events.clone();
     let update_tx_for_dispatch = event_ctx.update_tx_for_dispatch.clone();
-    let update_tx_for_ceremony = event_ctx.update_tx_for_ceremony.clone();
     let tasks_for_events = event_ctx.tasks_for_events.clone();
     let shared_channels_for_dispatch = event_ctx.shared_channels_for_dispatch;
-    let shared_neighborhood_homes_for_dispatch = event_ctx.shared_neighborhood_homes_for_dispatch;
     let shared_invitations_for_dispatch = event_ctx.shared_invitations_for_dispatch;
     let shared_pending_requests_for_dispatch = event_ctx.shared_pending_requests_for_dispatch;
     let shared_contacts_for_dispatch = event_ctx.shared_contacts_for_dispatch;
     let shared_discovered_peers_for_dispatch = event_ctx.shared_discovered_peers_for_dispatch;
     let shared_messages_for_dispatch = event_ctx.shared_messages_for_dispatch;
     let tui_selected_for_events = event_ctx.tui_selected_for_events;
-    let selected_channel_binding_for_events = event_ctx.selected_channel_binding_for_events;
 
     match dispatch_cmd {
         DispatchCommand::CreateAccount { name } => {
@@ -531,7 +557,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -539,7 +565,8 @@ pub(super) fn handle_dispatch_command_match(
                 SemanticOperationKind::CreateAccount,
             );
             let handle = operation.harness_handle();
-            new_state.set_authoritative_operation_state(
+            set_authoritative_operation_state_sanctioned(
+                new_state,
                 handle.operation_id().clone(),
                 Some(handle.instance_id().clone()),
                 None,
@@ -552,7 +579,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -562,7 +589,18 @@ pub(super) fn handle_dispatch_command_match(
             (cb.app.on_import_device_enrollment_during_onboarding)(code, operation);
         }
         DispatchCommand::AddGuardian { contact_id } => {
-            (cb.recovery.on_select_guardian)(contact_id.to_string());
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_workflow_handoff_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::invitation_create(),
+                SemanticOperationKind::CreateGuardianInvitation,
+            );
+            (cb.recovery.on_select_guardian)(contact_id.to_string(), operation);
         }
 
         // === Chat Screen Commands ===
@@ -571,11 +609,7 @@ pub(super) fn handle_dispatch_command_match(
             if let Some(idx) = channels.iter().position(|channel| channel.id == channel_id) {
                 new_state.chat.selected_channel = idx;
                 *tui_selected_for_events.write() =
-                    Some(CommittedChannelSelection::new(channel_id.to_string()));
-                {
-                    let mut guard = selected_channel_binding_for_events.write();
-                    *guard = channels.get(idx).map(authoritative_channel_binding);
-                }
+                    channels.get(idx).map(authoritative_committed_selection);
             }
         }
         DispatchCommand::JoinChannel { channel_name } => {
@@ -583,7 +617,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -598,7 +632,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -617,7 +651,7 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                Some(WorkflowHandoffOperationOwner::submit(
+                Some(submit_workflow_handoff_operation(
                     app_core_for_events.clone(),
                     tasks_for_events.clone(),
                     update_tx,
@@ -643,7 +677,7 @@ pub(super) fn handle_dispatch_command_match(
                 if let Some(operation) = operation {
                     (cb.chat.on_send_owned)(channel_id, content, operation);
                 } else {
-                    (cb.chat.on_send)(channel_id, content);
+                    (cb.chat.on_run_slash_command)(channel_id, content);
                 }
             } else {
                 new_state.toast_error(format!(
@@ -657,10 +691,22 @@ pub(super) fn handle_dispatch_command_match(
             let idx = new_state.chat.message_scroll;
             let guard = shared_messages_for_dispatch.read();
             if let Some(msg) = guard.get(idx) {
+                let Some(update_tx) = update_tx_for_events.clone() else {
+                    new_state.toast_error("UI update sender is unavailable");
+                    return EventCommandLoopAction::ContinueCommand;
+                };
+                let operation = submit_workflow_handoff_operation(
+                    app_core_for_events.clone(),
+                    tasks_for_events.clone(),
+                    update_tx,
+                    OperationId::retry_message(),
+                    SemanticOperationKind::RetryChatMessage,
+                );
                 (cb.chat.on_retry_message)(
                     msg.id.clone(),
                     msg.channel_id.clone(),
                     msg.content.clone(),
+                    operation,
                 );
             } else {
                 new_state.toast_error("No message selected");
@@ -812,7 +858,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -828,10 +874,32 @@ pub(super) fn handle_dispatch_command_match(
             );
         }
         DispatchCommand::SetChannelTopic { channel_id, topic } => {
-            (cb.chat.on_set_topic)(channel_id.to_string(), topic);
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::set_channel_topic(),
+                SemanticOperationKind::SetChannelTopic,
+            );
+            (cb.chat.on_set_topic)(channel_id.to_string(), topic, operation);
         }
         DispatchCommand::DeleteChannel { channel_id } => {
-            (cb.chat.on_close_channel)(channel_id.to_string());
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::close_channel(),
+                SemanticOperationKind::CloseChannel,
+            );
+            (cb.chat.on_close_channel)(channel_id.to_string(), operation);
         }
 
         // === Contacts Screen Commands ===
@@ -839,7 +907,18 @@ pub(super) fn handle_dispatch_command_match(
             contact_id,
             nickname,
         } => {
-            (cb.contacts.on_update_nickname)(contact_id.to_string(), nickname);
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::update_contact_nickname(),
+                SemanticOperationKind::UpdateContactNickname,
+            );
+            (cb.contacts.on_update_nickname)(contact_id.to_string(), nickname, operation);
         }
         DispatchCommand::OpenContactNicknameModal => {
             let idx = new_state.contacts.selected_index;
@@ -882,7 +961,18 @@ pub(super) fn handle_dispatch_command_match(
             {
                 let guard = shared_contacts_for_dispatch.read();
                 if let Some(contact) = guard.get(idx) {
-                    (cb.contacts.on_start_chat)(contact.id.clone());
+                    let Some(update_tx) = update_tx_for_events.clone() else {
+                        new_state.toast_error("UI update sender is unavailable");
+                        return EventCommandLoopAction::ContinueCommand;
+                    };
+                    let operation = submit_local_terminal_operation(
+                        app_core_for_events.clone(),
+                        tasks_for_events.clone(),
+                        update_tx,
+                        OperationId::start_direct_chat(),
+                        SemanticOperationKind::StartDirectChat,
+                    );
+                    (cb.contacts.on_start_chat)(contact.id.clone(), operation);
                 } else {
                     new_state.toast_error("No contact selected");
                 }
@@ -901,9 +991,10 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("No channel selected");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let selected_binding = selected_channel_binding_for_events
+            let selected_binding = tui_selected_for_events
                 .read()
                 .clone()
+                .map(|selection| selection.binding().clone())
                 .filter(|binding| binding.channel_id == channel.id);
             let context_id = selected_binding.and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
@@ -917,7 +1008,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -947,9 +1038,10 @@ pub(super) fn handle_dispatch_command_match(
                 ));
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let selected_binding = selected_channel_binding_for_events
+            let selected_binding = tui_selected_for_events
                 .read()
                 .clone()
+                .map(|selection| selection.binding().clone())
                 .filter(|binding| binding.channel_id == channel.id);
             let context_id = selected_binding.and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
@@ -963,7 +1055,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -983,7 +1075,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -1039,7 +1131,7 @@ pub(super) fn handle_dispatch_command_match(
             );
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 if let Some(update_tx) = update_tx_for_dispatch.clone() {
-                    let operation = WorkflowHandoffOperationOwner::submit(
+                    let operation = submit_workflow_handoff_operation(
                         app_ctx_for_dispatch.app_core.raw().clone(),
                         app_ctx_for_dispatch.tasks(),
                         update_tx,
@@ -1069,7 +1161,7 @@ pub(super) fn handle_dispatch_command_match(
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
-                let operation = LocalTerminalOperationOwner::submit(
+                let operation = submit_local_terminal_operation(
                     app_core_for_events.clone(),
                     tasks_for_events.clone(),
                     update_tx,
@@ -1096,7 +1188,7 @@ pub(super) fn handle_dispatch_command_match(
                 InvitationKind::Guardian => SemanticOperationKind::CreateContactInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -1117,7 +1209,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = WorkflowHandoffOperationOwner::submit(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -1144,7 +1236,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -1168,10 +1260,32 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::UpdateNicknameSuggestion {
             nickname_suggestion,
         } => {
-            (cb.settings.on_update_nickname_suggestion)(nickname_suggestion);
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::update_nickname_suggestion(),
+                SemanticOperationKind::UpdateNicknameSuggestion,
+            );
+            (cb.settings.on_update_nickname_suggestion)(nickname_suggestion, operation);
         }
         DispatchCommand::UpdateMfaPolicy { policy } => {
-            (cb.settings.on_update_mfa)(policy);
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_local_terminal_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::update_mfa_policy(),
+                SemanticOperationKind::UpdateMfaPolicy,
+            );
+            (cb.settings.on_update_mfa)(policy, operation);
         }
         DispatchCommand::AddDevice {
             name,
@@ -1181,7 +1295,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -1198,7 +1312,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = LocalTerminalOperationOwner::submit(
+            let operation = submit_local_terminal_operation(
                 app_core_for_events.clone(),
                 tasks_for_events.clone(),
                 update_tx,
@@ -1260,180 +1374,23 @@ pub(super) fn handle_dispatch_command_match(
         // which is handled above with the guardian ceremony commands.
 
         // === Neighborhood Screen Commands ===
-        DispatchCommand::EnterHome => {
-            let idx = new_state.neighborhood.grid.current();
-            {
-                let guard = shared_neighborhood_homes_for_dispatch.read();
-                if let Some(home_id) = guard.get(idx) {
-                    // Keep entered_home_id authoritative as a real home ID.
-                    // The state-machine layer sets an index sentinel first.
-                    new_state.neighborhood.entered_home_id = Some(home_id.clone());
-                    // Default to Limited-level traversal depth
-                    (cb.neighborhood.on_enter_home)(
-                        home_id.clone(),
-                        new_state.neighborhood.enter_depth,
-                    );
-                } else {
-                    new_state.toast_error("No home selected");
-                }
-            }
-        }
-        DispatchCommand::GoHome => {
-            (cb.neighborhood.on_go_home)();
-        }
-        DispatchCommand::BackToLimited => {
-            (cb.neighborhood.on_back_to_limited)();
-        }
-        DispatchCommand::OpenHomeCreate => {
-            // Open home creation modal
-            new_state
-                .modal_queue
-                .enqueue(crate::tui::state::QueuedModal::NeighborhoodHomeCreate(
-                    crate::tui::state::HomeCreateModalState::new(),
-                ));
-        }
-        DispatchCommand::OpenModeratorAssignmentModal => {
-            let contacts = shared_contacts_for_dispatch.read().clone();
-            new_state.modal_queue.enqueue(
-                crate::tui::state::QueuedModal::NeighborhoodModeratorAssignment(
-                    crate::tui::state::ModeratorAssignmentModalState::new(contacts),
-                ),
-            );
-        }
-        DispatchCommand::SubmitModeratorAssignment { target_id, assign } => {
-            (cb.neighborhood.on_set_moderator)(
-                new_state.neighborhood.entered_home_id.clone(),
-                target_id.to_string(),
-                assign,
-            );
-            new_state.modal_queue.dismiss();
-        }
-        DispatchCommand::OpenAccessOverrideModal => {
-            let contacts = shared_contacts_for_dispatch.read().clone();
-            new_state.modal_queue.enqueue(
-                crate::tui::state::QueuedModal::NeighborhoodAccessOverride(
-                    crate::tui::state::AccessOverrideModalState::new(contacts),
-                ),
-            );
-        }
-        DispatchCommand::SubmitAccessOverride {
-            target_id,
-            access_level,
-        } => {
-            new_state.modal_queue.dismiss();
-            let app_core = app_core_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
-            let home_id = new_state.neighborhood.entered_home_id.clone();
-            let target_for_toast = target_id.clone();
-            let tasks = tasks_for_events.clone();
-            tasks.spawn(async move {
-                match access_workflows::set_access_override(
-                    app_core.raw(),
-                    home_id.as_deref(),
-                    target_id,
-                    access_level.into(),
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if let Some(tx) = update_tx {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                                "access-override",
-                                format!(
-                                    "Access override set for {}: {}",
-                                    target_for_toast,
-                                    access_level.label()
-                                ),
-                            )));
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(tx) = update_tx {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "access-override",
-                                format!("Failed to set access override: {error}"),
-                            )));
-                        }
-                    }
-                }
-            });
-        }
-        DispatchCommand::OpenHomeCapabilityConfigModal => {
-            new_state.modal_queue.enqueue(
-                crate::tui::state::QueuedModal::NeighborhoodCapabilityConfig(
-                    crate::tui::state::HomeCapabilityConfigModalState::default(),
-                ),
-            );
-        }
-        DispatchCommand::SubmitHomeCapabilityConfig { config } => {
-            new_state.modal_queue.dismiss();
-            let app_core = app_core_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
-            let home_id = new_state.neighborhood.entered_home_id.clone();
-            let tasks = tasks_for_events.clone();
-            tasks.spawn(async move {
-                match access_workflows::configure_home_capabilities(
-                    app_core.raw(),
-                    home_id.as_deref(),
-                    &config.full_csv(),
-                    &config.partial_csv(),
-                    &config.limited_csv(),
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if let Some(tx) = update_tx {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
-                                "capability-config",
-                                "Capability config saved",
-                            )));
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(tx) = update_tx {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "capability-config",
-                                format!("Failed to save capability config: {error}"),
-                            )));
-                        }
-                    }
-                }
-            });
-        }
-        DispatchCommand::CreateHome { name, description } => {
-            (cb.neighborhood.on_create_home)(name, description);
-            new_state.modal_queue.dismiss();
-        }
-        DispatchCommand::CreateNeighborhood { name } => {
-            (cb.neighborhood.on_create_neighborhood)(name);
-        }
-        DispatchCommand::AddSelectedHomeToNeighborhood => {
-            let idx = new_state.neighborhood.grid.current();
-            {
-                let guard = shared_neighborhood_homes_for_dispatch.read();
-                if let Some(home_id) = guard.get(idx) {
-                    (cb.neighborhood.on_add_home_to_neighborhood)(home_id.clone());
-                } else {
-                    new_state.toast_error("No home selected");
-                }
-            }
-        }
-        DispatchCommand::AddHomeToNeighborhood { target } => {
-            (cb.neighborhood.on_add_home_to_neighborhood)(target.as_command_arg());
-        }
-        DispatchCommand::LinkSelectedHomeOneHopLink => {
-            let idx = new_state.neighborhood.grid.current();
-            {
-                let guard = shared_neighborhood_homes_for_dispatch.read();
-                if let Some(home_id) = guard.get(idx) {
-                    (cb.neighborhood.on_link_home_one_hop_link)(home_id.clone());
-                } else {
-                    new_state.toast_error("No home selected");
-                }
-            }
-        }
-        DispatchCommand::LinkHomeOneHopLink { target } => {
-            (cb.neighborhood.on_link_home_one_hop_link)(target.as_command_arg());
+        cmd @ (DispatchCommand::EnterHome
+        | DispatchCommand::GoHome
+        | DispatchCommand::BackToLimited
+        | DispatchCommand::OpenHomeCreate
+        | DispatchCommand::OpenModeratorAssignmentModal
+        | DispatchCommand::SubmitModeratorAssignment { .. }
+        | DispatchCommand::OpenAccessOverrideModal
+        | DispatchCommand::SubmitAccessOverride { .. }
+        | DispatchCommand::OpenHomeCapabilityConfigModal
+        | DispatchCommand::SubmitHomeCapabilityConfig { .. }
+        | DispatchCommand::CreateHome { .. }
+        | DispatchCommand::CreateNeighborhood { .. }
+        | DispatchCommand::AddSelectedHomeToNeighborhood
+        | DispatchCommand::AddHomeToNeighborhood { .. }
+        | DispatchCommand::LinkSelectedHomeOneHopLink
+        | DispatchCommand::LinkHomeOneHopLink { .. }) => {
+            return handle_neighborhood_dispatch(cmd, new_state, event_ctx);
         }
 
         // === Navigation Commands ===
