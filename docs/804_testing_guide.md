@@ -55,7 +55,7 @@ Use this lane matrix when selecting harness mode.
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot/readiness waits.
 
-Shared-semantic preflight is intentionally stricter than generic backend startup. A run config that includes SSH instances does not automatically qualify for the shared semantic lane; until a backend implements the shared semantic contract, SSH remains diagnostic-only / transport-only for harness purposes and shared-semantic scenarios must fail closed before execution.
+Shared-semantic preflight is intentionally stricter than generic backend startup. A run config that includes SSH instances does not automatically qualify for the shared semantic lane. Until a backend implements the shared semantic contract, SSH remains diagnostic-only / transport-only for harness purposes. Shared-semantic scenarios must fail closed before execution.
 
 `aura-app::ui_contract` is the canonical module for shared flow support. It defines `SharedFlowId`, `SHARED_FLOW_SUPPORT`, `SHARED_FLOW_SCENARIO_COVERAGE`, `UiSnapshot`, `compare_ui_snapshots_for_parity`, `OperationInstanceId`, and `RuntimeEventSnapshot`. Use semantic readiness and state assertions before using fallback text matching.
 
@@ -83,10 +83,10 @@ For shared semantic flows, the default expectation is:
   lifecycle/error publication
 - `aura-agent` owns long-lived runtime/service actors and other actor-owned
   async state
-- `aura-terminal` and `aura-web` submit commands and observe lifecycle; they do
-  not own terminal semantic truth
-- `aura-harness` consumes typed handles, readiness, and projections; it does
-  not mutate semantic lifecycle directly
+- `aura-terminal` and `aura-web` submit commands and observe lifecycle. They do
+  not own terminal semantic truth.
+- `aura-harness` consumes typed handles, readiness, and projections. It does
+  not mutate semantic lifecycle directly.
 
 If a migrated parity-critical flow needs both actor and move semantics, the split must stay explicit:
 
@@ -101,14 +101,14 @@ For parity-critical observation:
 - observation surfaces must be side-effect free
 - recovery and retries must be explicit and separate from observation
 - browser `ui_state` remains observation-only and must not perform implicit
-  navigation/state recovery; explicit recovery goes through
-  `recover_ui_state` / `readStructuredUiStateWithNavigationRecovery(...)`
+  navigation/state recovery. Explicit recovery goes through
+  `recover_ui_state` / `readStructuredUiStateWithNavigationRecovery(...)`.
 - DOM/text fallback paths are diagnostics only and must not become success-path observation behavior
 - browser semantic observation must fail closed when the published snapshot is
-  unavailable; it must not silently repair by reading a live controller/model
-  snapshot behind the harness bridge
-- channel-binding responses must either carry authoritative context materialization or fail explicitly; selected ids or labels alone are not semantic bindings
-- channel list item ids and selected-channel snapshot ids must stay keyed by canonical channel ids when the runtime projection already provides them; harness/browser code should not round-trip through display labels on those paths
+  unavailable. It must not silently repair by reading a live controller/model
+  snapshot behind the harness bridge.
+- channel-binding responses must either carry authoritative context materialization or fail explicitly. Selected ids or labels alone are not semantic bindings.
+- channel list item ids and selected-channel snapshot ids must stay keyed by canonical channel ids when the runtime projection already provides them. Harness/browser code should not round-trip through display labels on those paths.
 - diagnostic tool/query surfaces should say `diagnostic_*` at the API boundary when they are derived from screen/DOM capture rather than authoritative semantic state
 - onboarding must publish through the same semantic snapshot path as the rest of the UI
 - placeholder IDs, override-backed exports, and heuristic success/event synthesis are not acceptable correctness paths
@@ -121,10 +121,10 @@ For parity-critical waits and assertions:
   `DiscoveryTriggerOutcome`, `CeremonyProcessingOutcome`, or an explicit
   mutation outcome, tests should assert those variants directly instead of
   treating a unit success result as sufficient proof of progress
-- executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers; do not keep a second harness-local convergence graph
-- projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation; runtime-event, toast, and exact operation-state waits still fail closed across restarts
+- executor-side follow-on waits should carry typed submission evidence from the issued receipt into the declared contract barriers. Do not keep a second harness-local convergence graph.
+- projection-based semantic waits may resume across bounded browser/runtime restarts only by clearing stale freshness baselines and re-entering typed snapshot observation. Runtime-event, toast, and exact operation-state waits still fail closed across restarts.
 - semantic issue success must come from typed command receipts and authoritative runtime facts, not from visible homes, modal closure, message appearance, selected-list state, or a frontend-local submitting phase
-- shared semantic harness core should decode typed `ToolPayload` and bridge structs directly; keep raw `serde_json::Value` plumbing at outer CLI/browser adapters only
+- shared semantic harness core should decode typed `ToolPayload` and bridge structs directly. Keep raw `serde_json::Value` plumbing at outer CLI/browser adapters only.
 - raw sleeps, redraw polling, DOM scraping, and fallback text matching are diagnostics only
 - scenario-language text assertions must keep the same split:
   - `message_contains` means authoritative `UiSnapshot.messages`
@@ -210,7 +210,7 @@ Testing/enforcement split:
   compatibility branch, migration shim, or stale regression fixture rather than
   leaving both paths active
 
-The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). The browser also publishes page-owned semantic submit readiness metadata, including whether that enqueue surface is installed (`enqueue_ready`), so driver startup and recovery waits bind to the active shell generation’s real submission surface instead of stale driver-local probes. The bootstrap staging/handoff promise is completion-based: callers may treat it as confirmation that the owned bootstrap/rebootstrap transition finished, not merely that the request was queued. For generation-changing bootstrap flows, that completion now means the new page-owned shell generation has published its semantic snapshot through the canonical publication path, with the browser diagnostics `window.__AURA_UI_ACTIVE_GENERATION__` and `window.__AURA_UI_READY_GENERATION__` reflecting the active vs ready generation boundary. Render heartbeat remains the separate browser render-convergence signal. Browser bootstrap storage is also explicit: preserved-profile restart correctness depends on the typed selected runtime identity, pending bootstrap metadata, and browser-local `AccountConfig` metadata remaining distinct so the next generation can recover the canonical runtime bootstrap path without falling back to browser-local semantic repair. Channel-returning bridge responses now distinguish weak selected-channel ids from authoritative channel bindings; a payload that lacks context is not a binding. Browser harness failures also surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__` and `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`; those globals are diagnostic-only and do not replace the authoritative `UiSnapshot`/`RenderHeartbeat` payloads. Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`, and browser-owned maintenance polling should share one bounded helper for sleep/cancellation/pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
+The authoritative frontend matrix for converted shared scenarios comes from `scenarios/harness_inventory.toml` and is enforced by `just ci-harness-matrix-inventory`. Allowlisted harness-mode hooks must carry explicit owner, justification, and design-note references in `scripts/check/user-flow-policy-guardrails.sh`. Changes to the browser harness bridge request/response or observation surface must update both `crates/aura-web/ARCHITECTURE.md` and this guide so compatibility expectations stay explicit. The current browser compatibility surface includes the explicit `stage_runtime_identity` bootstrap handoff entrypoint plus the page-owned semantic submission queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`). The browser also publishes page-owned semantic submit readiness metadata, including whether that enqueue surface is installed (`enqueue_ready`), so driver startup and recovery waits bind to the active shell generation’s real submission surface instead of stale driver-local probes. The bootstrap staging/handoff promise is completion-based: callers may treat it as confirmation that the owned bootstrap/rebootstrap transition finished, not merely that the request was queued. For generation-changing bootstrap flows, that completion now means the new page-owned shell generation has published its semantic snapshot through the canonical publication path, with the browser diagnostics `window.__AURA_UI_ACTIVE_GENERATION__` and `window.__AURA_UI_READY_GENERATION__` reflecting the active vs ready generation boundary. Render heartbeat remains the separate browser render-convergence signal. Browser bootstrap storage is also explicit: preserved-profile restart correctness depends on the typed selected runtime identity, pending bootstrap metadata, and browser-local `AccountConfig` metadata remaining distinct so the next generation can recover the canonical runtime bootstrap path without falling back to browser-local semantic repair. Channel-returning bridge responses now distinguish weak selected-channel ids from authoritative channel bindings. A payload that lacks context is not a binding. Browser harness failures also surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__` and `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`. Those globals are diagnostic-only and do not replace the authoritative `UiSnapshot`/`RenderHeartbeat` payloads. Browser-owned semantic snapshot publication should flow through one helper aligned with `UiController::publish_ui_snapshot`, and browser-owned maintenance polling should share one bounded helper for sleep/cancellation/pause reporting so those paths stay uniform and clearly non-semantic. Parity exceptions must remain typed metadata in `aura-app::ui_contract` with a reason code, scope, affected surface, and authoritative doc reference.
 
 The canonical shared-flow coverage anchors for the current parity-critical user
 flows remain:
@@ -246,14 +246,14 @@ The required split is:
 Reactive subscription policy for tests:
 - subscribing before registration must fail with `ReactiveError::SignalNotFound`
 - tests must not treat an empty stream as equivalent to "signal not registered"
-- lagging subscribers are allowed to miss intermediate updates; assertions
-  should target eventual newer snapshots, not lossless delivery
+- lagging subscribers are allowed to miss intermediate updates. Assertions
+  should target eventual newer snapshots, not lossless delivery.
 - move-owned handles/tokens invalidate stale holders by construction
 - observed layers render and assert, but do not author semantic truth
 - TUI-local semantic submission is limited to the sanctioned local-terminal and
   workflow-handoff owner wrappers
-- browser bridge concurrency is limited to `WebTaskOwner`; it does not own
-  parity-critical lifecycle
+- browser bridge concurrency is limited to `WebTaskOwner`. It does not own
+  parity-critical lifecycle.
 - Playwright stages browser runtime identity through the explicit bridge
   entrypoint before rebootstrap and submits semantic commands through the
   page-owned semantic queue instead of mutating browser lifecycle state
@@ -740,7 +740,7 @@ artifacts/harness/<run>/network_backend_preflight.json
 
 Patchbay is the authoritative NAT-realism backend for holepunch validation.
 Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
-`patchbay-vm` relies on the explicit harness work/artifact directories and `QEMU_VM_WORK_DIR`; the removed `.qemu-vm` redirect path is no longer part of the supported workflow.
+`patchbay-vm` relies on the explicit harness work/artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
 
 Implementation follows three tiers. Tier 1 covers deterministic and property tests in `aura-testkit` for retry and path-selection invariants. Tier 2 covers Patchbay integration scenarios in `aura-harness` for PR gating. Tier 3 covers Patchbay stress and flake detection suites on scheduled CI.
 

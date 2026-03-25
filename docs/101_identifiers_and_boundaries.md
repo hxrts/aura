@@ -17,17 +17,17 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 | Identifier | Type | Purpose |
 |------------|------|---------|
 | `ContextId` | `Uuid` | Relational context or derived subcontext. Opaque on the wire, appears only inside encrypted envelopes and receipts. Never encodes participant lists or roles. Flow budgets and leakage metrics scope to `(ContextId, peer)` pairs. |
-| `SessionId` | `Uuid` | Choreographic protocol execution instance. Pairs a `ContextId` with a nonce. Not long-lived; expires when protocol completes or times out. |
+| `SessionId` | `Uuid` | Choreographic protocol execution instance. Pairs a `ContextId` with a nonce. Not long-lived. Expires when protocol completes or times out. |
 | `DkdContextId` | `{ app_label: String, fingerprint: [u8; 32] }` | Deterministic Key Derivation context. Combines application label with fingerprint to scope derived keys across application boundaries. |
 
 ## 3. Communication Identifiers
 
 | Identifier | Type | Purpose |
 |------------|------|---------|
-| `ChannelId` | `Hash32` | AMP messaging substream scoped under a relational context. Opaque; does not reveal membership or topology. |
+| `ChannelId` | `Hash32` | AMP messaging substream scoped under a relational context. Opaque. Does not reveal membership or topology. |
 | `RelayId` | `[u8; 32]` | Pairwise communication context derived from X25519 keys. Foundation for RID message contexts. |
 | `GroupId` | `[u8; 32]` | Threshold group communication context derived from group membership. Foundation for GID message contexts. |
-| `MessageContext` | `enum { Relay, Group, DkdContext }` | Unifies the three privacy context types. Enforces mutual exclusivity; cross-partition routing requires explicit bridge operations. |
+| `MessageContext` | `enum { Relay, Group, DkdContext }` | Unifies the three privacy context types. Enforces mutual exclusivity. Cross-partition routing requires explicit bridge operations. |
 | `ConnectionId` | `Uuid` | Network connection identifier with privacy-preserving properties. Does not encode endpoint information. |
 
 ## 4. Content Identifiers

@@ -117,7 +117,7 @@ See [Effects and Handlers Guide](802_effects_guide.md) for authorization scenari
 
 ## Performance and Caching
 
-Authorization results are cached per authority, token hash, and resource scope with epoch-based invalidation. Cache entries invalidate on epoch rotation or policy update. Signature verification scales with chain length; Datalog evaluation scales with facts times rules; attenuation is constant-cost.
+Authorization results are cached per authority, token hash, and resource scope with epoch-based invalidation. Cache entries invalidate on epoch rotation or policy update. Signature verification scales with chain length. Datalog evaluation scales with facts times rules. Attenuation is constant-cost.
 
 See [Distributed Maintenance Guide](808_maintenance_guide.md) for cache configuration.
 

@@ -56,7 +56,7 @@ Shared commands are typed `IntentAction` requests (account creation, device enro
 
 - Each command returns a typed response with submission metadata and an optional operation handle.
 - Post-action waits require a strictly newer authoritative projection or another declared barrier.
-- Unsupported semantic commands fail closed; no silent fallback to renderer-specific behavior.
+- Unsupported semantic commands fail closed. No silent fallback to renderer-specific behavior.
 
 See [Testing Guide](804_testing_guide.md) for semantic command usage.
 

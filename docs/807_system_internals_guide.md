@@ -329,14 +329,14 @@ Run `just check-arch` before submitting changes. The checker validates:
 
 Workflow operations in `aura-app` use `WorkflowError` (`aura-app::workflows::error`) for typed error propagation. The enum provides structured variants for common failure modes:
 
-- `RuntimeUnavailable` — runtime bridge not initialized
-- `RuntimeCall { operation, source }` — a named runtime bridge call failed
-- `ConnectivityRequired` — peer connectivity prerequisite not met
-- `Journal { operation, source }` — journal load/merge/persist failure
-- `FactEncoding { source }` — fact serialization failure
-- `Ceremony { operation, source }` — ceremony lifecycle failure
-- `DeliveryFailed { peer, attempts, detail }` — transport delivery exhausted retries
-- `Precondition` — static invariant violation
+- `RuntimeUnavailable`: runtime bridge not initialized
+- `RuntimeCall { operation, source }`: a named runtime bridge call failed
+- `ConnectivityRequired`: peer connectivity prerequisite not met
+- `Journal { operation, source }`: journal load/merge/persist failure
+- `FactEncoding { source }`: fact serialization failure
+- `Ceremony { operation, source }`: ceremony lifecycle failure
+- `DeliveryFailed { peer, attempts, detail }`: transport delivery exhausted retries
+- `Precondition`: static invariant violation
 
 `From<WorkflowError> for AuraError` enables workflows to keep `Result<T, AuraError>` signatures while constructing typed errors internally.
 

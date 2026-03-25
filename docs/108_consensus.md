@@ -91,7 +91,7 @@ Consensus uses the following core concepts and notation throughout the protocol.
 * `prestate` - local pre-state for this instance (e.g., journal snapshot)
 * `prestate_hash = H(prestate)` - hash of prestate
 * `rid = H(Op, prestate)` - result identifier
-* `t` - threshold; adversary controls `< t` key shares
+* `t` - threshold. Adversary controls `< t` key shares.
 * `W` - finite set of witnesses for this consensus instance
 
 ### Per-Instance Tracking

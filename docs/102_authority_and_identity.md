@@ -92,6 +92,8 @@ The `TreeStateSummary` provides a public view with only epoch, commitment, thres
 
 A commitment tree contains branch nodes and leaf nodes. A leaf node represents a device or guardian inside the account. A branch node represents a subpolicy with threshold requirements. The root node defines the account-level threshold policy.
 
+#### Node Kinds
+
 ```rust
 pub enum NodeKind {
     Leaf(LeafNode),
@@ -100,6 +102,8 @@ pub enum NodeKind {
 ```
 
 This type defines leaf and branch variants. The `Leaf` variant contains a `LeafNode` with device information. The `Branch` variant is a marker indicating an internal node.
+
+#### Leaf and Branch Nodes
 
 ```rust
 pub struct LeafNode {

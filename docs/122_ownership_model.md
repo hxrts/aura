@@ -34,11 +34,11 @@ In practice, Aura's production `ActorOwned` runtime path is `aura-agent`:
   public API for higher layers
 - raw spawn lives only inside the sanctioned supervision implementation
 - public runtime facades must consume shared runtime-owned supervisors and
-  ceremony runners; they may not allocate private ownership roots as a
-  convenience constructor
-- service health must reflect degraded obligation progress explicitly; "task
+  ceremony runners. They may not allocate private ownership roots as a
+  convenience constructor.
+- service health must reflect degraded obligation progress explicitly. "Task
   exists" is not a sufficient health contract when required maintenance work is
-  failing
+  failing.
 
 ### `Observed`
 
@@ -256,10 +256,10 @@ Macro declaration rule:
   enums
 - `#[aura_macros::authoritative_source(kind = "...")]` is the sanctioned
   declaration surface for helpers that mint or read authoritative semantic
-  truth; valid kinds are `runtime`, `signal`, `app_core`, and `proof_issuer`
+  truth. Valid kinds are `runtime`, `signal`, `app_core`, and `proof_issuer`.
 - `#[aura_macros::strong_reference(domain = "...")]` is the sanctioned
-  declaration surface for canonical strong-reference carriers; valid domains are
-  `channel`, `invitation`, `ceremony`, `home`, and `home_scope`
+  declaration surface for canonical strong-reference carriers. Valid domains are
+  `channel`, `invitation`, `ceremony`, `home`, and `home_scope`.
 - `#[aura_macros::weak_identifier(domain = "...")]` is the sanctioned
   declaration surface for weak identifier carriers that must not be upgraded
   into strong bindings without an explicit owner path
@@ -366,9 +366,9 @@ Best-effort work:
   materializing authoritative state, registering required ownership, or other
   work that a later parity-critical operation depends on
 - must not use the `best_effort_*` naming surface unless they actually obey the
-  best-effort contract above; Aura treats that prefix as a reserved ownership
+  best-effort contract above. Aura treats that prefix as a reserved ownership
   boundary and lints it accordingly even when the helper forgot to add an
-  explicit `#[best_effort_boundary]`
+  explicit `#[best_effort_boundary]`.
 
 If a step mutates authoritative state required by a later semantic operation, it is not best-effort. It belongs either:
 

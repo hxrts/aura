@@ -1,6 +1,8 @@
 # Distributed Systems Contract
 
-This contract specifies Aura's distributed systems model. It defines the safety, liveness, and consistency guarantees provided by the architecture. It also documents the synchrony assumptions, latency expectations, and adversarial capabilities the system tolerates. This contract complements [Privacy and Information Flow Contract](003_information_flow_contract.md), which focuses on metadata and privacy budgets. Together these contracts define the full set of invariants protocol authors must respect.
+This contract specifies Aura's distributed systems model. It defines the safety, liveness, and consistency guarantees provided by the architecture. It also documents the synchrony assumptions, latency expectations, and adversarial capabilities the system tolerates.
+
+This contract complements [Privacy and Information Flow Contract](003_information_flow_contract.md), which focuses on metadata and privacy budgets. Together these contracts define the full set of invariants protocol authors must respect.
 
 Formal verification of these properties uses Quint model checking (`verification/quint/`) and Lean 4 theorem proofs (`verification/lean/`). See [Verification Coverage Report](998_verification_coverage.md) for current status.
 

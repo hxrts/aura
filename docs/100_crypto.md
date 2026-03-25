@@ -18,6 +18,8 @@ This separation ensures that cryptographic operations are auditable, testable, a
 
 The `aura-core` crate provides cryptographic foundations without direct side effects.
 
+#### Type Wrappers
+
 Type wrappers live in `crates/aura-core/src/crypto/ed25519.rs`.
 
 ```rust
@@ -27,6 +29,8 @@ pub struct Ed25519Signature(pub [u8; 64]);
 ```
 
 These wrappers use fixed-size arrays for type safety and delegate to `ed25519_dalek` internally. They expose a stable API independent of the underlying library. They enable future algorithm migration without changing application code. They provide type safety across crate boundaries.
+
+#### Effect Traits
 
 Effect trait definitions live in `crates/aura-core/src/effects/`. The `CryptoCoreEffects` trait inherits from `RandomCoreEffects` and provides core cryptographic operations.
 

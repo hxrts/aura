@@ -168,7 +168,7 @@ Frontend-specific flows may still have scenario coverage, but they are not part 
    selected shared channel rather than frontend-specific ordering.
 5. Browser shared-flow bridge changes should preserve the explicit runtime
    identity staging handoff and the page-owned semantic command queue used by
-   the Playwright lane; coverage remains anchored in the shared semantic
+   the Playwright lane. Coverage remains anchored in the shared semantic
    scenarios rather than DOM-driving fallback mechanics.
 6. Changes to renderer-specific control wiring should add or update
    frontend-conformance coverage rather than weakening the shared semantic lane.
@@ -181,19 +181,19 @@ Frontend-specific flows may still have scenario coverage, but they are not part 
 Fast CI currently uses two separate gates:
 
 - `just ci-user-flow-coverage` enforces traceability heuristics between changed user flow-facing source files, canonical scenarios, and this report
-- `AURA_ALLOW_FLOW_COVERAGE_SKIP=1` is a local-only escape hatch; CI rejects it
+- `AURA_ALLOW_FLOW_COVERAGE_SKIP=1` is a local-only escape hatch. CI rejects it.
 - `just ci-user-flow-policy` enforces documentation and contributor-guidance updates for shared user flow contract and determinism surfaces via `scripts/check/user-flow-guidance-sync.sh`
 - OTA and module release/update validation rows in this report are part of that same user-flow guidance surface and must be kept in sync as the release matrix evolves
 - The release/update rows are expected to land in staged order: mechanism validation first, candidate rehearsal second, and promotion-gate coverage last
 - `just ci-harness-matrix-inventory` enforces that scenario classification drives the TUI/web matrix lanes
 - shared semantic scenarios and frontend-conformance scenarios are expected to
-  remain distinct classifications; CI policy should reject shared-flow drift
-  back to renderer-driven mechanics
+  remain distinct classifications. CI policy should reject shared-flow drift
+  back to renderer-driven mechanics.
 
 Current limitation:
 
 - `ci-user-flow-coverage` still infers some ownership from filenames and does not yet prove that the correct scenario set changed
-- docs updates and coverage traceability are distinct concerns; this report should not claim stronger behavioral enforcement than CI actually provides
+- docs updates and coverage traceability are distinct concerns. This report should not claim stronger behavioral enforcement than CI actually provides.
 
 ### Residual Risk Areas
 

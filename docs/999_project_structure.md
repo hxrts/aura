@@ -178,9 +178,9 @@ Layer 2 is the *specification* layer: pure domain semantics with zero runtime co
 Must hold:
 - No handler composition, runtime assembly, or UI dependencies.
 - Domain facts are versioned and encoded via canonical DAG-CBOR.
-- Fact reducers register through `FactRegistry`; no direct wiring in `aura-journal`.
+- Fact reducers register through `FactRegistry`. No direct wiring in `aura-journal`.
 - Authorization scopes use `aura-core` `ResourceScope` and typed operations.
-- No in-memory production state; stateful test handlers live in `aura-testkit`.
+- No in-memory production state. Stateful test handlers live in `aura-testkit`.
 
 Forbidden:
 - Direct OS access (time, fs, network) outside effect traits.
@@ -445,7 +445,7 @@ Crates:
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
 | `aura-authentication` | Authentication | Device, threshold, and guardian auth flows |
-| `aura-chat` | Chat | Chat domain facts + view reducers; local chat prototype |
+| `aura-chat` | Chat | Chat domain facts and view reducers. Local chat prototype. |
 | `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |

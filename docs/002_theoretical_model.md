@@ -25,12 +25,12 @@ Use this section when writing [Theoretical Model](002_theoretical_model.md), [Pr
 | $`a`$, $`b`$ | `AuthorityId` | Authority identifiers |
 | $`\kappa`$ | `ContextId` | Context identifier |
 | $`e`$ | `Epoch` | Epoch number |
-| authority | — | An account authority |
-| context | — | A relational or authority namespace keyed by `ContextId` |
-| peer authority | — | A remote authority in a context |
-| member | — | An authority in a home's threshold authority set |
-| participant | — | An authority granted home access but not in the threshold set |
-| moderator | — | A member with moderation designation for a home |
+| authority | | An account authority |
+| context | | A relational or authority namespace keyed by `ContextId` |
+| peer authority | | A remote authority in a context |
+| member | | An authority in a home's threshold authority set |
+| participant | | An authority granted home access but not in the threshold set |
+| moderator | | A member with moderation designation for a home |
 
 ### Access and Topology
 

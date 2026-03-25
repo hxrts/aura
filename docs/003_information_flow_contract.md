@@ -1,6 +1,8 @@
 # Privacy and Information Flow Contract
 
-This contract specifies Aura's privacy and information-flow model. It defines privacy boundaries, leakage budgets, and enforcement mechanisms. Privacy boundaries align with social relationships rather than technical perimeters. Violations occur when information crosses trust boundaries without consent. Acceptable flows consume explicitly budgeted headroom.
+This contract specifies Aura's privacy and information-flow model. It defines privacy boundaries, leakage budgets, and enforcement mechanisms. Privacy boundaries align with social relationships rather than technical perimeters.
+
+Violations occur when information crosses trust boundaries without consent. Acceptable flows consume explicitly budgeted headroom.
 
 This document complements [Distributed Systems Contract](004_distributed_systems_contract.md), which covers safety, liveness, and consistency. Together these contracts define the full set of invariants protocol authors must respect.
 

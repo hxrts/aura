@@ -106,11 +106,11 @@ In practice this means:
 - long-lived owners should consume a remaining timeout budget across nested stages instead of resetting fresh wall-clock literals at each call site
 - retry loops should use shared backoff policy rather than duplicated sleeps
 - timeout policy belongs to owner/coordinator code, not UI observation layers
-- reducing timeout duration in tests or harness mode is acceptable; changing what timeout means is not
+- reducing timeout duration in tests or harness mode is acceptable. Changing what timeout means is not.
 - runtime-facing workflow/task boundaries should carry `OperationTimeoutBudget`, `OwnedShutdownToken`, and `OwnedTaskSpawner` rather than raw `Duration`, raw cancellation traits, or ad hoc spawn helpers
 - parity-critical runtime waits should consume strong typed authoritative
-  references once context is known; they must not re-derive ownership or
-  context from weaker ids inside later readiness/wait helpers
+  references once context is known. They must not re-derive ownership or
+  context from weaker ids inside later readiness/wait helpers.
 
 ### Runtime Authority Discipline
 
