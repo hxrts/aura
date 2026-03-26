@@ -249,6 +249,12 @@ pub mod authorization {
     pub use crate::authorization::*;
 }
 
+pub mod frontend {
+    pub use crate::frontend_primitives::{
+        ClipboardPort, FrontendTaskOwner, FrontendTaskRuntime, FrontendUiOperation, MemoryClipboard,
+    };
+}
+
 pub mod prelude {
     //! UI prelude — import the approved aura-app surface for frontends.
 

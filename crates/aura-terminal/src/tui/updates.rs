@@ -48,13 +48,13 @@ use crate::error::TerminalError;
 use crate::tui::components::ToastMessage;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{AuthorityInfo, Device, MfaPolicy};
+pub use aura_app::frontend_primitives::FrontendUiOperation as UiOperation;
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui_contract::{
     ChannelBindingWitness, OperationId, OperationInstanceId, ProjectionRevision, RuntimeEventKind,
     RuntimeFact, SemanticOperationStatus,
 };
 use aura_core::types::Epoch;
-pub use aura_ui::FrontendUiOperation as UiOperation;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Notify;

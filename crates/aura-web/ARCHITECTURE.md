@@ -19,8 +19,8 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 | Direction | Crate | What is consumed / produced |
 |-----------|-------|-----------------------------|
-| Consumes | `aura-ui` | Shared Dioxus root, UI state, routing, snapshot rendering, frontend operation labels |
-| Consumes | `aura-app` | `AppCore`, `ui_contract`, workflow types |
+| Consumes | `aura-ui` | Shared Dioxus root, UI state, routing, snapshot rendering |
+| Consumes | `aura-app` | `AppCore`, `ui_contract`, workflow types, shared frontend primitives (`frontend_primitives`) |
 | Consumes | `aura-core` | Types, identifiers |
 | Produces | — | Browser shell, harness bridge surface, semantic projections |
 
@@ -28,8 +28,12 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 - Browser-only APIs stay in this crate.
 - Shared UI behavior remains in `aura-ui`.
-- Browser task ownership reuses the shared frontend task-owner implementation
-  from `aura-ui` rather than keeping a forked cancellation/spawner stack.
+- Browser shell DOM-id resolution reuses the shared typed helper surface from
+  `aura-ui` rather than re-opening `web_dom_id().expect(...)` chains at each
+  browser callsite.
+- Browser task ownership reuses the shared `FrontendTaskOwner` from
+  `aura-app::frontend_primitives` with browser-specific spawn wiring
+  (`wasm_bindgen_futures::spawn_local`) rather than keeping a forked stack.
 - Harness bridge methods are deterministic and backwards-compatible.
 - Bridge responses that claim to return a channel binding must originate from authoritative selected-channel context materialization; selected ids without context are not a binding.
 - When bridge flows can only observe a selected channel id without authoritative
@@ -97,10 +101,13 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 The browser shell exports structured observed semantic UI projections and render convergence signals for harness observation.
 
 Enforcement locus:
-- `src/harness_bridge.rs` publishes `UiSnapshot` and `RenderHeartbeat`.
-- `src/harness_bridge.rs` schedules publication through
-  `requestAnimationFrame`.
-- `src/main.rs` wires harness-mode startup and publication hooks.
+- `src/harness/publication.rs` is the canonical owner of semantic snapshot,
+  render-heartbeat, and semantic-submit publication surfaces.
+- `src/harness/publication.rs` schedules render heartbeat through
+  `requestAnimationFrame` after semantic snapshot publication.
+- `src/harness/install.rs` wires the page-owned observation/readiness surfaces.
+- `src/harness_bridge.rs` remains the thin stable facade rather than the
+  publication owner.
 
 Failure mode:
 - Browser harness runs must infer state from DOM text or ad hoc JS scraping.
@@ -142,14 +149,17 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 |------|----------|---------------------|------------|--------------|
 | Browser harness bridge installation and command ingress | `ActorOwned` | `aura-web::harness_bridge` bridge loop | bridge ingress/installation code | browser render layer, harness |
 | Browser semantic lifecycle rendering | `Observed` | authoritative semantic facts from `aura-app` | browser presentation state only | harness, user-visible rendering |
-| Render-convergence and projection publication | `Observed` | browser projection/export path | bridge/publication code only | Playwright/harness |
+| Render-convergence and projection publication | `Observed` | browser projection/export path | `aura-web::harness::publication` only | Playwright/harness |
 | Web onboarding/bootstrap command helpers for shared flows | `Observed` shell over upstream `MoveOwned`/`ActorOwned` coordination | shared workflow/runtime coordinators | browser-local UI state only; never terminal truth | harness, DOM/render readers |
-| Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper reused from `aura-ui::task_owner` | shared frontend task-owner implementation | browser shell wiring only | harness, render layer |
+| Shared browser task-owner cancellation/spawn mechanics | `ActorOwned` helper from `aura-app::frontend_primitives` | shared frontend task-owner implementation | browser shell wiring only | harness, render layer |
 
 ### Capability-Gated Points
 
 - Harness bridge command ingress and compatibility-gated semantic command execution in `src/harness_bridge.rs`.
-- Browser-side semantic projection and render-heartbeat publication in `src/harness_bridge.rs`.
+- Browser-side semantic projection, render-heartbeat publication, and typed
+  publication-state diagnostics in `src/harness/publication.rs`.
+- Page-owned harness observation/submit readiness installation in
+  `src/harness/install.rs`.
 - Browser clipboard and bootstrap adapters that may trigger upstream workflows, but may not author terminal semantic lifecycle locally.
 
 ### Verification Hooks
@@ -165,11 +175,15 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 
 - The harness bridge request/response surface carries explicit compatibility metadata so callers can detect versioned behavior changes.
 - Explicit bridge entrypoints currently include semantic command submission,
-  observed snapshot/render publication, and runtime identity staging for
-  owned browser rebootstrap during create-account style flows.
+  observed snapshot/render publication, semantic-submit readiness metadata, and
+  runtime identity staging for owned browser rebootstrap during create-account
+  style flows.
 - The browser also exports explicit diagnostic publication-state globals for
   semantic snapshot and render-heartbeat availability so harness failures can
   distinguish unavailable publication from stale render convergence.
+- Those publication diagnostics are typed internally through publication
+  status, binding-mode, and reliability classes before they are serialized onto
+  the browser globals.
 - Runtime identity staging and bootstrap handoff completion semantics are part
   of that compatibility surface; changes must preserve the distinction between
   accepted/enqueued work and completed bootstrap state.
