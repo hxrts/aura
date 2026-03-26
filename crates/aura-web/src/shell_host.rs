@@ -2,11 +2,8 @@ use async_lock::{Mutex, RwLock};
 use aura_agent::{AgentBuilder, AuraAgent};
 use aura_app::ui::types::{
     BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
-    InvitationBridgeType,
 };
 use aura_app::ui::workflows::account as account_workflows;
-use aura_app::ui::workflows::context as context_workflows;
-use aura_app::ui::workflows::invitation as invitation_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::system as system_workflows;
@@ -19,19 +16,19 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::future_to_promise;
 
 use crate::bootstrap_storage::{load_persisted_account_config, persist_runtime_account_config};
-use crate::error::{WebUiError, log_web_error};
+use crate::error::{log_web_error, WebUiError};
 use crate::harness_bridge::{
     self, BootstrapHandoff, BrowserShellPhase, RuntimeIdentityStageSource,
 };
 use crate::task_owner::shared_web_task_owner;
 use crate::web_clipboard::WebClipboardAdapter;
 use crate::{
-    active_storage_prefix, clear_pending_device_enrollment_code, clear_storage_key,
-    device_enrollment_bootstrap_name, harness_instance_id, harness_mode_enabled,
+    active_storage_prefix, clear_storage_key, harness_instance_id, harness_mode_enabled,
     load_pending_account_bootstrap, load_pending_device_enrollment_code,
     load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
     pending_device_enrollment_code_key, persist_selected_runtime_identity,
     selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
+    workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
 };
 
 #[derive(Clone, PartialEq)]
@@ -255,72 +252,39 @@ async fn reconcile_pending_device_enrollment_import(
     pending_code: &str,
     pending_code_storage_key: &str,
 ) -> Result<Option<String>, WebUiError> {
-    let invitation = invitation_workflows::import_invitation_details(app_core, pending_code)
-        .await
-        .map_err(|error| {
-            WebUiError::operation(
-                WebUiOperation::BootstrapController,
-                "WEB_PENDING_DEVICE_ENROLLMENT_IMPORT_DETAILS_FAILED",
-                format!("failed to inspect pending device enrollment code during bootstrap: {error}"),
-            )
-        })?;
-    let invitation_info = invitation.info().clone();
-    let InvitationBridgeType::DeviceEnrollment {
-        subject_authority,
-        device_id,
-        nickname_suggestion,
-        ..
-    } = invitation_info.invitation_type.clone()
-    else {
-        return Err(WebUiError::operation(
-            WebUiOperation::BootstrapController,
-            "WEB_PENDING_DEVICE_ENROLLMENT_WRONG_TYPE",
-            "pending device enrollment code did not resolve to a device enrollment invitation",
-        ));
-    };
-
-    if runtime_authority_id != subject_authority || runtime_device_id != device_id {
+    let storage_prefix = active_storage_prefix();
+    let result = workflows::accept_device_enrollment_import(
+        app_core,
+        DeviceEnrollmentImportRequest {
+            code: pending_code,
+            current_runtime_identity: CurrentRuntimeIdentity {
+                authority_id: runtime_authority_id,
+                selected_runtime_identity: Some(BootstrapRuntimeIdentity::new(
+                    runtime_authority_id,
+                    runtime_device_id,
+                )),
+            },
+            storage_prefix: &storage_prefix,
+            rebootstrap_policy: RebootstrapPolicy::RejectIfRequired,
+            operation: WebUiOperation::BootstrapController,
+        },
+    )
+    .await?;
+    if result.rebootstrap_required {
+        let staged_runtime_identity = result.staged_runtime_identity;
         return Err(WebUiError::operation(
             WebUiOperation::BootstrapController,
             "WEB_PENDING_DEVICE_ENROLLMENT_RUNTIME_IDENTITY_MISMATCH",
             format!(
                 "pending device enrollment code expected authority {subject_authority} device {device_id}, but bootstrap runtime is authority {} device {}",
-                runtime_authority_id,
-                runtime_device_id
+                runtime_authority_id, runtime_device_id,
+                subject_authority = staged_runtime_identity.authority_id,
+                device_id = staged_runtime_identity.device_id,
             ),
         ));
     }
-
-    let bootstrap_name = device_enrollment_bootstrap_name(nickname_suggestion.as_deref());
-    if context_workflows::current_home_context(app_core).await.is_err() {
-        account_workflows::initialize_runtime_account(app_core, bootstrap_name.clone())
-            .await
-            .map_err(|error| {
-                WebUiError::operation(
-                    WebUiOperation::BootstrapController,
-                    "WEB_PENDING_DEVICE_ENROLLMENT_ACCOUNT_INIT_FAILED",
-                    error.to_string(),
-                )
-            })?;
-    }
-
-    invitation_workflows::accept_device_enrollment_invitation(app_core, &invitation_info)
-        .await
-        .map_err(|error| {
-            WebUiError::operation(
-                WebUiOperation::BootstrapController,
-                "WEB_PENDING_DEVICE_ENROLLMENT_ACCEPT_FAILED",
-                error.to_string(),
-            )
-        })?;
-    persist_runtime_account_config(
-        app_core,
-        Some(bootstrap_name.clone()),
-        WebUiOperation::BootstrapController,
-    )
-    .await?;
-    clear_pending_device_enrollment_code(pending_code_storage_key)?;
-    Ok(Some(bootstrap_name))
+    let _ = pending_code_storage_key;
+    Ok(Some(result.bootstrap_name))
 }
 
 fn install_harness_instrumentation(controller: Arc<UiController>, generation_id: u64) {

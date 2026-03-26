@@ -1944,7 +1944,9 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub(crate) fn apply_authoritative_operation_status(
+    /// Apply an authoritative semantic operation status onto the currently
+    /// materialized UI operation snapshot for the given operation id.
+    pub fn apply_authoritative_operation_status(
         &self,
         operation_id: OperationId,
         status: SemanticOperationStatus,
@@ -1960,6 +1962,29 @@ impl UiController {
         model.set_authoritative_operation_state(operation_id, next_state);
         drop(model);
         self.request_rerender();
+    }
+
+    /// Seed an exact submitted operation instance before handing ownership to a
+    /// shared workflow so downstream semantic status publication can bind to
+    /// the same UI-visible instance id.
+    pub fn begin_exact_operation_submission(
+        &self,
+        operation_id: OperationId,
+    ) -> OperationInstanceId {
+        let mut model = write_model(&self.model);
+        model.set_operation_state(operation_id.clone(), OperationState::Submitting);
+        let instance_id = model
+            .operations
+            .iter()
+            .rev()
+            .find(|operation| operation.id == operation_id)
+            .map(|operation| operation.instance_id.clone())
+            .unwrap_or_else(|| {
+                panic!("begin_exact_operation_submission must materialize an operation snapshot")
+            });
+        drop(model);
+        self.request_rerender();
+        instance_id
     }
 
     pub(crate) fn complete_runtime_modal_operation_success(
@@ -2005,7 +2030,9 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub(crate) fn complete_runtime_contact_invitation_acceptance(
+    /// Apply the shared UI completion effects for a successful imported contact
+    /// invitation acceptance.
+    pub fn complete_runtime_contact_invitation_acceptance(
         &self,
         authority_id: AuthorityId,
         display_name: String,

@@ -15,23 +15,20 @@ cfg_if! {
         mod shell_host;
         mod task_owner;
         mod web_clipboard;
+        mod workflows;
 
         use async_lock::{Mutex, RwLock};
         use aura_app::{AppCore};
         use aura_app::ui::workflows::account as account_workflows;
-        use aura_app::ui::workflows::context as context_workflows;
-        use aura_app::ui::workflows::invitation as invitation_workflows;
         use aura_app::ui::workflows::network as network_workflows;
         use aura_app::ui::workflows::runtime as runtime_workflows;
         use aura_app::ui::workflows::system as system_workflows;
         use aura_app::ui::workflows::time as time_workflows;
         use aura_app::ui::types::{
             BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
-            InvitationBridgeType, PendingAccountBootstrap,
-            WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
+            PendingAccountBootstrap, WEB_PENDING_ACCOUNT_BOOTSTRAP_STORAGE_SUFFIX,
             WEB_SELECTED_RUNTIME_IDENTITY_STORAGE_SUFFIX,
         };
-        use bootstrap_storage::persist_runtime_account_config;
         use aura_app::ui::contract::{
             ControlId, FieldId, ScreenId, UiReadiness,
         };
@@ -46,6 +43,10 @@ cfg_if! {
         use std::sync::Arc;
         use shell_host::{BootstrapState, WebShellHost};
         use task_owner::shared_web_task_owner;
+        use workflows::{
+            AccountCreationStageMode, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest,
+            RebootstrapPolicy,
+        };
 
         const WEB_STORAGE_PREFIX: &str = "aura_";
         const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
@@ -371,7 +372,9 @@ cfg_if! {
             Ok(())
         }
 
-        async fn stage_initial_web_account_bootstrap(nickname: &str) -> Result<(), WebUiError> {
+        pub(crate) async fn stage_initial_web_account_bootstrap(
+            nickname: &str,
+        ) -> Result<(), WebUiError> {
             let pending_bootstrap = persist_pending_web_account_bootstrap(nickname).await?;
             let storage_prefix = active_storage_prefix();
             let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
@@ -635,9 +638,6 @@ cfg_if! {
                     }
 
                     let storage_prefix = active_storage_prefix();
-                    let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-                    let pending_code_storage_key =
-                        pending_device_enrollment_code_key(&storage_prefix);
                     importing_code.set(true);
                     import_error.set(None);
 
@@ -646,54 +646,43 @@ cfg_if! {
                     if let Err(error) = harness_bridge::schedule_browser_task_next_tick(move || {
                         shared_web_task_owner().spawn_local(async move {
                             let app_core = scheduled_controller.app_core().clone();
-                            let result = async {
-                            let mut requires_rebootstrap = false;
-                            let invitation = invitation_workflows::import_invitation_details(
-                                &app_core, &code,
-                            )
-                            .await
-                            .map_err(|error| {
-                                WebUiError::operation(
-                                    WebUiOperation::ImportDeviceEnrollmentCode,
-                                    "WEB_DEVICE_ENROLLMENT_IMPORT_DETAILS_FAILED",
-                                        error.to_string(),
-                                    )
-                                })?;
-                            let invitation_info = invitation.info().clone();
-                            let InvitationBridgeType::DeviceEnrollment {
-                                subject_authority,
-                                device_id,
-                                nickname_suggestion,
-                                ..
-                            } = invitation_info.invitation_type.clone()
-                            else {
-                                return Err(WebUiError::input(
-                                    WebUiOperation::ImportDeviceEnrollmentCode,
-                                    "WEB_DEVICE_ENROLLMENT_CODE_INVALID_KIND",
-                                    "Code is not a device enrollment invitation",
-                                ));
-                            };
-
-                            let runtime = runtime_workflows::require_runtime(&app_core)
-                                .await
-                                .map_err(|error| {
-                                    WebUiError::operation(
-                                        WebUiOperation::ImportDeviceEnrollmentCode,
-                                        "WEB_RUNTIME_REQUIRED_FAILED",
-                                        error.to_string(),
-                                    )
-                                })?;
-                            let current_authority = runtime.authority_id();
-                            let selected_runtime_identity =
-                                logged_optional(load_selected_runtime_identity(
-                                    &runtime_identity_key,
-                                ));
-                            if current_authority != subject_authority
-                                || selected_runtime_identity
-                                    .as_ref()
-                                    .map(|identity| identity.device_id)
-                                    != Some(device_id)
-                            {
+                            let result: Result<_, WebUiError> = async {
+                                let current_authority = runtime_workflows::require_runtime(&app_core)
+                                    .await
+                                    .map_err(|error| {
+                                        WebUiError::operation(
+                                            WebUiOperation::ImportDeviceEnrollmentCode,
+                                            "WEB_RUNTIME_REQUIRED_FAILED",
+                                            error.to_string(),
+                                        )
+                                    })?
+                                    .authority_id();
+                                let current_runtime_identity = CurrentRuntimeIdentity {
+                                    authority_id: current_authority,
+                                    selected_runtime_identity: logged_optional(
+                                        load_selected_runtime_identity(&selected_runtime_identity_key(
+                                            &storage_prefix,
+                                        )),
+                                    ),
+                                };
+                                let result = workflows::accept_device_enrollment_import(
+                                    &app_core,
+                                    DeviceEnrollmentImportRequest {
+                                        code: &code,
+                                        current_runtime_identity: current_runtime_identity.clone(),
+                                        storage_prefix: &storage_prefix,
+                                        rebootstrap_policy: RebootstrapPolicy::StageIfRequired,
+                                        operation: WebUiOperation::ImportDeviceEnrollmentCode,
+                                    },
+                                )
+                                .await?;
+                                if result.rebootstrap_required {
+                                    let staged_runtime_identity =
+                                        result.staged_runtime_identity.clone();
+                                    let selected_runtime_identity =
+                                        current_runtime_identity.selected_runtime_identity;
+                                    let device_id = staged_runtime_identity.device_id;
+                                    let subject_authority = staged_runtime_identity.authority_id;
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staging_rebootstrap current_authority={};subject_authority={};selected_runtime_identity={:?};invited_device={}",
@@ -704,24 +693,6 @@ cfg_if! {
                                     )
                                     .into(),
                                 );
-                                persist_pending_device_enrollment_code(
-                                    &pending_code_storage_key,
-                                    &code,
-                                )
-                                .map_err(|error| {
-                                    error.with_operation(
-                                        WebUiOperation::ImportDeviceEnrollmentCode,
-                                    )
-                                })?;
-                                persist_selected_runtime_identity(
-                                    &runtime_identity_key,
-                                    &BootstrapRuntimeIdentity::new(subject_authority, device_id),
-                                )
-                                .map_err(|error| {
-                                    error.with_operation(
-                                        WebUiOperation::ImportDeviceEnrollmentCode,
-                                    )
-                                })?;
                                 web_sys::console::log_1(
                                     &format!(
                                         "[web-import-device] staged_rebootstrap subject_authority={};device_id={}",
@@ -729,7 +700,6 @@ cfg_if! {
                                     )
                                     .into(),
                                 );
-                                requires_rebootstrap = true;
                                 submit_runtime_bootstrap_handoff(
                                     harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
                                         authority_id: subject_authority,
@@ -743,82 +713,31 @@ cfg_if! {
                                         WebUiOperation::ImportDeviceEnrollmentCode,
                                     )
                                 })?;
-                                return Ok(requires_rebootstrap);
-                            }
-
-                            web_sys::console::log_1(
-                                &format!(
-                                    "[web-import-device] accepting_on_bound_runtime authority={};selected_runtime_identity={:?};invited_device={}",
-                                    current_authority,
-                                    selected_runtime_identity,
-                                    device_id
-                                )
-                                .into(),
-                            );
-
-                            let bootstrap_name =
-                                device_enrollment_bootstrap_name(nickname_suggestion.as_deref());
-                            if context_workflows::current_home_context(&app_core)
-                                .await
-                                .is_err()
-                            {
+                                    return Ok(result);
+                                }
                                 web_sys::console::log_1(
                                     &format!(
-                                        "[web-import-device] initializing_runtime_account nickname={bootstrap_name}"
+                                        "[web-import-device] accepting_on_bound_runtime authority={};selected_runtime_identity={:?};invited_device={}",
+                                        current_authority,
+                                        current_runtime_identity.selected_runtime_identity,
+                                        result.staged_runtime_identity.device_id
                                     )
                                     .into(),
                                 );
-                                account_workflows::initialize_runtime_account(
-                                    &app_core,
-                                    bootstrap_name.clone(),
-                                )
-                                .await
-                                .map_err(|error| {
-                                    WebUiError::operation(
-                                        WebUiOperation::ImportDeviceEnrollmentCode,
-                                        "WEB_DEVICE_ENROLLMENT_ACCOUNT_INIT_FAILED",
-                                        error.to_string(),
+                                web_sys::console::log_1(
+                                    &format!(
+                                        "[web-import-device] initializing_runtime_account nickname={}",
+                                        result.bootstrap_name
                                     )
-                                })?;
-                            }
-
-                            invitation_workflows::accept_device_enrollment_invitation(
-                                &app_core,
-                                &invitation_info,
-                            )
-                            .await
-                            .map_err(|error| {
-                                WebUiError::operation(
-                                    WebUiOperation::ImportDeviceEnrollmentCode,
-                                    "WEB_DEVICE_ENROLLMENT_ACCEPT_FAILED",
-                                    error.to_string(),
-                                )
-                            })?;
-                            let runtime_devices_after_accept =
-                                runtime.try_list_devices().await.unwrap_or_default();
-                            web_sys::console::log_1(
-                                &format!(
-                                    "[web-import-device] accepted runtime_devices={:?}",
-                                    runtime_devices_after_accept
-                                        .iter()
-                                        .map(|device| device.id.to_string())
-                                        .collect::<Vec<_>>()
-                                )
-                                .into(),
-                            );
-                            persist_runtime_account_config(
-                                &app_core,
-                                Some(bootstrap_name.clone()),
-                                WebUiOperation::ImportDeviceEnrollmentCode,
-                            )
-                            .await?;
-                            Ok(requires_rebootstrap)
+                                    .into(),
+                                );
+                                Ok(result)
                             }
                             .await;
 
                             match result {
-                                Ok(requires_rebootstrap) => {
-                                    if !requires_rebootstrap {
+                                Ok(result) => {
+                                    if result.accepted {
                                         web_sys::console::log_1(
                                             &"[web-import-device] finalizing_ui".into(),
                                         );
@@ -828,13 +747,6 @@ cfg_if! {
                                         harness_bridge::publish_semantic_controller_snapshot(
                                             scheduled_controller.clone(),
                                         );
-                                        if let Err(clear_error) =
-                                            clear_pending_device_enrollment_code(
-                                                &pending_code_storage_key,
-                                            )
-                                        {
-                                            log_web_error("warn", &clear_error);
-                                        }
                                         web_sys::console::log_1(
                                             &"[web-import-device] finalized_ui".into(),
                                         );
@@ -845,11 +757,6 @@ cfg_if! {
                                     importing_code.set(false);
                                 }
                                 Err(error) => {
-                                    if let Err(clear_error) = clear_pending_device_enrollment_code(
-                                        &pending_code_storage_key,
-                                    ) {
-                                        log_web_error("warn", &clear_error);
-                                    }
                                     let message = error.user_message();
                                     scheduled_controller.set_account_setup_state(
                                         false,
@@ -902,59 +809,29 @@ cfg_if! {
 
                     let controller = controller.clone();
                     shared_web_task_owner().spawn_local(async move {
-                        let has_runtime = {
-                            let core = controller.app_core().read().await;
-                            core.runtime().is_some()
-                        };
-                        let result = if has_runtime {
-                            match stage_runtime_bound_web_account_bootstrap(&nickname).await {
-                                Ok(()) => {
-                                    let init_result = account_workflows::initialize_runtime_account(
-                                        controller.app_core(),
-                                        nickname.clone(),
-                                    )
-                                    .await
-                                    .map_err(|error| {
-                                        WebUiError::operation(
-                                            WebUiOperation::CreateAccount,
-                                            "WEB_CREATE_ACCOUNT_INIT_FAILED",
-                                            error.to_string(),
-                                        )
-                                    });
-                                    match init_result {
-                                        Ok(()) => persist_runtime_account_config(
-                                            controller.app_core(),
-                                            Some(nickname.clone()),
-                                            WebUiOperation::CreateAccount,
-                                        )
-                                        .await
-                                        .map(|_| ()),
-                                        Err(error) => Err(error),
-                                    }
-                                }
-                                Err(error) => Err(error),
+                        let result: Result<_, WebUiError> = async {
+                            let result =
+                                workflows::stage_account_creation(controller.app_core(), &nickname)
+                                    .await?;
+                            if result.mode == AccountCreationStageMode::InitialBootstrapStaged {
+                                submit_runtime_bootstrap_handoff(
+                                    harness_bridge::BootstrapHandoff::PendingAccountBootstrap {
+                                        account_name: nickname.clone(),
+                                        source: harness_bridge::PendingAccountBootstrapSource::OnboardingUi,
+                                    },
+                                )
+                                .await?;
                             }
-                        } else {
-                            match stage_initial_web_account_bootstrap(&nickname).await {
-                                Ok(()) => {
-                                    submit_runtime_bootstrap_handoff(
-                                        harness_bridge::BootstrapHandoff::PendingAccountBootstrap {
-                                            account_name: nickname.clone(),
-                                            source: harness_bridge::PendingAccountBootstrapSource::OnboardingUi,
-                                        },
-                                    )
-                                    .await
-                                }
-                                Err(error) => Err(error),
-                            }
-                        };
+                            Ok(result)
+                        }
+                        .await;
 
                         match result {
-                            Ok(()) => {
+                            Ok(result) => {
                                 web_sys::console::log_1(
                                     &"[web-onboarding] submit_account ok".into(),
                                 );
-                                if has_runtime {
+                                if result.mode == AccountCreationStageMode::RuntimeInitialized {
                                     controller
                                         .finalize_account_setup(ScreenId::Neighborhood);
                                 } else {
@@ -1489,16 +1366,12 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", main_path.display()));
 
         assert!(
-            source.contains("persist_runtime_account_config(")
-                && source.contains("Some(bootstrap_name.clone())")
-                && source.contains("WebUiOperation::ImportDeviceEnrollmentCode"),
-            "bound-runtime device enrollment acceptance must persist browser account metadata before the next preserved-profile restart"
+            source.contains("workflows::accept_device_enrollment_import("),
+            "device enrollment import should route through the shared aura-web workflow helper"
         );
         assert!(
-            source.contains("persist_runtime_account_config(")
-                && source.contains("Some(nickname.clone())")
-                && source.contains("WebUiOperation::CreateAccount"),
-            "runtime-backed onboarding must persist browser account metadata after account bootstrap succeeds"
+            source.contains("workflows::stage_account_creation(controller.app_core(), &nickname)"),
+            "onboarding account creation should route through the shared aura-web workflow helper"
         );
     }
 }

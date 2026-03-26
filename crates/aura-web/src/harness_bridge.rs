@@ -4,15 +4,15 @@
 //! harness to send keys, capture screenshots, and query UI state from Playwright.
 
 use aura_app::ui::contract::{
-    ListId, ModalId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot, classify_screen_item_id,
-    classify_semantic_settings_section_item_id,
+    classify_screen_item_id, classify_semantic_settings_section_item_id, ListId, ModalId,
+    OperationId, OperationInstanceId, RenderHeartbeat, ScreenId, UiReadiness, UiSnapshot,
 };
 use aura_app::ui::scenarios::{
-    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
+    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
+    SemanticSubmissionHandle, SettingsSection, SubmissionState, UiOperationHandle,
 };
 use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
-use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::ceremonies as ceremony_workflows;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::invitation as invitation_workflows;
@@ -20,12 +20,15 @@ use aura_app::ui::workflows::messaging as messaging_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::time as time_workflows;
-use aura_app::ui_contract::RuntimeFact;
-use aura_core::{AuthorityId, DeviceId, types::identifiers::ChannelId};
+use aura_app::ui_contract::{
+    RuntimeFact, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
+};
+use aura_core::{types::identifiers::ChannelId, AuthorityId, DeviceId};
 use aura_effects::ReactiveEffects;
 use aura_ui::UiController;
 use futures::channel::oneshot;
-use js_sys::{Array, Function, JSON, Object, Reflect};
+use js_sys::{Array, Function, Object, Reflect, JSON};
 use serde_json::{from_str, to_string};
 use serde_wasm_bindgen::to_value;
 use std::cell::{Cell, RefCell, RefCell as StdRefCell};
@@ -35,13 +38,14 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::future_to_promise;
 
-use crate::bootstrap_storage::persist_runtime_account_config;
 use crate::{
-    active_storage_prefix, clear_pending_device_enrollment_code, device_enrollment_bootstrap_name,
-    load_selected_runtime_identity, pending_device_enrollment_code_key,
-    persist_pending_device_enrollment_code, persist_selected_runtime_identity,
-    selected_runtime_identity_key, submit_runtime_bootstrap_handoff,
+    active_storage_prefix, load_selected_runtime_identity, selected_runtime_identity_key,
+    submit_runtime_bootstrap_handoff,
     task_owner::shared_web_task_owner,
+    workflows::{
+        self, AccountCreationStageMode, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest,
+        RebootstrapPolicy,
+    },
 };
 
 thread_local! {
@@ -84,42 +88,14 @@ fn current_browser_shell_phase() -> BrowserShellPhase {
     BROWSER_SHELL_PHASE.with(|slot| slot.get())
 }
 
-async fn initialize_runtime_account_for_web_shell(
-    controller: Arc<UiController>,
-    nickname: String,
-) -> Result<(), JsValue> {
-    web_sys::console::log_1(
-        &format!("[web-harness] create_account start nickname={nickname}").into(),
-    );
-    super::stage_runtime_bound_web_account_bootstrap(&nickname)
-        .await
-        .map_err(|error| JsValue::from_str(&error.user_message()))?;
-    controller.set_account_setup_state(false, nickname.clone(), None);
-    account_workflows::initialize_runtime_account(controller.app_core(), nickname.clone())
-        .await
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    persist_runtime_account_config(
-        controller.app_core(),
-        Some(nickname.clone()),
-        crate::WebUiOperation::CreateAccount,
-    )
-    .await
-    .map_err(|error| JsValue::from_str(&error.user_message()))?;
-    controller.finalize_account_setup(ScreenId::Neighborhood);
-    publish_semantic_controller_snapshot(controller);
-    web_sys::console::log_1(&format!("[web-harness] create_account ok nickname={nickname}").into());
-    Ok(())
-}
-
 async fn start_and_monitor_runtime_device_removal(
     controller: Arc<UiController>,
     device_id: String,
 ) -> Result<(), JsValue> {
     let app_core = controller.app_core().clone();
-    let ceremony_handle =
-        ceremony_workflows::start_device_removal_ceremony(&app_core, device_id)
-            .await
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let ceremony_handle = ceremony_workflows::start_device_removal_ceremony(&app_core, device_id)
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let status_handle = ceremony_handle.status_handle();
     match ceremony_workflows::get_key_rotation_ceremony_status(&app_core, &status_handle).await {
         Ok(status) if status.is_complete => {
@@ -334,6 +310,107 @@ fn semantic_channel_result(
         }
         None => SemanticCommandResponse::accepted_channel_selection(channel_id),
     }
+}
+
+fn semantic_response_with_handle(
+    handle: UiOperationHandle,
+    value: SemanticCommandValue,
+) -> SemanticCommandResponse {
+    SemanticCommandResponse {
+        submission: SubmissionState::Accepted,
+        handle: SemanticSubmissionHandle {
+            ui_operation: Some(handle),
+        },
+        value,
+    }
+}
+
+fn semantic_unit_result_with_handle(handle: UiOperationHandle) -> SemanticCommandResponse {
+    semantic_response_with_handle(handle, SemanticCommandValue::None)
+}
+
+fn semantic_channel_result_with_handle(
+    handle: UiOperationHandle,
+    channel_id: String,
+    context_id: Option<String>,
+) -> SemanticCommandResponse {
+    match context_id {
+        Some(context_id) => semantic_response_with_handle(
+            handle,
+            SemanticCommandValue::AuthoritativeChannelBinding {
+                channel_id,
+                context_id,
+            },
+        ),
+        None => semantic_response_with_handle(
+            handle,
+            SemanticCommandValue::ChannelSelection { channel_id },
+        ),
+    }
+}
+
+fn begin_exact_ui_operation(
+    controller: Arc<UiController>,
+    operation_id: OperationId,
+) -> UiOperationHandle {
+    let instance_id = Rc::new(StdRefCell::new(None::<OperationInstanceId>));
+    let captured_instance_id = instance_id.clone();
+    let captured_operation_id = operation_id.clone();
+    apply_browser_ui_mutation(controller, move |controller| {
+        let next_instance_id =
+            controller.begin_exact_operation_submission(captured_operation_id.clone());
+        captured_instance_id.borrow_mut().replace(next_instance_id);
+    });
+    let instance_id = instance_id
+        .borrow_mut()
+        .take()
+        .unwrap_or_else(|| panic!("exact browser operation submission must return an instance id"));
+    UiOperationHandle::new(operation_id, instance_id)
+}
+
+fn spawn_background_semantic_task(
+    label: &'static str,
+    task: impl std::future::Future<Output = Result<(), JsValue>> + 'static,
+) {
+    shared_web_task_owner().spawn_local(async move {
+        if let Err(error) = task.await {
+            let detail = error.as_string().unwrap_or_else(|| format!("{error:?}"));
+            update_semantic_debug(label, Some(&detail));
+            web_sys::console::error_1(
+                &format!("[web-harness] background semantic task {label} failed: {detail}").into(),
+            );
+        }
+    });
+}
+
+fn apply_handed_off_terminal_status(
+    controller: Arc<UiController>,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+    terminal: Option<WorkflowTerminalStatus>,
+) -> Result<(), JsValue> {
+    let terminal = terminal.ok_or_else(|| {
+        JsValue::from_str(&format!(
+            "workflow handoff completed without terminal authoritative status for {}",
+            operation_id.0
+        ))
+    })?;
+    if terminal.status.kind != kind {
+        return Err(JsValue::from_str(&format!(
+            "workflow handoff returned mismatched semantic kind for {} (expected={kind:?} observed={:?})",
+            operation_id.0, terminal.status.kind
+        )));
+    }
+    if !terminal.status.phase.is_terminal() {
+        return Err(JsValue::from_str(&format!(
+            "workflow handoff returned non-terminal phase for {}: {:?}",
+            operation_id.0, terminal.status.phase
+        )));
+    }
+    apply_browser_ui_mutation(controller, move |controller| {
+        controller.apply_authoritative_operation_status(operation_id, terminal.status);
+    });
+    Ok(())
 }
 
 fn selected_device_id(controller: &UiController) -> Result<String, JsValue> {
@@ -609,21 +686,19 @@ async fn submit_semantic_command(
                 controller.set_account_setup_state(false, staged_account_name, None);
             })
             .await?;
-            let has_runtime = {
-                let core = controller.app_core().read().await;
-                core.runtime().is_some()
-            };
-            if has_runtime {
+            let stage_result =
+                workflows::stage_account_creation(controller.app_core(), &account_name)
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.user_message()))?;
+            if stage_result.mode == AccountCreationStageMode::RuntimeInitialized {
                 update_semantic_debug("create_account_runtime_path", Some(&account_name));
-                initialize_runtime_account_for_web_shell(controller, account_name.clone()).await?;
+                controller.finalize_account_setup(ScreenId::Neighborhood);
+                publish_semantic_controller_snapshot(controller);
             } else {
                 update_semantic_debug("create_account_stage_start", Some(&account_name));
                 web_sys::console::log_1(
                     &format!("[web-harness] create_account stage nickname={account_name}").into(),
                 );
-                super::stage_initial_web_account_bootstrap(&account_name)
-                    .await
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
                 update_semantic_debug("create_account_staged", Some(&account_name));
                 web_sys::console::log_1(
                     &format!("[web-harness] create_account staged nickname={account_name}").into(),
@@ -696,86 +771,42 @@ async fn submit_semantic_command(
         }
         IntentAction::ImportDeviceEnrollmentCode { code } => {
             let app_core = controller.app_core().clone();
-            let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let invitation_info = invitation.info().clone();
-            let InvitationBridgeType::DeviceEnrollment {
-                subject_authority,
-                device_id,
-                nickname_suggestion,
-                ..
-            } = invitation_info.invitation_type.clone()
-            else {
-                return Err(JsValue::from_str(
-                    "code is not a device enrollment invitation",
-                ));
-            };
             let runtime = runtime_workflows::require_runtime(&app_core)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let current_authority = runtime.authority_id();
             let storage_prefix = active_storage_prefix();
-            let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
-            let pending_code_storage_key = pending_device_enrollment_code_key(&storage_prefix);
-            let selected_runtime_identity =
-                load_selected_runtime_identity(&runtime_identity_key)
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            if current_authority != subject_authority
-                || selected_runtime_identity
-                    .as_ref()
-                    .map(|identity| identity.device_id)
-                    != Some(device_id)
-            {
-                persist_pending_device_enrollment_code(&pending_code_storage_key, &code)
-                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                persist_selected_runtime_identity(
-                    &runtime_identity_key,
-                    &BootstrapRuntimeIdentity::new(subject_authority, device_id),
-                )
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                submit_runtime_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
-                    authority_id: subject_authority,
-                    device_id,
-                    source: RuntimeIdentityStageSource::ImportDeviceEnrollment,
-                })
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-                return Ok(SemanticCommandResponse::accepted_without_value());
-            }
-
-            if context_workflows::current_home_context(&app_core)
-                .await
-                .is_err()
-            {
-                account_workflows::initialize_runtime_account(
-                    &app_core,
-                    device_enrollment_bootstrap_name(nickname_suggestion.as_deref()),
-                )
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            }
-            invitation_workflows::accept_device_enrollment_invitation(&app_core, &invitation_info)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            persist_runtime_account_config(
+            let result = workflows::accept_device_enrollment_import(
                 &app_core,
-                Some(device_enrollment_bootstrap_name(
-                    nickname_suggestion.as_deref(),
-                )),
-                crate::WebUiOperation::ImportDeviceEnrollmentCode,
+                DeviceEnrollmentImportRequest {
+                    code: &code,
+                    current_runtime_identity: CurrentRuntimeIdentity {
+                        authority_id: runtime.authority_id(),
+                        selected_runtime_identity: load_selected_runtime_identity(
+                            &selected_runtime_identity_key(&storage_prefix),
+                        )
+                        .map_err(|error| JsValue::from_str(&error.to_string()))?,
+                    },
+                    storage_prefix: &storage_prefix,
+                    rebootstrap_policy: RebootstrapPolicy::StageIfRequired,
+                    operation: crate::WebUiOperation::ImportDeviceEnrollmentCode,
+                },
             )
             .await
             .map_err(|error| JsValue::from_str(&error.user_message()))?;
+            if result.rebootstrap_required {
+                let staged_runtime_identity = result.staged_runtime_identity;
+                submit_runtime_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
+                    authority_id: staged_runtime_identity.authority_id,
+                    device_id: staged_runtime_identity.device_id,
+                    source: RuntimeIdentityStageSource::ImportDeviceEnrollment,
+                })
+                .await
+                .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
             apply_browser_ui_mutation(controller.clone(), move |controller| {
                 controller.finalize_account_setup(ScreenId::Neighborhood);
             });
-            if let Err(error) = clear_pending_device_enrollment_code(&pending_code_storage_key) {
-                web_sys::console::warn_1(
-                    &format!("[web-harness] clear_pending_device_enrollment_code failed: {error}")
-                        .into(),
-                );
-            }
             Ok(SemanticCommandResponse::accepted_without_value())
         }
         IntentAction::OpenSettingsSection(section) => {
@@ -819,16 +850,19 @@ async fn submit_semantic_command(
             receiver_authority_id,
             ..
         } => {
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_create());
             let authority_id = receiver_authority_id
                 .parse::<AuthorityId>()
                 .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
             let app_core = controller.app_core().clone();
-            let invitation = invitation_workflows::create_contact_invitation(
+            let invitation = invitation_workflows::create_contact_invitation_with_instance(
                 &app_core,
                 authority_id.clone(),
                 None,
                 None,
                 None,
+                Some(handle.instance_id().clone()),
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
@@ -842,46 +876,145 @@ async fn submit_semantic_command(
                 source_operation: aura_app::ui::contract::OperationId::invitation_create(),
                 code: Some(code.clone()),
             });
-            Ok(SemanticCommandResponse::accepted_contact_invitation_code(
-                code,
+            Ok(semantic_response_with_handle(
+                handle,
+                SemanticCommandValue::ContactInvitationCode { code },
             ))
         }
         IntentAction::AcceptContactInvitation { code } => {
             let app_core = controller.app_core().clone();
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_accept());
             let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            invitation_workflows::accept_imported_invitation(&app_core, invitation)
+            let invitation_info = invitation.info().clone();
+            let instance_id = handle.instance_id().clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task("accept_contact_invitation_failed", async move {
+                let result = invitation_workflows::accept_imported_invitation_with_terminal_status(
+                    &app_core,
+                    invitation,
+                    Some(instance_id),
+                )
                 .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+                .result;
+                let terminal = match &result {
+                    Ok(()) => {
+                        if let InvitationBridgeType::Contact { nickname } =
+                            &invitation_info.invitation_type
+                        {
+                            let display_name = nickname
+                                .clone()
+                                .filter(|value| !value.trim().is_empty())
+                                .unwrap_or_else(|| invitation_info.sender_id.to_string());
+                            apply_browser_ui_mutation(controller.clone(), move |controller| {
+                                controller.complete_runtime_contact_invitation_acceptance(
+                                    invitation_info.sender_id,
+                                    display_name,
+                                );
+                            });
+                        }
+                        WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::new(
+                                SemanticOperationKind::AcceptContactInvitation,
+                                SemanticOperationPhase::Succeeded,
+                            ),
+                        }
+                    }
+                    Err(error) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            SemanticOperationKind::AcceptContactInvitation,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(error.to_string()),
+                        ),
+                    },
+                };
+                apply_handed_off_terminal_status(
+                    controller,
+                    OperationId::invitation_accept(),
+                    SemanticOperationKind::AcceptContactInvitation,
+                    Some(terminal),
+                )?;
+                result.map_err(|error| JsValue::from_str(&error.to_string()))
+            });
+            Ok(semantic_unit_result_with_handle(handle))
         }
         IntentAction::AcceptPendingChannelInvitation => {
-            invitation_workflows::accept_pending_home_invitation(controller.app_core())
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let (channel_id, context_id) = selected_channel_binding(&controller).await?;
-            Ok(
-                SemanticCommandResponse::accepted_authoritative_channel_binding(
-                    channel_id, context_id,
-                ),
-            )
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_accept());
+            let app_core = controller.app_core().clone();
+            let instance_id = handle.instance_id().clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task(
+                "accept_pending_channel_invitation_failed",
+                async move {
+                    let result = invitation_workflows::accept_pending_channel_invitation_with_binding_terminal_status(
+                        &app_core,
+                        Some(instance_id),
+                    )
+                    .await
+                    .result;
+                    let terminal = match &result {
+                        Ok(_) => WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::new(
+                                SemanticOperationKind::AcceptPendingChannelInvitation,
+                                SemanticOperationPhase::Succeeded,
+                            ),
+                        },
+                        Err(error) => WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::failed(
+                                SemanticOperationKind::AcceptPendingChannelInvitation,
+                                SemanticOperationError::new(
+                                    SemanticFailureDomain::Command,
+                                    SemanticFailureCode::InternalError,
+                                )
+                                .with_detail(error.to_string()),
+                            ),
+                        },
+                    };
+                    apply_handed_off_terminal_status(
+                        controller,
+                        OperationId::invitation_accept(),
+                        SemanticOperationKind::AcceptPendingChannelInvitation,
+                        Some(terminal),
+                    )?;
+                    result
+                        .map(|_| ())
+                        .map_err(|error| JsValue::from_str(&error.to_string()))
+                },
+            );
+            Ok(semantic_unit_result_with_handle(handle))
         }
         IntentAction::JoinChannel { channel_name } => {
-            messaging_workflows::join_channel_by_name(controller.app_core(), &channel_name)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let (channel_id, context_id) = selected_channel_binding(&controller).await?;
-            Ok(
-                SemanticCommandResponse::accepted_authoritative_channel_binding(
-                    channel_id, context_id,
-                ),
+            let handle = begin_exact_ui_operation(controller.clone(), OperationId::join_channel());
+            messaging_workflows::join_channel_by_name_with_instance(
+                controller.app_core(),
+                &channel_name,
+                Some(handle.instance_id().clone()),
             )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let (channel_id, context_id) = selected_channel_binding(&controller).await?;
+            Ok(semantic_channel_result_with_handle(
+                handle,
+                channel_id,
+                Some(context_id),
+            ))
         }
         IntentAction::InviteActorToChannel {
             authority_id,
             channel_id,
         } => {
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_create());
             let authority_id = authority_id
                 .parse::<AuthorityId>()
                 .map_err(|error| JsValue::from_str(&format!("invalid authority id: {error}")))?;
@@ -893,31 +1026,105 @@ async fn submit_semantic_command(
                 })?
                 .parse::<ChannelId>()
                 .map_err(|error| JsValue::from_str(&format!("invalid channel id: {error}")))?;
-            messaging_workflows::invite_authority_to_channel(
-                controller.app_core(),
-                authority_id,
-                channel_id,
-                None,
-                None,
-            )
-            .await
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            let app_core = controller.app_core().clone();
+            let authority_id = authority_id.to_string();
+            let channel_id = channel_id.to_string();
+            let instance_id = handle.instance_id().clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task("invite_actor_to_channel_failed", async move {
+                let result =
+                    messaging_workflows::invite_user_to_channel_with_context_terminal_status(
+                        &app_core,
+                        &authority_id,
+                        &channel_id,
+                        None,
+                        Some(instance_id),
+                        None,
+                        None,
+                    )
+                    .await
+                    .result;
+                let terminal = match &result {
+                    Ok(_) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::new(
+                            SemanticOperationKind::InviteActorToChannel,
+                            SemanticOperationPhase::Succeeded,
+                        ),
+                    },
+                    Err(error) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            SemanticOperationKind::InviteActorToChannel,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(error.to_string()),
+                        ),
+                    },
+                };
+                apply_handed_off_terminal_status(
+                    controller,
+                    OperationId::invitation_create(),
+                    SemanticOperationKind::InviteActorToChannel,
+                    Some(terminal),
+                )?;
+                result
+                    .map(|_| ())
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
+            });
+            Ok(semantic_unit_result_with_handle(handle))
         }
         IntentAction::SendChatMessage { message } => {
+            let handle = begin_exact_ui_operation(controller.clone(), OperationId::send_message());
             let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             let channel_id = selected_channel_id(&controller)?;
-            messaging_workflows::send_message(
-                controller.app_core(),
-                channel_id,
-                &message,
-                timestamp_ms,
-            )
-            .await
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            let app_core = controller.app_core().clone();
+            let instance_id = handle.instance_id().clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task("send_chat_message_failed", async move {
+                let result = messaging_workflows::send_message_with_instance(
+                    &app_core,
+                    channel_id,
+                    &message,
+                    timestamp_ms,
+                    Some(instance_id),
+                )
+                .await;
+                let terminal = match &result {
+                    Ok(_) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::new(
+                            SemanticOperationKind::SendChatMessage,
+                            SemanticOperationPhase::Succeeded,
+                        ),
+                    },
+                    Err(error) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            SemanticOperationKind::SendChatMessage,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(error.to_string()),
+                        ),
+                    },
+                };
+                apply_handed_off_terminal_status(
+                    controller,
+                    OperationId::send_message(),
+                    SemanticOperationKind::SendChatMessage,
+                    Some(terminal),
+                )?;
+                result
+                    .map(|_| ())
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
+            });
+            Ok(semantic_unit_result_with_handle(handle))
         }
     }
 }
@@ -1304,7 +1511,14 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let Ok(value) = to_value(snapshot) else {
+    let render_seq = RENDER_SEQ.with(|slot| {
+        let mut seq = slot.borrow_mut();
+        *seq = seq.saturating_add(1);
+        *seq
+    });
+    let mut snapshot = snapshot.clone();
+    snapshot.revision.render_seq = Some(render_seq);
+    let Ok(value) = to_value(&snapshot) else {
         return;
     };
     let Ok(json) = JSON::stringify(&value) else {
@@ -1320,17 +1534,12 @@ pub fn publish_ui_snapshot(snapshot: &UiSnapshot) {
         return;
     }
     let generation_id = ACTIVE_GENERATION.with(|slot| slot.get());
-    if snapshot_marks_generation_ready(snapshot) {
+    if snapshot_marks_generation_ready(&snapshot) {
         mark_generation_ready(generation_id);
     }
 
     let callback_window = window.clone();
     let callback = Closure::once_into_js(move || {
-        let render_seq = RENDER_SEQ.with(|slot| {
-            let mut seq = slot.borrow_mut();
-            *seq = seq.saturating_add(1);
-            *seq
-        });
         publish_render_heartbeat(
             &callback_window,
             &RenderHeartbeat {
@@ -2447,29 +2656,9 @@ mod tests {
             "selected_authority_id command paths must not re-read observed authority selection"
         );
 
-        let create_account_start = source
-            .find("async fn initialize_runtime_account_for_web_shell(")
-            .unwrap_or_else(|| panic!("missing initialize_runtime_account_for_web_shell"));
-        let create_account_end = source[create_account_start..]
-            .find("#[derive(Clone, Debug)]")
-            .map(|offset| create_account_start + offset)
-            .unwrap_or(source.len());
-        let create_account_block = &source[create_account_start..create_account_end];
         assert!(
-            create_account_block.contains("stage_runtime_bound_web_account_bootstrap(&nickname)"),
-            "runtime-backed web account creation must persist pending bootstrap metadata before awaited initialization"
-        );
-        assert!(
-            create_account_block.contains("controller.app_core().read().await"),
-            "runtime-backed web account creation must use an authoritative runtime presence read"
-        );
-        assert!(
-            !create_account_block.contains(".try_read()"),
-            "runtime-backed web account creation must not silently downgrade on a contended app_core read"
-        );
-        assert!(
-            create_account_block.contains("persist_runtime_account_config(\n        controller.app_core(),\n        Some(nickname.clone()),"),
-            "runtime-backed harness account creation must persist browser account metadata after initialization"
+            source.contains("let stage_result = workflows::stage_account_creation(controller.app_core(), &account_name)"),
+            "harness account creation should route through the shared aura-web workflow helper"
         );
 
         let import_start = source
@@ -2481,8 +2670,8 @@ mod tests {
             .unwrap_or(source.len());
         let import_block = &source[import_start..import_end];
         assert!(
-            import_block.contains("persist_runtime_account_config(\n                &app_core,\n                Some(device_enrollment_bootstrap_name("),
-            "bound-runtime harness device enrollment acceptance must persist browser account metadata before finalizing the UI"
+            import_block.contains("workflows::accept_device_enrollment_import("),
+            "harness device enrollment import should route through the shared aura-web workflow helper"
         );
 
         let removal_helper_start = source
@@ -2523,11 +2712,14 @@ mod tests {
             .unwrap_or(source.len());
         let removal_block = &source[removal_start..removal_end];
         assert!(
-            removal_block.contains("start_and_monitor_runtime_device_removal(controller.clone(), device_id).await?;"),
+            removal_block.contains(
+                "start_and_monitor_runtime_device_removal(controller.clone(), device_id).await?;"
+            ),
             "web remove-selected-device must delegate to the shared start-and-monitor helper"
         );
         assert!(
-            !removal_block.contains("start_device_removal_ceremony(&controller.app_core(), device_id)"),
+            !removal_block
+                .contains("start_device_removal_ceremony(&controller.app_core(), device_id)"),
             "web remove-selected-device must not drop the ceremony handle immediately after start"
         );
 
@@ -2674,6 +2866,127 @@ mod tests {
     }
 
     #[test]
+    fn shared_browser_submission_branches_seed_exact_operation_handles() {
+        let source = include_str!("harness_bridge.rs");
+
+        assert!(
+            source.contains("fn begin_exact_ui_operation("),
+            "browser shared semantic flows must seed an exact UI operation handle before workflow handoff"
+        );
+        assert!(
+            source.contains(
+                "controller.begin_exact_operation_submission(captured_operation_id.clone())"
+            ),
+            "browser exact-operation helper must use the shared UiController submission path"
+        );
+
+        let create_contact_start = source
+            .find("IntentAction::CreateContactInvitation {")
+            .unwrap_or_else(|| panic!("missing create contact invitation branch"));
+        let create_contact_end = source[create_contact_start..]
+            .find("IntentAction::AcceptContactInvitation { code } => {")
+            .map(|offset| create_contact_start + offset)
+            .unwrap_or(source.len());
+        let create_contact_block = &source[create_contact_start..create_contact_end];
+        assert!(
+            create_contact_block.contains(
+                "begin_exact_ui_operation(controller.clone(), OperationId::invitation_create())"
+            ),
+            "browser contact invitation creation must allocate an exact invitation_create handle"
+        );
+        assert!(
+            create_contact_block.contains("create_contact_invitation_with_instance(")
+                && create_contact_block.contains("Some(handle.instance_id().clone())"),
+            "browser contact invitation creation must hand off the exact instance id to the shared workflow"
+        );
+        assert!(
+            create_contact_block.contains("semantic_response_with_handle("),
+            "browser contact invitation creation must return the canonical handle to the harness"
+        );
+
+        let accept_pending_start = source
+            .find("IntentAction::AcceptPendingChannelInvitation => {")
+            .unwrap_or_else(|| panic!("missing accept pending channel invitation branch"));
+        let accept_pending_end = source[accept_pending_start..]
+            .find("IntentAction::JoinChannel { channel_name } => {")
+            .map(|offset| accept_pending_start + offset)
+            .unwrap_or(source.len());
+        let accept_pending_block = &source[accept_pending_start..accept_pending_end];
+        assert!(
+            accept_pending_block.contains(
+                "begin_exact_ui_operation(controller.clone(), OperationId::invitation_accept())"
+            ),
+            "browser pending channel acceptance must allocate an exact invitation_accept handle"
+        );
+        assert!(
+            accept_pending_block.contains(
+                "accept_pending_channel_invitation_with_binding_terminal_status("
+            ) && accept_pending_block.contains("semantic_unit_result_with_handle(handle)"),
+            "browser pending channel acceptance must hand off the exact instance and return an immediate handled acceptance"
+        );
+
+        let join_start = source
+            .find("IntentAction::JoinChannel { channel_name } => {")
+            .unwrap_or_else(|| panic!("missing join channel branch"));
+        let join_end = source[join_start..]
+            .find("IntentAction::InviteActorToChannel {")
+            .map(|offset| join_start + offset)
+            .unwrap_or(source.len());
+        let join_block = &source[join_start..join_end];
+        assert!(
+            join_block.contains(
+                "begin_exact_ui_operation(controller.clone(), OperationId::join_channel())"
+            ),
+            "browser join channel must allocate an exact join_channel handle"
+        );
+        assert!(
+            join_block.contains("join_channel_by_name_with_instance(")
+                && join_block.contains("semantic_channel_result_with_handle("),
+            "browser join channel must hand off and return the exact handle"
+        );
+
+        let invite_start = source
+            .find("IntentAction::InviteActorToChannel {")
+            .unwrap_or_else(|| panic!("missing invite actor to channel branch"));
+        let invite_end = source[invite_start..]
+            .find("IntentAction::SendChatMessage { message } => {")
+            .map(|offset| invite_start + offset)
+            .unwrap_or(source.len());
+        let invite_block = &source[invite_start..invite_end];
+        assert!(
+            invite_block.contains(
+                "begin_exact_ui_operation(controller.clone(), OperationId::invitation_create())"
+            ),
+            "browser invite-to-channel must allocate an exact invitation_create handle"
+        );
+        assert!(
+            invite_block.contains("invite_user_to_channel_with_context(")
+                && invite_block.contains("semantic_unit_result_with_handle(handle)"),
+            "browser invite-to-channel must return the exact handle after workflow handoff"
+        );
+
+        let send_start = source
+            .find("IntentAction::SendChatMessage { message } => {")
+            .unwrap_or_else(|| panic!("missing send chat message branch"));
+        let send_end = source[send_start..]
+            .find("\n    }\n}\n\nfn publish_ui_snapshot_now(")
+            .map(|offset| send_start + offset)
+            .unwrap_or(source.len());
+        let send_block = &source[send_start..send_end];
+        assert!(
+            send_block.contains(
+                "begin_exact_ui_operation(controller.clone(), OperationId::send_message())"
+            ),
+            "browser send-message must allocate an exact send_message handle"
+        );
+        assert!(
+            send_block.contains("send_message_with_instance(")
+                && send_block.contains("semantic_unit_result_with_handle(handle)"),
+            "browser send-message must hand off the exact instance and return the handle"
+        );
+    }
+
+    #[test]
     fn semantic_ui_snapshot_publication_precedes_render_heartbeat_scheduling() {
         let source = include_str!("harness_bridge.rs");
         let publish_start = source
@@ -2694,6 +3007,10 @@ mod tests {
         assert!(
             publish_now_index < raf_index,
             "semantic snapshot publication must happen before RAF heartbeat scheduling"
+        );
+        assert!(
+            publish_block.contains("snapshot.revision.render_seq = Some(render_seq);"),
+            "browser semantic snapshot publication must attach render-sequence freshness metadata"
         );
         assert!(
             publish_block.contains("RENDER_HEARTBEAT_PUBLICATION_STATE_KEY"),

@@ -10,9 +10,11 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use aura_app::ui::contract::{
     ControlId, FieldId, ListId, UiSnapshot, classify_screen_item_id, list_item_selector,
-    nav_control_id_for_screen, screen_item_id, semantic_settings_section_item_id,
+    nav_control_id_for_screen, semantic_settings_section_item_id,
 };
-use aura_app::ui::scenarios::{SemanticCommandRequest, SemanticCommandResponse, SettingsSection};
+use aura_app::ui::scenarios::{
+    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
+};
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
 use nix::poll::{PollFd, PollFlags, poll};
@@ -69,12 +71,6 @@ struct BrowserTailLogPayload {
 #[serde(deny_unknown_fields)]
 struct BrowserClipboardPayload {
     text: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BrowserAuthorityIdPayload {
-    authority_id: String,
 }
 
 fn decode_rpc_payload<T: DeserializeOwned>(
@@ -564,23 +560,10 @@ impl InstanceBackend for PlaywrightBrowserBackend {
     }
 
     fn authority_id(&mut self) -> Result<Option<String>> {
-        self.with_session(|session| {
-            let payload = session.rpc_call(
-                "get_authority_id",
-                json!({
-                    "instance_id": self.config.id,
-                }),
-            )?;
-            let payload: BrowserAuthorityIdPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser authority_id payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            let authority_id = payload.authority_id.trim().to_string();
-            let authority_id = (!authority_id.is_empty()).then_some(authority_id);
-            Ok(authority_id)
-        })
+        let snapshot = self.ui_snapshot()?;
+        Ok(snapshot
+            .selected_item_id(ListId::Authorities)
+            .map(str::to_string))
     }
 
     fn health_check(&self) -> Result<bool> {
@@ -903,32 +886,17 @@ impl RawUiBackend for PlaywrightBrowserBackend {
         );
         if is_navigation_control {
             let target_screen = match control_id {
-                ControlId::NavNeighborhood => Some(screen_item_id(
-                    aura_app::ui::contract::ScreenId::Neighborhood,
-                )),
-                ControlId::NavChat => Some(screen_item_id(aura_app::ui::contract::ScreenId::Chat)),
-                ControlId::NavContacts => {
-                    Some(screen_item_id(aura_app::ui::contract::ScreenId::Contacts))
-                }
-                ControlId::NavNotifications => Some(screen_item_id(
-                    aura_app::ui::contract::ScreenId::Notifications,
-                )),
-                ControlId::NavSettings => {
-                    Some(screen_item_id(aura_app::ui::contract::ScreenId::Settings))
-                }
+                ControlId::NavNeighborhood => Some(aura_app::ui::contract::ScreenId::Neighborhood),
+                ControlId::NavChat => Some(aura_app::ui::contract::ScreenId::Chat),
+                ControlId::NavContacts => Some(aura_app::ui::contract::ScreenId::Contacts),
+                ControlId::NavNotifications => Some(aura_app::ui::contract::ScreenId::Notifications),
+                ControlId::NavSettings => Some(aura_app::ui::contract::ScreenId::Settings),
                 _ => None,
             };
             if let Some(target_screen) = target_screen {
-                let navigate_result = self.with_session(|session| {
-                    session.rpc_call(
-                        "navigate_screen",
-                        json!({
-                            "instance_id": self.config.id,
-                            "screen": target_screen,
-                        }),
-                    )?;
-                    Ok(())
-                });
+                let navigate_result = self.submit_semantic_command(SemanticCommandRequest::new(
+                    IntentAction::OpenScreen(target_screen),
+                ));
                 if navigate_result.is_ok() {
                     return Ok(());
                 }
@@ -1517,6 +1485,30 @@ mod tests {
         assert!(
             !body.contains("blocking_sleep(Duration::from_millis(100))"),
             "browser backend readiness should not poll with fixed sleeps"
+        );
+    }
+
+    #[test]
+    fn playwright_backend_authority_id_reads_from_authoritative_snapshot() {
+        let source = include_str!("playwright_browser.rs");
+        let (_, tail) = source
+            .split_once("fn authority_id(&mut self) -> Result<Option<String>> {")
+            .unwrap_or_else(|| panic!("missing authority_id"));
+        let body = tail
+            .split_once("\n    }\n\n    fn health_check")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing authority_id terminator"));
+        assert!(
+            body.contains("self.ui_snapshot()?"),
+            "browser authority id should read from the authoritative shared projection"
+        );
+        assert!(
+            body.contains(".selected_item_id(ListId::Authorities)"),
+            "browser authority id should mirror the TUI selection-based authority lookup"
+        );
+        assert!(
+            !body.contains("\"get_authority_id\""),
+            "browser authority id should not depend on a separate driver RPC"
         );
     }
 
