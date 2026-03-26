@@ -38,12 +38,13 @@ where
     Fut: Future<Output = Result<T, E>>,
 {
     let time = PhysicalTimeHandler::new();
-    let started_at = time.physical_time().await.map_err(|error| {
-        TerminalTimeoutError::Setup {
+    let started_at = time
+        .physical_time()
+        .await
+        .map_err(|error| TerminalTimeoutError::Setup {
             context,
             detail: format!("failed to read physical time: {error}"),
-        }
-    })?;
+        })?;
     let scaled = terminal_timeout_profile()
         .scale_duration(duration)
         .map_err(|error| TerminalTimeoutError::Setup {

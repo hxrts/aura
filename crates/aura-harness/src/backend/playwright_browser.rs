@@ -7,20 +7,20 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use aura_app::ui::contract::{
-    ControlId, FieldId, ListId, UiSnapshot, classify_screen_item_id, list_item_selector,
-    nav_control_id_for_screen, semantic_settings_section_item_id,
+    classify_screen_item_id, list_item_selector, nav_control_id_for_screen,
+    semantic_settings_section_item_id, ControlId, FieldId, ListId, UiSnapshot,
 };
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SettingsSection,
 };
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_core::{AuthorityId, DeviceId};
-use nix::poll::{PollFd, PollFlags, poll};
-use serde::Deserialize;
+use nix::poll::{poll, PollFd, PollFlags};
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
@@ -889,7 +889,9 @@ impl RawUiBackend for PlaywrightBrowserBackend {
                 ControlId::NavNeighborhood => Some(aura_app::ui::contract::ScreenId::Neighborhood),
                 ControlId::NavChat => Some(aura_app::ui::contract::ScreenId::Chat),
                 ControlId::NavContacts => Some(aura_app::ui::contract::ScreenId::Contacts),
-                ControlId::NavNotifications => Some(aura_app::ui::contract::ScreenId::Notifications),
+                ControlId::NavNotifications => {
+                    Some(aura_app::ui::contract::ScreenId::Notifications)
+                }
                 ControlId::NavSettings => Some(aura_app::ui::contract::ScreenId::Settings),
                 _ => None,
             };
@@ -1172,8 +1174,8 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_PAGE_GOTO_TIMEOUT_MS, browser_app_url, control_selector, field_selector,
-        navigation_control_id, parse_bool_setting, parse_u64_setting, tool_key_name,
+        browser_app_url, control_selector, field_selector, navigation_control_id,
+        parse_bool_setting, parse_u64_setting, tool_key_name, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
     };
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId};
@@ -1215,10 +1217,9 @@ mod tests {
         match error {
             Ok(value) => panic!("expected out-of-range error, got value {value}"),
             Err(err) => {
-                assert!(
-                    err.to_string()
-                        .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range")
-                );
+                assert!(err
+                    .to_string()
+                    .contains("AURA_HARNESS_BROWSER_U64_TEST must be in range"));
             }
         }
     }
@@ -1383,6 +1384,17 @@ mod tests {
         let bridge_source =
             std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness_bridge.rs"))
                 .unwrap_or_else(|error| panic!("failed to read browser harness bridge: {error}"));
+        let install_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness/install.rs"))
+                .unwrap_or_else(|error| {
+                    panic!("failed to read browser harness installer: {error}")
+                });
+        let commands_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/harness/commands.rs"))
+                .unwrap_or_else(|error| panic!("failed to read browser harness commands: {error}"));
+        let app_source =
+            std::fs::read_to_string(workspace_root.join("crates/aura-web/src/shell/app.rs"))
+                .unwrap_or_else(|error| panic!("failed to read web shell app: {error}"));
         let driver_source = std::fs::read_to_string(
             workspace_root.join("crates/aura-harness/playwright-driver/src/playwright_driver.ts"),
         )
@@ -1390,15 +1402,16 @@ mod tests {
         let backend_source = include_str!("playwright_browser.rs");
 
         assert!(
-            bridge_source.contains("invalid semantic command request"),
+            install_source.contains("invalid semantic command request"),
             "browser bridge should reject malformed semantic requests with typed context"
         );
         assert!(
-            bridge_source.contains("BootstrapHandoff::PendingAccountBootstrap {"),
+            commands_source.contains("BootstrapHandoff::PendingAccountBootstrap {")
+                || app_source.contains("BootstrapHandoff::PendingAccountBootstrap {"),
             "browser semantic bridge should stage create-account bootstrap through the owned bootstrap handoff"
         );
         assert!(
-            bridge_source.contains("&JsValue::from_str(\"stage_runtime_identity\")"),
+            install_source.contains("&JsValue::from_str(\"stage_runtime_identity\")"),
             "browser harness bridge should expose an explicit runtime identity staging entrypoint"
         );
         assert!(
@@ -1406,13 +1419,13 @@ mod tests {
             "browser harness bridge must not expose a generic bootstrap trigger"
         );
         assert!(
-            bridge_source.contains("classify_screen_item_id(&screen_name)")
-                && bridge_source
+            install_source.contains("classify_screen_item_id(&screen_name)")
+                && install_source
                     .contains("classify_semantic_settings_section_item_id(&section_name)"),
             "browser bridge should classify screen and settings item ids through the shared ui contract helpers"
         );
         assert!(
-            !bridge_source.contains("unsupported semantic browser command"),
+            !commands_source.contains("unsupported semantic browser command"),
             "browser bridge should cover the typed semantic intent surface directly instead of keeping a generic unsupported-intent fallback"
         );
         assert!(
@@ -1420,8 +1433,8 @@ mod tests {
             "browser driver should advance the semantic observation baseline after semantic submission"
         );
         assert!(
-            bridge_source.contains("typeof harness?.stage_runtime_identity !== \"function\"")
-                && bridge_source
+            install_source.contains("typeof harness?.stage_runtime_identity !== \"function\"")
+                && install_source
                     .contains("window.__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__ = (payloadJson) => {"),
             "browser harness bridge should own the runtime-stage queue and invoke the explicit runtime identity staging entrypoint inside the page"
         );
@@ -1438,8 +1451,8 @@ mod tests {
             "browser driver must not own browser runtime-identity storage layout"
         );
         assert!(
-            bridge_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {")
-                && bridge_source.contains("submitState?.status === \"ready\""),
+            install_source.contains("window.__AURA_DRIVER_SEMANTIC_ENQUEUE__ = (payloadJson) => {")
+                && install_source.contains("submitState?.status === \"ready\""),
             "browser harness bridge should own a generation-aware page semantic queue instead of leaving semantic replay ownership to the driver"
         );
         assert!(

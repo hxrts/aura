@@ -5,6 +5,7 @@
 
 #![allow(clippy::incompatible_msrv)]
 
+use crate::dom_ids::RequiredDomId;
 use aura_app::ui::contract::{list_item_dom_id, ControlId, FieldId, ListId, ModalId};
 use aura_core::types::identifiers::AuthorityId;
 use dioxus::prelude::*;
@@ -14,19 +15,6 @@ use dioxus_shadcn::components::dialog::{
     DialogContent as LbDialogContent, DialogOverlay as LbDialogOverlay, DialogRoot as LbDialogRoot,
     DialogTitle as LbDialogTitle,
 };
-
-trait RequiredDomId {
-    fn required_dom_id(self, context: &'static str) -> &'static str;
-}
-
-impl RequiredDomId for Option<&'static str> {
-    fn required_dom_id(self, context: &'static str) -> &'static str {
-        let Some(id) = self else {
-            panic!("{context} must define a web DOM id");
-        };
-        id
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonVariant {

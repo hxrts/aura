@@ -12,7 +12,6 @@
 //! - 30 days (720 hours): Long-term invitations
 
 use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
-use crate::workflows::runtime::workflow_best_effort;
 
 // ============================================================================
 // TTL Constants
@@ -2055,17 +2054,11 @@ async fn accept_invitation_id_owned(
                 })
             });
         if let Some(contact_id) = contact_id {
-            if let Err(error) = wait_for_contact_link(app_core, &runtime, contact_id).await {
-                return fail_invitation_accept(owner, error).await;
-            }
-            if let Err(error) = refresh_authoritative_contact_link_readiness(app_core).await {
-                return fail_invitation_accept(
-                    owner,
-                    AcceptInvitationError::AcceptFailed {
-                        detail: error.to_string(),
-                    },
-                )
-                .await;
+            // Terminal success reflects accepted invitation ownership. Contact
+            // link materialization can lag and is observed separately via
+            // readiness/runtime signals.
+            if wait_for_contact_link(app_core, &runtime, contact_id).await.is_ok() {
+                let _ = refresh_authoritative_contact_link_readiness(app_core).await;
             }
             owner
                 .publish_success_with(issue_invitation_accepted_or_materialized_proof(
@@ -2317,19 +2310,14 @@ async fn accept_imported_invitation_owned(
 
     match &invitation.invitation_type {
         crate::runtime_bridge::InvitationBridgeType::Contact { .. } => {
-            if let Err(error) =
-                wait_for_contact_link(app_core, &runtime, invitation.sender_id).await
+            // Imported contact acceptance should settle terminal status once
+            // the accept itself succeeds; link materialization follows via
+            // normal convergence and authoritative readiness refresh.
+            if wait_for_contact_link(app_core, &runtime, invitation.sender_id)
+                .await
+                .is_ok()
             {
-                return fail_invitation_accept(owner, error).await;
-            }
-            if let Err(error) = refresh_authoritative_contact_link_readiness(app_core).await {
-                return fail_invitation_accept(
-                    owner,
-                    AcceptInvitationError::AcceptFailed {
-                        detail: error.to_string(),
-                    },
-                )
-                .await;
+                let _ = refresh_authoritative_contact_link_readiness(app_core).await;
             }
             owner
                 .publish_success_with(issue_invitation_accepted_or_materialized_proof(
@@ -4764,3 +4752,4 @@ mod tests {
         );
     }
 }
+use crate::workflows::runtime::workflow_best_effort;

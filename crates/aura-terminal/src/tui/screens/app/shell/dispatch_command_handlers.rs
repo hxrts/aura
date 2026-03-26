@@ -994,11 +994,9 @@ pub(super) fn handle_dispatch_command_match(
                 return EventCommandLoopAction::ContinueCommand;
             };
             let selected = tui_selected_for_events.read().clone();
-            let context_id = strongest_authoritative_binding_for_channel(
-                channel,
-                selected.as_ref(),
-            )
-            .and_then(|binding| binding.context_id);
+            let context_id =
+                strongest_authoritative_binding_for_channel(channel, selected.as_ref())
+                    .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 new_state.toast_error(format!(
                     "Selected channel lacks authoritative context: {}",
@@ -1041,11 +1039,9 @@ pub(super) fn handle_dispatch_command_match(
                 return EventCommandLoopAction::ContinueCommand;
             };
             let selected = tui_selected_for_events.read().clone();
-            let context_id = strongest_authoritative_binding_for_channel(
-                channel,
-                selected.as_ref(),
-            )
-            .and_then(|binding| binding.context_id);
+            let context_id =
+                strongest_authoritative_binding_for_channel(channel, selected.as_ref())
+                    .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 new_state.toast_error(format!(
                     "Selected channel lacks authoritative context: {}",

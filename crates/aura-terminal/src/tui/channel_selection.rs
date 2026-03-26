@@ -67,9 +67,7 @@ pub fn strongest_authoritative_binding_for_channel(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        strongest_authoritative_binding_for_channel, CommittedChannelSelection,
-    };
+    use super::{strongest_authoritative_binding_for_channel, CommittedChannelSelection};
     use crate::tui::types::Channel;
     use aura_app::ui_contract::ChannelBindingWitness;
 

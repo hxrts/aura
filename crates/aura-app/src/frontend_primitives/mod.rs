@@ -5,9 +5,11 @@
 //! these types under their own aliases but should not fork them.
 
 mod clipboard;
+mod debug_probe;
 mod operations;
 mod task_owner;
 
 pub use clipboard::{ClipboardPort, MemoryClipboard};
+pub use debug_probe::{emit_frontend_debug_probe, set_frontend_debug_probe};
 pub use operations::FrontendUiOperation;
 pub use task_owner::{FrontendTaskOwner, FrontendTaskRuntime};

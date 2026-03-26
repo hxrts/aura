@@ -1,0 +1,960 @@
+use aura_app::ui::contract::{OperationId, OperationInstanceId, ScreenId};
+use aura_app::ui::scenarios::{
+    IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
+    SemanticSubmissionHandle, SettingsSection, SubmissionState, UiOperationHandle,
+};
+use aura_app::ui::types::InvitationBridgeType;
+use aura_app::ui::workflows::ceremonies as ceremony_workflows;
+use aura_app::ui::workflows::context as context_workflows;
+use aura_app::ui::workflows::invitation as invitation_workflows;
+use aura_app::ui::workflows::messaging as messaging_workflows;
+use aura_app::ui::workflows::runtime as runtime_workflows;
+use aura_app::ui::workflows::settings as settings_workflows;
+use aura_app::ui::workflows::time as time_workflows;
+use aura_app::ui_contract::{
+    ChannelBindingWitness, RuntimeFact, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
+    WorkflowTerminalStatus,
+};
+use aura_core::{types::identifiers::ChannelId, AuthorityId};
+use aura_ui::UiController;
+use std::cell::RefCell as StdRefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use wasm_bindgen::JsValue;
+
+use crate::harness::channel_selection::{
+    selected_authority_id, selected_channel_binding, selected_channel_id, selected_device_id,
+    SelectionError, WeakChannelSelection,
+};
+use crate::harness_bridge::{
+    BootstrapHandoff, PendingAccountBootstrapSource, RuntimeIdentityStageSource,
+};
+use crate::{
+    active_storage_prefix, load_selected_runtime_identity, selected_runtime_identity_key,
+    submit_runtime_bootstrap_handoff,
+    task_owner::shared_web_task_owner,
+    workflows::{
+        self, AccountCreationStageMode, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest,
+        RebootstrapPolicy,
+    },
+};
+
+pub(crate) fn browser_settings_section(
+    section: SettingsSection,
+) -> aura_ui::model::SettingsSection {
+    match section {
+        SettingsSection::Devices => aura_ui::model::SettingsSection::Devices,
+    }
+}
+
+#[derive(Clone, Debug)]
+enum RoutedSemanticIntent {
+    OpenScreen(ScreenId),
+    CreateAccount {
+        account_name: String,
+    },
+    CreateHome {
+        home_name: String,
+    },
+    CreateChannel {
+        channel_name: String,
+    },
+    StartDeviceEnrollment {
+        device_name: String,
+        invitee_authority_id: AuthorityId,
+    },
+    ImportDeviceEnrollmentCode {
+        code: String,
+    },
+    OpenSettingsSection(SettingsSection),
+    RemoveSelectedDevice {
+        device_id: String,
+    },
+    SwitchAuthority {
+        current_authority_id: Option<String>,
+        authority_id: AuthorityId,
+    },
+    CreateContactInvitation {
+        receiver_authority_id: AuthorityId,
+    },
+    AcceptContactInvitation {
+        code: String,
+    },
+    AcceptPendingChannelInvitation,
+    JoinChannel {
+        channel_name: String,
+    },
+    InviteActorToChannel {
+        authority_id: AuthorityId,
+        channel_id: ChannelId,
+    },
+    SendChatMessage {
+        message: String,
+        channel: WeakChannelSelection,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum RouteSemanticIntentError {
+    Selection(SelectionError),
+    InvalidAuthorityId(String),
+    InvalidChannelId(String),
+    MissingAuthoritativeChannelBinding,
+}
+
+impl RouteSemanticIntentError {
+    fn invalid_authority_id(error: impl ToString) -> Self {
+        Self::InvalidAuthorityId(error.to_string())
+    }
+
+    fn invalid_channel_id(error: impl ToString) -> Self {
+        Self::InvalidChannelId(error.to_string())
+    }
+
+    #[must_use]
+    fn into_js_value(self) -> JsValue {
+        let detail = match self {
+            Self::Selection(error) => error.detail(),
+            Self::InvalidAuthorityId(error) => format!("invalid authority id: {error}"),
+            Self::InvalidChannelId(error) => format!("invalid channel id: {error}"),
+            Self::MissingAuthoritativeChannelBinding => {
+                "invite_actor_to_channel requires an authoritative channel binding".to_string()
+            }
+        };
+        JsValue::from_str(&detail)
+    }
+}
+
+impl From<SelectionError> for RouteSemanticIntentError {
+    fn from(value: SelectionError) -> Self {
+        Self::Selection(value)
+    }
+}
+
+fn semantic_channel_result(binding: ChannelBindingWitness) -> SemanticCommandResponse {
+    SemanticCommandResponse::accepted(binding.semantic_value())
+}
+
+fn semantic_response_with_handle(
+    handle: UiOperationHandle,
+    value: SemanticCommandValue,
+) -> SemanticCommandResponse {
+    SemanticCommandResponse {
+        submission: SubmissionState::Accepted,
+        handle: SemanticSubmissionHandle {
+            ui_operation: Some(handle),
+        },
+        value,
+    }
+}
+
+fn semantic_unit_result_with_handle(handle: UiOperationHandle) -> SemanticCommandResponse {
+    semantic_response_with_handle(handle, SemanticCommandValue::None)
+}
+
+fn semantic_channel_result_with_handle(
+    handle: UiOperationHandle,
+    binding: ChannelBindingWitness,
+) -> SemanticCommandResponse {
+    semantic_response_with_handle(handle, binding.semantic_value())
+}
+
+fn begin_exact_ui_operation(
+    controller: Arc<UiController>,
+    operation_id: OperationId,
+) -> UiOperationHandle {
+    let handle = Rc::new(StdRefCell::new(None::<UiOperationHandle>));
+    let captured_handle = handle.clone();
+    let captured_operation_id = operation_id;
+    crate::harness_bridge::apply_browser_ui_mutation(controller, move |controller| {
+        let next_handle =
+            controller.begin_exact_operation_handle_submission(captured_operation_id.clone());
+        captured_handle.borrow_mut().replace(next_handle);
+    });
+    let exact_handle = handle
+        .borrow_mut()
+        .take()
+        .unwrap_or_else(|| panic!("exact browser operation submission must return a handle"));
+    exact_handle
+}
+
+fn spawn_background_semantic_task(
+    label: &'static str,
+    task: impl std::future::Future<Output = Result<(), JsValue>> + 'static,
+) {
+    shared_web_task_owner().spawn_local(async move {
+        if let Err(error) = task.await {
+            let detail = error.as_string().unwrap_or_else(|| format!("{error:?}"));
+            update_semantic_debug(label, Some(&detail));
+            web_sys::console::error_1(
+                &format!("[web-harness] background semantic task {label} failed: {detail}").into(),
+            );
+        }
+    });
+}
+
+fn apply_handed_off_terminal_status(
+    controller: Arc<UiController>,
+    operation_id: OperationId,
+    instance_id: Option<OperationInstanceId>,
+    kind: SemanticOperationKind,
+    terminal: Option<WorkflowTerminalStatus>,
+) -> Result<(), JsValue> {
+    let terminal = terminal.ok_or_else(|| {
+        JsValue::from_str(&format!(
+            "workflow handoff completed without terminal authoritative status for {}",
+            operation_id.0
+        ))
+    })?;
+    if terminal.status.kind != kind {
+        return Err(JsValue::from_str(&format!(
+            "workflow handoff returned mismatched semantic kind for {} (expected={kind:?} observed={:?})",
+            operation_id.0, terminal.status.kind
+        )));
+    }
+    if !terminal.status.phase.is_terminal() {
+        return Err(JsValue::from_str(&format!(
+            "workflow handoff returned non-terminal phase for {}: {:?}",
+            operation_id.0, terminal.status.phase
+        )));
+    }
+    crate::harness_bridge::apply_browser_ui_mutation(controller, move |controller| {
+        controller.apply_authoritative_operation_status(
+            operation_id,
+            instance_id,
+            terminal.causality,
+            terminal.status,
+        );
+    });
+    Ok(())
+}
+
+async fn start_and_monitor_runtime_device_removal(
+    controller: Arc<UiController>,
+    device_id: String,
+) -> Result<(), JsValue> {
+    let app_core = controller.app_core().clone();
+    let ceremony_handle = ceremony_workflows::start_device_removal_ceremony(&app_core, device_id)
+        .await
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let status_handle = ceremony_handle.status_handle();
+    match ceremony_workflows::get_key_rotation_ceremony_status(&app_core, &status_handle).await {
+        Ok(status) if status.is_complete => {
+            settings_workflows::refresh_settings_from_runtime(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.request_rerender();
+            return Ok(());
+        }
+        Ok(_) => {}
+        Err(error) => {
+            return Err(JsValue::from_str(&error.to_string()));
+        }
+    }
+    shared_web_task_owner().spawn_local({
+        let controller = controller.clone();
+        let app_core = app_core.clone();
+        async move {
+            let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
+                &app_core,
+                &status_handle,
+                ceremony_workflows::CeremonyPollPolicy {
+                    interval: std::time::Duration::from_millis(250),
+                    max_attempts: 160,
+                    rollback_on_failure: true,
+                    refresh_settings_on_complete: true,
+                },
+                |_| {
+                    controller.request_rerender();
+                },
+                |duration| {
+                    let app_core = app_core.clone();
+                    async move {
+                        let sleep_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+                        let _ = time_workflows::sleep_ms(&app_core, sleep_ms).await;
+                    }
+                },
+            )
+            .await;
+
+            match lifecycle {
+                Ok(lifecycle) => {
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-harness] device_removal_monitor state={:?};complete={};failed={};attempts={}",
+                            lifecycle.state,
+                            lifecycle.status.is_complete,
+                            lifecycle.status.has_failed,
+                            lifecycle.attempts
+                        )
+                        .into(),
+                    );
+                    controller.request_rerender();
+                }
+                Err(error) => {
+                    web_sys::console::warn_1(
+                        &format!("[web-harness] device_removal_monitor failed: {error}").into(),
+                    );
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
+pub(crate) fn update_semantic_debug(event: &str, detail: Option<&str>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let debug = js_sys::Reflect::get(
+        window.as_ref(),
+        &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+    )
+    .ok()
+    .filter(|value| !value.is_null() && !value.is_undefined())
+    .unwrap_or_else(|| {
+        let object = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(
+            window.as_ref(),
+            &JsValue::from_str("__AURA_SEMANTIC_DEBUG__"),
+            object.as_ref(),
+        );
+        object.into()
+    });
+    let _ = js_sys::Reflect::set(
+        &debug,
+        &JsValue::from_str("last_event"),
+        &JsValue::from_str(event),
+    );
+    let _ = js_sys::Reflect::set(
+        &debug,
+        &JsValue::from_str("last_detail"),
+        &detail.map(JsValue::from_str).unwrap_or(JsValue::NULL),
+    );
+}
+
+async fn route_semantic_intent(
+    controller: &UiController,
+    intent: IntentAction,
+) -> Result<RoutedSemanticIntent, RouteSemanticIntentError> {
+    match intent {
+        IntentAction::OpenScreen(screen) => Ok(RoutedSemanticIntent::OpenScreen(screen)),
+        IntentAction::CreateAccount { account_name } => {
+            Ok(RoutedSemanticIntent::CreateAccount { account_name })
+        }
+        IntentAction::CreateHome { home_name } => {
+            Ok(RoutedSemanticIntent::CreateHome { home_name })
+        }
+        IntentAction::CreateChannel { channel_name } => {
+            Ok(RoutedSemanticIntent::CreateChannel { channel_name })
+        }
+        IntentAction::StartDeviceEnrollment {
+            device_name,
+            invitee_authority_id,
+            ..
+        } => Ok(RoutedSemanticIntent::StartDeviceEnrollment {
+            device_name,
+            invitee_authority_id: invitee_authority_id
+                .parse::<AuthorityId>()
+                .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+        }),
+        IntentAction::ImportDeviceEnrollmentCode { code } => {
+            Ok(RoutedSemanticIntent::ImportDeviceEnrollmentCode { code })
+        }
+        IntentAction::OpenSettingsSection(section) => {
+            Ok(RoutedSemanticIntent::OpenSettingsSection(section))
+        }
+        IntentAction::RemoveSelectedDevice { device_id } => {
+            let device_id = match device_id {
+                Some(device_id) => device_id,
+                None => selected_device_id(controller)?,
+            };
+            Ok(RoutedSemanticIntent::RemoveSelectedDevice { device_id })
+        }
+        IntentAction::SwitchAuthority { authority_id } => {
+            Ok(RoutedSemanticIntent::SwitchAuthority {
+                current_authority_id: selected_authority_id(controller),
+                authority_id: authority_id
+                    .parse::<AuthorityId>()
+                    .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+            })
+        }
+        IntentAction::CreateContactInvitation {
+            receiver_authority_id,
+            ..
+        } => Ok(RoutedSemanticIntent::CreateContactInvitation {
+            receiver_authority_id: receiver_authority_id
+                .parse::<AuthorityId>()
+                .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+        }),
+        IntentAction::AcceptContactInvitation { code } => {
+            Ok(RoutedSemanticIntent::AcceptContactInvitation { code })
+        }
+        IntentAction::AcceptPendingChannelInvitation => {
+            Ok(RoutedSemanticIntent::AcceptPendingChannelInvitation)
+        }
+        IntentAction::JoinChannel { channel_name } => {
+            Ok(RoutedSemanticIntent::JoinChannel { channel_name })
+        }
+        IntentAction::InviteActorToChannel {
+            authority_id,
+            channel_id,
+        } => Ok(RoutedSemanticIntent::InviteActorToChannel {
+            authority_id: authority_id
+                .parse::<AuthorityId>()
+                .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+            channel_id: channel_id
+                .ok_or(RouteSemanticIntentError::MissingAuthoritativeChannelBinding)?
+                .parse::<ChannelId>()
+                .map_err(RouteSemanticIntentError::invalid_channel_id)?,
+        }),
+        IntentAction::SendChatMessage { message } => Ok(RoutedSemanticIntent::SendChatMessage {
+            message,
+            channel: selected_channel_id(controller)?,
+        }),
+    }
+}
+
+async fn execute_semantic_intent(
+    controller: Arc<UiController>,
+    intent: RoutedSemanticIntent,
+) -> Result<SemanticCommandResponse, JsValue> {
+    match intent {
+        RoutedSemanticIntent::OpenScreen(screen) => {
+            crate::harness_bridge::apply_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.set_screen(screen);
+                },
+            );
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::CreateAccount { account_name } => {
+            update_semantic_debug("create_account_begin", Some(&account_name));
+            let staged_account_name = account_name.clone();
+            crate::harness_bridge::schedule_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.set_account_setup_state(false, staged_account_name, None);
+                },
+            )
+            .await?;
+            let stage_result =
+                workflows::stage_account_creation(controller.app_core(), &account_name)
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.user_message()))?;
+            if stage_result.mode == AccountCreationStageMode::RuntimeInitialized {
+                update_semantic_debug("create_account_runtime_path", Some(&account_name));
+                controller.finalize_account_setup(ScreenId::Neighborhood);
+                crate::harness_bridge::publish_semantic_controller_snapshot(controller);
+            } else {
+                update_semantic_debug("create_account_stage_start", Some(&account_name));
+                submit_runtime_bootstrap_handoff(BootstrapHandoff::PendingAccountBootstrap {
+                    account_name: account_name.clone(),
+                    source: PendingAccountBootstrapSource::HarnessSemanticBridge,
+                })
+                .await
+                .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                update_semantic_debug("create_account_handoff_done", Some(&account_name));
+            }
+            update_semantic_debug("create_account_return", Some(&account_name));
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::CreateHome { home_name } => {
+            context_workflows::create_home(controller.app_core(), Some(home_name), None)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::CreateChannel { channel_name } => {
+            let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let created = messaging_workflows::create_channel_with_authoritative_binding(
+                controller.app_core(),
+                &channel_name,
+                None,
+                &[],
+                1,
+                timestamp_ms,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(semantic_channel_result(ChannelBindingWitness::new(
+                created.channel_id.to_string(),
+                created.context_id.map(|context_id| context_id.to_string()),
+            )))
+        }
+        RoutedSemanticIntent::StartDeviceEnrollment {
+            device_name,
+            invitee_authority_id,
+        } => {
+            crate::harness_bridge::apply_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.set_screen(ScreenId::Settings);
+                    controller
+                        .set_settings_section(browser_settings_section(SettingsSection::Devices));
+                },
+            );
+            let start = ceremony_workflows::start_device_enrollment_ceremony(
+                &controller.app_core(),
+                device_name.clone(),
+                invitee_authority_id,
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.write_clipboard(&start.enrollment_code);
+            controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+                device_name: Some(device_name),
+                code_len: Some(start.enrollment_code.len()),
+                code: Some(start.enrollment_code),
+            });
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::ImportDeviceEnrollmentCode { code } => {
+            let app_core = controller.app_core().clone();
+            let runtime = runtime_workflows::require_runtime(&app_core)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let storage_prefix = active_storage_prefix();
+            let result = workflows::accept_device_enrollment_import(
+                &app_core,
+                DeviceEnrollmentImportRequest {
+                    code: &code,
+                    current_runtime_identity: CurrentRuntimeIdentity {
+                        authority_id: runtime.authority_id(),
+                        selected_runtime_identity: load_selected_runtime_identity(
+                            &selected_runtime_identity_key(&storage_prefix),
+                        )
+                        .map_err(|error| JsValue::from_str(&error.to_string()))?,
+                    },
+                    storage_prefix: &storage_prefix,
+                    rebootstrap_policy: RebootstrapPolicy::StageIfRequired,
+                    operation: crate::WebUiOperation::ImportDeviceEnrollmentCode,
+                },
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.user_message()))?;
+            if result.rebootstrap_required {
+                let staged_runtime_identity = result.staged_runtime_identity;
+                submit_runtime_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
+                    authority_id: staged_runtime_identity.authority_id,
+                    device_id: staged_runtime_identity.device_id,
+                    source: RuntimeIdentityStageSource::ImportDeviceEnrollment,
+                })
+                .await
+                .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
+            crate::harness_bridge::apply_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.finalize_account_setup(ScreenId::Neighborhood);
+                },
+            );
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::OpenSettingsSection(section) => {
+            crate::harness_bridge::apply_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.set_screen(ScreenId::Settings);
+                    controller.set_settings_section(browser_settings_section(section));
+                },
+            );
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::RemoveSelectedDevice { device_id } => {
+            crate::harness_bridge::apply_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.set_screen(ScreenId::Settings);
+                    controller
+                        .set_settings_section(browser_settings_section(SettingsSection::Devices));
+                },
+            );
+            start_and_monitor_runtime_device_removal(controller.clone(), device_id).await?;
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::SwitchAuthority {
+            current_authority_id,
+            authority_id,
+        } => {
+            crate::harness_bridge::apply_browser_ui_mutation(
+                controller.clone(),
+                move |controller| {
+                    controller.set_screen(ScreenId::Settings);
+                    controller.set_settings_section(aura_ui::model::SettingsSection::Authority);
+                },
+            );
+            if current_authority_id.as_deref() == Some(authority_id.to_string().as_str()) {
+                return Ok(SemanticCommandResponse::accepted_without_value());
+            }
+            if !controller.request_authority_switch(authority_id) {
+                return Err(JsValue::from_str(
+                    "authority switching is not available for this frontend",
+                ));
+            }
+            Ok(SemanticCommandResponse::accepted_without_value())
+        }
+        RoutedSemanticIntent::CreateContactInvitation {
+            receiver_authority_id,
+        } => {
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_create());
+            let app_core = controller.app_core().clone();
+            let invitation = invitation_workflows::create_contact_invitation_with_instance(
+                &app_core,
+                receiver_authority_id.clone(),
+                None,
+                None,
+                None,
+                Some(handle.instance_id().clone()),
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let code =
+                invitation_workflows::export_invitation(&app_core, invitation.invitation_id())
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            controller.write_clipboard(&code);
+            controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                receiver_authority_id: Some(receiver_authority_id.to_string()),
+                source_operation: aura_app::ui::contract::OperationId::invitation_create(),
+                code: Some(code.clone()),
+            });
+            Ok(semantic_response_with_handle(
+                handle,
+                SemanticCommandValue::ContactInvitationCode { code },
+            ))
+        }
+        RoutedSemanticIntent::AcceptContactInvitation { code } => {
+            let app_core = controller.app_core().clone();
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_accept());
+            update_semantic_debug("accept_contact_invitation_import_start", None);
+            web_sys::console::log_1(&"[web-harness] accept_contact_invitation import_start".into());
+            let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let invitation_info = invitation.info().clone();
+            let instance_id = handle.instance_id().clone();
+            let handoff_instance_id = instance_id.clone();
+            let controller = controller.clone();
+            controller.inject_message("debug:accept_contact:spawn_enqueued");
+            controller.push_log("debug:accept_contact:spawn_enqueued");
+            spawn_background_semantic_task("accept_contact_invitation_failed", async move {
+                controller.inject_message("debug:accept_contact:workflow_start");
+                controller.push_log("debug:accept_contact:workflow_start");
+                controller.push_runtime_fact(RuntimeFact::InvitationAccepted {
+                    invitation_kind: aura_app::ui_contract::InvitationFactKind::Generic,
+                    authority_id: None,
+                    operation_state: None,
+                });
+                update_semantic_debug(
+                    "accept_contact_invitation_workflow_start",
+                    Some(handoff_instance_id.0.as_str()),
+                );
+                web_sys::console::log_1(
+                    &format!(
+                        "[web-harness] accept_contact_invitation workflow_start instance={}",
+                        handoff_instance_id.0
+                    )
+                    .into(),
+                );
+                let result = invitation_workflows::accept_imported_invitation_with_terminal_status(
+                    &app_core,
+                    invitation,
+                    Some(instance_id),
+                )
+                .await;
+                update_semantic_debug(
+                    "accept_contact_invitation_workflow_done",
+                    Some(if result.result.is_ok() { "ok" } else { "err" }),
+                );
+                controller.inject_message(if result.result.is_ok() {
+                    "debug:accept_contact:workflow_done:ok"
+                } else {
+                    "debug:accept_contact:workflow_done:err"
+                });
+                controller.push_log(if result.result.is_ok() {
+                    "debug:accept_contact:workflow_done:ok"
+                } else {
+                    "debug:accept_contact:workflow_done:err"
+                });
+                web_sys::console::log_1(
+                    &format!(
+                        "[web-harness] accept_contact_invitation workflow_done status={}",
+                        if result.result.is_ok() { "ok" } else { "err" }
+                    )
+                    .into(),
+                );
+                let result = result.result;
+                let accepted_contact = match &result {
+                    Ok(()) => match &invitation_info.invitation_type {
+                        InvitationBridgeType::Contact { nickname } => {
+                            let display_name = nickname
+                                .clone()
+                                .filter(|value| !value.trim().is_empty())
+                                .unwrap_or_else(|| invitation_info.sender_id.to_string());
+                            Some((invitation_info.sender_id, display_name))
+                        }
+                        _ => None,
+                    },
+                    Err(_) => None,
+                };
+                let terminal = match &result {
+                    Ok(()) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::new(
+                            SemanticOperationKind::AcceptContactInvitation,
+                            SemanticOperationPhase::Succeeded,
+                        ),
+                    },
+                    Err(error) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            SemanticOperationKind::AcceptContactInvitation,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(error.to_string()),
+                        ),
+                    },
+                };
+                update_semantic_debug(
+                    "accept_contact_invitation_apply_terminal",
+                    Some(handoff_instance_id.0.as_str()),
+                );
+                controller.inject_message("debug:accept_contact:apply_terminal");
+                controller.push_log("debug:accept_contact:apply_terminal");
+                web_sys::console::log_1(
+                    &format!(
+                        "[web-harness] accept_contact_invitation apply_terminal instance={}",
+                        handoff_instance_id.0
+                    )
+                    .into(),
+                );
+                apply_handed_off_terminal_status(
+                    controller.clone(),
+                    OperationId::invitation_accept(),
+                    Some(handoff_instance_id.clone()),
+                    SemanticOperationKind::AcceptContactInvitation,
+                    Some(terminal),
+                )?;
+                if let Some((authority_id, display_name)) = accepted_contact {
+                    update_semantic_debug(
+                        "accept_contact_invitation_complete_runtime",
+                        Some(display_name.as_str()),
+                    );
+                    web_sys::console::log_1(
+                        &format!(
+                            "[web-harness] accept_contact_invitation complete_runtime display_name={display_name}"
+                        )
+                        .into(),
+                    );
+                    crate::harness_bridge::apply_browser_ui_mutation(
+                        controller.clone(),
+                        move |controller| {
+                            controller.complete_runtime_contact_invitation_acceptance(
+                                authority_id,
+                                display_name,
+                            );
+                        },
+                    );
+                }
+                update_semantic_debug("accept_contact_invitation_done", None);
+                controller.push_log("debug:accept_contact:done");
+                web_sys::console::log_1(&"[web-harness] accept_contact_invitation done".into());
+                result.map_err(|error| JsValue::from_str(&error.to_string()))
+            });
+            Ok(semantic_unit_result_with_handle(handle))
+        }
+        RoutedSemanticIntent::AcceptPendingChannelInvitation => {
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_accept());
+            let app_core = controller.app_core().clone();
+            let instance_id = handle.instance_id().clone();
+            let handoff_instance_id = instance_id.clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task(
+                "accept_pending_channel_invitation_failed",
+                async move {
+                    let result = invitation_workflows::accept_pending_channel_invitation_with_binding_terminal_status(
+                        &app_core,
+                        Some(instance_id),
+                    )
+                    .await
+                    .result;
+                    let terminal = match &result {
+                        Ok(_) => WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::new(
+                                SemanticOperationKind::AcceptPendingChannelInvitation,
+                                SemanticOperationPhase::Succeeded,
+                            ),
+                        },
+                        Err(error) => WorkflowTerminalStatus {
+                            causality: None,
+                            status: SemanticOperationStatus::failed(
+                                SemanticOperationKind::AcceptPendingChannelInvitation,
+                                SemanticOperationError::new(
+                                    SemanticFailureDomain::Command,
+                                    SemanticFailureCode::InternalError,
+                                )
+                                .with_detail(error.to_string()),
+                            ),
+                        },
+                    };
+                    apply_handed_off_terminal_status(
+                        controller,
+                        OperationId::invitation_accept(),
+                        Some(handoff_instance_id),
+                        SemanticOperationKind::AcceptPendingChannelInvitation,
+                        Some(terminal),
+                    )?;
+                    result
+                        .map(|_| ())
+                        .map_err(|error| JsValue::from_str(&error.to_string()))
+                },
+            );
+            Ok(semantic_unit_result_with_handle(handle))
+        }
+        RoutedSemanticIntent::JoinChannel { channel_name } => {
+            let handle = begin_exact_ui_operation(controller.clone(), OperationId::join_channel());
+            messaging_workflows::join_channel_by_name_with_instance(
+                controller.app_core(),
+                &channel_name,
+                Some(handle.instance_id().clone()),
+            )
+            .await
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let binding = selected_channel_binding(&controller)
+                .await
+                .map_err(|error| JsValue::from_str(&error.detail()))?;
+            Ok(semantic_channel_result_with_handle(handle, binding))
+        }
+        RoutedSemanticIntent::InviteActorToChannel {
+            authority_id,
+            channel_id,
+        } => {
+            let handle =
+                begin_exact_ui_operation(controller.clone(), OperationId::invitation_create());
+            let app_core = controller.app_core().clone();
+            let authority_id = authority_id.to_string();
+            let channel_id = channel_id.to_string();
+            let instance_id = handle.instance_id().clone();
+            let handoff_instance_id = instance_id.clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task("invite_actor_to_channel_failed", async move {
+                let result =
+                    messaging_workflows::invite_user_to_channel_with_context_terminal_status(
+                        &app_core,
+                        &authority_id,
+                        &channel_id,
+                        None,
+                        Some(instance_id),
+                        None,
+                        None,
+                    )
+                    .await
+                    .result;
+                let terminal = match &result {
+                    Ok(_) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::new(
+                            SemanticOperationKind::InviteActorToChannel,
+                            SemanticOperationPhase::Succeeded,
+                        ),
+                    },
+                    Err(error) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            SemanticOperationKind::InviteActorToChannel,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(error.to_string()),
+                        ),
+                    },
+                };
+                apply_handed_off_terminal_status(
+                    controller,
+                    OperationId::invitation_create(),
+                    Some(handoff_instance_id),
+                    SemanticOperationKind::InviteActorToChannel,
+                    Some(terminal),
+                )?;
+                result
+                    .map(|_| ())
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
+            });
+            Ok(semantic_unit_result_with_handle(handle))
+        }
+        RoutedSemanticIntent::SendChatMessage { message, channel } => {
+            let handle = begin_exact_ui_operation(controller.clone(), OperationId::send_message());
+            let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            let app_core = controller.app_core().clone();
+            let instance_id = handle.instance_id().clone();
+            let handoff_instance_id = instance_id.clone();
+            let controller = controller.clone();
+            spawn_background_semantic_task("send_chat_message_failed", async move {
+                let result = messaging_workflows::send_message_with_instance(
+                    &app_core,
+                    channel.channel_id().clone(),
+                    &message,
+                    timestamp_ms,
+                    Some(instance_id),
+                )
+                .await;
+                let terminal = match &result {
+                    Ok(_) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::new(
+                            SemanticOperationKind::SendChatMessage,
+                            SemanticOperationPhase::Succeeded,
+                        ),
+                    },
+                    Err(error) => WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            SemanticOperationKind::SendChatMessage,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(error.to_string()),
+                        ),
+                    },
+                };
+                apply_handed_off_terminal_status(
+                    controller,
+                    OperationId::send_message(),
+                    Some(handoff_instance_id),
+                    SemanticOperationKind::SendChatMessage,
+                    Some(terminal),
+                )?;
+                result
+                    .map(|_| ())
+                    .map_err(|error| JsValue::from_str(&error.to_string()))
+            });
+            Ok(semantic_unit_result_with_handle(handle))
+        }
+    }
+}
+
+pub(crate) async fn submit_semantic_command(
+    controller: Arc<UiController>,
+    request: SemanticCommandRequest,
+) -> Result<SemanticCommandResponse, JsValue> {
+    let routed = route_semantic_intent(controller.as_ref(), request.intent)
+        .await
+        .map_err(RouteSemanticIntentError::into_js_value)?;
+    execute_semantic_intent(controller, routed).await
+}

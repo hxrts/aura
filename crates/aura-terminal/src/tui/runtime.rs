@@ -185,25 +185,24 @@ impl<T: TerminalEffects> TuiRuntime<T> {
     /// Times out after `STEP_TIMEOUT` so the loop can re-check `should_exit`.
     pub async fn step(&mut self) -> Result<bool, TerminalError> {
         // Bounded wait for next event — prevents indefinite hang.
-        let event = match execute_with_terminal_timeout(
-            "tui_runtime_step",
-            Duration::from_secs(30),
-            || self.terminal.next_event(),
-        )
-        .await
-        {
-            Ok(event) => event,
-            Err(TerminalTimeoutError::Timeout { .. }) => {
-                // No input within timeout — not an error, just re-check exit.
-                return Ok(!self.state.should_exit);
-            }
-            Err(TerminalTimeoutError::Setup { context, detail }) => {
-                return Err(TerminalError::IoError(format!(
-                    "{context}: failed to configure bounded terminal wait: {detail}"
-                )));
-            }
-            Err(TerminalTimeoutError::Operation(error)) => return Err(error),
-        };
+        let event =
+            match execute_with_terminal_timeout("tui_runtime_step", Duration::from_secs(30), || {
+                self.terminal.next_event()
+            })
+            .await
+            {
+                Ok(event) => event,
+                Err(TerminalTimeoutError::Timeout { .. }) => {
+                    // No input within timeout — not an error, just re-check exit.
+                    return Ok(!self.state.should_exit);
+                }
+                Err(TerminalTimeoutError::Setup { context, detail }) => {
+                    return Err(TerminalError::IoError(format!(
+                        "{context}: failed to configure bounded terminal wait: {detail}"
+                    )));
+                }
+                Err(TerminalTimeoutError::Operation(error)) => return Err(error),
+            };
 
         // Transition
         let commands = self.process_event(event);

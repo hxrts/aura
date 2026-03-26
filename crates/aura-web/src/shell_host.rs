@@ -1,5 +1,5 @@
 use async_lock::{Mutex, RwLock};
-use aura_agent::{AgentBuilder, AuraAgent};
+use aura_agent::AgentBuilder;
 use aura_app::ui::types::{
     BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
 };
@@ -17,9 +17,9 @@ use wasm_bindgen_futures::future_to_promise;
 
 use crate::bootstrap_storage::{load_persisted_account_config, persist_runtime_account_config};
 use crate::error::{log_web_error, WebUiError};
-use crate::harness_bridge::{
-    self, BootstrapHandoff, BrowserShellPhase, RuntimeIdentityStageSource,
-};
+use crate::harness::generation::BrowserShellPhase;
+use crate::harness_bridge::{self, BootstrapHandoff, RuntimeIdentityStageSource};
+use crate::shell::{cancel_generation_maintenance_loops, spawn_generation_maintenance_loops};
 use crate::task_owner::shared_web_task_owner;
 use crate::web_clipboard::WebClipboardAdapter;
 use crate::{
@@ -38,6 +38,105 @@ pub(crate) struct BootstrapState {
     pub(crate) account_ready: bool,
     pub(crate) pending_device_enrollment_code: Option<String>,
     pub(crate) pending_device_enrollment_code_key: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BootstrapPhase {
+    LoadStorageKeys,
+    ResolveRuntimeIdentity,
+    BuildAgent,
+    InitAppCore,
+    HydrateExistingAccount,
+    ReconcilePendingBootstrap,
+    ReconcilePendingEnrollment,
+    InstallHarness,
+    SpawnMaintenance,
+    PublishFinalSnapshot,
+    Ready,
+}
+
+impl BootstrapPhase {
+    const fn order(self) -> u8 {
+        match self {
+            Self::LoadStorageKeys => 0,
+            Self::ResolveRuntimeIdentity => 1,
+            Self::BuildAgent => 2,
+            Self::InitAppCore => 3,
+            Self::HydrateExistingAccount => 4,
+            Self::ReconcilePendingBootstrap => 5,
+            Self::ReconcilePendingEnrollment => 6,
+            Self::InstallHarness => 7,
+            Self::SpawnMaintenance => 8,
+            Self::PublishFinalSnapshot => 9,
+            Self::Ready => 10,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::LoadStorageKeys => "load_storage_keys",
+            Self::ResolveRuntimeIdentity => "resolve_runtime_identity",
+            Self::BuildAgent => "build_agent",
+            Self::InitAppCore => "init_app_core",
+            Self::HydrateExistingAccount => "hydrate_existing_account",
+            Self::ReconcilePendingBootstrap => "reconcile_pending_bootstrap",
+            Self::ReconcilePendingEnrollment => "reconcile_pending_enrollment",
+            Self::InstallHarness => "install_harness",
+            Self::SpawnMaintenance => "spawn_maintenance",
+            Self::PublishFinalSnapshot => "publish_final_snapshot",
+            Self::Ready => "ready",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct BootstrapPhaseTracker {
+    generation_id: u64,
+    current: BootstrapPhase,
+}
+
+impl BootstrapPhaseTracker {
+    fn new(generation_id: u64) -> Self {
+        Self {
+            generation_id,
+            current: BootstrapPhase::LoadStorageKeys,
+        }
+    }
+
+    fn advance_to(&mut self, next: BootstrapPhase) -> Result<(), WebUiError> {
+        if next.order() <= self.current.order() {
+            return Err(self.error(
+                WebUiOperation::BootstrapController,
+                "WEB_BOOTSTRAP_PHASE_ORDER_INVALID",
+                format!(
+                    "invalid bootstrap phase transition {} -> {} for generation {}",
+                    self.current.label(),
+                    next.label(),
+                    self.generation_id
+                ),
+            ));
+        }
+        self.current = next;
+        Ok(())
+    }
+
+    fn error(
+        &self,
+        operation: WebUiOperation,
+        code: &'static str,
+        detail: impl Into<String>,
+    ) -> WebUiError {
+        WebUiError::operation(
+            operation,
+            code,
+            format!(
+                "bootstrap phase {} (generation {}): {}",
+                self.current.label(),
+                self.generation_id,
+                detail.into()
+            ),
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -128,6 +227,7 @@ impl WebShellHost {
         bootstrap_epoch.set(epoch);
         bootstrap_error.set(None);
         committed_bootstrap.set(None);
+        cancel_generation_maintenance_loops();
         harness_bridge::clear_controller(&format!("bootstrap_generation_rebinding:{epoch}"));
         harness_bridge::set_browser_shell_phase(BrowserShellPhase::Rebinding);
 
@@ -311,6 +411,7 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
 }
 
 async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {
+    let mut phase = BootstrapPhaseTracker::new(generation_id);
     let storage_prefix = active_storage_prefix();
     let runtime_identity_key = selected_runtime_identity_key(&storage_prefix);
     let pending_account_key = pending_account_bootstrap_key(&storage_prefix);
@@ -333,6 +434,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         )
         .into(),
     );
+    phase.advance_to(BootstrapPhase::ResolveRuntimeIdentity)?;
     let harness_instance = harness_instance_id();
     let clipboard = Arc::new(WebClipboardAdapter::default());
     if let Some(runtime_identity) = selected_runtime_identity {
@@ -363,6 +465,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             device_id,
             ..Default::default()
         };
+        phase.advance_to(BootstrapPhase::BuildAgent)?;
         let agent = Arc::new(
             AgentBuilder::web()
                 .storage_prefix(&storage_prefix)
@@ -371,7 +474,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 .build()
                 .await
                 .map_err(|error| {
-                    WebUiError::operation(
+                    phase.error(
                         WebUiOperation::BootstrapController,
                         "WEB_RUNTIME_BUILD_FAILED",
                         format!("failed to build web runtime: {error}"),
@@ -387,10 +490,11 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             .into(),
         );
 
+        phase.advance_to(BootstrapPhase::InitAppCore)?;
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), agent.clone().as_runtime_bridge())
                 .map_err(|error| {
-                    WebUiError::operation(
+                    phase.error(
                         WebUiOperation::BootstrapController,
                         "WEB_APP_CORE_INIT_FAILED",
                         format!("failed to initialize AppCore: {error}"),
@@ -401,7 +505,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .map_err(|error| {
-                WebUiError::operation(
+                phase.error(
                     WebUiOperation::BootstrapController,
                     "WEB_SIGNAL_INIT_FAILED",
                     format!("failed to initialize app signals: {error}"),
@@ -409,20 +513,29 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             })?;
 
         if pending_account_bootstrap.is_none() && pending_device_enrollment_code.is_none() {
+            phase.advance_to(BootstrapPhase::HydrateExistingAccount)?;
             hydrate_existing_runtime_account_projection(
                 &app_core,
                 persisted_account_config.as_ref(),
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                phase.error(
+                    WebUiOperation::BootstrapController,
+                    "WEB_BOOTSTRAP_HYDRATE_EXISTING_ACCOUNT_FAILED",
+                    error.user_message(),
+                )
+            })?;
         }
 
+        phase.advance_to(BootstrapPhase::ReconcilePendingBootstrap)?;
         let bootstrap_resolution = account_workflows::reconcile_pending_runtime_account_bootstrap(
             &app_core,
             pending_account_bootstrap.clone(),
         )
         .await
         .map_err(|error| {
-            WebUiError::operation(
+            phase.error(
                 WebUiOperation::BootstrapController,
                 "WEB_PENDING_BOOTSTRAP_RECONCILE_FAILED",
                 format!("failed to reconcile pending web account bootstrap: {error}"),
@@ -482,6 +595,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 });
             })),
         ));
+        phase.advance_to(BootstrapPhase::ReconcilePendingEnrollment)?;
         if let Some(pending_code) = pending_device_enrollment_code
             .as_ref()
             .filter(|code| !code.is_empty())
@@ -494,7 +608,14 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 &pending_code,
                 &pending_code_storage_key,
             )
-            .await?
+            .await
+            .map_err(|error| {
+                phase.error(
+                    WebUiOperation::BootstrapController,
+                    "WEB_PENDING_DEVICE_ENROLLMENT_RECONCILE_FAILED",
+                    error.user_message(),
+                )
+            })?
             .is_some()
             {
                 account_ready = true;
@@ -504,8 +625,8 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         if account_ready {
             controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Neighborhood);
         }
+        phase.advance_to(BootstrapPhase::InstallHarness)?;
         install_harness_instrumentation(controller.clone(), generation_id);
-        spawn_ceremony_acceptance_loop(controller.clone(), app_core.clone(), agent.clone());
         if account_ready {
             if let Err(error) =
                 settings_workflows::refresh_settings_from_runtime(controller.app_core()).await
@@ -613,6 +734,15 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             }
         }
 
+        phase.advance_to(BootstrapPhase::SpawnMaintenance)?;
+        spawn_generation_maintenance_loops(
+            generation_id,
+            controller.clone(),
+            app_core.clone(),
+            account_ready,
+            Some(agent.clone()),
+        );
+        phase.advance_to(BootstrapPhase::PublishFinalSnapshot)?;
         let final_snapshot =
             harness_bridge::publish_semantic_controller_snapshot(controller.clone());
         web_sys::console::log_1(
@@ -634,6 +764,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
                 "web harness instance {instance_id} booted in testing mode"
             ));
         }
+        phase.advance_to(BootstrapPhase::Ready)?;
         Ok(BootstrapState {
             generation_id,
             controller,
@@ -643,9 +774,10 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             pending_device_enrollment_code_key: pending_code_storage_key,
         })
     } else {
+        phase.advance_to(BootstrapPhase::InitAppCore)?;
         let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).map_err(
             |error| {
-                WebUiError::operation(
+                phase.error(
                     WebUiOperation::BootstrapController,
                     "WEB_BOOTSTRAP_APP_CORE_INIT_FAILED",
                     format!("failed to initialize bootstrap AppCore: {error}"),
@@ -655,7 +787,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         AppCore::init_signals_with_hooks(&app_core)
             .await
             .map_err(|error| {
-                WebUiError::operation(
+                phase.error(
                     WebUiOperation::BootstrapController,
                     "WEB_BOOTSTRAP_SIGNAL_INIT_FAILED",
                     format!("failed to initialize bootstrap app signals: {error}"),
@@ -663,17 +795,21 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             })?;
         let controller = Arc::new(UiController::new(app_core, clipboard));
         controller.set_account_setup_state(false, "", None);
+        phase.advance_to(BootstrapPhase::InstallHarness)?;
         install_harness_instrumentation(controller.clone(), generation_id);
         let waiting_event = BootstrapEvent::new(
             BootstrapSurface::Web,
             BootstrapEventKind::ShellAwaitingAccount,
         );
         controller.push_log(&waiting_event.to_string());
+        phase.advance_to(BootstrapPhase::PublishFinalSnapshot)?;
+        let _ = harness_bridge::publish_semantic_controller_snapshot(controller.clone());
         if let Some(instance_id) = harness_instance {
             controller.push_log(&format!(
                 "web harness instance {instance_id} booted without runtime"
             ));
         }
+        phase.advance_to(BootstrapPhase::Ready)?;
         Ok(BootstrapState {
             generation_id,
             controller,
@@ -686,6 +822,43 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
 
 #[cfg(test)]
 mod tests {
+    use super::{BootstrapPhase, BootstrapPhaseTracker};
+    use aura_ui::FrontendUiOperation as WebUiOperation;
+
+    #[test]
+    fn bootstrap_phase_tracker_enforces_monotonic_ordering() {
+        let mut tracker = BootstrapPhaseTracker::new(7);
+        tracker
+            .advance_to(BootstrapPhase::ResolveRuntimeIdentity)
+            .expect("forward transition should succeed");
+        tracker
+            .advance_to(BootstrapPhase::InitAppCore)
+            .expect("skipping forward within the declared order should succeed");
+        let error = tracker
+            .advance_to(BootstrapPhase::ResolveRuntimeIdentity)
+            .expect_err("backward transition must fail");
+
+        let rendered = error.user_message();
+        assert!(rendered.contains("WEB_BOOTSTRAP_PHASE_ORDER_INVALID"));
+        assert!(rendered.contains("init_app_core"));
+        assert!(rendered.contains("resolve_runtime_identity"));
+    }
+
+    #[test]
+    fn bootstrap_phase_tracker_errors_include_phase_context() {
+        let tracker = BootstrapPhaseTracker::new(11);
+        let error = tracker.error(
+            WebUiOperation::BootstrapController,
+            "WEB_BOOTSTRAP_PHASE_CONTEXT_TEST",
+            "phase-aware detail",
+        );
+        let rendered = error.user_message();
+
+        assert!(rendered.contains("WEB_BOOTSTRAP_PHASE_CONTEXT_TEST"));
+        assert!(rendered.contains("load_storage_keys"));
+        assert!(rendered.contains("generation 11"));
+    }
+
     #[test]
     fn shell_host_hydrates_runtime_projection_before_pending_reconcile() {
         let source = include_str!("shell_host.rs");
@@ -693,7 +866,7 @@ mod tests {
             .find("async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {")
             .unwrap_or_else(|| panic!("missing bootstrap_generation"));
         let bootstrap_end = source[bootstrap_start..]
-            .find("fn spawn_ceremony_acceptance_loop(")
+            .find("\n#[cfg(test)]")
             .map(|offset| bootstrap_start + offset)
             .unwrap_or(source.len());
         let bootstrap_block = &source[bootstrap_start..bootstrap_end];
@@ -710,7 +883,7 @@ mod tests {
             .find("async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {")
             .unwrap_or_else(|| panic!("missing bootstrap_generation"));
         let bootstrap_end = source[bootstrap_start..]
-            .find("fn spawn_ceremony_acceptance_loop(")
+            .find("\n#[cfg(test)]")
             .map(|offset| bootstrap_start + offset)
             .unwrap_or(source.len());
         let bootstrap_block = &source[bootstrap_start..bootstrap_end];
@@ -748,7 +921,7 @@ mod tests {
             .find("async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {")
             .unwrap_or_else(|| panic!("missing bootstrap_generation"));
         let bootstrap_end = source[bootstrap_start..]
-            .find("fn spawn_ceremony_acceptance_loop(")
+            .find("\n#[cfg(test)]")
             .map(|offset| bootstrap_start + offset)
             .unwrap_or(source.len());
         let bootstrap_block = &source[bootstrap_start..bootstrap_end];
@@ -767,7 +940,7 @@ mod tests {
             .find("async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {")
             .unwrap_or_else(|| panic!("missing bootstrap_generation"));
         let bootstrap_end = source[bootstrap_start..]
-            .find("fn spawn_ceremony_acceptance_loop(")
+            .find("\n#[cfg(test)]")
             .map(|offset| bootstrap_start + offset)
             .unwrap_or(source.len());
         let bootstrap_block = &source[bootstrap_start..bootstrap_end];
@@ -776,34 +949,4 @@ mod tests {
             "ready browser generations must persist account bootstrap metadata for preserved-profile restarts"
         );
     }
-}
-
-fn spawn_ceremony_acceptance_loop(
-    controller: Arc<UiController>,
-    app_core: Arc<RwLock<AppCore>>,
-    agent: Arc<AuraAgent>,
-) {
-    crate::spawn_browser_maintenance_loop(
-        controller,
-        app_core,
-        500,
-        "Ceremony acceptance paused; refresh to resume",
-        WebUiOperation::ProcessCeremonyAcceptances,
-        "WEB_CEREMONY_ACCEPTANCE_SLEEP_FAILED",
-        move || {
-            let agent = agent.clone();
-            async move {
-                if let Err(error) = agent.process_ceremony_acceptances().await {
-                    log_web_error(
-                        "warn",
-                        &WebUiError::operation(
-                            WebUiOperation::ProcessCeremonyAcceptances,
-                            "WEB_CEREMONY_ACCEPTANCE_PROCESS_FAILED",
-                            format!("{error}"),
-                        ),
-                    );
-                }
-            }
-        },
-    );
 }

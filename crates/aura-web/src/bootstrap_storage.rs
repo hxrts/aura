@@ -1,5 +1,5 @@
 use async_lock::RwLock;
-use aura_app::ui::types::{AccountConfig, WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX};
+use aura_app::ui::types::AccountConfig;
 use aura_app::ui::workflows::context as context_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
@@ -8,12 +8,8 @@ use aura_app::AppCore;
 use aura_ui::FrontendUiOperation as WebUiOperation;
 use std::sync::Arc;
 
-use crate::active_storage_prefix;
 use crate::error::WebUiError;
-
-fn account_config_key(storage_prefix: &str) -> String {
-    format!("{storage_prefix}{WEB_ACCOUNT_CONFIG_STORAGE_SUFFIX}")
-}
+use crate::shell::storage::{WebLocalStorage, WebStorageScope};
 
 fn normalized_nickname_suggestion(value: Option<String>) -> Option<String> {
     value.and_then(|nickname| {
@@ -29,83 +25,34 @@ fn normalized_nickname_suggestion(value: Option<String>) -> Option<String> {
 pub(crate) fn load_persisted_account_config(
     operation: WebUiOperation,
 ) -> Result<Option<AccountConfig>, WebUiError> {
-    let Some(window) = web_sys::window() else {
+    let Some(storage) = WebLocalStorage::optional_lookup(operation)? else {
         return Ok(None);
     };
-    let Some(storage) = window.local_storage().map_err(|error| {
-        WebUiError::config(
-            operation,
-            "WEB_LOCAL_STORAGE_LOOKUP_FAILED",
-            format!("failed to access localStorage: {:?}", error),
-        )
-    })?
-    else {
-        return Ok(None);
-    };
-
-    let storage_key = account_config_key(&active_storage_prefix());
-    let Some(raw) = storage.get_item(&storage_key).map_err(|error| {
-        WebUiError::config(
-            operation,
-            "WEB_ACCOUNT_CONFIG_READ_FAILED",
-            format!("failed to read persisted account config: {:?}", error),
-        )
-    })?
-    else {
-        return Ok(None);
-    };
-
-    serde_json::from_str(&raw).map(Some).map_err(|error| {
-        WebUiError::config(
-            operation,
-            "WEB_ACCOUNT_CONFIG_PARSE_FAILED",
-            format!("failed to parse persisted account config: {error}"),
-        )
-    })
+    let storage_key = WebStorageScope::active().account_config_key();
+    storage.load_json(
+        &storage_key,
+        operation,
+        "WEB_ACCOUNT_CONFIG_READ_FAILED",
+        "WEB_ACCOUNT_CONFIG_PARSE_FAILED",
+        "persisted account config",
+        "persisted account config",
+    )
 }
 
 fn persist_account_config(
     operation: WebUiOperation,
     account_config: &AccountConfig,
 ) -> Result<(), WebUiError> {
-    let window = web_sys::window().ok_or_else(|| {
-        WebUiError::config(
-            operation,
-            "WEB_WINDOW_UNAVAILABLE",
-            "window is not available",
-        )
-    })?;
-    let storage = window
-        .local_storage()
-        .map_err(|error| {
-            WebUiError::config(
-                operation,
-                "WEB_LOCAL_STORAGE_UNAVAILABLE",
-                format!("localStorage unavailable: {:?}", error),
-            )
-        })?
-        .ok_or_else(|| {
-            WebUiError::config(
-                operation,
-                "WEB_LOCAL_STORAGE_MISSING",
-                "localStorage unavailable",
-            )
-        })?;
-    let raw = serde_json::to_string(account_config).map_err(|error| {
-        WebUiError::operation(
-            operation,
-            "WEB_ACCOUNT_CONFIG_SERIALIZE_FAILED",
-            format!("failed to serialize persisted account config: {error}"),
-        )
-    })?;
-    let storage_key = account_config_key(&active_storage_prefix());
-    storage.set_item(&storage_key, &raw).map_err(|error| {
-        WebUiError::config(
-            operation,
-            "WEB_ACCOUNT_CONFIG_PERSIST_FAILED",
-            format!("failed to persist account config: {:?}", error),
-        )
-    })
+    let storage_key = WebStorageScope::active().account_config_key();
+    WebLocalStorage::required(operation)?.set_json(
+        &storage_key,
+        account_config,
+        operation,
+        "WEB_ACCOUNT_CONFIG_SERIALIZE_FAILED",
+        "WEB_ACCOUNT_CONFIG_PERSIST_FAILED",
+        "persisted account config",
+        "persisted account config",
+    )
 }
 
 pub(crate) async fn persist_runtime_account_config(

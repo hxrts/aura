@@ -166,6 +166,7 @@ impl TaskSpawner for FrontendTaskSpawnerImpl {
 #[derive(Clone, Debug)]
 pub struct FrontendTaskOwner {
     inner: Arc<FrontendTaskSpawnerImpl>,
+    owner_liveness: Arc<()>,
     spawner: OwnedTaskSpawner,
 }
 
@@ -176,7 +177,11 @@ impl FrontendTaskOwner {
         let inner = Arc::new(FrontendTaskSpawnerImpl::new(cancellation_state, runtime));
         let shutdown = OwnedShutdownToken::attached(inner.cancellation_token());
         let spawner = OwnedTaskSpawner::new(inner.clone(), shutdown);
-        Self { inner, spawner }
+        Self {
+            inner,
+            owner_liveness: Arc::new(()),
+            spawner,
+        }
     }
 
     pub fn spawn<F>(&self, fut: F)
@@ -219,7 +224,9 @@ impl FrontendTaskOwner {
 
 impl Drop for FrontendTaskOwner {
     fn drop(&mut self) {
-        self.inner.signal_shutdown();
+        if Arc::strong_count(&self.owner_liveness) == 1 {
+            self.inner.signal_shutdown();
+        }
     }
 }
 
@@ -257,6 +264,25 @@ mod tests {
             spawner
         };
 
+        assert!(spawner.shutdown_token().is_cancelled());
+    }
+
+    #[test]
+    fn dropping_temporary_owner_clone_does_not_shutdown_shared_owner() {
+        let owner = FrontendTaskOwner::new(FrontendTaskRuntime::new(
+            noop_spawn_boxed,
+            noop_spawn_local_boxed,
+        ));
+        let spawner = owner.owned_spawner();
+        assert!(!spawner.shutdown_token().is_cancelled());
+
+        {
+            let temporary = owner.clone();
+            drop(temporary);
+        }
+
+        assert!(!spawner.shutdown_token().is_cancelled());
+        owner.shutdown();
         assert!(spawner.shutdown_token().is_cancelled());
     }
 }

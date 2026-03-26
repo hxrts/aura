@@ -76,11 +76,9 @@ use crate::tui::props::{
     extract_chat_view_props, extract_contacts_view_props, extract_neighborhood_view_props,
     extract_notifications_view_props, extract_settings_view_props,
 };
-use crate::tui::timeout_support::{execute_with_terminal_timeout, TerminalTimeoutError};
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
-use crate::tui::updates::{
-    harness_command_channel, ui_update_channel, UiUpdate, UiUpdateSender,
-};
+use crate::tui::timeout_support::{execute_with_terminal_timeout, TerminalTimeoutError};
+use crate::tui::updates::{harness_command_channel, ui_update_channel, UiUpdate, UiUpdateSender};
 use std::sync::Mutex;
 use std::time::Duration;
 

@@ -541,11 +541,9 @@ pub(super) fn execute_harness_followup_command(
                 return Err("No channel selected".to_string());
             };
             let selected = selected_channel.read().clone();
-            let context_id = strongest_authoritative_binding_for_channel(
-                channel,
-                selected.as_ref(),
-            )
-            .and_then(|binding| binding.context_id);
+            let context_id =
+                strongest_authoritative_binding_for_channel(channel, selected.as_ref())
+                    .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",
@@ -590,11 +588,9 @@ pub(super) fn execute_harness_followup_command(
                 ));
             };
             let selected = selected_channel.read().clone();
-            let context_id = strongest_authoritative_binding_for_channel(
-                channel,
-                selected.as_ref(),
-            )
-            .and_then(|binding| binding.context_id);
+            let context_id =
+                strongest_authoritative_binding_for_channel(channel, selected.as_ref())
+                    .and_then(|binding| binding.context_id);
             let Some(context_id) = context_id else {
                 return Err(format!(
                     "Selected channel lacks authoritative context: {}",
