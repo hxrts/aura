@@ -2056,7 +2056,16 @@ async fn warm_invited_peer_connectivity(
         converge_runtime(runtime).await;
         let _ = crate::workflows::system::refresh_account(app_core).await;
         let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
-        if runtime.is_peer_online(receiver).await {
+        let peer_online = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "is_peer_online",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.is_peer_online(receiver),
+        )
+        .await
+        .unwrap_or(false);
+        if peer_online {
             return true;
         }
     }
@@ -3592,7 +3601,7 @@ pub async fn send_message_ref_with_instance(
         instance_id,
         SemanticOperationKind::SendChatMessage,
     );
-    send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await
+    send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner, None).await
 }
 
 /// Send a message by channel reference while returning a directly-settled
@@ -3610,7 +3619,8 @@ pub async fn send_message_with_terminal_status(
         instance_id,
         SemanticOperationKind::SendChatMessage,
     );
-    let result = send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await;
+    let result =
+        send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner, None).await;
     crate::ui_contract::WorkflowTerminalOutcome {
         result,
         terminal: owner.terminal_status().await,
@@ -3630,15 +3640,28 @@ pub async fn send_message_ref(
         None,
         SemanticOperationKind::SendChatMessage,
     );
-    send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await
+    send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner, None).await
 }
 
+#[aura_macros::semantic_owner(
+    owner = "send_message_ref_with_instance",
+    terminal = "publish_success_with",
+    postcondition = "message_committed",
+    proof = crate::workflows::semantic_facts::MessageCommittedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "channel_target_resolved,authoritative_context_materialized,delivery_ready",
+    child_ops = "",
+    category = "move_owned"
+)]
 async fn send_message_ref_owned(
     app_core: &Arc<RwLock<AppCore>>,
     channel: ChannelRef,
     content: &str,
     timestamp_ms: u64,
     owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<String, AuraError> {
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
@@ -3733,20 +3756,54 @@ async fn send_message_ref_owned(
                             SendMessageError::RecipientResolutionNotReady { .. }
                             | SendMessageError::DeliveryNotReady { .. },
                         ) => {
-                            let _ = refresh_authoritative_recipient_resolution_readiness(app_core)
+                            if let Err(error) =
+                                refresh_authoritative_recipient_resolution_readiness(app_core)
+                                    .await
+                            {
+                                return fail_send_message(
+                                    owner,
+                                    SendMessageError::ReadinessFactsUnavailable {
+                                        detail: format!(
+                                            "recipient resolution refresh failed for {channel_id}: {error}"
+                                        ),
+                                    },
+                                )
                                 .await;
-                            let _ = refresh_authoritative_delivery_readiness_for_channel(
+                            }
+                            if let Err(error) = refresh_authoritative_delivery_readiness_for_channel(
                                 app_core,
                                 &runtime,
                                 authoritative_channel,
                             )
-                            .await;
-                            let _ = warm_channel_connectivity(
+                            .await
+                            {
+                                return fail_send_message(
+                                    owner,
+                                    SendMessageError::ReadinessFactsUnavailable {
+                                        detail: format!(
+                                            "delivery readiness refresh failed for {channel_id}: {error}"
+                                        ),
+                                    },
+                                )
+                                .await;
+                            }
+                            if !warm_channel_connectivity(
                                 app_core,
                                 &runtime,
                                 authoritative_channel,
                             )
-                            .await;
+                            .await
+                            {
+                                return fail_send_message(
+                                    owner,
+                                    SendMessageError::ReadinessFactsUnavailable {
+                                        detail: format!(
+                                            "channel connectivity warmup failed for {channel_id}"
+                                        ),
+                                    },
+                                )
+                                .await;
+                            }
                             match require_send_message_readiness(app_core, authoritative_channel)
                                 .await
                             {

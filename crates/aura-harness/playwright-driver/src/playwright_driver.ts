@@ -2338,8 +2338,9 @@ function requestTimeoutMs(method, params) {
     }
     case "click_button":
     case "fill_input":
-    case "submit_semantic_command":
       return 30000;
+    case "submit_semantic_command":
+      return 90000;
     case "reload_page":
     case "recover_ui_state":
     case "restart_page_session":

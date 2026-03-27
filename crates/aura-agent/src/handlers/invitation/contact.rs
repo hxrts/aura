@@ -6,6 +6,12 @@ const CONTACT_INVITATION_ACCEPTANCE_PROCESS_TIMEOUT_MS: u64 = 20_000;
 const CONTACT_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
 const CONTACT_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS: u64 = 75;
 
+#[derive(Debug, thiserror::Error)]
+enum ContactInvitationAcceptanceError {
+    #[error("contact invitation acceptance peer channel is not yet established for {sender_id}")]
+    PeerChannelNotEstablished { sender_id: AuthorityId },
+}
+
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,
 }
@@ -104,9 +110,10 @@ impl<'a> InvitationContactHandler<'a> {
                 return Ok(());
             }
 
-            Err(AgentError::runtime(format!(
-                "contact invitation acceptance peer channel is not yet established for {sender_id}"
-            )))
+            Err(AgentError::runtime(
+                ContactInvitationAcceptanceError::PeerChannelNotEstablished { sender_id }
+                    .to_string(),
+            ))
         })
         .await
         .map_err(|error| match error {

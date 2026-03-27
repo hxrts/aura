@@ -142,6 +142,18 @@ impl SemanticSuccessProof for InvitationCreatedProof {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct InvitationExportedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for InvitationExportedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("invitation_exported")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workflows) struct InvitationAcceptedOrMaterializedProof {
     invitation_id: aura_core::InvitationId,
 }
@@ -161,6 +173,30 @@ pub(in crate::workflows) struct PendingInvitationConsumedProof {
 impl SemanticSuccessProof for PendingInvitationConsumedProof {
     fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
         SemanticOwnerPostcondition::new("pending_invitation_consumed")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct InvitationDeclinedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for InvitationDeclinedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("invitation_declined")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct InvitationRevokedProof {
+    invitation_id: aura_core::InvitationId,
+}
+
+impl SemanticSuccessProof for InvitationRevokedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("invitation_revoked")
     }
 }
 
@@ -588,6 +624,19 @@ pub(in crate::workflows) fn issue_invitation_created_proof(
     capability = "semantic_postcondition_proof"
 )]
 #[allow(dead_code)]
+pub(in crate::workflows) fn issue_invitation_exported_proof(
+    invitation_id: aura_core::InvitationId,
+) -> InvitationExportedProof {
+    let _ = semantic_postcondition_proof_capability();
+    InvitationExportedProof { invitation_id }
+}
+
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
 pub(in crate::workflows) fn issue_channel_invitation_created_proof(
     invitation_id: aura_core::InvitationId,
 ) -> ChannelInvitationCreatedProof {
@@ -605,6 +654,32 @@ pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
 ) -> InvitationAcceptedOrMaterializedProof {
     let _ = semantic_postcondition_proof_capability();
     InvitationAcceptedOrMaterializedProof { invitation_id }
+}
+
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
+pub(in crate::workflows) fn issue_invitation_declined_proof(
+    invitation_id: aura_core::InvitationId,
+) -> InvitationDeclinedProof {
+    let _ = semantic_postcondition_proof_capability();
+    InvitationDeclinedProof { invitation_id }
+}
+
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
+pub(in crate::workflows) fn issue_invitation_revoked_proof(
+    invitation_id: aura_core::InvitationId,
+) -> InvitationRevokedProof {
+    let _ = semantic_postcondition_proof_capability();
+    InvitationRevokedProof { invitation_id }
 }
 
 #[aura_macros::authoritative_source(kind = "proof_issuer")]

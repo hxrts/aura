@@ -157,7 +157,9 @@ use crate::workflows::runtime_error_classification::{
 use crate::workflows::semantic_facts::prove_channel_membership_ready;
 use crate::workflows::semantic_facts::{
     issue_device_enrollment_imported_proof, issue_invitation_accepted_or_materialized_proof,
-    issue_invitation_created_proof, publish_authoritative_semantic_fact,
+    issue_invitation_created_proof, issue_invitation_declined_proof,
+    issue_invitation_exported_proof, issue_invitation_revoked_proof,
+    publish_authoritative_semantic_fact,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
@@ -940,7 +942,7 @@ async fn drive_invitation_accept_convergence(
     Ok(())
 }
 
-async fn best_effort_propagate_contact_acceptance(
+async fn propagate_contact_acceptance_followup(
     app_core: &Arc<RwLock<AppCore>>,
     contact_id: AuthorityId,
 ) -> Result<(), AuraError> {
@@ -988,7 +990,15 @@ async fn best_effort_propagate_contact_acceptance(
                     .any(|contact| contact.id == contact_id)
             })
             .unwrap_or(false);
-        let peer_online = runtime.is_peer_online(contact_id).await;
+        let peer_online = timeout_runtime_call(
+            &runtime,
+            "accept_contact_invitation",
+            "is_peer_online",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.is_peer_online(contact_id),
+        )
+        .await
+        .unwrap_or(false);
         if linked && peer_online {
             break;
         }
@@ -1004,7 +1014,7 @@ pub async fn run_post_contact_accept_followups(
 ) {
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
-        .capture(best_effort_propagate_contact_acceptance(
+        .capture(propagate_contact_acceptance_followup(
             app_core, contact_id,
         ))
         .await;
@@ -2268,9 +2278,10 @@ pub async fn export_invitation_by_str_with_terminal_status(
         owner
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
-        let code = export_invitation_runtime(app_core, &InvitationId::new(invitation_id)).await?;
+        let invitation_id = InvitationId::new(invitation_id);
+        let code = export_invitation_runtime(app_core, &invitation_id).await?;
         owner
-            .publish_phase(SemanticOperationPhase::Succeeded)
+            .publish_success_with(issue_invitation_exported_proof(invitation_id))
             .await?;
         Ok(code)
     }
@@ -2453,8 +2464,30 @@ async fn accept_invitation_id_owned(
             // Terminal success reflects accepted invitation ownership.
             // Contact-link materialization can lag and is observed separately
             // via readiness/runtime signals and refresh hooks.
-            let _ = refresh_authoritative_contact_link_readiness(app_core).await;
-            let _ = publish_authoritative_contact_invitation_accepted(app_core, contact_id).await;
+            if let Err(error) = refresh_authoritative_contact_link_readiness(app_core).await {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "contact invitation readiness refresh failed for {contact_id}: {error}"
+                        ),
+                    },
+                )
+                .await;
+            }
+            if let Err(error) =
+                publish_authoritative_contact_invitation_accepted(app_core, contact_id).await
+            {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "contact invitation authoritative publish failed for {contact_id}: {error}"
+                        ),
+                    },
+                )
+                .await;
+            }
             owner
                 .publish_success_with(issue_invitation_accepted_or_materialized_proof(
                     invitation_id.clone(),
@@ -2733,10 +2766,35 @@ async fn accept_imported_invitation_owned(
             // Imported contact acceptance should settle terminal status once
             // the accept itself succeeds. Contact-link materialization follows
             // via normal convergence and authoritative readiness hooks.
-            let _ = refresh_authoritative_contact_link_readiness(app_core).await;
-            let _ =
-                publish_authoritative_contact_invitation_accepted(app_core, invitation.sender_id)
-                    .await;
+            if let Err(error) = refresh_authoritative_contact_link_readiness(app_core).await {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "imported contact invitation readiness refresh failed for {}: {error}",
+                            invitation.sender_id
+                        ),
+                    },
+                )
+                .await;
+            }
+            if let Err(error) = publish_authoritative_contact_invitation_accepted(
+                app_core,
+                invitation.sender_id,
+            )
+            .await
+            {
+                return fail_invitation_accept(
+                    owner,
+                    AcceptInvitationError::AcceptFailed {
+                        detail: format!(
+                            "imported contact invitation authoritative publish failed for {}: {error}",
+                            invitation.sender_id
+                        ),
+                    },
+                )
+                .await;
+            }
             emit_contact_accept_probe("publish_success");
             owner
                 .publish_success_with(issue_invitation_accepted_or_materialized_proof(
@@ -3230,9 +3288,10 @@ pub async fn decline_invitation_by_str_with_terminal_status(
         owner
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
-        decline_invitation_by_str(app_core, invitation_id).await?;
+        let invitation_id = InvitationId::new(invitation_id);
+        decline_invitation_by_str(app_core, invitation_id.as_str()).await?;
         owner
-            .publish_phase(SemanticOperationPhase::Succeeded)
+            .publish_success_with(issue_invitation_declined_proof(invitation_id))
             .await?;
         Ok(())
     }
@@ -3301,9 +3360,10 @@ pub async fn cancel_invitation_by_str_with_terminal_status(
         owner
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
-        cancel_invitation_by_str(app_core, invitation_id).await?;
+        let invitation_id = InvitationId::new(invitation_id);
+        cancel_invitation_by_str(app_core, invitation_id.as_str()).await?;
         owner
-            .publish_phase(SemanticOperationPhase::Succeeded)
+            .publish_success_with(issue_invitation_revoked_proof(invitation_id))
             .await?;
         Ok(())
     }
