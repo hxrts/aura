@@ -9,19 +9,22 @@
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
 use crate::views::PendingAccountBootstrap;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workflows::runtime::{execute_with_runtime_retry_budget, workflow_retry_policy};
 use crate::workflows::{
     context,
     runtime::{
-        execute_with_runtime_retry_budget, execute_with_runtime_timeout_budget, require_runtime,
-        timeout_runtime_call, warn_workflow_timeout, workflow_retry_policy,
-        workflow_timeout_budget,
+        execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
+        warn_workflow_timeout, workflow_timeout_budget,
     },
     settings, system,
 };
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, RetryRunError, TimeoutBudgetError, TimeoutRunError};
+#[cfg(not(target_arch = "wasm32"))]
+use aura_core::RetryRunError;
+use aura_core::{AuraError, TimeoutBudgetError, TimeoutRunError};
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -12,10 +12,12 @@ use super::services::{
 };
 use super::{
     AuraEffectSystem, EffectContext, EffectExecutor, LifecycleManager, RuntimeDiagnosticSink,
-    RuntimeShutdownEvent, TaskGroup, TaskSupervisor,
+    RuntimeShutdownEvent, TaskSupervisor,
 };
 use crate::core::{AgentConfig, AuthorityContext};
 use crate::handlers::RendezvousHandler;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::task_registry::TaskGroup;
 use crate::task_registry::TaskSupervisionError;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};

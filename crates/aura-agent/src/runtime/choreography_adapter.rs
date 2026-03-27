@@ -31,6 +31,7 @@ use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_core::TimeoutBudget;
 use aura_core::{CapabilityName, FlowCost};
 use aura_guards::guards::journal::JournalCoupler;

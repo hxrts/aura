@@ -27,18 +27,12 @@ struct FrontendTaskCancellationState {
 }
 
 impl FrontendTaskCancellationState {
-    fn signal_shutdown(&self) {
-        if self.cancelled.swap(true, Ordering::SeqCst) {
-            return;
-        }
-
-        for waiter in self.waiters.drain() {
-            let _ = waiter.send(());
-        }
-    }
-
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
+    }
+
+    fn begin_shutdown(&self) -> bool {
+        !self.cancelled.swap(true, Ordering::SeqCst)
     }
 }
 
@@ -59,6 +53,7 @@ impl CancellationToken for FrontendTaskCancellationToken {
             .state
             .waiters
             .register(tx, || self.state.is_cancelled())
+            .await
         {
             return;
         }
@@ -108,7 +103,16 @@ impl FrontendTaskSpawnerImpl {
     }
 
     fn signal_shutdown(&self) {
-        self.cancellation_state.signal_shutdown();
+        if !self.cancellation_state.begin_shutdown() {
+            return;
+        }
+
+        let cancellation_state = self.cancellation_state.clone();
+        (self.runtime.spawn_local)(Box::pin(async move {
+            for waiter in cancellation_state.waiters.drain().await {
+                let _ = waiter.send(());
+            }
+        }));
     }
 }
 

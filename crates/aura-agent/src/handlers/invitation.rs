@@ -3245,12 +3245,18 @@ async fn execute_notify_peer(
     };
 
     if best_effort_network_failures {
-        attempt_network_send_envelope(effects, "notify peer with invitation failed", envelope)
-            .await?;
-    } else {
-        effects.send_envelope(envelope).await.map_err(|e| {
-            AgentError::effects(format!("Failed to notify peer with invitation: {e}"))
-        })?;
+        if let Err(error) =
+            attempt_network_send_envelope(effects, "notify peer with invitation failed", envelope)
+                .await
+        {
+            emit_browser_harness_debug_event("invite_notify_error", &error.to_string());
+            return Err(error);
+        }
+    } else if let Err(error) = effects.send_envelope(envelope).await {
+        emit_browser_harness_debug_event("invite_notify_error", &error.to_string());
+        return Err(AgentError::effects(format!(
+            "Failed to notify peer with invitation: {error}"
+        )));
     }
     emit_browser_harness_debug_event("invite_notify_ok", &peer.to_string());
 

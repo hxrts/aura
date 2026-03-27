@@ -4,7 +4,7 @@ use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex as BlockingMutex};
+use std::sync::{Arc, Condvar};
 use std::thread;
 use std::time::Duration;
 
@@ -201,10 +201,10 @@ struct RunningSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: Arc<Mutex<vt100::Parser>>,
     parse_generation: Arc<AtomicU64>,
-    reader_status: Arc<BlockingMutex<Option<String>>>,
+    reader_status: Arc<BlockingStatusCell<Option<String>>>,
     reader_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_feed: Arc<UiSnapshotFeed>,
-    ui_snapshot_listener_status: Arc<BlockingMutex<Option<String>>>,
+    ui_snapshot_listener_status: Arc<BlockingStatusCell<Option<String>>>,
     ui_snapshot_thread: Option<thread::JoinHandle<()>>,
     ui_snapshot_stop: Arc<AtomicU64>,
     transient_root: PathBuf,
@@ -219,6 +219,23 @@ struct RunningSession {
 struct UiSnapshotFeedState {
     latest: Option<UiSnapshot>,
     version: u64,
+}
+
+#[allow(clippy::disallowed_types)]
+#[derive(Default)]
+struct BlockingStatusCell<T>(std::sync::Mutex<T>);
+
+impl<T> BlockingStatusCell<T> {
+    #[allow(clippy::disallowed_types)]
+    fn new(value: T) -> Self {
+        Self(std::sync::Mutex::new(value))
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 #[allow(clippy::disallowed_types)]
@@ -259,16 +276,8 @@ impl LocalPtyBackend {
             .ui_snapshot_thread
             .as_ref()
             .map_or(true, |thread| !thread.is_finished());
-        let reader_status = session
-            .reader_status
-            .lock()
-            .expect("pty reader status mutex poisoned")
-            .clone();
-        let ui_snapshot_listener_status = session
-            .ui_snapshot_listener_status
-            .lock()
-            .expect("pty snapshot listener status mutex poisoned")
-            .clone();
+        let reader_status = session.reader_status.lock().clone();
+        let ui_snapshot_listener_status = session.ui_snapshot_listener_status.lock().clone();
         anyhow::bail!(
             "local PTY instance {} exited before {context}; last_screen={:?} reader_alive={} reader_status={reader_status:?} child_alive={} child_status={child_status:?} ui_snapshot_thread_alive={} ui_snapshot_listener_status={ui_snapshot_listener_status:?} command_socket_exists={} ui_snapshot_socket_exists={} ui_snapshot_file_exists={} child_pid_file_exists={} log_tail={}",
             self.config.id,
@@ -379,7 +388,7 @@ impl LocalPtyBackend {
         socket_path: &PathBuf,
         feed: &Arc<UiSnapshotFeed>,
         stop_flag: &Arc<AtomicU64>,
-        listener_status: &Arc<BlockingMutex<Option<String>>>,
+        listener_status: &Arc<BlockingStatusCell<Option<String>>>,
     ) -> Result<thread::JoinHandle<()>> {
         let _ = fs::remove_file(socket_path);
         if let Some(parent) = socket_path.parent() {
@@ -402,9 +411,7 @@ impl LocalPtyBackend {
         let listener_status = Arc::clone(listener_status);
         Ok(thread::spawn(move || {
             let set_status = |status: String| {
-                *listener_status
-                    .lock()
-                    .expect("pty snapshot listener status mutex poisoned") = Some(status);
+                *listener_status.lock() = Some(status);
             };
             for stream in listener.incoming() {
                 if stop_flag.load(Ordering::Acquire) > 0 {
@@ -436,14 +443,8 @@ impl LocalPtyBackend {
                 guard.latest = Some(snapshot);
                 feed.ready.notify_all();
             }
-            if listener_status
-                .lock()
-                .expect("pty snapshot listener status mutex poisoned")
-                .is_none()
-            {
-                *listener_status
-                    .lock()
-                    .expect("pty snapshot listener status mutex poisoned") =
+            if listener_status.lock().is_none() {
+                *listener_status.lock() =
                     Some("listener exited without explicit status".to_string());
             }
             let _ = fs::remove_file(socket_path);
@@ -831,7 +832,7 @@ impl InstanceBackend for LocalPtyBackend {
             Self::absolutize_path(self.command_socket_path(session_generation));
         let clipboard_file_path = Self::absolutize_path(self.clipboard_file_path());
         let child_pid_path = Self::absolutize_path(self.child_pid_path(session_generation));
-        let ui_snapshot_listener_status = Arc::new(BlockingMutex::new(None));
+        let ui_snapshot_listener_status = Arc::new(BlockingStatusCell::new(None));
         let ui_snapshot_thread = Self::spawn_ui_snapshot_listener(
             &ui_snapshot_socket_path,
             &ui_snapshot_feed,
@@ -866,13 +867,11 @@ impl InstanceBackend for LocalPtyBackend {
         let parser_for_thread = Arc::clone(&parser);
         let generation_for_thread = Arc::clone(&parse_generation);
         let log_path_for_thread = self.config.log_path.clone();
-        let reader_status = Arc::new(BlockingMutex::new(None));
+        let reader_status = Arc::new(BlockingStatusCell::new(None));
         let reader_status_for_thread = Arc::clone(&reader_status);
         let reader_thread = thread::spawn(move || {
             let set_status = |status: String| {
-                *reader_status_for_thread
-                    .lock()
-                    .expect("pty reader status mutex poisoned") = Some(status);
+                *reader_status_for_thread.lock() = Some(status);
             };
             let mut log_file = log_path_for_thread.and_then(|path| {
                 if let Some(parent) = path.parent() {
