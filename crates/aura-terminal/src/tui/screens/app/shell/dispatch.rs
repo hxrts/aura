@@ -90,7 +90,7 @@ pub(super) fn authoritative_binding_for_requested_join(
     }
     let context_id = matched_channel.context_id.clone()?;
     Some(
-        ChannelBindingWitness::new(matched_channel.id.to_string(), Some(context_id.to_string()))
+        ChannelBindingWitness::new(matched_channel.id.clone(), Some(context_id))
             .semantic_value(),
     )
 }

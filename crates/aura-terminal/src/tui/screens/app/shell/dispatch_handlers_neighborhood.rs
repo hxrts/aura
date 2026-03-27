@@ -59,13 +59,13 @@ pub(super) fn handle_neighborhood_dispatch(
             );
         }
         DispatchCommand::SubmitModeratorAssignment { target_id, assign } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 if assign {
                     OperationId::grant_moderator()
@@ -99,11 +99,11 @@ pub(super) fn handle_neighborhood_dispatch(
             access_level,
         } => {
             new_state.modal_queue.dismiss();
-            let app_core = app_core_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
+            let app_core = app_core_for_ceremony;
+            let update_tx = update_tx_for_ceremony;
             let home_id = new_state.neighborhood.entered_home_id.clone();
             let target_for_toast = target_id.clone();
-            let tasks = tasks_for_events.clone();
+            let tasks = tasks_for_events;
             tasks.spawn(async move {
                 match access_workflows::set_access_override(
                     app_core.raw(),
@@ -149,10 +149,10 @@ pub(super) fn handle_neighborhood_dispatch(
         }
         DispatchCommand::SubmitHomeCapabilityConfig { config } => {
             new_state.modal_queue.dismiss();
-            let app_core = app_core_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
+            let app_core = app_core_for_ceremony;
+            let update_tx = update_tx_for_ceremony;
             let home_id = new_state.neighborhood.entered_home_id.clone();
-            let tasks = tasks_for_events.clone();
+            let tasks = tasks_for_events;
             tasks.spawn(async move {
                 match access_workflows::configure_home_capabilities(
                     app_core.raw(),
@@ -187,13 +187,13 @@ pub(super) fn handle_neighborhood_dispatch(
             });
         }
         DispatchCommand::CreateHome { name, description } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::create_home(),
                 SemanticOperationKind::CreateHome,
@@ -202,13 +202,13 @@ pub(super) fn handle_neighborhood_dispatch(
             new_state.modal_queue.dismiss();
         }
         DispatchCommand::CreateNeighborhood { name } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::create_neighborhood(),
                 SemanticOperationKind::CreateNeighborhood,
@@ -220,13 +220,13 @@ pub(super) fn handle_neighborhood_dispatch(
             {
                 let guard = shared_neighborhood_homes_for_dispatch.read();
                 if let Some(home_id) = guard.get(idx) {
-                    let Some(update_tx) = update_tx_for_events.clone() else {
+                    let Some(update_tx) = update_tx_for_events else {
                         new_state.toast_error("UI update sender is unavailable");
                         return EventCommandLoopAction::ContinueCommand;
                     };
                     let operation = submit_local_terminal_operation(
-                        app_core_for_events.clone(),
-                        tasks_for_events.clone(),
+                        app_core_for_events,
+                        tasks_for_events,
                         update_tx,
                         OperationId::add_home_to_neighborhood(),
                         SemanticOperationKind::AddHomeToNeighborhood,
@@ -238,13 +238,13 @@ pub(super) fn handle_neighborhood_dispatch(
             }
         }
         DispatchCommand::AddHomeToNeighborhood { target } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::add_home_to_neighborhood(),
                 SemanticOperationKind::AddHomeToNeighborhood,
@@ -256,13 +256,13 @@ pub(super) fn handle_neighborhood_dispatch(
             {
                 let guard = shared_neighborhood_homes_for_dispatch.read();
                 if let Some(home_id) = guard.get(idx) {
-                    let Some(update_tx) = update_tx_for_events.clone() else {
+                    let Some(update_tx) = update_tx_for_events else {
                         new_state.toast_error("UI update sender is unavailable");
                         return EventCommandLoopAction::ContinueCommand;
                     };
                     let operation = submit_local_terminal_operation(
-                        app_core_for_events.clone(),
-                        tasks_for_events.clone(),
+                        app_core_for_events,
+                        tasks_for_events,
                         update_tx,
                         OperationId::link_home_one_hop_link(),
                         SemanticOperationKind::LinkHomeOneHopLink,
@@ -274,13 +274,13 @@ pub(super) fn handle_neighborhood_dispatch(
             }
         }
         DispatchCommand::LinkHomeOneHopLink { target } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::link_home_one_hop_link(),
                 SemanticOperationKind::LinkHomeOneHopLink,

@@ -35,6 +35,7 @@ const DEFAULT_PAGE_GOTO_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_HARNESS_READY_TIMEOUT_MS: u64 = 90_000;
 const DEFAULT_RPC_TIMEOUT_MS: u64 = 15_000;
 const WAIT_RPC_TIMEOUT_MARGIN_MS: u64 = 5_000;
+const DIAGNOSTIC_DOM_RPC_TIMEOUT_MS: u64 = 2_000;
 const SUBMIT_SEMANTIC_COMMAND_RPC_TIMEOUT_MS: u64 = 30_000 + WAIT_RPC_TIMEOUT_MARGIN_MS;
 const STAGE_RUNTIME_IDENTITY_RPC_TIMEOUT_MS: u64 = 60_000 + WAIT_RPC_TIMEOUT_MARGIN_MS;
 const DEFAULT_START_MAX_ATTEMPTS: u32 = 3;
@@ -649,7 +650,11 @@ impl DiagnosticBackend for PlaywrightBrowserBackend {
 
     fn diagnostic_dom_snapshot(&self) -> Result<String> {
         let payload = self.with_session(|session| {
-            session.rpc_call("dom_snapshot", json!({ "instance_id": self.config.id }))
+            session.rpc_call_with_timeout(
+                "dom_snapshot",
+                json!({ "instance_id": self.config.id }),
+                DIAGNOSTIC_DOM_RPC_TIMEOUT_MS.saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+            )
         })?;
         let payload: BrowserDiagnosticScreenPayload = decode_rpc_payload(payload, || {
             format!(

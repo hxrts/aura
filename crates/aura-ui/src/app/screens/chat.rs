@@ -129,10 +129,9 @@ pub(super) fn ChatScreen(
                                         label: "Close Channel".to_string(),
                                         variant: ButtonVariant::Secondary,
                                         onclick: {
-                                            let controller = close_channel_controller.clone();
                                             let channel_name = active_channel.clone();
                                             move |_| {
-                                                let controller_for_click = controller.clone();
+                                                let controller_for_click = close_channel_controller.clone();
                                                 let channel_name_for_click = channel_name.clone();
                                                 let app_core = controller_for_click.app_core().clone();
                                                 let operation = UiLocalOperationOwner::submit(
@@ -274,7 +273,7 @@ pub(super) fn ChatScreen(
                                 }
                                 div {
                                     class: "flex h-full min-w-[4.5rem] flex-col items-end justify-end gap-1",
-                                    if let Some(retryable_message) = retryable_message.clone() {
+                                    if let Some(retryable_message) = retryable_message {
                                         UiButton {
                                             id: Some(
                                                 ControlId::ChatRetryMessageButton
@@ -285,10 +284,9 @@ pub(super) fn ChatScreen(
                                             label: "Retry".to_string(),
                                             variant: ButtonVariant::Secondary,
                                             onclick: {
-                                                let controller = retry_message_controller.clone();
                                                 let active_channel = active_channel.clone();
                                                 move |_| {
-                                                    let controller_for_click = controller.clone();
+                                                    let controller_for_click = retry_message_controller.clone();
                                                     let active_channel_for_click = active_channel.clone();
                                                     let retry_message_for_click = retryable_message.clone();
                                                     let app_core = controller_for_click.app_core().clone();

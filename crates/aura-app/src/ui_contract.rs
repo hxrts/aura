@@ -1922,19 +1922,10 @@ pub struct HarnessShellStructureSnapshot {
     pub active_screen_root_count: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProjectionRevision {
     pub semantic_seq: u64,
     pub render_seq: Option<u64>,
-}
-
-impl Default for ProjectionRevision {
-    fn default() -> Self {
-        Self {
-            semantic_seq: 0,
-            render_seq: None,
-        }
-    }
 }
 
 impl ProjectionRevision {
@@ -1974,19 +1965,10 @@ pub fn next_projection_revision(render_seq: Option<u64>) -> ProjectionRevision {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AuthoritativeSemanticFactsSnapshot {
     pub revision: ProjectionRevision,
     pub facts: Vec<AuthoritativeSemanticFact>,
-}
-
-impl Default for AuthoritativeSemanticFactsSnapshot {
-    fn default() -> Self {
-        Self {
-            revision: ProjectionRevision::default(),
-            facts: Vec::new(),
-        }
-    }
 }
 
 impl Deref for AuthoritativeSemanticFactsSnapshot {

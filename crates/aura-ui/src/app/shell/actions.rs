@@ -57,7 +57,7 @@ pub(crate) fn submit_runtime_chat_input(
             SemanticOperationKind::SendChatMessage,
         );
         let transfer = operation.handoff_to_app_workflow(UiOperationTransferScope::SendChatMessage);
-        let content = trimmed.clone();
+        let content = trimmed;
 
         controller.clear_input_buffer();
         spawn_ui(async move {
@@ -94,7 +94,7 @@ pub(crate) fn submit_runtime_chat_input(
     }
 
     let app_core = controller.app_core().clone();
-    let controller_for_task = controller.clone();
+    let controller_for_task = controller;
     spawn_ui(async move {
         let raw = trimmed.clone();
         let actor = {
@@ -136,7 +136,7 @@ pub(crate) fn submit_runtime_chat_input(
             SlashCommandToastKind::Success => controller_for_task.info_toast(feedback.message),
             SlashCommandToastKind::Info => controller_for_task.info_toast(feedback.message),
             SlashCommandToastKind::Error => {
-                controller_for_task.runtime_error_toast(feedback.message)
+                controller_for_task.runtime_error_toast(feedback.message);
             }
         }
         rerender();

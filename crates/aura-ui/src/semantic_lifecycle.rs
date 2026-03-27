@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiOperationTransferScope {
+    StartDeviceEnrollment,
     SendChatMessage,
     JoinChannel,
     CreateInvitation,
@@ -275,7 +276,6 @@ impl SubmittedUiHandoffOwner {
 }
 
 impl UiLocalOperationOwner {
-    #[must_use]
     pub fn submit(
         controller: Arc<UiController>,
         operation_id: OperationId,
@@ -288,7 +288,6 @@ impl UiLocalOperationOwner {
         ))
     }
 
-    #[must_use]
     pub fn submit_with_instance(
         controller: Arc<UiController>,
         operation_id: OperationId,
@@ -323,7 +322,6 @@ impl UiLocalOperationOwner {
 }
 
 impl UiWorkflowHandoffOwner {
-    #[must_use]
     pub fn submit(
         controller: Arc<UiController>,
         operation_id: OperationId,
@@ -336,7 +334,6 @@ impl UiWorkflowHandoffOwner {
         ))
     }
 
-    #[must_use]
     pub fn submit_with_instance(
         controller: Arc<UiController>,
         operation_id: OperationId,
@@ -415,7 +412,6 @@ impl SubmittedUiCeremonyOwner {
 }
 
 impl UiCeremonySubmissionOwner {
-    #[must_use]
     pub fn submit(
         controller: Arc<UiController>,
         operation_id: OperationId,

@@ -338,7 +338,7 @@ pub(super) async fn process_ui_update_match(
                 } else if has_failed {
                     toast = Some((
                         error_message
-                            .clone()
+                            
                             .unwrap_or_else(|| "Device enrollment failed".to_string()),
                         crate::tui::state::ToastLevel::Error,
                     ));
@@ -396,9 +396,9 @@ pub(super) async fn process_ui_update_match(
                         let message_idx = messages.len();
                         messages.push(crate::tui::types::Message::sending(
                             format!("local-accepted-{channel}-{message_idx}"),
-                            channel.clone(),
+                            channel,
                             "You",
-                            content.clone(),
+                            content,
                         ));
                         appended = true;
                     }
@@ -440,7 +440,7 @@ pub(super) async fn process_ui_update_match(
                 .map(|selection| selection.binding().clone());
             if let Some(binding) = selected_binding {
                 complete_ready_join_binding_submissions(
-                    &ready_join_channel_instances_for_updates,
+                    ready_join_channel_instances_for_updates,
                     &binding,
                 )
                 .await;
@@ -554,7 +554,7 @@ pub(super) async fn process_ui_update_match(
                 .map(|selection| selection.binding().clone());
             if let Some(binding) = selected_binding {
                 complete_ready_join_binding_submissions(
-                    &ready_join_channel_instances_for_updates,
+                    ready_join_channel_instances_for_updates,
                     &binding,
                 )
                 .await;
@@ -739,7 +739,7 @@ pub(super) async fn process_ui_update_match(
                         };
                         if let Some(binding) = selected_binding {
                             complete_ready_join_binding_submissions(
-                                &ready_join_channel_instances_for_updates,
+                                ready_join_channel_instances_for_updates,
                                 &binding,
                             )
                             .await;

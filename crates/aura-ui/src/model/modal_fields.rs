@@ -176,7 +176,7 @@ impl CreateInvitationModalState {
         match self.active_field {
             FieldId::InvitationMessage => self.message = value,
             FieldId::InvitationTtl => {
-                self.ttl_hours = value.trim().parse::<u64>().unwrap_or(self.ttl_hours.max(1))
+                self.ttl_hours = value.trim().parse::<u64>().unwrap_or(self.ttl_hours.max(1));
             }
             _ => self.receiver_id = value,
         }

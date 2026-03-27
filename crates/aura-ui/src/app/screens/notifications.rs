@@ -286,7 +286,7 @@ pub(super) fn NotificationsScreen(
                                     },
                                     NotificationRuntimeAction::SentInvitation => {
                                         let export_controller = controller.clone();
-                                        let revoke_controller = controller.clone();
+                                        let revoke_controller = controller;
                                         rsx! {
                                         UiButton {
                                             label: "Copy Code".to_string(),
@@ -328,7 +328,7 @@ pub(super) fn NotificationsScreen(
                                                                 controller.complete_runtime_modal_success("Invitation code copied to clipboard");
                                                             }
                                                             Err(SubmittedOperationWorkflowError::Workflow(error)) => {
-                                                                controller.runtime_error_toast(error.to_string())
+                                                                controller.runtime_error_toast(error.to_string());
                                                             }
                                                             Err(
                                                                 SubmittedOperationWorkflowError::Protocol(detail)
@@ -378,7 +378,7 @@ pub(super) fn NotificationsScreen(
                                                         {
                                                             Ok(()) => controller.complete_runtime_modal_success("Invitation revoked"),
                                                             Err(SubmittedOperationWorkflowError::Workflow(error)) => {
-                                                                controller.runtime_error_toast(error.to_string())
+                                                                controller.runtime_error_toast(error.to_string());
                                                             }
                                                             Err(
                                                                 SubmittedOperationWorkflowError::Protocol(detail)

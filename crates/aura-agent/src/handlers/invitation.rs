@@ -2057,7 +2057,7 @@ impl InvitationHandler {
                 let should_cache =
                     invitations
                         .get(&invitation.invitation_id)
-                        .is_none_or(|existing| {
+                        .map_or(true, |existing| {
                             InvitationCacheHandler::should_replace_invitation(existing, &invitation)
                         });
                 if should_cache {

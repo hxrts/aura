@@ -59,13 +59,13 @@ fn handle_recovery_and_ceremonies_dispatch(
                 return EventCommandLoopAction::ContinueCommand;
             }
 
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::start_recovery(),
                 SemanticOperationKind::StartRecovery,
@@ -75,8 +75,8 @@ fn handle_recovery_and_ceremonies_dispatch(
         DispatchCommand::ApproveRecovery => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
-                &shared_invitations_for_dispatch,
-                &shared_pending_requests_for_dispatch,
+                shared_invitations_for_dispatch,
+                shared_pending_requests_for_dispatch,
             );
             let approval_target = match selected {
                 Some(NotificationSelection::RecoveryRequest(request_id)) => Some(request_id),
@@ -86,13 +86,13 @@ fn handle_recovery_and_ceremonies_dispatch(
                 }
             };
             if let Some(request_id) = approval_target {
-                let Some(update_tx) = update_tx_for_events.clone() else {
+                let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
                 let operation = submit_local_terminal_operation(
-                    app_core_for_events.clone(),
-                    tasks_for_events.clone(),
+                    app_core_for_events,
+                    tasks_for_events,
                     update_tx,
                     OperationId::submit_guardian_approval(),
                     SemanticOperationKind::SubmitGuardianApproval,
@@ -119,8 +119,8 @@ fn handle_recovery_and_ceremonies_dispatch(
                 Ok(threshold) => threshold,
                 Err(error) => {
                     tracing::error!("Invalid threshold for guardian ceremony: {}", error);
-                    let update_tx = update_tx_for_ceremony.clone();
-                    let tasks = tasks_for_events.clone();
+                    let update_tx = update_tx_for_ceremony;
+                    let tasks = tasks_for_events;
                     tasks.spawn(async move {
                         send_optional_ui_update_required(
                             &update_tx,
@@ -135,22 +135,22 @@ fn handle_recovery_and_ceremonies_dispatch(
                 }
             };
 
-            let app_core = app_core_for_ceremony.clone();
-            let io_ctx = io_ctx_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
+            let app_core = app_core_for_ceremony;
+            let io_ctx = io_ctx_for_ceremony;
+            let update_tx = update_tx_for_ceremony;
             let Some(update_tx_for_owner) = update_tx.clone() else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_ceremony_operation(
-                app_core_for_events.clone(),
+                app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::start_guardian_ceremony(),
                 SemanticOperationKind::StartGuardianCeremony,
             );
 
-            let tasks = tasks_for_events.clone();
+            let tasks = tasks_for_events;
             let tasks_handle = tasks.clone();
             tasks_handle.spawn(async move {
                 let app = app_core.raw();
@@ -290,8 +290,8 @@ fn handle_recovery_and_ceremonies_dispatch(
                 Ok(threshold) => threshold,
                 Err(error) => {
                     tracing::error!("Invalid threshold for multifactor ceremony: {}", error);
-                    let update_tx = update_tx_for_ceremony.clone();
-                    let tasks = tasks_for_events.clone();
+                    let update_tx = update_tx_for_ceremony;
+                    let tasks = tasks_for_events;
                     tasks.spawn(async move {
                         send_optional_ui_update_required(
                             &update_tx,
@@ -306,22 +306,22 @@ fn handle_recovery_and_ceremonies_dispatch(
                 }
             };
 
-            let app_core = app_core_for_ceremony.clone();
-            let io_ctx = io_ctx_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
+            let app_core = app_core_for_ceremony;
+            let io_ctx = io_ctx_for_ceremony;
+            let update_tx = update_tx_for_ceremony;
             let Some(update_tx_for_owner) = update_tx.clone() else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_ceremony_operation(
-                app_core_for_events.clone(),
+                app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::start_multifactor_ceremony(),
                 SemanticOperationKind::StartMultifactorCeremony,
             );
 
-            let tasks = tasks_for_events.clone();
+            let tasks = tasks_for_events;
             let tasks_handle = tasks.clone();
             tasks_handle.spawn(async move {
                 let app = app_core.raw();
@@ -453,22 +453,22 @@ fn handle_recovery_and_ceremonies_dispatch(
         DispatchCommand::CancelGuardianCeremony { ceremony_id } => {
             tracing::info!(ceremony_id = %ceremony_id, "Canceling guardian ceremony");
 
-            let app_core = app_core_for_ceremony.clone();
-            let io_ctx = io_ctx_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
+            let app_core = app_core_for_ceremony;
+            let io_ctx = io_ctx_for_ceremony;
+            let update_tx = update_tx_for_ceremony;
             let Some(update_tx_for_owner) = update_tx.clone() else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_ceremony_operation(
-                app_core_for_events.clone(),
+                app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::cancel_guardian_ceremony(),
                 SemanticOperationKind::CancelGuardianCeremony,
             );
 
-            let tasks = tasks_for_events.clone();
+            let tasks = tasks_for_events;
             tasks.spawn(async move {
                 let app = app_core.raw();
                 let handle = match io_ctx.take_key_rotation_ceremony_handle(&ceremony_id).await {
@@ -519,22 +519,22 @@ fn handle_recovery_and_ceremonies_dispatch(
         DispatchCommand::CancelKeyRotationCeremony { ceremony_id } => {
             tracing::info!(ceremony_id = %ceremony_id, "Canceling ceremony");
 
-            let app_core = app_core_for_ceremony.clone();
-            let io_ctx = io_ctx_for_ceremony.clone();
-            let update_tx = update_tx_for_ceremony.clone();
+            let app_core = app_core_for_ceremony;
+            let io_ctx = io_ctx_for_ceremony;
+            let update_tx = update_tx_for_ceremony;
             let Some(update_tx_for_owner) = update_tx.clone() else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_ceremony_operation(
-                app_core_for_events.clone(),
+                app_core_for_events,
                 tasks_for_events.clone(),
                 update_tx_for_owner,
                 OperationId::cancel_key_rotation_ceremony(),
                 SemanticOperationKind::CancelKeyRotationCeremony,
             );
 
-            let tasks = tasks_for_events.clone();
+            let tasks = tasks_for_events;
             tasks.spawn(async move {
                 let app = app_core.raw();
                 let handle = match io_ctx.take_key_rotation_ceremony_handle(&ceremony_id).await {
@@ -609,13 +609,13 @@ pub(super) fn handle_dispatch_command_match(
 
     match dispatch_cmd {
         DispatchCommand::CreateAccount { name } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::account_create(),
                 SemanticOperationKind::CreateAccount,
@@ -631,13 +631,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.app.on_create_account)(name, operation);
         }
         DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
@@ -645,13 +645,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.app.on_import_device_enrollment_during_onboarding)(code, operation);
         }
         DispatchCommand::AddGuardian { contact_id } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_workflow_handoff_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::CreateGuardianInvitation,
@@ -669,13 +669,13 @@ pub(super) fn handle_dispatch_command_match(
             }
         }
         DispatchCommand::JoinChannel { channel_name } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_workflow_handoff_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::join_channel(),
                 SemanticOperationKind::JoinChannel,
@@ -684,13 +684,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.chat.on_join_channel)(channel_name, operation);
         }
         DispatchCommand::AcceptPendingHomeInvitation => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_workflow_handoff_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_accept(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
@@ -703,13 +703,13 @@ pub(super) fn handle_dispatch_command_match(
             let operation = if trimmed.starts_with('/') {
                 None
             } else {
-                let Some(update_tx) = update_tx_for_events.clone() else {
+                let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
                 Some(submit_workflow_handoff_operation(
-                    app_core_for_events.clone(),
-                    tasks_for_events.clone(),
+                    app_core_for_events,
+                    tasks_for_events,
                     update_tx,
                     OperationId::send_message(),
                     SemanticOperationKind::SendChatMessage,
@@ -727,7 +727,7 @@ pub(super) fn handle_dispatch_command_match(
                 })
                 .map(|selection| selection.channel_id().to_string());
             if let Some(channel_id) = committed_channel_id.or_else(|| {
-                resolve_committed_selected_channel_id(&new_state, &channels)
+                resolve_committed_selected_channel_id(new_state, &channels)
                     .map(|selection| selection.channel_id().to_string())
             }) {
                 if let Some(operation) = operation {
@@ -747,13 +747,13 @@ pub(super) fn handle_dispatch_command_match(
             let idx = new_state.chat.message_scroll;
             let guard = shared_messages_for_dispatch.read();
             if let Some(msg) = guard.get(idx) {
-                let Some(update_tx) = update_tx_for_events.clone() else {
+                let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
                 let operation = submit_workflow_handoff_operation(
-                    app_core_for_events.clone(),
-                    tasks_for_events.clone(),
+                    app_core_for_events,
+                    tasks_for_events,
                     update_tx,
                     OperationId::retry_message(),
                     SemanticOperationKind::RetryChatMessage,
@@ -910,13 +910,13 @@ pub(super) fn handle_dispatch_command_match(
             }
             members.sort();
             members.dedup();
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::create_channel(),
                 aura_app::ui_contract::SemanticOperationKind::CreateChannel,
@@ -930,13 +930,13 @@ pub(super) fn handle_dispatch_command_match(
             );
         }
         DispatchCommand::SetChannelTopic { channel_id, topic } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::set_channel_topic(),
                 SemanticOperationKind::SetChannelTopic,
@@ -944,13 +944,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.chat.on_set_topic)(channel_id.to_string(), topic, operation);
         }
         DispatchCommand::DeleteChannel { channel_id } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::close_channel(),
                 SemanticOperationKind::CloseChannel,
@@ -963,13 +963,13 @@ pub(super) fn handle_dispatch_command_match(
             contact_id,
             nickname,
         } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::update_contact_nickname(),
                 SemanticOperationKind::UpdateContactNickname,
@@ -1017,13 +1017,13 @@ pub(super) fn handle_dispatch_command_match(
             {
                 let guard = shared_contacts_for_dispatch.read();
                 if let Some(contact) = guard.get(idx) {
-                    let Some(update_tx) = update_tx_for_events.clone() else {
+                    let Some(update_tx) = update_tx_for_events else {
                         new_state.toast_error("UI update sender is unavailable");
                         return EventCommandLoopAction::ContinueCommand;
                     };
                     let operation = submit_local_terminal_operation(
-                        app_core_for_events.clone(),
-                        tasks_for_events.clone(),
+                        app_core_for_events,
+                        tasks_for_events,
                         update_tx,
                         OperationId::start_direct_chat(),
                         SemanticOperationKind::StartDirectChat,
@@ -1058,13 +1058,13 @@ pub(super) fn handle_dispatch_command_match(
                 ));
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_workflow_handoff_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
@@ -1103,13 +1103,13 @@ pub(super) fn handle_dispatch_command_match(
                 ));
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_workflow_handoff_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
@@ -1123,13 +1123,13 @@ pub(super) fn handle_dispatch_command_match(
             );
         }
         DispatchCommand::RemoveContact { contact_id } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::remove_contact(),
                 SemanticOperationKind::RemoveContact,
@@ -1178,18 +1178,18 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::AcceptInvitation => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
-                &shared_invitations_for_dispatch,
-                &shared_pending_requests_for_dispatch,
+                shared_invitations_for_dispatch,
+                shared_pending_requests_for_dispatch,
             );
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
-                if let Some(update_tx) = update_tx_for_dispatch.clone() {
+                if let Some(update_tx) = update_tx_for_dispatch {
                     let operation = submit_workflow_handoff_operation(
                         app_ctx_for_dispatch.app_core.raw().clone(),
                         app_ctx_for_dispatch.tasks(),
                         update_tx,
                         OperationId::invitation_accept(),
                         semantic_accept_kind_for_invitation(
-                            &shared_invitations_for_dispatch,
+                            shared_invitations_for_dispatch,
                             &invitation_id,
                         ),
                     );
@@ -1205,17 +1205,17 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::DeclineInvitation => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
-                &shared_invitations_for_dispatch,
-                &shared_pending_requests_for_dispatch,
+                shared_invitations_for_dispatch,
+                shared_pending_requests_for_dispatch,
             );
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
-                let Some(update_tx) = update_tx_for_events.clone() else {
+                let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
                 };
                 let operation = submit_local_terminal_operation(
-                    app_core_for_events.clone(),
-                    tasks_for_events.clone(),
+                    app_core_for_events,
+                    tasks_for_events,
                     update_tx,
                     OperationId::invitation_decline(),
                     SemanticOperationKind::DeclineInvitation,
@@ -1231,7 +1231,7 @@ pub(super) fn handle_dispatch_command_match(
             message,
             ttl_secs,
         } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
@@ -1241,8 +1241,8 @@ pub(super) fn handle_dispatch_command_match(
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_create(),
                 kind,
@@ -1257,13 +1257,13 @@ pub(super) fn handle_dispatch_command_match(
             );
         }
         DispatchCommand::ImportInvitation { code } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_workflow_handoff_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_accept(),
                 SemanticOperationKind::AcceptContactInvitation,
@@ -1274,8 +1274,8 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::ExportInvitation => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
-                &shared_invitations_for_dispatch,
-                &shared_pending_requests_for_dispatch,
+                shared_invitations_for_dispatch,
+                shared_pending_requests_for_dispatch,
             );
             if let Some(NotificationSelection::SentInvitation(invitation_id)) = selected {
                 (cb.invitations.on_export)(invitation_id);
@@ -1284,13 +1284,13 @@ pub(super) fn handle_dispatch_command_match(
             }
         }
         DispatchCommand::RevokeInvitation { invitation_id } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::invitation_revoke(),
                 SemanticOperationKind::RevokeInvitation,
@@ -1312,13 +1312,13 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::UpdateNicknameSuggestion {
             nickname_suggestion,
         } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::update_nickname_suggestion(),
                 SemanticOperationKind::UpdateNicknameSuggestion,
@@ -1326,13 +1326,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.settings.on_update_nickname_suggestion)(nickname_suggestion, operation);
         }
         DispatchCommand::UpdateMfaPolicy { policy } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::update_mfa_policy(),
                 SemanticOperationKind::UpdateMfaPolicy,
@@ -1343,13 +1343,13 @@ pub(super) fn handle_dispatch_command_match(
             name,
             invitee_authority_id,
         } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::StartDeviceEnrollment,
@@ -1357,13 +1357,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.settings.on_add_device)(name, invitee_authority_id, operation);
         }
         DispatchCommand::RemoveDevice { device_id } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_ceremony_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::remove_device(),
                 SemanticOperationKind::RemoveDevice,
@@ -1371,13 +1371,13 @@ pub(super) fn handle_dispatch_command_match(
             (cb.settings.on_remove_device)(device_id, operation);
         }
         DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
-            let Some(update_tx) = update_tx_for_events.clone() else {
+            let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
             let operation = submit_local_terminal_operation(
-                app_core_for_events.clone(),
-                tasks_for_events.clone(),
+                app_core_for_events,
+                tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
@@ -1425,7 +1425,7 @@ pub(super) fn handle_dispatch_command_match(
                     }
                 });
                 new_state.current_authority_index = idx;
-                app_ctx_for_dispatch.request_authority_switch(authority_id, nickname.clone());
+                app_ctx_for_dispatch.request_authority_switch(authority_id, nickname);
                 new_state.modal_queue.dismiss();
                 new_state.toast_info("Reloading selected authority");
                 new_state.should_exit = true;

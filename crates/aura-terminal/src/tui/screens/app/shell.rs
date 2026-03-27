@@ -681,7 +681,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     let tasks_for_updates = tasks.clone();
     hooks.use_future({
-        let command_rx_holder = harness_command_rx_holder.clone();
+        let command_rx_holder = harness_command_rx_holder;
         {
             let mut screen = screen.clone();
             let mut should_exit = should_exit.clone();
@@ -926,12 +926,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         }
     });
     hooks.use_future({
-        let rx_holder = update_rx_holder.clone();
+        let rx_holder = update_rx_holder;
         {
             let nickname_suggestion_state = nickname_suggestion_state.clone();
             let mut should_exit = should_exit.clone();
             let app_ctx_for_updates = app_ctx.clone();
-            let bootstrap_handoff_tx = bootstrap_handoff_tx.clone();
+            let bootstrap_handoff_tx = bootstrap_handoff_tx;
             let bg_shutdown = bg_shutdown.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let tui = tui.clone();

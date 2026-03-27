@@ -470,9 +470,10 @@ mod tests {
         SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalOutcome,
         WorkflowTerminalStatus,
     };
+    use async_lock::Mutex;
     use async_trait::async_trait;
     use futures::executor::block_on;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum Event {
@@ -501,7 +502,7 @@ mod tests {
         ) {
             self.events
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .await
                 .push(Event::Dispatched(
                     operation_id.clone(),
                     instance_id.clone(),
@@ -518,7 +519,7 @@ mod tests {
         ) {
             self.events
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .await
                 .push(Event::Terminal(
                     operation_id.clone(),
                     instance_id.clone(),
@@ -534,8 +535,7 @@ mod tests {
             kind: SemanticOperationKind,
         ) {
             self.events
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .lock_blocking()
                 .push(Event::Dropped(
                     operation_id.clone(),
                     instance_id.clone(),
@@ -547,8 +547,7 @@ mod tests {
     fn events(publisher: &TestPublisher) -> Vec<Event> {
         publisher
             .events
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .lock_blocking()
             .clone()
     }
 

@@ -1250,7 +1250,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_runtime_fact_reuses_existing_runtime_event_id() {
+    fn repeated_runtime_fact_reuses_existing_runtime_event_id() -> Result<(), &'static str> {
         let mut model = UiModel::new("authority-local".to_string());
         let fact = RuntimeFact::InvitationAccepted {
             invitation_kind: InvitationFactKind::Contact,
@@ -1264,7 +1264,7 @@ mod tests {
             .runtime_events
             .last()
             .map(|event| event.id.clone())
-            .expect("runtime event should exist after first push");
+            .ok_or("runtime event should exist after first push")?;
 
         model.push_runtime_fact(fact);
         let second_id = model
@@ -1272,9 +1272,10 @@ mod tests {
             .runtime_events
             .last()
             .map(|event| event.id.clone())
-            .expect("runtime event should exist after second push");
+            .ok_or("runtime event should exist after second push")?;
 
         assert_eq!(second_id, first_id);
+        Ok(())
     }
 
     #[test]

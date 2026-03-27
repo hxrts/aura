@@ -1,11 +1,13 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
+type FrontendDebugProbe = Arc<dyn Fn(String)>;
+
 thread_local! {
-    static FRONTEND_DEBUG_PROBE: RefCell<Option<Arc<dyn Fn(String)>>> = const { RefCell::new(None) };
+    static FRONTEND_DEBUG_PROBE: RefCell<Option<FrontendDebugProbe>> = const { RefCell::new(None) };
 }
 
-pub fn set_frontend_debug_probe(probe: Option<Arc<dyn Fn(String)>>) {
+pub fn set_frontend_debug_probe(probe: Option<FrontendDebugProbe>) {
     FRONTEND_DEBUG_PROBE.with(|slot| {
         *slot.borrow_mut() = probe;
     });

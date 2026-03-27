@@ -366,7 +366,7 @@ proptest! {
         prop_assume!(cap_a != cap_b);
 
         // Build a token with ONLY cap_a
-        let (_, bridge, token) = bridge_with_caps_owned(&[cap_a.clone()]);
+        let (_, bridge, token) = bridge_with_caps_owned(std::slice::from_ref(&cap_a));
 
         // authorize() with cap_a passes
         let result_a = bridge

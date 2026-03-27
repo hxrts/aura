@@ -110,6 +110,7 @@ struct ScenarioContext {
     current_channel_binding: BTreeMap<String, ChannelBinding>,
     current_channel_name: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
+    pending_projection_baseline_snapshot: BTreeMap<String, UiSnapshot>,
     canonical_trace: Vec<CanonicalTraceEvent>,
 }
 
@@ -1115,7 +1116,7 @@ fn execute_semantic_environment_action(
         EnvironmentAction::LaunchActors => Ok(()),
         EnvironmentAction::RestartActor { actor } => {
             let instance_id = actor.0.clone();
-            context.pending_projection_baseline.remove(&instance_id);
+            clear_projection_baseline(context, &instance_id);
             dispatch(tool_api, ToolRequest::Restart { instance_id })
         }
         EnvironmentAction::KillActor { actor } => {
@@ -3228,14 +3229,30 @@ fn submit_shared_intent(
     intent: IntentAction,
 ) -> Result<SemanticCommandResponse> {
     if let Ok(snapshot) = fetch_ui_snapshot(tool_api, instance_id) {
-        context
-            .pending_projection_baseline
-            .insert(instance_id.to_string(), snapshot.revision);
+        set_projection_baseline(context, instance_id, snapshot);
     }
     issue_stage(
         step,
         tool_api.submit_semantic_command(instance_id, SemanticCommandRequest::new(intent)),
     )
+}
+
+fn set_projection_baseline(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    snapshot: UiSnapshot,
+) {
+    context
+        .pending_projection_baseline
+        .insert(instance_id.to_string(), snapshot.revision);
+    context
+        .pending_projection_baseline_snapshot
+        .insert(instance_id.to_string(), snapshot);
+}
+
+fn clear_projection_baseline(context: &mut ScenarioContext, instance_id: &str) {
+    context.pending_projection_baseline.remove(instance_id);
+    context.pending_projection_baseline_snapshot.remove(instance_id);
 }
 
 fn clear_projection_baseline_if_semantic_state_already_visible(
@@ -3248,7 +3265,7 @@ fn clear_projection_baseline_if_semantic_state_already_visible(
         return;
     };
     if semantic_wait_matches_for_instance(wait_step, &snapshot, context, instance_id) {
-        context.pending_projection_baseline.remove(instance_id);
+        clear_projection_baseline(context, instance_id);
     }
 }
 
@@ -3489,7 +3506,7 @@ fn wait_for_semantic_state_snapshot(
     match classify_projection_freshness(required_newer_than, &last_snapshot) {
         ProjectionFreshness::Satisfied => {
             if semantic_wait_matches_for_instance(step, &last_snapshot, context, instance_id) {
-                context.pending_projection_baseline.remove(instance_id);
+                clear_projection_baseline(context, instance_id);
                 return Ok(last_snapshot);
             }
         }
@@ -3513,7 +3530,19 @@ fn wait_for_semantic_state_snapshot(
                 return Ok(last_snapshot);
             }
         }
-        ProjectionFreshness::Pending => {}
+        ProjectionFreshness::Pending => {
+            if projection_wait_can_resume_from_matching_snapshot(
+                step,
+                &last_snapshot,
+                context,
+                instance_id,
+                required_newer_than,
+                restart_handling,
+            ) {
+                clear_projection_baseline(context, instance_id);
+                return Ok(last_snapshot);
+            }
+        }
     }
     loop {
         if Instant::now() >= deadline {
@@ -3587,7 +3616,7 @@ fn wait_for_semantic_state_snapshot(
         match classify_projection_freshness(required_newer_than, &snapshot) {
             ProjectionFreshness::Satisfied => {
                 if semantic_wait_matches_for_instance(step, &snapshot, context, instance_id) {
-                    context.pending_projection_baseline.remove(instance_id);
+                    clear_projection_baseline(context, instance_id);
                     return Ok(snapshot);
                 }
             }
@@ -3611,9 +3640,26 @@ fn wait_for_semantic_state_snapshot(
                     return Ok(snapshot);
                 }
             }
-            ProjectionFreshness::Pending => {}
+            ProjectionFreshness::Pending => {
+                if projection_wait_can_resume_from_matching_snapshot(
+                    step,
+                    &snapshot,
+                    context,
+                    instance_id,
+                    required_newer_than,
+                    restart_handling,
+                ) {
+                    clear_projection_baseline(context, instance_id);
+                    return Ok(snapshot);
+                }
+            }
         }
-        consume_projection_baseline(context, instance_id, &snapshot);
+        consume_projection_baseline(
+            context,
+            instance_id,
+            &snapshot,
+            &mut required_newer_than,
+        );
         last_snapshot = snapshot;
     }
     let diagnostic_screen =
@@ -3682,9 +3728,26 @@ fn reset_semantic_wait_after_restart(
     required_newer_than: &mut Option<ProjectionRevision>,
     snapshot_version: &mut Option<u64>,
 ) {
-    context.pending_projection_baseline.remove(instance_id);
+    clear_projection_baseline(context, instance_id);
     *required_newer_than = None;
     *snapshot_version = None;
+}
+
+fn projection_wait_can_resume_from_matching_snapshot(
+    step: &CompatibilityStep,
+    snapshot: &UiSnapshot,
+    context: &ScenarioContext,
+    instance_id: &str,
+    required_newer_than: Option<ProjectionRevision>,
+    restart_handling: SemanticWaitRestartHandling,
+) -> bool {
+    restart_handling == SemanticWaitRestartHandling::ResumeAfterRestart
+        && required_newer_than.is_some()
+        && semantic_wait_matches_for_instance(step, snapshot, context, instance_id)
+        && context
+            .pending_projection_baseline_snapshot
+            .get(instance_id)
+            .is_some_and(|baseline_snapshot| baseline_snapshot != snapshot)
 }
 
 fn classify_projection_freshness(
@@ -3711,13 +3774,15 @@ fn consume_projection_baseline(
     context: &mut ScenarioContext,
     instance_id: &str,
     snapshot: &UiSnapshot,
+    required_newer_than: &mut Option<ProjectionRevision>,
 ) {
     if context
         .pending_projection_baseline
         .get(instance_id)
         .is_some_and(|baseline| snapshot.revision.is_newer_than(*baseline))
     {
-        context.pending_projection_baseline.remove(instance_id);
+        clear_projection_baseline(context, instance_id);
+        *required_newer_than = None;
     }
 }
 
@@ -5723,6 +5788,97 @@ mod tests {
         assert!(required_newer_than.is_none());
         assert!(snapshot_version.is_none());
         assert!(!context.pending_projection_baseline.contains_key("alice"));
+    }
+
+    #[test]
+    fn consuming_projection_baseline_clears_live_required_newer_than_state() {
+        let baseline = ProjectionRevision {
+            semantic_seq: 7,
+            render_seq: Some(7),
+        };
+        let snapshot = UiSnapshot {
+            revision: ProjectionRevision {
+                semantic_seq: 8,
+                render_seq: Some(1),
+            },
+            ..UiSnapshot::loading(ScreenId::Settings)
+        };
+        let mut context = ScenarioContext::default();
+        context
+            .pending_projection_baseline
+            .insert("alice".to_string(), baseline);
+        let mut required_newer_than = Some(baseline);
+
+        consume_projection_baseline(
+            &mut context,
+            "alice",
+            &snapshot,
+            &mut required_newer_than,
+        );
+
+        assert!(required_newer_than.is_none());
+        assert!(!context.pending_projection_baseline.contains_key("alice"));
+    }
+
+    #[test]
+    fn projection_wait_can_resume_when_matching_snapshot_differs_from_baseline() {
+        let step = crate::config::CompatibilityStep {
+            id: "devices-count-one".to_string(),
+            action: crate::config::CompatibilityAction::WaitFor,
+            list_id: Some(ListId::Devices),
+            count: Some(1),
+            ..Default::default()
+        };
+        let baseline = UiSnapshot {
+            revision: ProjectionRevision {
+                semantic_seq: 12,
+                render_seq: Some(8),
+            },
+            screen: ScreenId::Settings,
+            lists: vec![ListSnapshot {
+                id: ListId::Devices,
+                items: vec![
+                    ListItemSnapshot {
+                        id: "device-a".to_string(),
+                        selected: false,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: false,
+                    },
+                    ListItemSnapshot {
+                        id: "device-b".to_string(),
+                        selected: false,
+                        confirmation: ConfirmationState::Confirmed,
+                        is_current: true,
+                    },
+                ],
+            }],
+            ..UiSnapshot::loading(ScreenId::Settings)
+        };
+        let matching_snapshot = UiSnapshot {
+            revision: baseline.revision,
+            screen: ScreenId::Settings,
+            lists: vec![ListSnapshot {
+                id: ListId::Devices,
+                items: vec![ListItemSnapshot {
+                    id: "device-b".to_string(),
+                    selected: false,
+                    confirmation: ConfirmationState::Confirmed,
+                    is_current: true,
+                }],
+            }],
+            ..UiSnapshot::loading(ScreenId::Settings)
+        };
+        let mut context = ScenarioContext::default();
+        set_projection_baseline(&mut context, "alice", baseline);
+
+        assert!(projection_wait_can_resume_from_matching_snapshot(
+            &step,
+            &matching_snapshot,
+            &context,
+            "alice",
+            Some(matching_snapshot.revision),
+            SemanticWaitRestartHandling::ResumeAfterRestart,
+        ));
     }
 
     #[test]

@@ -398,7 +398,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         .with_channel(m.channel_id.to_string())
                         .with_timestamp(ts_str)
                         .own(m.is_own)
-                        .with_status(m.delivery_status.into())
+                        .with_status(m.delivery_status)
                         .with_finalized(m.is_finalized)
                 })
                 .collect()

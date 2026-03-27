@@ -245,7 +245,7 @@ pub(super) fn ContactsScreen(
                                                         );
                                                     }
                                                     Err(SubmittedOperationWorkflowError::Workflow(error)) => {
-                                                        controller.runtime_error_toast(error.to_string())
+                                                        controller.runtime_error_toast(error.to_string());
                                                     }
                                                     Err(
                                                         SubmittedOperationWorkflowError::Protocol(detail)

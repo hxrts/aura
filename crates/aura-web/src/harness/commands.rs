@@ -1,4 +1,4 @@
-use aura_app::ui::contract::{OperationId, OperationInstanceId, ScreenId};
+use aura_app::ui::contract::{OperationId, ScreenId};
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
     SemanticSubmissionHandle, SettingsSection, SubmissionState, UiOperationHandle,
@@ -505,20 +505,40 @@ async fn execute_semantic_intent(
                         .set_settings_section(browser_settings_section(SettingsSection::Devices));
                 },
             );
-            let start = ceremony_workflows::start_device_enrollment_ceremony(
-                &controller.app_core(),
-                device_name.clone(),
-                invitee_authority_id,
-            )
-            .await
-            .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            controller.write_clipboard(&start.enrollment_code);
-            controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
-                device_name: Some(device_name),
-                code_len: Some(start.enrollment_code.len()),
-                code: Some(start.enrollment_code),
-            });
-            Ok(SemanticCommandResponse::accepted_without_value())
+            let (handle, transfer) = begin_exact_handoff_operation(
+                controller.clone(),
+                OperationId::device_enrollment(),
+                SemanticOperationKind::StartDeviceEnrollment,
+                UiOperationTransferScope::StartDeviceEnrollment,
+            );
+            let app_core = controller.app_core().clone();
+            let controller = controller.clone();
+            let workflow_device_name = device_name.clone();
+            let success_device_name = device_name;
+            spawn_handoff_workflow_task(
+                "start_device_enrollment_failed",
+                controller,
+                transfer,
+                "start_device_enrollment callback",
+                async move {
+                    ceremony_workflows::start_device_enrollment_ceremony(
+                        &app_core,
+                        workflow_device_name,
+                        invitee_authority_id,
+                    )
+                    .await
+                },
+                move |controller, start| async move {
+                    controller.write_clipboard(&start.enrollment_code);
+                    controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+                        device_name: Some(success_device_name),
+                        code_len: Some(start.enrollment_code.len()),
+                        code: Some(start.enrollment_code),
+                    });
+                    Ok(())
+                },
+            );
+            Ok(semantic_unit_result_with_handle(handle))
         }
         RoutedSemanticIntent::ImportDeviceEnrollmentCode { code } => {
             let app_core = controller.app_core().clone();
@@ -666,6 +686,8 @@ async fn execute_semantic_intent(
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
             let invitation_info = invitation.info().clone();
             let instance_id = handle.instance_id().clone();
+            let transfer_instance_id = transfer.instance_id().clone();
+            let transfer_operation_id = transfer.operation_id().clone();
             let controller = controller.clone();
             controller.inject_message("debug:accept_contact:spawn_enqueued");
             controller.push_log("debug:accept_contact:spawn_enqueued");
@@ -674,12 +696,12 @@ async fn execute_semantic_intent(
                 controller.push_log("debug:accept_contact:workflow_start");
                 update_semantic_debug(
                     "accept_contact_invitation_workflow_start",
-                    Some(transfer.instance_id().0.as_str()),
+                    Some(transfer_instance_id.0.as_str()),
                 );
                 web_sys::console::log_1(
                     &format!(
                         "[web-harness] accept_contact_invitation workflow_start instance={}",
-                        transfer.instance_id().0
+                        transfer_instance_id.0
                     )
                     .into(),
                 );
@@ -730,21 +752,21 @@ async fn execute_semantic_intent(
                 };
                 update_semantic_debug(
                     "accept_contact_invitation_apply_terminal",
-                    Some(transfer.instance_id().0.as_str()),
+                    Some(transfer_instance_id.0.as_str()),
                 );
                 controller.inject_message("debug:accept_contact:apply_terminal");
                 controller.push_log("debug:accept_contact:apply_terminal");
                 web_sys::console::log_1(
                     &format!(
                         "[web-harness] accept_contact_invitation apply_terminal instance={}",
-                        transfer.instance_id().0
+                        transfer_instance_id.0
                     )
                     .into(),
                 );
                 let applied_snapshot =
                     crate::harness_bridge::publish_semantic_controller_snapshot(controller.clone());
                 let applied_state = applied_snapshot
-                    .operation_state_for_instance(&transfer.operation_id(), &transfer.instance_id())
+                    .operation_state_for_instance(&transfer_operation_id, &transfer_instance_id)
                     .map(|state| format!("{state:?}"))
                     .unwrap_or_else(|| "Missing".to_string());
                 controller.push_log(&format!(
@@ -800,6 +822,7 @@ async fn execute_semantic_intent(
                 UiOperationTransferScope::AcceptPendingChannelInvitation,
             );
             let app_core = controller.app_core().clone();
+            let workflow_app_core = app_core.clone();
             let instance_id = handle.instance_id().clone();
             let controller = controller.clone();
             spawn_handoff_workflow_task(
@@ -807,10 +830,13 @@ async fn execute_semantic_intent(
                 controller,
                 transfer,
                 "accept_pending_channel_invitation callback",
-                invitation_workflows::accept_pending_channel_invitation_with_binding_terminal_status(
-                    &app_core,
-                    Some(instance_id),
-                ),
+                async move {
+                    invitation_workflows::accept_pending_channel_invitation_with_binding_terminal_status(
+                        &workflow_app_core,
+                        Some(instance_id),
+                    )
+                    .await
+                },
                 |_controller, _accepted| async move { Ok(()) },
             );
             Ok(semantic_unit_result_with_handle(handle))

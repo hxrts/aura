@@ -147,7 +147,7 @@ use crate::ui_contract::{
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
     execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
-    warn_workflow_timeout, workflow_retry_policy, workflow_timeout_budget,
+    warn_workflow_timeout, workflow_best_effort, workflow_retry_policy, workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -1321,7 +1321,7 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
             )
         });
         facts.extend(contact_link_facts.clone());
-        facts.extend(invitation_accepted_facts.clone());
+        facts.extend(invitation_accepted_facts);
     })
     .await
 }
@@ -2466,8 +2466,7 @@ async fn accept_invitation_id_owned(
             owner,
             AcceptInvitationError::AcceptFailed {
                 detail: format!(
-                    "contact invitation {} completed without an authoritative contact id",
-                    invitation_id
+                    "contact invitation {invitation_id} completed without an authoritative contact id"
                 ),
             },
         )
@@ -4091,7 +4090,7 @@ mod tests {
             message: None,
         }]);
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4134,7 +4133,7 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
         runtime.set_pending_invitations(Vec::new());
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4324,7 +4323,7 @@ mod tests {
             crate::runtime_bridge::OfflineRuntimeBridge::new(our_authority),
         );
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4513,7 +4512,7 @@ mod tests {
             our_authority,
         ));
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4579,7 +4578,7 @@ mod tests {
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4629,7 +4628,7 @@ mod tests {
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4673,7 +4672,7 @@ mod tests {
                 receiver_id: our_authority,
                 invitation_type: InvitationBridgeType::Channel {
                     home_id: channel_id.to_string(),
-                    context_id: Some(context_id.to_string()),
+                    context_id: Some(context_id),
                     nickname_suggestion: Some("shared-parity-lab".to_string()),
                 },
                 status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
@@ -4727,7 +4726,7 @@ mod tests {
         }]);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4809,7 +4808,7 @@ mod tests {
         ));
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4893,7 +4892,7 @@ mod tests {
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -4966,7 +4965,7 @@ mod tests {
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -5013,7 +5012,7 @@ mod tests {
         )));
         let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
         let app_core = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
         {
             let core = app_core.read().await;
@@ -5318,4 +5317,3 @@ mod tests {
         );
     }
 }
-use crate::workflows::runtime::workflow_best_effort;

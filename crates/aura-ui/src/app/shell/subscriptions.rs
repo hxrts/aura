@@ -9,7 +9,7 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
     settings_runtime: Signal<SettingsRuntimeView>,
     notifications_runtime: Signal<NotificationsRuntimeView>,
 ) {
-    let controller_for_runtime = controller.clone();
+    let controller_for_runtime = controller;
     use_effect(move || {
         if runtime_bridge_started() {
             return;

@@ -429,6 +429,7 @@ mod tests {
         GuardCapabilityAdmission, ModuleGuardCapabilityError,
     };
     use aura_core::CapabilityName;
+    use std::error::Error;
 
     #[test]
     fn qualified_name_uses_namespace_when_present() {
@@ -515,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_guard_capabilities_accepts_canonical_names() {
+    fn validate_guard_capabilities_accepts_canonical_names() -> Result<(), Box<dyn Error>> {
         let manifest = CompositionManifest {
             protocol_name: "TestProtocol".to_string(),
             protocol_namespace: Some("test".to_string()),
@@ -524,21 +525,20 @@ mod tests {
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
             guard_capabilities: vec![
-                CapabilityName::parse("chat:message:send").expect("capability"),
-                CapabilityName::parse("amp:receive").expect("capability"),
+                CapabilityName::parse("chat:message:send")?,
+                CapabilityName::parse("amp:receive")?,
             ],
             determinism_policy_ref: None,
             link_specs: Vec::new(),
             delegation_constraints: Vec::new(),
         };
 
-        manifest
-            .validate_guard_capabilities(GuardCapabilityAdmission::first_party_only())
-            .expect("canonical capability list should validate");
+        manifest.validate_guard_capabilities(GuardCapabilityAdmission::first_party_only())?;
+        Ok(())
     }
 
     #[test]
-    fn validate_guard_capabilities_rejects_legacy_or_unnamespaced_values() {
+    fn validate_guard_capabilities_rejects_legacy_or_unnamespaced_values() -> Result<(), Box<dyn Error>> {
         let manifest = CompositionManifest {
             protocol_name: "LegacyProtocol".to_string(),
             protocol_namespace: Some("legacy".to_string()),
@@ -546,61 +546,61 @@ mod tests {
             protocol_id: "legacy.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
-            guard_capabilities: vec![
-                CapabilityName::parse("send_message").expect("grammar-valid capability token")
-            ],
+            guard_capabilities: vec![CapabilityName::parse("send_message")?],
             determinism_policy_ref: None,
             link_specs: Vec::new(),
             delegation_constraints: Vec::new(),
         };
 
-        let error = manifest
-            .validate_guard_capabilities(GuardCapabilityAdmission::first_party_only())
-            .expect_err("legacy capability name must fail manifest validation");
-        assert!(error.to_string().contains("canonical namespaced"));
+        match manifest.validate_guard_capabilities(GuardCapabilityAdmission::first_party_only()) {
+            Ok(()) => panic!("legacy capability name must fail manifest validation"),
+            Err(error) => assert!(error.to_string().contains("canonical namespaced")),
+        }
+        Ok(())
     }
 
     #[test]
-    fn admitted_module_capabilities_reject_reserved_roots() {
-        let error = AdmittedModuleGuardCapabilities::new(
+    fn admitted_module_capabilities_reject_reserved_roots() -> Result<(), Box<dyn Error>> {
+        let first_party = AdmittedModuleGuardCapabilities::new(
             "calendar_pack",
-            vec![
-                CapabilityName::parse("module:calendar_pack:invitation:send")
-                    .expect("grammar-valid capability"),
-            ],
-        )
-        .expect_err("reserved first-party root must fail");
-        assert!(matches!(
-            error,
-            ModuleGuardCapabilityError::InvalidCapability(_)
-        ));
-        assert!(error
-            .to_string()
-            .contains("reserved first-party namespace root `invitation`"));
+            vec![CapabilityName::parse("module:calendar_pack:invitation:send")?],
+        );
+        match first_party {
+            Ok(_) => panic!("reserved first-party root must fail"),
+            Err(error) => {
+                assert!(matches!(
+                    error,
+                    ModuleGuardCapabilityError::InvalidCapability(_)
+                ));
+                assert!(error
+                    .to_string()
+                    .contains("reserved first-party namespace root `invitation`"));
+            }
+        }
 
-        let error = AdmittedModuleGuardCapabilities::new(
+        let host_owned = AdmittedModuleGuardCapabilities::new(
             "calendar_pack",
-            vec![CapabilityName::parse("module:calendar_pack:write:item")
-                .expect("grammar-valid capability")],
-        )
-        .expect_err("reserved host-owned root must fail");
-        assert!(error
-            .to_string()
-            .contains("reserved host-owned capability root `write`"));
+            vec![CapabilityName::parse("module:calendar_pack:write:item")?],
+        );
+        match host_owned {
+            Ok(_) => panic!("reserved host-owned root must fail"),
+            Err(error) => assert!(error
+                .to_string()
+                .contains("reserved host-owned capability root `write`")),
+        }
+        Ok(())
     }
 
     #[test]
-    fn module_capabilities_do_not_collide_across_modules() {
+    fn module_capabilities_do_not_collide_across_modules() -> Result<(), Box<dyn Error>> {
         let alpha = AdmittedModuleGuardCapabilities::new(
             "alpha_module",
-            vec![CapabilityName::parse("module:alpha_module:calendar:sync").expect("capability")],
-        )
-        .expect("alpha descriptors");
+            vec![CapabilityName::parse("module:alpha_module:calendar:sync")?],
+        )?;
         let beta = AdmittedModuleGuardCapabilities::new(
             "beta_module",
-            vec![CapabilityName::parse("module:beta_module:calendar:sync").expect("capability")],
-        )
-        .expect("beta descriptors");
+            vec![CapabilityName::parse("module:beta_module:calendar:sync")?],
+        )?;
         let admitted = vec![alpha, beta];
 
         let manifest = CompositionManifest {
@@ -611,28 +611,26 @@ mod tests {
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
             guard_capabilities: vec![
-                CapabilityName::parse("module:alpha_module:calendar:sync").expect("capability"),
-                CapabilityName::parse("module:beta_module:calendar:sync").expect("capability"),
+                CapabilityName::parse("module:alpha_module:calendar:sync")?,
+                CapabilityName::parse("module:beta_module:calendar:sync")?,
             ],
             determinism_policy_ref: None,
             link_specs: Vec::new(),
             delegation_constraints: Vec::new(),
         };
 
-        manifest
-            .validate_guard_capabilities(
-                GuardCapabilityAdmission::with_admitted_module_capabilities(&admitted),
-            )
-            .expect("module capabilities should stay distinct across module ids");
+        manifest.validate_guard_capabilities(
+            GuardCapabilityAdmission::with_admitted_module_capabilities(&admitted),
+        )?;
+        Ok(())
     }
 
     #[test]
-    fn validate_guard_capabilities_rejects_undeclared_module_capabilities() {
+    fn validate_guard_capabilities_rejects_undeclared_module_capabilities() -> Result<(), Box<dyn Error>> {
         let admitted = vec![AdmittedModuleGuardCapabilities::new(
             "calendar_pack",
-            vec![CapabilityName::parse("module:calendar_pack:calendar:read").expect("capability")],
-        )
-        .expect("module descriptor")];
+            vec![CapabilityName::parse("module:calendar_pack:calendar:read")?],
+        )?];
         let manifest = CompositionManifest {
             protocol_name: "ModuleProtocol".to_string(),
             protocol_namespace: Some("module_pack".to_string()),
@@ -640,21 +638,20 @@ mod tests {
             protocol_id: "module.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
-            guard_capabilities: vec![
-                CapabilityName::parse("module:calendar_pack:calendar:write").expect("capability")
-            ],
+            guard_capabilities: vec![CapabilityName::parse("module:calendar_pack:calendar:write")?],
             determinism_policy_ref: None,
             link_specs: Vec::new(),
             delegation_constraints: Vec::new(),
         };
 
-        let error = manifest
-            .validate_guard_capabilities(
-                GuardCapabilityAdmission::with_admitted_module_capabilities(&admitted),
-            )
-            .expect_err("undeclared module guard capability must fail");
-        assert!(error
-            .to_string()
-            .contains("is not declared in the installed module release"));
+        match manifest.validate_guard_capabilities(
+            GuardCapabilityAdmission::with_admitted_module_capabilities(&admitted),
+        ) {
+            Ok(()) => panic!("undeclared module guard capability must fail"),
+            Err(error) => assert!(error
+                .to_string()
+                .contains("is not declared in the installed module release")),
+        }
+        Ok(())
     }
 }

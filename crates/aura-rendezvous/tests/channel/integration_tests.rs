@@ -26,7 +26,6 @@ use aura_rendezvous::{
     capabilities::RendezvousCapability,
     facts::{RendezvousDescriptor, RendezvousFact, TransportHint},
     new_channel::{ChannelManager, HandshakeConfig, Handshaker, SecureChannel},
-    protocol::guards,
     service::{EffectCommand, GuardDecision, GuardSnapshot, RendezvousConfig, RendezvousService},
 };
 

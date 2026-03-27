@@ -627,7 +627,7 @@ fn submit_wizard_modal_action(
                             "Multifactor ceremony",
                             rerender_for_monitor,
                         );
-                        controller.complete_runtime_modal_success("Multifactor ceremony started")
+                        controller.complete_runtime_modal_success("Multifactor ceremony started");
                     }
                     Err(error) => {
                         owner.fail_with(invitation_command_failure(error.to_string()));
@@ -714,9 +714,9 @@ fn submit_simple_modal_action(
                 SemanticOperationKind::AcceptContactInvitation
             };
             let operation =
-                UiWorkflowHandoffOwner::submit(controller.clone(), operation_id.clone(), base_kind);
+                UiWorkflowHandoffOwner::submit(controller.clone(), operation_id, base_kind);
             let app_core = controller.app_core().clone();
-            let controller_for_import = controller.clone();
+            let controller_for_import = controller;
             let rerender_for_import = rerender.clone();
             spawn_ui(async move {
                 controller_for_import.push_log("accept_invitation import_details start");
@@ -846,7 +846,7 @@ fn submit_simple_modal_action(
                 rerender();
                 return true;
             }
-            let message = (!create_state.message.trim().is_empty()).then(|| create_state.message);
+            let message = (!create_state.message.trim().is_empty()).then_some(create_state.message);
             let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
 
             let app_core = controller.app_core().clone();

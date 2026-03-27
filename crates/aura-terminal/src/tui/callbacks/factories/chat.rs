@@ -238,7 +238,7 @@ impl ChatCallbacks {
                   channel: String,
                   content: String,
                   operation: WorkflowHandoffOperationOwner| {
-                let msg_id = message_id.clone();
+                let msg_id = message_id;
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 let app_core = ctx.app_core_raw().clone();

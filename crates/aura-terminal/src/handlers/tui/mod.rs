@@ -348,8 +348,7 @@ async fn initialized_runtime_app_core(
     let app_core = AppCore::with_runtime(app_config, agent.as_runtime_bridge())
         .map_err(|error| AuraError::internal(format!("Failed to create AppCore: {error}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
-    InitializedAppCore::new(app_core).await.map_err(Into::into)
-}
+    InitializedAppCore::new(app_core).await}
 
 #[cfg(feature = "development")]
 fn build_demo_io_context(
@@ -973,8 +972,7 @@ async fn handle_tui_launch(
                 )
                 .await?;
                 stdio.println(format_args!(
-                    "Reloading TUI for authority: {}",
-                    authority_id
+                    "Reloading TUI for authority: {authority_id}"
                 ));
                 return reexec_current_tui_process("authority switch").map_err(Into::into);
             }

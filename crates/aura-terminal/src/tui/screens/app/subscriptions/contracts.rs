@@ -43,9 +43,7 @@ impl SubscriptionDegradationNotice {
     }
 
     fn into_update(self) -> UiUpdate {
-        let reason = match self.reason {
-            SubscriptionDegradationReason::StructuralExhaustion(reason) => reason,
-        };
+        let SubscriptionDegradationReason::StructuralExhaustion(reason) = self.reason;
         UiUpdate::SubscriptionDegraded {
             signal_id: self.signal_id,
             reason,

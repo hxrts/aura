@@ -514,6 +514,7 @@ mod tests {
 
     #[test]
     fn runtime_semantic_snapshot_marks_active_home_row_selected_when_falling_back_to_runtime_home()
+        -> Result<(), &'static str>
     {
         let model = UiModel::new("authority-test".to_string());
         let neighborhood_runtime = NeighborhoodRuntimeView {
@@ -540,12 +541,12 @@ mod tests {
 
         snapshot
             .validate_invariants()
-            .expect("runtime snapshot should export matching home selection");
+            .map_err(|_| "runtime snapshot should export matching home selection")?;
         let homes = snapshot
             .lists
             .iter()
             .find(|list| list.id == ListId::Homes)
-            .expect("homes list should be exported");
+            .ok_or("homes list should be exported")?;
         assert!(
             homes
                 .items
@@ -557,10 +558,11 @@ mod tests {
             snapshot.selected_item_id(ListId::Homes),
             Some("channel:home-1")
         );
+        Ok(())
     }
 
     #[test]
-    fn runtime_semantic_snapshot_keeps_current_device_distinct_from_selection() {
+    fn runtime_semantic_snapshot_keeps_current_device_distinct_from_selection() -> Result<(), &'static str> {
         let model = UiModel::new("authority-test".to_string());
         let settings_runtime = SettingsRuntimeView {
             loaded: true,
@@ -583,16 +585,17 @@ mod tests {
 
         snapshot
             .validate_invariants()
-            .expect("current device marker must not fabricate list selection");
+            .map_err(|_| "current device marker must not fabricate list selection")?;
         let devices = snapshot
             .lists
             .iter()
             .find(|list| list.id == ListId::Devices)
-            .expect("devices list should be exported");
+            .ok_or("devices list should be exported")?;
         assert_eq!(snapshot.selected_item_id(ListId::Devices), None);
         assert_eq!(devices.items.len(), 1);
         assert!(devices.items[0].is_current);
         assert!(!devices.items[0].selected);
+        Ok(())
     }
 
     #[test]

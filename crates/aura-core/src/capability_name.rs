@@ -131,11 +131,13 @@ macro_rules! capability_name {
 #[cfg(test)]
 mod tests {
     use super::CapabilityName;
+    use std::error::Error;
 
     #[test]
-    fn parses_valid_names() {
-        let parsed = CapabilityName::parse("invitation:guardian:accept").expect("valid capability");
+    fn parses_valid_names() -> Result<(), Box<dyn Error>> {
+        let parsed = CapabilityName::parse("invitation:guardian:accept")?;
         assert_eq!(parsed.as_str(), "invitation:guardian:accept");
+        Ok(())
     }
 
     #[test]
@@ -154,20 +156,22 @@ mod tests {
     }
 
     #[test]
-    fn serde_round_trip_preserves_value() {
-        let name = CapabilityName::parse("chat:message:send").expect("valid capability");
-        let encoded = serde_json::to_string(&name).expect("serialize");
+    fn serde_round_trip_preserves_value() -> Result<(), Box<dyn Error>> {
+        let name = CapabilityName::parse("chat:message:send")?;
+        let encoded = serde_json::to_string(&name)?;
         assert_eq!(encoded, "\"chat:message:send\"");
 
-        let decoded: CapabilityName = serde_json::from_str(&encoded).expect("deserialize");
+        let decoded: CapabilityName = serde_json::from_str(&encoded)?;
         assert_eq!(decoded, name);
+        Ok(())
     }
 
     #[test]
     fn deserialization_rejects_invalid_names() {
-        let error = serde_json::from_str::<CapabilityName>("\"Chat:Send\"")
-            .expect_err("invalid name should fail");
-        assert!(error.to_string().contains("invalid capability token"));
+        match serde_json::from_str::<CapabilityName>("\"Chat:Send\"") {
+            Ok(name) => panic!("invalid name should fail, got {}", name.as_str()),
+            Err(error) => assert!(error.to_string().contains("invalid capability token")),
+        }
     }
 
     #[test]
