@@ -250,6 +250,50 @@ mod tests {
     }
 
     #[test]
+    fn web_semantic_command_execution_uses_declared_submission_helpers() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let commands_path = repo_root.join("crates/aura-web/src/harness/commands.rs");
+        let source = std::fs::read_to_string(&commands_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", commands_path.display()));
+
+        let start = source
+            .find("async fn execute_semantic_intent(")
+            .unwrap_or_else(|| panic!("missing execute_semantic_intent"));
+        let end = source[start..]
+            .find("pub(crate) async fn submit_semantic_command(")
+            .map(|offset| start + offset)
+            .unwrap_or_else(|| panic!("missing submit_semantic_command marker"));
+        let body = &source[start..end];
+
+        for forbidden in [
+            "SemanticCommandResponse::accepted_without_value()",
+            "begin_exact_handoff_operation(",
+            "begin_exact_ui_operation(",
+            "semantic_response_with_handle(",
+            "semantic_unit_result_with_handle(",
+            "semantic_channel_result(",
+            "semantic_channel_result_with_handle(",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "execute_semantic_intent should use declared submission helpers instead of `{forbidden}`"
+            );
+        }
+    }
+
+    #[test]
+    fn web_harness_install_delegates_semantic_submission_to_commands_module() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let install_path = repo_root.join("crates/aura-web/src/harness/install.rs");
+        let source = std::fs::read_to_string(&install_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", install_path.display()));
+
+        assert!(source.contains("commands::submit_semantic_command(controller, request).await?"));
+        assert!(!source.contains("route_semantic_intent("));
+        assert!(!source.contains("execute_semantic_intent("));
+    }
+
+    #[test]
     fn web_bootstrap_handoff_waits_for_completion() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let shell_host_path = repo_root.join("crates/aura-web/src/shell_host.rs");

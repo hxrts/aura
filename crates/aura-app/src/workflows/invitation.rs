@@ -4664,7 +4664,7 @@ mod tests {
         .unwrap();
 
         let runtime_for_pending_publish = runtime.clone();
-        tokio::spawn(async move {
+        let delayed_pending_publish = async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
             runtime_for_pending_publish.set_pending_invitations(vec![InvitationInfo {
                 invitation_id: InvitationId::new("pending-channel-signal-fallback"),
@@ -4680,15 +4680,14 @@ mod tests {
                 expires_at_ms: None,
                 message: None,
             }]);
-        });
-
-        let outcome = accept_pending_channel_invitation_with_binding_terminal_status(
+        };
+        let accept_pending = accept_pending_channel_invitation_with_binding_terminal_status(
             &app_core,
             Some(OperationInstanceId(
                 "accept-pending-binding-signal-fallback-1".to_string(),
             )),
-        )
-        .await;
+        );
+        let ((), outcome) = tokio::join!(delayed_pending_publish, accept_pending);
 
         let accepted = outcome
             .result

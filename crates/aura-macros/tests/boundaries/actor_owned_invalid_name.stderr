@@ -1,0 +1,5 @@
+error: actor_owned is reserved for long-lived mutable async domains (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)
+  --> tests/boundaries/actor_owned_invalid_name.rs:12:8
+   |
+12 | struct DemoState;
+   |        ^^^^^^^^^

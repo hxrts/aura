@@ -2644,19 +2644,30 @@ async function startPage(params) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} submit_ready mode active`,
         );
-        await waitForPageNavigationStabilization(
-          session,
-          `startup_submit_ready:${instanceId}`,
-        );
-        await waitForNavigationQuietPeriod(
-          session,
-          `startup_submit_ready:${instanceId}`,
-        );
-        await waitForSubmitQueueReady(
-          session,
-          `startup_submit_ready:${instanceId}`,
-          Math.min(harnessReadyTimeoutMs, 10000),
-        );
+        const seededStartup =
+          (typeof pendingSemanticPayload === "string" &&
+            pendingSemanticPayload.length > 0) ||
+          (typeof pendingRuntimeStagePayload === "string" &&
+            pendingRuntimeStagePayload.length > 0);
+        if (!seededStartup) {
+          await waitForPageNavigationStabilization(
+            session,
+            `startup_submit_ready:${instanceId}`,
+          );
+          await waitForNavigationQuietPeriod(
+            session,
+            `startup_submit_ready:${instanceId}`,
+          );
+          await waitForSubmitQueueReady(
+            session,
+            `startup_submit_ready:${instanceId}`,
+            Math.min(harnessReadyTimeoutMs, 10000),
+          );
+        } else {
+          console.error(
+            `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} submit_ready seeded fast_path`,
+          );
+        }
         consoleLog.push(
           `[${nowIso()}] startup completed in submit_ready mode for ${instanceId}`,
         );

@@ -76,9 +76,12 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/semantic_owner_missing_authoritative_inputs.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_category.rs");
     t.compile_fail("tests/boundaries/semantic_owner_missing_terminal_path.rs");
+    t.compile_fail("tests/boundaries/semantic_owner_await_before_handoff.rs");
     t.compile_fail("tests/boundaries/actor_owned_missing_capacity.rs");
     t.compile_fail("tests/boundaries/actor_owned_missing_gate.rs");
     t.compile_fail("tests/boundaries/actor_owned_bypass_without_macro.rs");
+    t.compile_fail("tests/boundaries/actor_owned_invalid_name.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_category.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_missing_capability.rs");
     t.compile_fail("tests/boundaries/ownership_lifecycle_invalid_variant.rs");
 }

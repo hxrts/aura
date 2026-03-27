@@ -649,6 +649,7 @@ ci-frontend-portability:
 
 ci-ownership-policy:
     just ci-ownership-categories
+    just ci-annotation-ratchet
     just ci-actor-lifecycle
     just ci-async-session-ownership
     just ci-async-concurrency-envelope
@@ -686,6 +687,11 @@ ci-ownership-policy:
     just ci-timeout-time-domains
     just ci-harness-ownership-policy
 
+ci-annotation-ratchet:
+    bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
+    bash scripts/check/ownership-annotation-ratchet.sh actor-owned
+    bash scripts/check/ownership-annotation-ratchet.sh capability-boundary
+
 ci-ownership-categories:
     bash scripts/check/ownership-category-declarations.sh
 
@@ -705,7 +711,7 @@ ci-typed-errors:
     bash scripts/check/typed-error-boundary.sh
 
 ci-semantic-owner-awaits:
-    just _ownership-lint semantic-owner-bounded-awaits crates/aura-terminal/src/tui/callbacks
+    just _ownership-lint semantic-owner-bounded-awaits crates/aura-app/src/workflows crates/aura-terminal/src/tui/callbacks crates/aura-web/src
 
 ci-semantic-owner-detached-continuation:
     just _ownership-lint semantic-owner-detached-continuation crates/aura-app/src crates/aura-terminal/src crates/aura-web/src crates/aura-harness/src

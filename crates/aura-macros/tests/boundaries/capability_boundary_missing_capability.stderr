@@ -1,0 +1,7 @@
+error: capability_boundary requires `capability = "..."`
+ --> tests/boundaries/capability_boundary_missing_capability.rs:1:1
+  |
+1 | #[aura_macros::capability_boundary(category = "capability_gated")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `aura_macros::capability_boundary` (in Nightly builds, run with -Z macro-backtrace for more info)

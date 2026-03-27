@@ -21,7 +21,7 @@ use crate::workflows::semantic_facts::{
 use crate::AppCore;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use aura_core::types::FrostThreshold;
-use aura_core::{AttemptBudget, AuraError};
+use aura_core::{AttemptBudget, AuraError, OperationContext, TraceContext};
 use std::future::Future;
 use std::time::Duration;
 
@@ -167,15 +167,29 @@ pub async fn start_device_enrollment_ceremony(
         nickname_suggestion,
         invitee_authority_id,
         &owner,
+        None,
     )
     .await
 }
 
+#[aura_macros::semantic_owner(
+    owner = "start_device_enrollment_ceremony_owned",
+    terminal = "publish_success_with",
+    postcondition = "device_enrollment_started",
+    proof = crate::workflows::semantic_facts::DeviceEnrollmentStartedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "runtime_device_enrollment_started",
+    child_ops = "",
+    category = "move_owned"
+)]
 async fn start_device_enrollment_ceremony_owned(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
     invitee_authority_id: AuthorityId,
     owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
@@ -248,6 +262,7 @@ pub async fn start_device_enrollment_ceremony_with_terminal_status(
         nickname_suggestion,
         invitee_authority_id,
         &owner,
+        None,
     )
     .await;
     crate::ui_contract::WorkflowTerminalOutcome {

@@ -522,7 +522,7 @@ fn scan_concurrency(file: &Path, source: &str, syntax: &File) -> Vec<String> {
 
 fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<String> {
     let path = display_path(file);
-    if path != "crates/aura-app/src/frontend_primitives/task_owner.rs" {
+    if !path.starts_with("crates/aura-app/src/frontend_primitives/") {
         return Vec::new();
     }
 
@@ -541,7 +541,19 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
             ),
             (
                 "lock_blocking(",
-                "shared frontend task ownership must remain wasm-safe; do not use blocking async-lock APIs in FrontendTaskOwner",
+                "shared frontend primitives must remain wasm-safe; do not use blocking async-lock APIs",
+            ),
+            (
+                "wasm_bindgen_futures::spawn_local",
+                "shared frontend primitives must use the sanctioned frontend task owner instead of direct platform-specific spawn_local",
+            ),
+            (
+                "tokio::spawn",
+                "shared frontend primitives must use the sanctioned frontend task owner instead of direct tokio::spawn",
+            ),
+            (
+                "dioxus::prelude::spawn",
+                "shared frontend primitives must use the sanctioned frontend task owner instead of direct dioxus spawn",
             ),
         ],
         &ignored_test_lines(syntax),
@@ -552,11 +564,56 @@ fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<St
 
 fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
     let path = display_path(file);
-    if path != "crates/aura-web/src/harness/commands.rs" {
+    if !path.starts_with("crates/aura-web/src/harness/") {
         return Vec::new();
     }
 
     let mut violations = Vec::new();
+    if path != "crates/aura-web/src/harness/commands.rs" {
+        let source = syntax.to_token_stream().to_string();
+        for (pattern, message) in [
+            (
+                "route_semantic_intent",
+                "browser semantic routing must remain centralized in harness/commands.rs",
+            ),
+            (
+                "execute_semantic_intent",
+                "browser semantic execution must remain centralized in harness/commands.rs",
+            ),
+            (
+                "SemanticCommandResponse :: accepted_without_value",
+                "browser semantic bridge files must not construct raw semantic responses outside harness/commands.rs",
+            ),
+            (
+                "begin_exact_handoff_operation",
+                "browser semantic bridge files must not begin raw handoff operations outside harness/commands.rs",
+            ),
+            (
+                "begin_exact_ui_operation",
+                "browser semantic bridge files must not begin raw exact operations outside harness/commands.rs",
+            ),
+        ] {
+            if source.contains(pattern) {
+                violations.push(format_violation(
+                    file,
+                    Span::call_site(),
+                    message.to_string(),
+                ));
+            }
+        }
+
+        if path == "crates/aura-web/src/harness/install.rs"
+            && !source.contains("commands :: submit_semantic_command")
+        {
+            violations.push(format_violation(
+                file,
+                Span::call_site(),
+                "browser harness install path must delegate semantic submission through harness/commands.rs".to_string(),
+            ));
+        }
+        return violations;
+    }
+
     for item in &syntax.items {
         let Item::Fn(function) = item else {
             continue;
