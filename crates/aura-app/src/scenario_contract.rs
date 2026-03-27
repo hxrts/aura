@@ -160,6 +160,26 @@ pub enum SubmissionState {
     Accepted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubmissionValueContract {
+    None,
+    ContactInvitationCode,
+    AuthoritativeChannelBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SubmissionContract {
+    Immediate {
+        value: SubmissionValueContract,
+    },
+    OperationHandle {
+        operation_id: OperationId,
+        value: SubmissionValueContract,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubmittedAction<T> {
     pub value: T,
@@ -276,6 +296,7 @@ pub enum SelectionSemantics {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SharedActionContract {
     pub intent: IntentKind,
+    pub submission: SubmissionContract,
     pub preconditions: Vec<ActionPrecondition>,
     pub barriers: SharedActionBarrierMetadata,
     pub post_operation_convergence: Option<PostOperationConvergenceContract>,
@@ -709,6 +730,9 @@ impl IntentAction {
         match self {
             Self::OpenScreen(screen) => SharedActionContract {
                 intent: IntentKind::OpenScreen,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Readiness(UiReadiness::Ready),
                     ActionPrecondition::Quiescence(QuiescenceState::Settled),
@@ -738,6 +762,9 @@ impl IntentAction {
             },
             Self::CreateAccount { .. } => SharedActionContract {
                 intent: IntentKind::CreateAccount,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
@@ -764,6 +791,9 @@ impl IntentAction {
             },
             Self::CreateHome { .. } => SharedActionContract {
                 intent: IntentKind::CreateHome,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Neighborhood),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -806,6 +836,9 @@ impl IntentAction {
             },
             Self::CreateChannel { .. } => SharedActionContract {
                 intent: IntentKind::CreateChannel,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::AuthoritativeChannelBinding,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -847,6 +880,10 @@ impl IntentAction {
             },
             Self::StartDeviceEnrollment { .. } => SharedActionContract {
                 intent: IntentKind::StartDeviceEnrollment,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::device_enrollment(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -889,6 +926,9 @@ impl IntentAction {
             },
             Self::ImportDeviceEnrollmentCode { .. } => SharedActionContract {
                 intent: IntentKind::ImportDeviceEnrollmentCode,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
                 barriers: SharedActionBarrierMetadata {
                     before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
@@ -918,6 +958,9 @@ impl IntentAction {
             },
             Self::OpenSettingsSection(_) => SharedActionContract {
                 intent: IntentKind::OpenSettingsSection,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -949,6 +992,9 @@ impl IntentAction {
             },
             Self::RemoveSelectedDevice { .. } => SharedActionContract {
                 intent: IntentKind::RemoveSelectedDevice,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -981,6 +1027,9 @@ impl IntentAction {
             },
             Self::SwitchAuthority { .. } => SharedActionContract {
                 intent: IntentKind::SwitchAuthority,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Settings),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1012,6 +1061,10 @@ impl IntentAction {
             },
             Self::CreateContactInvitation { .. } => SharedActionContract {
                 intent: IntentKind::CreateContactInvitation,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_create(),
+                    value: SubmissionValueContract::ContactInvitationCode,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1051,6 +1104,10 @@ impl IntentAction {
             },
             Self::AcceptContactInvitation { .. } => SharedActionContract {
                 intent: IntentKind::AcceptContactInvitation,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_accept(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1092,6 +1149,10 @@ impl IntentAction {
             },
             Self::AcceptPendingChannelInvitation => SharedActionContract {
                 intent: IntentKind::AcceptPendingChannelInvitation,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_accept(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Readiness(UiReadiness::Ready),
                     ActionPrecondition::Quiescence(QuiescenceState::Settled),
@@ -1128,6 +1189,10 @@ impl IntentAction {
             },
             Self::JoinChannel { .. } => SharedActionContract {
                 intent: IntentKind::JoinChannel,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::join_channel(),
+                    value: SubmissionValueContract::AuthoritativeChannelBinding,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1165,6 +1230,10 @@ impl IntentAction {
             },
             Self::InviteActorToChannel { .. } => SharedActionContract {
                 intent: IntentKind::InviteActorToChannel,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::invitation_create(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Contacts),
                     ActionPrecondition::Readiness(UiReadiness::Ready),
@@ -1202,6 +1271,10 @@ impl IntentAction {
             },
             Self::SendChatMessage { .. } => SharedActionContract {
                 intent: IntentKind::SendChatMessage,
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::send_message(),
+                    value: SubmissionValueContract::None,
+                },
                 preconditions: vec![
                     ActionPrecondition::Screen(ScreenId::Chat),
                     ActionPrecondition::Readiness(UiReadiness::Ready),

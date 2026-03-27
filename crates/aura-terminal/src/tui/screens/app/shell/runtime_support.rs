@@ -69,7 +69,7 @@ pub(super) async fn authoritative_settings_devices_for_command(
 
     if from_signal
         .as_ref()
-        .is_none_or(|settings_state| settings_state.devices.is_empty())
+        .map_or(true, |settings_state| settings_state.devices.is_empty())
     {
         let _ = refresh_settings_from_runtime(app_ctx.app_core.raw()).await;
         from_signal = {

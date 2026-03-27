@@ -3237,11 +3237,7 @@ fn submit_shared_intent(
     )
 }
 
-fn set_projection_baseline(
-    context: &mut ScenarioContext,
-    instance_id: &str,
-    snapshot: UiSnapshot,
-) {
+fn set_projection_baseline(context: &mut ScenarioContext, instance_id: &str, snapshot: UiSnapshot) {
     context
         .pending_projection_baseline
         .insert(instance_id.to_string(), snapshot.revision);
@@ -3252,7 +3248,9 @@ fn set_projection_baseline(
 
 fn clear_projection_baseline(context: &mut ScenarioContext, instance_id: &str) {
     context.pending_projection_baseline.remove(instance_id);
-    context.pending_projection_baseline_snapshot.remove(instance_id);
+    context
+        .pending_projection_baseline_snapshot
+        .remove(instance_id);
 }
 
 fn clear_projection_baseline_if_semantic_state_already_visible(
@@ -3654,12 +3652,7 @@ fn wait_for_semantic_state_snapshot(
                 }
             }
         }
-        consume_projection_baseline(
-            context,
-            instance_id,
-            &snapshot,
-            &mut required_newer_than,
-        );
+        consume_projection_baseline(context, instance_id, &snapshot, &mut required_newer_than);
         last_snapshot = snapshot;
     }
     let diagnostic_screen =
@@ -5809,12 +5802,7 @@ mod tests {
             .insert("alice".to_string(), baseline);
         let mut required_newer_than = Some(baseline);
 
-        consume_projection_baseline(
-            &mut context,
-            "alice",
-            &snapshot,
-            &mut required_newer_than,
-        );
+        consume_projection_baseline(&mut context, "alice", &snapshot, &mut required_newer_than);
 
         assert!(required_newer_than.is_none());
         assert!(!context.pending_projection_baseline.contains_key("alice"));

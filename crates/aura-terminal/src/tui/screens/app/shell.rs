@@ -193,7 +193,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIn
                 .await
                 {
                     Ok(result) => Ok(result),
-                    Err(TerminalTimeoutError::Timeout { .. }) => Err(std::io::Error::other(
+                    Err(TerminalTimeoutError::Timeout) => Err(std::io::Error::other(
                         "bootstrap runtime handoff committed but fullscreen generation did not exit within 5s",
                     )),
                     Err(TerminalTimeoutError::Setup { context, detail }) => {
@@ -1365,7 +1365,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         View(width: 100pct, height: 100pct) {
                             NeighborhoodScreen(
                                 view: neighborhood_props.clone(),
-                                update_tx: update_tx_holder.clone(),
+                                update_tx: update_tx_holder,
                             )
                         }
                     })

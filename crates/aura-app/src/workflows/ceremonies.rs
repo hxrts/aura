@@ -11,8 +11,8 @@ use async_lock::RwLock;
 use super::error::{ceremony_op, WorkflowError};
 use crate::runtime_bridge::KeyRotationCeremonyStatus;
 use crate::ui_contract::{
-    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
-    SemanticOperationKind, SemanticOperationPhase,
+    OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
 };
 use crate::workflows::runtime::timeout_runtime_call;
 use crate::workflows::semantic_facts::{
@@ -162,6 +162,21 @@ pub async fn start_device_enrollment_ceremony(
         None,
         SemanticOperationKind::StartDeviceEnrollment,
     );
+    start_device_enrollment_ceremony_owned(
+        app_core,
+        nickname_suggestion,
+        invitee_authority_id,
+        &owner,
+    )
+    .await
+}
+
+async fn start_device_enrollment_ceremony_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    invitee_authority_id: AuthorityId,
+    owner: &SemanticWorkflowOwner,
+) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
@@ -183,14 +198,14 @@ pub async fn start_device_enrollment_ceremony(
         Ok(Ok(start)) => start,
         Ok(Err(error)) => {
             return fail_start_device_enrollment(
-                &owner,
+                owner,
                 ceremony_op("start device enrollment", error).to_string(),
             )
             .await;
         }
         Err(error) => {
             return fail_start_device_enrollment(
-                &owner,
+                owner,
                 ceremony_op("start device enrollment", error).to_string(),
             )
             .await;
@@ -214,6 +229,31 @@ pub async fn start_device_enrollment_ceremony(
         handle,
         status_handle,
     })
+}
+
+pub async fn start_device_enrollment_ceremony_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    invitee_authority_id: AuthorityId,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentCeremonyStart> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment(),
+        instance_id,
+        SemanticOperationKind::StartDeviceEnrollment,
+    );
+    let result = start_device_enrollment_ceremony_owned(
+        app_core,
+        nickname_suggestion,
+        invitee_authority_id,
+        &owner,
+    )
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 /// Start a device removal ("remove device") ceremony.
 pub async fn start_device_removal_ceremony(

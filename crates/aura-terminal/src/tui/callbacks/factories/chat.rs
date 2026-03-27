@@ -1,7 +1,6 @@
 //! Chat domain callbacks.
 
 use super::*;
-use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the chat screen
 #[derive(Clone)]
@@ -54,8 +53,6 @@ impl ChatCallbacks {
                 tx,
                 operation,
                 WorkflowHandoffSpec::new(
-                    OperationId::invitation_accept(),
-                    SemanticOperationKind::AcceptPendingChannelInvitation,
                     SemanticOperationTransferScope::AcceptPendingChannelInvitation,
                     "invitation",
                     "Accept pending invitation failed",
@@ -332,8 +329,6 @@ impl ChatCallbacks {
                     tx,
                     operation,
                     WorkflowHandoffSpec::new(
-                        OperationId::join_channel(),
-                        SemanticOperationKind::JoinChannel,
                         SemanticOperationTransferScope::JoinChannel,
                         "chat",
                         "Join channel failed",

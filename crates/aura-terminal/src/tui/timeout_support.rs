@@ -13,10 +13,7 @@ pub(crate) enum TerminalTimeoutError<E> {
         context: &'static str,
         detail: String,
     },
-    Timeout {
-        context: &'static str,
-        detail: String,
-    },
+    Timeout,
     Operation(E),
 }
 
@@ -61,10 +58,10 @@ where
     execute_with_timeout_budget(&time, &budget, operation)
         .await
         .map_err(|error| match error {
-            TimeoutRunError::Timeout(timeout_error) => TerminalTimeoutError::Timeout {
-                context,
-                detail: timeout_error.to_string(),
-            },
+            TimeoutRunError::Timeout(_timeout_error) => {
+                let _ = context;
+                TerminalTimeoutError::Timeout
+            }
             TimeoutRunError::Operation(error) => TerminalTimeoutError::Operation(error),
         })
 }

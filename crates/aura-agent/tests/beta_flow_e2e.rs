@@ -77,9 +77,14 @@ async fn test_invitation_code_roundtrip() -> TestResult {
     };
 
     // Encode to shareable code
-    let code = shareable
-        .to_code()
-        .expect("shareable invitation should serialize");
+    let code = match shareable.to_code() {
+        Ok(code) => code,
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "shareable invitation should serialize: {error}"
+            ))
+        }
+    };
     assert!(code.starts_with("aura:v1:"));
 
     // Decode back

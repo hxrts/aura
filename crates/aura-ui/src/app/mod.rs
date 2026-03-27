@@ -513,9 +513,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_semantic_snapshot_marks_active_home_row_selected_when_falling_back_to_runtime_home()
-        -> Result<(), &'static str>
-    {
+    fn runtime_semantic_snapshot_marks_active_home_row_selected_when_falling_back_to_runtime_home(
+    ) -> Result<(), &'static str> {
         let model = UiModel::new("authority-test".to_string());
         let neighborhood_runtime = NeighborhoodRuntimeView {
             loaded: true,
@@ -562,7 +561,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_semantic_snapshot_keeps_current_device_distinct_from_selection() -> Result<(), &'static str> {
+    fn runtime_semantic_snapshot_keeps_current_device_distinct_from_selection(
+    ) -> Result<(), &'static str> {
         let model = UiModel::new("authority-test".to_string());
         let settings_runtime = SettingsRuntimeView {
             loaded: true,

@@ -253,7 +253,7 @@ impl OperationalHandler {
             Ok(core) => {
                 let _ = core.emit(&*ERROR_SIGNAL, Some(mapped)).await;
             }
-            Err(TerminalTimeoutError::Timeout { .. }) => {
+            Err(TerminalTimeoutError::Timeout) => {
                 tracing::warn!(
                     error_code = "ERROR_SIGNAL_CONTENDED",
                     original_error = %error,
@@ -285,7 +285,7 @@ impl OperationalHandler {
             Ok(core) => {
                 let _ = core.emit(&*ERROR_SIGNAL, None).await;
             }
-            Err(TerminalTimeoutError::Timeout { .. }) => {
+            Err(TerminalTimeoutError::Timeout) => {
                 tracing::warn!(
                     error_code = "ERROR_SIGNAL_CONTENDED",
                     "failed to clear ERROR_SIGNAL: AppCore write-locked for >500ms"

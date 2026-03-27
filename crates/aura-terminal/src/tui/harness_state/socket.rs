@@ -163,7 +163,7 @@ fn ensure_harness_command_plane_owner_started() {
     {
         let guard = harness_command_plane_control_slot()
             .lock()
-            .expect("harness command plane control lock poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if guard.as_ref().is_some_and(|control| !control.is_closed()) {
             return;
         }
@@ -173,7 +173,7 @@ fn ensure_harness_command_plane_owner_started() {
     {
         let mut guard = harness_command_plane_control_slot()
             .lock()
-            .expect("harness command plane control lock poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = Some(control_tx);
     }
     let state_tx = harness_command_plane_state_sender().clone();
@@ -496,17 +496,16 @@ async fn drive_harness_command_plane(
             }
             HarnessCommandPlaneControl::CompletePendingSemanticValue { instance_id, value } => {
                 if let Some(pending) = pending_semantic_values.remove(&instance_id.0) {
-                    let value_matches_kind = match (&pending.kind, &value) {
+                    let value_matches_kind = matches!(
+                        (&pending.kind, &value),
                         (
                             PendingSemanticValueKind::ChannelBinding,
                             SemanticCommandValue::AuthoritativeChannelBinding { .. },
-                        ) => true,
-                        (
+                        ) | (
                             PendingSemanticValueKind::ContactInvitationCode,
                             SemanticCommandValue::ContactInvitationCode { .. },
-                        ) => true,
-                        _ => false,
-                    };
+                        )
+                    );
                     if value_matches_kind {
                         let _ =
                             pending

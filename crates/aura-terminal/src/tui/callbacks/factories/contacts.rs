@@ -1,7 +1,6 @@
 //! Contacts domain callbacks.
 
 use super::*;
-use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 
 /// All callbacks for the contacts screen
 #[derive(Clone)]
@@ -136,8 +135,6 @@ impl ContactsCallbacks {
                     tx,
                     operation,
                     WorkflowHandoffSpec::new(
-                        OperationId::invitation_create(),
-                        SemanticOperationKind::InviteActorToChannel,
                         SemanticOperationTransferScope::InviteActorToChannel,
                         "invitation",
                         "Invite to channel failed",

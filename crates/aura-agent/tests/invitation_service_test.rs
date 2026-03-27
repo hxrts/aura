@@ -238,10 +238,14 @@ async fn test_decline_invitation_via_agent_surfaces_followup_failure() -> TestRe
         .await?;
     let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let error = receiver_invitations
-        .decline(&imported.invitation_id)
-        .await
-        .expect_err("contact decline should surface follow-up exchange failure");
+    let error = match receiver_invitations.decline(&imported.invitation_id).await {
+        Ok(_) => {
+            return Err(
+                "contact decline unexpectedly succeeded despite follow-up exchange failure".into(),
+            );
+        }
+        Err(error) => error,
+    };
     assert!(error
         .to_string()
         .contains("decline invitation follow-up failed"));

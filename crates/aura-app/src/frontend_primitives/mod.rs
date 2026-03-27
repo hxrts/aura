@@ -4,6 +4,7 @@
 //! (Dioxus-based or otherwise) consumes. Shell crates may re-export
 //! these types under their own aliases but should not fork them.
 
+mod cancellation_waiters;
 mod clipboard;
 mod debug_probe;
 mod operations;

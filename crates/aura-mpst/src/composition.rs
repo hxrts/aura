@@ -538,7 +538,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_guard_capabilities_rejects_legacy_or_unnamespaced_values() -> Result<(), Box<dyn Error>> {
+    fn validate_guard_capabilities_rejects_legacy_or_unnamespaced_values(
+    ) -> Result<(), Box<dyn Error>> {
         let manifest = CompositionManifest {
             protocol_name: "LegacyProtocol".to_string(),
             protocol_namespace: Some("legacy".to_string()),
@@ -563,7 +564,9 @@ mod tests {
     fn admitted_module_capabilities_reject_reserved_roots() -> Result<(), Box<dyn Error>> {
         let first_party = AdmittedModuleGuardCapabilities::new(
             "calendar_pack",
-            vec![CapabilityName::parse("module:calendar_pack:invitation:send")?],
+            vec![CapabilityName::parse(
+                "module:calendar_pack:invitation:send",
+            )?],
         );
         match first_party {
             Ok(_) => panic!("reserved first-party root must fail"),
@@ -626,7 +629,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_guard_capabilities_rejects_undeclared_module_capabilities() -> Result<(), Box<dyn Error>> {
+    fn validate_guard_capabilities_rejects_undeclared_module_capabilities(
+    ) -> Result<(), Box<dyn Error>> {
         let admitted = vec![AdmittedModuleGuardCapabilities::new(
             "calendar_pack",
             vec![CapabilityName::parse("module:calendar_pack:calendar:read")?],
@@ -638,7 +642,9 @@ mod tests {
             protocol_id: "module.protocol".to_string(),
             role_names: vec!["Alice".to_string(), "Bob".to_string()],
             required_capabilities: Vec::new(),
-            guard_capabilities: vec![CapabilityName::parse("module:calendar_pack:calendar:write")?],
+            guard_capabilities: vec![CapabilityName::parse(
+                "module:calendar_pack:calendar:write",
+            )?],
             determinism_policy_ref: None,
             link_specs: Vec::new(),
             delegation_constraints: Vec::new(),

@@ -80,8 +80,10 @@ mod tests {
             Some("selected-ctx".to_string()),
         ));
 
-        let binding = strongest_authoritative_binding_for_channel(&channel, Some(&selected))
-            .expect("binding");
+        let Some(binding) = strongest_authoritative_binding_for_channel(&channel, Some(&selected))
+        else {
+            panic!("binding");
+        };
 
         assert_eq!(binding.context_id.as_deref(), Some("selected-ctx"));
     }
@@ -95,8 +97,10 @@ mod tests {
             None::<String>,
         ));
 
-        let binding = strongest_authoritative_binding_for_channel(&channel, Some(&selected))
-            .expect("binding");
+        let Some(binding) = strongest_authoritative_binding_for_channel(&channel, Some(&selected))
+        else {
+            panic!("binding");
+        };
 
         assert_eq!(binding.context_id.as_deref(), Some("projection-ctx"));
     }

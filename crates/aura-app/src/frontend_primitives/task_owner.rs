@@ -9,7 +9,6 @@ use std::sync::{
     Arc,
 };
 
-use async_lock::Mutex;
 use async_trait::async_trait;
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::{OwnedShutdownToken, OwnedTaskSpawner};
@@ -19,10 +18,12 @@ use futures::{
     FutureExt,
 };
 
+use super::cancellation_waiters::FrontendCancellationWaiters;
+
 #[derive(Debug, Default)]
 struct FrontendTaskCancellationState {
     cancelled: AtomicBool,
-    waiters: Mutex<Vec<oneshot::Sender<()>>>,
+    waiters: FrontendCancellationWaiters,
 }
 
 impl FrontendTaskCancellationState {
@@ -31,11 +32,7 @@ impl FrontendTaskCancellationState {
             return;
         }
 
-        let waiters = {
-            let mut guard = self.waiters.lock_blocking();
-            std::mem::take(&mut *guard)
-        };
-        for waiter in waiters {
+        for waiter in self.waiters.drain() {
             let _ = waiter.send(());
         }
     }
@@ -58,12 +55,12 @@ impl CancellationToken for FrontendTaskCancellationToken {
         }
 
         let (tx, rx) = oneshot::channel();
+        if !self
+            .state
+            .waiters
+            .register(tx, || self.state.is_cancelled())
         {
-            let mut waiters = self.state.waiters.lock().await;
-            if self.state.is_cancelled() {
-                return;
-            }
-            waiters.push(tx);
+            return;
         }
         let _ = rx.await;
     }

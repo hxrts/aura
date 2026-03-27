@@ -323,6 +323,8 @@ lint-arch-syntax:
     cargo run -q -p aura-macros --bin arch_lints -- effect-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- impure-escapes crates
     cargo run -q -p aura-macros --bin arch_lints -- concurrency crates
+    cargo run -q -p aura-macros --bin arch_lints -- frontend-portability crates
+    cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
     cargo run -q -p aura-macros --bin arch_lints -- crypto-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- capability-boundaries crates
     cargo run -q -p aura-macros --bin arch_lints -- style crates
@@ -638,6 +640,12 @@ ci-harness-ownership-policy:
     bash scripts/check/harness-typed-json-boundary.sh
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
     bash scripts/check/harness-authoritative-fact-boundary.sh
+    just ci-frontend-portability
+
+ci-frontend-portability:
+    cargo run -q -p aura-macros --bin arch_lints -- frontend-portability crates
+    cargo run -q -p aura-macros --bin arch_lints -- semantic-bridge-contracts crates
+    just web-check
 
 ci-ownership-policy:
     just ci-ownership-categories

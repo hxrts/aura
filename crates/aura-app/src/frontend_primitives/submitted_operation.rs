@@ -500,14 +500,11 @@ mod tests {
             instance_id: &OperationInstanceId,
             kind: SemanticOperationKind,
         ) {
-            self.events
-                .lock()
-                .await
-                .push(Event::Dispatched(
-                    operation_id.clone(),
-                    instance_id.clone(),
-                    kind,
-                ));
+            self.events.lock().await.push(Event::Dispatched(
+                operation_id.clone(),
+                instance_id.clone(),
+                kind,
+            ));
         }
 
         async fn publish_terminal(
@@ -517,15 +514,12 @@ mod tests {
             causality: Option<SemanticOperationCausality>,
             status: SemanticOperationStatus,
         ) {
-            self.events
-                .lock()
-                .await
-                .push(Event::Terminal(
-                    operation_id.clone(),
-                    instance_id.clone(),
-                    causality,
-                    status,
-                ));
+            self.events.lock().await.push(Event::Terminal(
+                operation_id.clone(),
+                instance_id.clone(),
+                causality,
+                status,
+            ));
         }
 
         fn publish_drop_failure(
@@ -534,21 +528,16 @@ mod tests {
             instance_id: &OperationInstanceId,
             kind: SemanticOperationKind,
         ) {
-            self.events
-                .lock_blocking()
-                .push(Event::Dropped(
-                    operation_id.clone(),
-                    instance_id.clone(),
-                    kind,
-                ));
+            self.events.lock_blocking().push(Event::Dropped(
+                operation_id.clone(),
+                instance_id.clone(),
+                kind,
+            ));
         }
     }
 
     fn events(publisher: &TestPublisher) -> Vec<Event> {
-        publisher
-            .events
-            .lock_blocking()
-            .clone()
+        publisher.events.lock_blocking().clone()
     }
 
     #[test]

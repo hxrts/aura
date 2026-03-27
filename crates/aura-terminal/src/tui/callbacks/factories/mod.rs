@@ -31,8 +31,9 @@ use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
 use aura_app::ui::workflows::invitation::import_invitation_details;
+#[cfg(test)]
 use aura_app::ui::workflows::strong_command::{
-    classify_terminal_execution_error, CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
+    CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
 };
 use aura_app::ui_contract::{
     OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
@@ -73,8 +74,6 @@ impl CallbackFactoryRuntime {
 
 #[derive(Clone)]
 struct WorkflowHandoffSpec {
-    operation_id: OperationId,
-    kind: SemanticOperationKind,
     scope: SemanticOperationTransferScope,
     toast_scope: &'static str,
     failure_prefix: &'static str,
@@ -83,16 +82,12 @@ struct WorkflowHandoffSpec {
 
 impl WorkflowHandoffSpec {
     fn new(
-        operation_id: OperationId,
-        kind: SemanticOperationKind,
         scope: SemanticOperationTransferScope,
         toast_scope: &'static str,
         failure_prefix: &'static str,
         panic_context: &'static str,
     ) -> Self {
         Self {
-            operation_id,
-            kind,
             scope,
             toast_scope,
             failure_prefix,
@@ -435,72 +430,11 @@ fn enqueue_invalid_lan_authority_toast(
     );
 }
 
-// ---------------------------------------------------------------------------
-// Command outcome classification
-// ---------------------------------------------------------------------------
-
-type CommandOutcomeStatus = CommandTerminalOutcomeStatus;
-type CommandReasonCode = CommandTerminalReasonCode;
-
-fn classify_command_error(
-    error: &aura_core::AuraError,
-) -> (CommandOutcomeStatus, CommandReasonCode) {
-    let classification = classify_terminal_execution_error(error);
-    (classification.status, classification.reason)
-}
-
-fn classify_chat_command_error(
-    error: &aura_app::ui::workflows::chat_commands::CommandError,
-) -> (CommandOutcomeStatus, CommandReasonCode) {
-    use aura_app::ui::workflows::chat_commands::CommandError;
-
-    match error {
-        CommandError::NotACommand => (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::InvalidArgument,
-        ),
-        CommandError::UnknownCommand(_) => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
-        }
-        CommandError::MissingArgument { .. } | CommandError::InvalidArgument { .. } => (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::InvalidArgument,
-        ),
-    }
-}
-
-fn classify_command_resolver_error(
-    error: &aura_app::ui::workflows::strong_command::CommandResolverError,
-) -> (CommandOutcomeStatus, CommandReasonCode) {
-    use aura_app::ui::workflows::strong_command::CommandResolverError;
-
-    match error {
-        CommandResolverError::UnknownTarget { .. } => {
-            (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound)
-        }
-        CommandResolverError::AmbiguousTarget { .. } => (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::InvalidArgument,
-        ),
-        CommandResolverError::StaleSnapshot { .. } => (
-            CommandOutcomeStatus::Failed,
-            CommandReasonCode::InvalidState,
-        ),
-        CommandResolverError::ParseError { .. } => (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::InvalidArgument,
-        ),
-        CommandResolverError::MissingCurrentChannel { .. } => (
-            CommandOutcomeStatus::Invalid,
-            CommandReasonCode::MissingActiveContext,
-        ),
-    }
-}
-
+#[cfg(test)]
 fn command_outcome_message(
     message: impl Into<String>,
-    status: CommandOutcomeStatus,
-    reason: CommandReasonCode,
+    status: CommandTerminalOutcomeStatus,
+    reason: CommandTerminalReasonCode,
     consistency: Option<&str>,
 ) -> String {
     let metadata = format!(
@@ -686,8 +620,8 @@ mod tests {
     fn command_outcome_message_includes_typed_timeout_metadata() {
         let message = command_outcome_message(
             "/invite: consistency barrier timed out (partial-timeout)",
-            CommandOutcomeStatus::Failed,
-            CommandReasonCode::OperationTimedOut,
+            CommandTerminalOutcomeStatus::Failed,
+            CommandTerminalReasonCode::OperationTimedOut,
             Some("partial-timeout"),
         );
 

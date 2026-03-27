@@ -337,9 +337,7 @@ pub(super) async fn process_ui_update_match(
                     ));
                 } else if has_failed {
                     toast = Some((
-                        error_message
-                            
-                            .unwrap_or_else(|| "Device enrollment failed".to_string()),
+                        error_message.unwrap_or_else(|| "Device enrollment failed".to_string()),
                         crate::tui::state::ToastLevel::Error,
                     ));
                 }

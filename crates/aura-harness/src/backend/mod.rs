@@ -370,9 +370,9 @@ fn tool_key_sequence(key: ToolKey) -> &'static str {
 }
 
 pub enum BackendHandle {
-    Local(local_pty::LocalPtyBackend),
+    Local(Box<local_pty::LocalPtyBackend>),
     Browser(Box<playwright_browser::PlaywrightBrowserBackend>),
-    Ssh(ssh_tunnel::SshTunnelBackend),
+    Ssh(Box<ssh_tunnel::SshTunnelBackend>),
 }
 
 impl BackendHandle {
@@ -382,13 +382,15 @@ impl BackendHandle {
         pty_cols: Option<u16>,
     ) -> Result<Self> {
         match config.mode {
-            InstanceMode::Local => Ok(Self::Local(local_pty::LocalPtyBackend::new(
+            InstanceMode::Local => Ok(Self::Local(Box::new(local_pty::LocalPtyBackend::new(
                 config, pty_rows, pty_cols,
-            ))),
+            )))),
             InstanceMode::Browser => Ok(Self::Browser(Box::new(
                 playwright_browser::PlaywrightBrowserBackend::new(config)?,
             ))),
-            InstanceMode::Ssh => Ok(Self::Ssh(ssh_tunnel::SshTunnelBackend::new(config))),
+            InstanceMode::Ssh => Ok(Self::Ssh(Box::new(ssh_tunnel::SshTunnelBackend::new(
+                config,
+            )))),
         }
     }
 

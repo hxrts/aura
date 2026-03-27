@@ -18,6 +18,8 @@ enum LintMode {
     EffectBoundaries,
     ImpureEscapes,
     Concurrency,
+    FrontendPortability,
+    SemanticBridgeContracts,
     CryptoBoundaries,
     CapabilityBoundaries,
     Style,
@@ -30,6 +32,8 @@ impl LintMode {
             "effect-boundaries" => Ok(Self::EffectBoundaries),
             "impure-escapes" => Ok(Self::ImpureEscapes),
             "concurrency" => Ok(Self::Concurrency),
+            "frontend-portability" => Ok(Self::FrontendPortability),
+            "semantic-bridge-contracts" => Ok(Self::SemanticBridgeContracts),
             "crypto-boundaries" => Ok(Self::CryptoBoundaries),
             "capability-boundaries" => Ok(Self::CapabilityBoundaries),
             "style" => Ok(Self::Style),
@@ -43,6 +47,8 @@ impl LintMode {
             Self::EffectBoundaries => "effect-boundaries",
             Self::ImpureEscapes => "impure-escapes",
             Self::Concurrency => "concurrency",
+            Self::FrontendPortability => "frontend-portability",
+            Self::SemanticBridgeContracts => "semantic-bridge-contracts",
             Self::CryptoBoundaries => "crypto-boundaries",
             Self::CapabilityBoundaries => "capability-boundaries",
             Self::Style => "style",
@@ -197,6 +203,8 @@ fn scan_file(mode: LintMode, file: &Path, source: &str, syntax: &File) -> Vec<St
         LintMode::EffectBoundaries => scan_effect_boundaries(file, source, syntax),
         LintMode::ImpureEscapes => scan_impure_escapes(file, source, syntax),
         LintMode::Concurrency => scan_concurrency(file, source, syntax),
+        LintMode::FrontendPortability => scan_frontend_portability(file, source, syntax),
+        LintMode::SemanticBridgeContracts => scan_semantic_bridge_contracts(file, syntax),
         LintMode::CryptoBoundaries => scan_crypto_boundaries(file, source, syntax),
         LintMode::CapabilityBoundaries => scan_capability_boundaries(file, source, syntax),
         LintMode::Style => scan_style(file, source, syntax),
@@ -508,6 +516,95 @@ fn scan_concurrency(file: &Path, source: &str, syntax: &File) -> Vec<String> {
         &ignored_lines,
         &mut violations,
     );
+
+    violations
+}
+
+fn scan_frontend_portability(file: &Path, source: &str, syntax: &File) -> Vec<String> {
+    let path = display_path(file);
+    if path != "crates/aura-app/src/frontend_primitives/task_owner.rs" {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    scan_line_patterns(
+        file,
+        source,
+        &[
+            (
+                "std::sync::Mutex",
+                "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::Mutex",
+            ),
+            (
+                "std::sync::RwLock",
+                "shared frontend task ownership must use the sanctioned frontend waiter abstraction instead of std::sync::RwLock",
+            ),
+            (
+                "lock_blocking(",
+                "shared frontend task ownership must remain wasm-safe; do not use blocking async-lock APIs in FrontendTaskOwner",
+            ),
+        ],
+        &ignored_test_lines(syntax),
+        &mut violations,
+    );
+    violations
+}
+
+fn scan_semantic_bridge_contracts(file: &Path, syntax: &File) -> Vec<String> {
+    let path = display_path(file);
+    if path != "crates/aura-web/src/harness/commands.rs" {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    for item in &syntax.items {
+        let Item::Fn(function) = item else {
+            continue;
+        };
+        if function.sig.ident != "execute_semantic_intent" {
+            continue;
+        }
+
+        let body = function.block.to_token_stream().to_string();
+        for (pattern, message) in [
+            (
+                "SemanticCommandResponse :: accepted_without_value",
+                "web semantic command execution must use declared immediate-response helpers instead of raw accepted_without_value",
+            ),
+            (
+                "begin_exact_handoff_operation",
+                "web semantic command execution must use declared handoff helpers instead of raw begin_exact_handoff_operation",
+            ),
+            (
+                "begin_exact_ui_operation",
+                "web semantic command execution must use declared exact-handle helpers instead of raw begin_exact_ui_operation",
+            ),
+            (
+                "semantic_response_with_handle",
+                "web semantic command execution must use declared handle-response helpers instead of raw semantic_response_with_handle",
+            ),
+            (
+                "semantic_unit_result_with_handle",
+                "web semantic command execution must use declared handle-response helpers instead of raw semantic_unit_result_with_handle",
+            ),
+            (
+                "semantic_channel_result",
+                "web semantic command execution must use declared response helpers instead of raw semantic_channel_result",
+            ),
+            (
+                "semantic_channel_result_with_handle",
+                "web semantic command execution must use declared handle-response helpers instead of raw semantic_channel_result_with_handle",
+            ),
+        ] {
+            if body.contains(pattern) {
+                violations.push(format_violation(
+                    file,
+                    function.sig.ident.span(),
+                    message.to_string(),
+                ));
+            }
+        }
+    }
 
     violations
 }

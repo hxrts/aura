@@ -184,6 +184,13 @@ prepare_lane_artifacts() {
       fi
       ;;
     web)
+      if [[ "${AURA_HARNESS_WEB_CHECK_DONE:-0}" != "1" ]]; then
+        (
+          cd "$repo_root"
+          just web-check
+        )
+        export AURA_HARNESS_WEB_CHECK_DONE=1
+      fi
       ;;
     *)
       fail "unknown lane for artifact preparation: $selected_lane"

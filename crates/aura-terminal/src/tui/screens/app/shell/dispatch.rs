@@ -89,10 +89,7 @@ pub(super) fn authoritative_binding_for_requested_join(
         return None;
     }
     let context_id = matched_channel.context_id.clone()?;
-    Some(
-        ChannelBindingWitness::new(matched_channel.id.clone(), Some(context_id))
-            .semantic_value(),
-    )
+    Some(ChannelBindingWitness::new(matched_channel.id.clone(), Some(context_id)).semantic_value())
 }
 
 pub(super) fn terminal_error_to_toast_level(

@@ -471,8 +471,6 @@ pub(crate) async fn run_harness_transport_tick_once() {
     let context = ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| slot.borrow().clone());
     if let Some(context) = context {
         run_harness_transport_tick(context.app_core, context.agent).await;
-    } else {
-        emit_browser_harness_debug_event("transport_tick_once_no_context", "");
     }
 }
 

@@ -1,7 +1,7 @@
 //! Recovery domain callbacks.
 
 use super::*;
-use aura_app::ui_contract::{OperationId, SemanticOperationKind};
+use aura_app::ui_contract::SemanticOperationKind;
 
 /// All callbacks for the recovery screen
 #[derive(Clone)]
@@ -57,8 +57,6 @@ impl RecoveryCallbacks {
                     tx.clone(),
                     operation,
                     WorkflowHandoffSpec::new(
-                        OperationId::invitation_create(),
-                        SemanticOperationKind::CreateGuardianInvitation,
                         SemanticOperationTransferScope::CreateGuardianInvitation,
                         "recovery",
                         "Create guardian invitation failed",

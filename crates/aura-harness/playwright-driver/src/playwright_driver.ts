@@ -1537,6 +1537,29 @@ function isUiStateRecoveryCandidate(error) {
   );
 }
 
+function isClosedTargetError(error) {
+  const message = String(error?.message ?? error ?? "");
+  return (
+    message.includes("Target page, context or browser has been closed") ||
+    message.includes("Browser has been closed")
+  );
+}
+
+function sessionPageClosed(session) {
+  try {
+    return session?.page?.isClosed?.() === true;
+  } catch {
+    return true;
+  }
+}
+
+async function ensureSessionPage(session, reason) {
+  if (!sessionPageClosed(session)) {
+    return session;
+  }
+  return restartPageSession(session, `page_closed:${reason}`);
+}
+
 async function waitForPageNavigationStabilization(session, reason) {
   traceDriver(
     `[driver] navigation_wait start instance=${session.id} reason=${reason}`,
@@ -2887,6 +2910,21 @@ async function readStructuredUiStateWithNavigationRecovery(
     if (!isUiStateRecoveryCandidate(error)) {
       throw error;
     }
+    if (isClosedTargetError(error) || sessionPageClosed(session)) {
+      const restartedSession = await restartPageSession(
+        session,
+        `structured_ui_state_closed:${reason}`,
+      );
+      return readStructuredUiState(
+        restartedSession,
+        instanceId,
+        `post_restart_${reason}`,
+        UI_STATE_TIMEOUT_MS,
+        {
+          storeResult: false,
+        },
+      );
+    }
     resetUiObservationState(session, `structured_navigation_recovery:${reason}`);
   traceDriver(
     `[driver] ui_state structured_navigation_recovery instance=${instanceId} reason=${reason}`,
@@ -3179,8 +3217,8 @@ async function processHarnessTransport(session, instanceId) {
 
 async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
-  const session = getSession(instanceId);
-  await processHarnessTransport(session, instanceId);
+  let session = getSession(instanceId);
+  session = await ensureSessionPage(session, `ui_state:${instanceId}`);
   const recoveryTimeoutMs = Math.min(UI_STATE_TIMEOUT_MS, 4000);
   const recentConsole = consoleTailText(session, 8).replace(/\n/g, " | ");
   traceDriver(
@@ -3199,16 +3237,32 @@ async function uiState(params) {
   }
 
   traceDriver(`[driver] ui_state cache_miss instance=${instanceId}`);
-  const observed = await readStructuredUiState(
-    session,
-    instanceId,
-    "observation",
-    recoveryTimeoutMs,
-  ).catch((error) => {
-    throw new Error(
-      `structured ui_state observation failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`,
+  let observed = null;
+  try {
+    observed = await readStructuredUiState(
+      session,
+      instanceId,
+      "observation",
+      recoveryTimeoutMs,
     );
-  });
+  } catch (error) {
+    if (isClosedTargetError(error)) {
+      session = await restartPageSession(
+        session,
+        `ui_state_observation_closed:${instanceId}`,
+      );
+      observed = await readStructuredUiState(
+        session,
+        instanceId,
+        "observation_after_restart",
+        recoveryTimeoutMs,
+      );
+    } else {
+      throw new Error(
+        `structured ui_state observation failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`,
+      );
+    }
+  }
   if (observed) {
     const staleReason = uiStateStalenessReason(session, observed);
     if (staleReason) {
@@ -3226,8 +3280,8 @@ async function uiState(params) {
 
 async function waitForUiState(params) {
   const instanceId = normalizeInstanceId(params);
-  const session = getSession(instanceId);
-  await processHarnessTransport(session, instanceId);
+  let session = getSession(instanceId);
+  session = await ensureSessionPage(session, `wait_for_ui_state:${instanceId}`);
   const timeoutMs = Number(params?.timeout_ms ?? UI_STATE_TIMEOUT_MS);
   const rawAfterVersion = params?.after_version;
   const afterVersion =
@@ -3248,7 +3302,6 @@ async function waitForUiState(params) {
   const deadlineMs = Date.now() + timeoutMs;
 
   while (true) {
-    await processHarnessTransport(session, instanceId);
     if (session.uiStateCache && typeof session.uiStateCache === "object") {
       const cached =
         typeof session.uiStateCacheJson === "string"
@@ -3292,12 +3345,12 @@ async function waitForUiState(params) {
           throw error;
         }
 
-        const recovered = await readStructuredUiStateWithNavigationRecovery(
-          session,
-          instanceId,
-          "wait_for_ui_state_navigation",
-          remainingMs,
-        );
+      const recovered = await readStructuredUiStateWithNavigationRecovery(
+        session,
+        instanceId,
+        "wait_for_ui_state_navigation",
+        remainingMs,
+      );
         const staleReason = uiStateStalenessReason(session, recovered);
         if (!staleReason) {
           storeUiState(session, recovered, "wait_for_ui_state_recovery");

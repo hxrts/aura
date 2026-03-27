@@ -1,7 +1,10 @@
+use aura_app::scenario_contract::{
+    SharedActionContract, SubmissionContract, SubmissionState, SubmissionValueContract,
+};
 use aura_app::ui::contract::{OperationId, ScreenId};
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
-    SemanticSubmissionHandle, SettingsSection, SubmissionState, UiOperationHandle,
+    SemanticSubmissionHandle, SettingsSection, UiOperationHandle,
 };
 use aura_app::ui::signals::SETTINGS_SIGNAL;
 use aura_app::ui::types::InvitationBridgeType;
@@ -143,10 +146,6 @@ impl From<SelectionError> for RouteSemanticIntentError {
     }
 }
 
-fn semantic_channel_result(binding: ChannelBindingWitness) -> SemanticCommandResponse {
-    SemanticCommandResponse::accepted(binding.semantic_value())
-}
-
 fn semantic_response_with_handle(
     handle: UiOperationHandle,
     value: SemanticCommandValue,
@@ -160,15 +159,148 @@ fn semantic_response_with_handle(
     }
 }
 
-fn semantic_unit_result_with_handle(handle: UiOperationHandle) -> SemanticCommandResponse {
-    semantic_response_with_handle(handle, SemanticCommandValue::None)
+fn submission_value_matches_contract(
+    contract: SubmissionValueContract,
+    value: &SemanticCommandValue,
+) -> bool {
+    match (contract, value) {
+        (SubmissionValueContract::None, SemanticCommandValue::None) => true,
+        (
+            SubmissionValueContract::ContactInvitationCode,
+            SemanticCommandValue::ContactInvitationCode { .. },
+        ) => true,
+        (
+            SubmissionValueContract::AuthoritativeChannelBinding,
+            SemanticCommandValue::AuthoritativeChannelBinding { .. },
+        ) => true,
+        _ => false,
+    }
 }
 
-fn semantic_channel_result_with_handle(
+fn declared_immediate_response(
+    contract: &SharedActionContract,
+    value: SemanticCommandValue,
+) -> Result<SemanticCommandResponse, JsValue> {
+    match &contract.submission {
+        SubmissionContract::Immediate {
+            value: expected_value,
+        } if submission_value_matches_contract(*expected_value, &value) => {
+            Ok(SemanticCommandResponse::accepted(value))
+        }
+        SubmissionContract::Immediate {
+            value: expected_value,
+        } => Err(JsValue::from_str(&format!(
+            "intent {:?} declared immediate submission value {:?}, observed {:?}",
+            contract.intent, expected_value, value
+        ))),
+        SubmissionContract::OperationHandle {
+            operation_id,
+            value: expected_value,
+        } => Err(JsValue::from_str(&format!(
+            "intent {:?} requires operation handle submission for {} with value {:?}",
+            contract.intent, operation_id.0, expected_value
+        ))),
+    }
+}
+
+fn declared_immediate_unit_response(
+    contract: &SharedActionContract,
+) -> Result<SemanticCommandResponse, JsValue> {
+    declared_immediate_response(contract, SemanticCommandValue::None)
+}
+
+fn declared_handle_response(
+    contract: &SharedActionContract,
     handle: UiOperationHandle,
-    binding: ChannelBindingWitness,
-) -> SemanticCommandResponse {
-    semantic_response_with_handle(handle, binding.semantic_value())
+    value: SemanticCommandValue,
+) -> Result<SemanticCommandResponse, JsValue> {
+    match &contract.submission {
+        SubmissionContract::OperationHandle {
+            operation_id,
+            value: expected_value,
+        } if operation_id == handle.id()
+            && submission_value_matches_contract(*expected_value, &value) =>
+        {
+            Ok(semantic_response_with_handle(handle, value))
+        }
+        SubmissionContract::OperationHandle {
+            operation_id,
+            value: expected_value,
+        } => Err(JsValue::from_str(&format!(
+            "intent {:?} declared handle submission for {} with value {:?}, observed handle {} and value {:?}",
+            contract.intent, operation_id.0, expected_value, handle.id().0, value
+        ))),
+        SubmissionContract::Immediate { value: expected_value } => Err(JsValue::from_str(
+            &format!(
+                "intent {:?} declared immediate submission with value {:?}, observed handle {}",
+                contract.intent, expected_value, handle.id().0
+            ),
+        )),
+    }
+}
+
+fn declared_handle_unit_response(
+    contract: &SharedActionContract,
+    handle: UiOperationHandle,
+) -> Result<SemanticCommandResponse, JsValue> {
+    declared_handle_response(contract, handle, SemanticCommandValue::None)
+}
+
+fn begin_declared_handoff_operation(
+    controller: Arc<UiController>,
+    contract: &SharedActionContract,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+    scope: UiOperationTransferScope,
+) -> Result<(UiOperationHandle, UiOperationTransfer), JsValue> {
+    match &contract.submission {
+        SubmissionContract::OperationHandle {
+            operation_id: expected_operation_id,
+            ..
+        } if expected_operation_id == &operation_id => Ok(begin_exact_handoff_operation(
+            controller,
+            operation_id,
+            kind,
+            scope,
+        )),
+        SubmissionContract::OperationHandle {
+            operation_id: expected_operation_id,
+            ..
+        } => Err(JsValue::from_str(&format!(
+            "intent {:?} declared handoff operation {}, observed {}",
+            contract.intent, expected_operation_id.0, operation_id.0
+        ))),
+        SubmissionContract::Immediate { .. } => Err(JsValue::from_str(&format!(
+            "intent {:?} declared immediate submission but attempted handoff for {}",
+            contract.intent, operation_id.0
+        ))),
+    }
+}
+
+fn begin_declared_exact_ui_operation(
+    controller: Arc<UiController>,
+    contract: &SharedActionContract,
+    operation_id: OperationId,
+) -> Result<UiOperationHandle, JsValue> {
+    match &contract.submission {
+        SubmissionContract::OperationHandle {
+            operation_id: expected_operation_id,
+            ..
+        } if expected_operation_id == &operation_id => {
+            Ok(begin_exact_ui_operation(controller, operation_id))
+        }
+        SubmissionContract::OperationHandle {
+            operation_id: expected_operation_id,
+            ..
+        } => Err(JsValue::from_str(&format!(
+            "intent {:?} declared exact ui operation {}, observed {}",
+            contract.intent, expected_operation_id.0, operation_id.0
+        ))),
+        SubmissionContract::Immediate { .. } => Err(JsValue::from_str(&format!(
+            "intent {:?} declared immediate submission but attempted exact-handle issue for {}",
+            contract.intent, operation_id.0
+        ))),
+    }
 }
 
 fn begin_exact_ui_operation(
@@ -195,6 +327,7 @@ fn spawn_background_semantic_task(
     task: impl std::future::Future<Output = Result<(), JsValue>> + 'static,
 ) {
     shared_web_task_owner().spawn_local(async move {
+        yield_to_browser_event_loop().await;
         if let Err(error) = task.await {
             let detail = error.as_string().unwrap_or_else(|| format!("{error:?}"));
             update_semantic_debug(label, Some(&detail));
@@ -203,6 +336,14 @@ fn spawn_background_semantic_task(
             );
         }
     });
+}
+
+async fn yield_to_browser_event_loop() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&JsValue::UNDEFINED))
+            .await;
+    }
 }
 
 fn spawn_handoff_workflow_task<T, Fut, Success, SuccessFut>(
@@ -426,6 +567,7 @@ async fn route_semantic_intent(
 async fn execute_semantic_intent(
     controller: Arc<UiController>,
     intent: RoutedSemanticIntent,
+    contract: SharedActionContract,
 ) -> Result<SemanticCommandResponse, JsValue> {
     match intent {
         RoutedSemanticIntent::OpenScreen(screen) => {
@@ -435,7 +577,7 @@ async fn execute_semantic_intent(
                     controller.set_screen(screen);
                 },
             );
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::CreateAccount { account_name } => {
             update_semantic_debug("create_account_begin", Some(&account_name));
@@ -466,13 +608,13 @@ async fn execute_semantic_intent(
                 update_semantic_debug("create_account_handoff_done", Some(&account_name));
             }
             update_semantic_debug("create_account_return", Some(&account_name));
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::CreateHome { home_name } => {
             context_workflows::create_home(controller.app_core(), Some(home_name), None)
                 .await
                 .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::CreateChannel { channel_name } => {
             let timestamp_ms = context_workflows::current_time_ms(controller.app_core())
@@ -488,10 +630,14 @@ async fn execute_semantic_intent(
             )
             .await
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(semantic_channel_result(ChannelBindingWitness::new(
-                created.channel_id.to_string(),
-                created.context_id.map(|context_id| context_id.to_string()),
-            )))
+            declared_immediate_response(
+                &contract,
+                ChannelBindingWitness::new(
+                    created.channel_id.to_string(),
+                    created.context_id.map(|context_id| context_id.to_string()),
+                )
+                .semantic_value(),
+            )
         }
         RoutedSemanticIntent::StartDeviceEnrollment {
             device_name,
@@ -505,26 +651,29 @@ async fn execute_semantic_intent(
                         .set_settings_section(browser_settings_section(SettingsSection::Devices));
                 },
             );
-            let (handle, transfer) = begin_exact_handoff_operation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
+                &contract,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::StartDeviceEnrollment,
                 UiOperationTransferScope::StartDeviceEnrollment,
-            );
+            )?;
             let app_core = controller.app_core().clone();
             let controller = controller.clone();
             let workflow_device_name = device_name.clone();
             let success_device_name = device_name;
+            let workflow_instance_id = handle.instance_id().clone();
             spawn_handoff_workflow_task(
                 "start_device_enrollment_failed",
                 controller,
                 transfer,
                 "start_device_enrollment callback",
                 async move {
-                    ceremony_workflows::start_device_enrollment_ceremony(
+                    ceremony_workflows::start_device_enrollment_ceremony_with_terminal_status(
                         &app_core,
                         workflow_device_name,
                         invitee_authority_id,
+                        Some(workflow_instance_id),
                     )
                     .await
                 },
@@ -538,7 +687,7 @@ async fn execute_semantic_intent(
                     Ok(())
                 },
             );
-            Ok(semantic_unit_result_with_handle(handle))
+            declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::ImportDeviceEnrollmentCode { code } => {
             let app_core = controller.app_core().clone();
@@ -573,7 +722,7 @@ async fn execute_semantic_intent(
                 })
                 .await
                 .map_err(|error| JsValue::from_str(&error.user_message()))?;
-                return Ok(SemanticCommandResponse::accepted_without_value());
+                return declared_immediate_unit_response(&contract);
             }
             crate::harness_bridge::apply_browser_ui_mutation(
                 controller.clone(),
@@ -581,7 +730,7 @@ async fn execute_semantic_intent(
                     controller.finalize_account_setup(ScreenId::Neighborhood);
                 },
             );
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::OpenSettingsSection(section) => {
             crate::harness_bridge::apply_browser_ui_mutation(
@@ -591,7 +740,7 @@ async fn execute_semantic_intent(
                     controller.set_settings_section(browser_settings_section(section));
                 },
             );
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::RemoveSelectedDevice { device_id } => {
             crate::harness_bridge::apply_browser_ui_mutation(
@@ -603,7 +752,7 @@ async fn execute_semantic_intent(
                 },
             );
             start_and_monitor_runtime_device_removal(controller.clone(), device_id).await?;
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::SwitchAuthority {
             current_authority_id,
@@ -617,24 +766,25 @@ async fn execute_semantic_intent(
                 },
             );
             if current_authority_id.as_deref() == Some(authority_id.to_string().as_str()) {
-                return Ok(SemanticCommandResponse::accepted_without_value());
+                return declared_immediate_unit_response(&contract);
             }
             if !controller.request_authority_switch(authority_id) {
                 return Err(JsValue::from_str(
                     "authority switching is not available for this frontend",
                 ));
             }
-            Ok(SemanticCommandResponse::accepted_without_value())
+            declared_immediate_unit_response(&contract)
         }
         RoutedSemanticIntent::CreateContactInvitation {
             receiver_authority_id,
         } => {
-            let (handle, transfer) = begin_exact_handoff_operation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
+                &contract,
                 OperationId::invitation_create(),
                 SemanticOperationKind::CreateContactInvitation,
                 UiOperationTransferScope::CreateInvitation,
-            );
+            )?;
             let app_core = controller.app_core().clone();
             let nickname = {
                 let core = app_core.read().await;
@@ -666,19 +816,21 @@ async fn execute_semantic_intent(
                 source_operation: aura_app::ui::contract::OperationId::invitation_create(),
                 code: Some(code.clone()),
             });
-            Ok(semantic_response_with_handle(
+            declared_handle_response(
+                &contract,
                 handle,
                 SemanticCommandValue::ContactInvitationCode { code },
-            ))
+            )
         }
         RoutedSemanticIntent::AcceptContactInvitation { code } => {
             let app_core = controller.app_core().clone();
-            let (handle, transfer) = begin_exact_handoff_operation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
+                &contract,
                 OperationId::invitation_accept(),
                 SemanticOperationKind::AcceptContactInvitation,
                 UiOperationTransferScope::AcceptInvitation,
-            );
+            )?;
             update_semantic_debug("accept_contact_invitation_import_start", None);
             web_sys::console::log_1(&"[web-harness] accept_contact_invitation import_start".into());
             let invitation = invitation_workflows::import_invitation_details(&app_core, &code)
@@ -812,15 +964,16 @@ async fn execute_semantic_intent(
                 web_sys::console::log_1(&"[web-harness] accept_contact_invitation done".into());
                 result.map_err(|error| JsValue::from_str(&error.to_string()))
             });
-            Ok(semantic_unit_result_with_handle(handle))
+            declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::AcceptPendingChannelInvitation => {
-            let (handle, transfer) = begin_exact_handoff_operation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
+                &contract,
                 OperationId::invitation_accept(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
                 UiOperationTransferScope::AcceptPendingChannelInvitation,
-            );
+            )?;
             let app_core = controller.app_core().clone();
             let workflow_app_core = app_core.clone();
             let instance_id = handle.instance_id().clone();
@@ -839,10 +992,14 @@ async fn execute_semantic_intent(
                 },
                 |_controller, _accepted| async move { Ok(()) },
             );
-            Ok(semantic_unit_result_with_handle(handle))
+            declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::JoinChannel { channel_name } => {
-            let handle = begin_exact_ui_operation(controller.clone(), OperationId::join_channel());
+            let handle = begin_declared_exact_ui_operation(
+                controller.clone(),
+                &contract,
+                OperationId::join_channel(),
+            )?;
             messaging_workflows::join_channel_by_name_with_instance(
                 controller.app_core(),
                 &channel_name,
@@ -853,7 +1010,7 @@ async fn execute_semantic_intent(
             let binding = selected_channel_binding(&controller)
                 .await
                 .map_err(|error| JsValue::from_str(&error.detail()))?;
-            Ok(semantic_channel_result_with_handle(handle, binding))
+            declared_handle_response(&contract, handle, binding.semantic_value())
         }
         RoutedSemanticIntent::InviteActorToChannel {
             authority_id,
@@ -883,12 +1040,13 @@ async fn execute_semantic_intent(
                         })?
                 }
             };
-            let (handle, transfer) = begin_exact_handoff_operation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
+                &contract,
                 OperationId::invitation_create(),
                 SemanticOperationKind::InviteActorToChannel,
                 UiOperationTransferScope::InviteActorToChannel,
-            );
+            )?;
             let app_core = controller.app_core().clone();
             let authority_id = authority_id.to_string();
             let channel_hint = channel_name;
@@ -955,15 +1113,16 @@ async fn execute_semantic_intent(
                     Ok(())
                 },
             );
-            Ok(semantic_unit_result_with_handle(handle))
+            declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::SendChatMessage { message, channel } => {
-            let (handle, transfer) = begin_exact_handoff_operation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
+                &contract,
                 OperationId::send_message(),
                 SemanticOperationKind::SendChatMessage,
                 UiOperationTransferScope::SendChatMessage,
-            );
+            )?;
             let app_core = controller.app_core().clone();
             let workflow_app_core = app_core.clone();
             let controller = controller.clone();
@@ -988,7 +1147,7 @@ async fn execute_semantic_intent(
                     .map(|_| ())
                     .map_err(|error| JsValue::from_str(&error.to_string()))
             });
-            Ok(semantic_unit_result_with_handle(handle))
+            declared_handle_unit_response(&contract, handle)
         }
     }
 }
@@ -997,14 +1156,86 @@ pub(crate) async fn submit_semantic_command(
     controller: Arc<UiController>,
     request: SemanticCommandRequest,
 ) -> Result<SemanticCommandResponse, JsValue> {
+    let contract = request.intent.contract();
     let routed = route_semantic_intent(controller.as_ref(), request.intent)
         .await
         .map_err(RouteSemanticIntentError::into_js_value)?;
-    execute_semantic_intent(controller, routed).await
+    execute_semantic_intent(controller, routed, contract).await
 }
 
 #[cfg(test)]
 mod tests {
+    use aura_app::ui::contract::OperationId;
+    use aura_app::ui::scenarios::{IntentAction, SubmissionContract, SubmissionValueContract};
+    use aura_core::AuthorityId;
+
+    fn test_authority_id() -> AuthorityId {
+        "aura:a:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            .parse()
+            .unwrap_or_else(|error| panic!("test authority id must parse: {error}"))
+    }
+
+    #[test]
+    fn start_device_enrollment_contract_requires_handle_submission() {
+        let contract = IntentAction::StartDeviceEnrollment {
+            device_name: "Browser Device".to_string(),
+            invitee_authority_id: test_authority_id(),
+        }
+        .contract();
+
+        assert_eq!(
+            contract.submission,
+            SubmissionContract::OperationHandle {
+                operation_id: OperationId::device_enrollment(),
+                value: SubmissionValueContract::None,
+            }
+        );
+    }
+
+    #[test]
+    fn join_channel_contract_requires_handle_with_binding() {
+        let contract = IntentAction::JoinChannel {
+            channel_name: "General".to_string(),
+        }
+        .contract();
+
+        assert_eq!(
+            contract.submission,
+            SubmissionContract::OperationHandle {
+                operation_id: OperationId::join_channel(),
+                value: SubmissionValueContract::AuthoritativeChannelBinding,
+            }
+        );
+    }
+
+    #[test]
+    fn execute_semantic_intent_uses_declared_submission_helpers() {
+        let source = include_str!("commands.rs");
+        let start = source
+            .find("async fn execute_semantic_intent(")
+            .expect("execute_semantic_intent function");
+        let end = source[start..]
+            .find("pub(crate) async fn submit_semantic_command(")
+            .map(|offset| start + offset)
+            .expect("submit_semantic_command marker");
+        let body = &source[start..end];
+
+        for forbidden in [
+            "SemanticCommandResponse::accepted_without_value()",
+            "begin_exact_handoff_operation(",
+            "begin_exact_ui_operation(",
+            "semantic_response_with_handle(",
+            "semantic_unit_result_with_handle(",
+            "semantic_channel_result(",
+            "semantic_channel_result_with_handle(",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "execute_semantic_intent should use declared submission helpers instead of `{forbidden}`"
+            );
+        }
+    }
+
     #[test]
     fn invite_actor_to_channel_does_not_reintroduce_weak_name_fallback() {
         let source = include_str!("commands.rs");

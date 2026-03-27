@@ -284,12 +284,6 @@ impl SubmittedLocalOperationOwner {
     fn harness_handle(&self) -> HarnessUiOperationHandle {
         HarnessUiOperationHandle::new(self.0.operation_id().clone(), self.0.instance_id().clone())
     }
-
-    #[cfg(test)]
-    #[cfg(test)]
-    fn instance_id(&self) -> &OperationInstanceId {
-        self.0.instance_id()
-    }
 }
 
 impl SubmittedWorkflowOperationOwner {
