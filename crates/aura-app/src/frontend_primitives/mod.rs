@@ -7,9 +7,16 @@
 mod clipboard;
 mod debug_probe;
 mod operations;
+mod submitted_operation;
 mod task_owner;
 
 pub use clipboard::{ClipboardPort, MemoryClipboard};
 pub use debug_probe::{emit_frontend_debug_probe, set_frontend_debug_probe};
 pub use operations::FrontendUiOperation;
+pub use submitted_operation::{
+    dropped_owner_error, CeremonyMonitorHandoffRelease, CeremonyMonitorHandoffSubmission,
+    CeremonySubmissionTerminalOutcome, LocalTerminalSubmission, SubmittedOperation,
+    SubmittedOperationPublisher, SubmittedOperationRelease, SubmittedOperationWorkflowError,
+    WorkflowHandoffRelease, WorkflowHandoffSubmission,
+};
 pub use task_owner::{FrontendTaskOwner, FrontendTaskRuntime};

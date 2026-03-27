@@ -1701,9 +1701,15 @@ impl SharedSemanticBackend for LocalPtyBackend {
             IntentAction::InviteActorToChannel {
                 authority_id,
                 channel_id,
+                context_id: _,
+                channel_name: _,
             } => {
-                let submitted =
-                    self.submit_invite_actor_to_channel(&authority_id, channel_id.as_deref())?;
+                let submitted = self.submit_invite_actor_to_channel(
+                    &authority_id,
+                    channel_id.as_deref(),
+                    None,
+                    None,
+                )?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
@@ -1825,6 +1831,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         authority_id: &str,
         channel_id: Option<&str>,
+        _context_id: Option<&str>,
+        _channel_name: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         let channel_id = channel_id.map(ToOwned::to_owned).ok_or_else(|| {
             anyhow::anyhow!(

@@ -3,6 +3,8 @@ use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 
 const CONTACT_INVITATION_ACCEPTANCE_PROCESS_TIMEOUT_MS: u64 = 20_000;
+const CONTACT_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
+const CONTACT_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS: u64 = 75;
 
 pub(super) struct InvitationContactHandler<'a> {
     handler: &'a InvitationHandler,
@@ -11,6 +13,106 @@ pub(super) struct InvitationContactHandler<'a> {
 impl<'a> InvitationContactHandler<'a> {
     pub(super) fn new(handler: &'a InvitationHandler) -> Self {
         Self { handler }
+    }
+
+    async fn seed_sender_descriptor_for_authority_context(
+        &self,
+        effects: &AuraEffectSystem,
+        sender_id: AuthorityId,
+    ) {
+        let Some(rendezvous_manager) = effects.rendezvous_manager() else {
+            return;
+        };
+
+        let authority_context = default_context_id_for_authority(sender_id);
+        if rendezvous_manager
+            .get_descriptor(authority_context, sender_id)
+            .await
+            .is_some()
+        {
+            return;
+        }
+
+        let local_context_id = self.handler.context.authority.default_context_id();
+        let descriptor = if let Some(existing) = rendezvous_manager
+            .get_descriptor(local_context_id, sender_id)
+            .await
+        {
+            Some(existing)
+        } else {
+            rendezvous_manager
+                .get_lan_discovered_peer(sender_id)
+                .await
+                .map(|peer| peer.descriptor)
+        };
+
+        let Some(mut descriptor) = descriptor else {
+            return;
+        };
+
+        descriptor.context_id = authority_context;
+        let _ = rendezvous_manager.cache_descriptor(descriptor).await;
+    }
+
+    async fn ensure_sender_peer_channel(
+        &self,
+        effects: &AuraEffectSystem,
+        sender_id: AuthorityId,
+    ) -> AgentResult<()> {
+        let Some(rendezvous_manager) = effects.rendezvous_manager() else {
+            return Ok(());
+        };
+
+        let authority = self.handler.context.authority.clone();
+        let handler = crate::handlers::rendezvous::RendezvousHandler::new(authority)
+            .map_err(|error| AgentError::internal(error.to_string()))?
+            .with_rendezvous_manager(rendezvous_manager.clone());
+        let backoff = ExponentialBackoffPolicy::new(
+            Duration::from_millis(CONTACT_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS),
+            Duration::from_millis(CONTACT_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS),
+            invitation_timeout_profile(effects).jitter(),
+        )
+        .map_err(|error| AgentError::runtime(error.to_string()))?;
+        let retry_policy = invitation_timeout_profile(effects)
+            .apply_retry_policy(&RetryBudgetPolicy::new(
+                CONTACT_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS as u32,
+                backoff,
+            ))
+            .map_err(|error| AgentError::runtime(error.to_string()))?;
+        let authority_context = default_context_id_for_authority(sender_id);
+
+        execute_with_retry_budget(effects, &retry_policy, |_attempt| async {
+            self.seed_sender_descriptor_for_authority_context(effects, sender_id)
+                .await;
+
+            if effects
+                .is_channel_established(authority_context, sender_id)
+                .await
+            {
+                return Ok(());
+            }
+
+            let result = handler
+                .initiate_channel(effects, authority_context, sender_id)
+                .await
+                .map_err(|error| AgentError::runtime(error.to_string()))?;
+            if result.success
+                && effects
+                    .is_channel_established(authority_context, sender_id)
+                    .await
+            {
+                return Ok(());
+            }
+
+            Err(AgentError::runtime(format!(
+                "contact invitation acceptance peer channel is not yet established for {sender_id}"
+            )))
+        })
+        .await
+        .map_err(|error| match error {
+            RetryRunError::Timeout(timeout_error) => AgentError::timeout(timeout_error.to_string()),
+            RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
+        })
     }
 
     pub(super) async fn notify_contact_invitation_acceptance(
@@ -33,6 +135,18 @@ impl<'a> InvitationContactHandler<'a> {
         let acceptor_id = self.handler.context.authority.authority_id();
         if invitation.sender_id == acceptor_id {
             return Ok(());
+        }
+        if let Err(error) = self
+            .ensure_sender_peer_channel(effects, invitation.sender_id)
+            .await
+        {
+            tracing::debug!(
+                invitation_id = %invitation.invitation_id,
+                sender_id = %invitation.sender_id,
+                acceptor_id = %acceptor_id,
+                error = %error,
+                "contact acceptance peer-channel warmup did not converge before notify"
+            );
         }
 
         let acceptance = ContactInvitationAcceptance {

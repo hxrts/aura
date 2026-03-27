@@ -10,7 +10,7 @@ use crate::ui_contract::{
 };
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
-use crate::workflows::context::current_home_context;
+use crate::workflows::context::{authority_default_relational_context, current_home_context};
 use crate::workflows::harness_determinism;
 use crate::workflows::observed_projection::{
     reduce_chat_fact_observed, update_chat_projection_observed,
@@ -80,6 +80,7 @@ const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
 const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
 const INVITE_USER_STAGE_TIMEOUT_MS: u64 = 20_000;
 const INVITE_USER_OPERATION_TIMEOUT_MS: u64 = 15_000;
+const CHANNEL_INVITE_POST_CREATE_PROPAGATION_ATTEMPTS: usize = 8;
 const MESSAGING_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
 const MESSAGING_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
 
@@ -1994,6 +1995,164 @@ async fn warm_channel_connectivity(
     warmed
 }
 
+async fn warm_invited_peer_connectivity(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    context_id: ContextId,
+    receiver: AuthorityId,
+) -> bool {
+    let authority_context = authority_default_relational_context(receiver);
+    for _ in 0..8 {
+        let receiver_peer_id = receiver.to_string();
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "trigger_discovery",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.trigger_discovery(),
+        )
+        .await;
+        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "ensure_authority_peer_channel",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.ensure_peer_channel(authority_context, receiver),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "ensure_peer_channel",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.ensure_peer_channel(context_id, receiver),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "sync_with_peer",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.sync_with_peer(&receiver_peer_id),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "process_ceremony_messages",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.process_ceremony_messages(),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "trigger_sync",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.trigger_sync(),
+        )
+        .await;
+        converge_runtime(runtime).await;
+        let _ = crate::workflows::system::refresh_account(app_core).await;
+        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
+        if runtime.is_peer_online(receiver).await {
+            return true;
+        }
+    }
+
+    false
+}
+
+async fn propagate_channel_invitation_to_peer(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    authoritative_channel: AuthoritativeChannelRef,
+    receiver: AuthorityId,
+) {
+    let authority_context = authority_default_relational_context(receiver);
+    for _ in 0..CHANNEL_INVITE_POST_CREATE_PROPAGATION_ATTEMPTS {
+        let receiver_peer_id = receiver.to_string();
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "trigger_discovery",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.trigger_discovery(),
+        )
+        .await;
+        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "ensure_authority_peer_channel",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.ensure_peer_channel(authority_context, receiver),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "ensure_peer_channel",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.ensure_peer_channel(authoritative_channel.context_id(), receiver),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "process_ceremony_messages",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.process_ceremony_messages(),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "sync_with_peer",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.sync_with_peer(&receiver_peer_id),
+        )
+        .await;
+        let _ = timeout_runtime_call(
+            runtime,
+            "invite_authority_to_channel",
+            "trigger_sync",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.trigger_sync(),
+        )
+        .await;
+        converge_runtime(runtime).await;
+        let _ = crate::workflows::system::refresh_account(app_core).await;
+        let _ = crate::workflows::network::refresh_discovered_peers(app_core).await;
+    }
+}
+
+/// Run bounded post-terminal channel-invite propagation without delaying the
+/// already-published terminal outcome.
+pub async fn run_post_channel_invite_followups(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    authoritative_channel: AuthoritativeChannelRef,
+) {
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(async {
+            let runtime = require_runtime(app_core).await?;
+            propagate_channel_invitation_to_peer(
+                app_core,
+                &runtime,
+                authoritative_channel,
+                receiver,
+            )
+            .await;
+            let _ = crate::workflows::system::refresh_account(app_core).await;
+            Ok::<(), AuraError>(())
+        })
+        .await;
+    let _ = best_effort.finish();
+}
+
 /// Send a direct message to a contact
 ///
 /// **What it does**: Sends a message in a DM channel with the contact
@@ -2603,6 +2762,155 @@ pub async fn join_channel_by_name_with_instance(
     join_channel_by_name_owned(app_core, channel_name, &owner, None).await
 }
 
+/// Typed frontend handoff facades for messaging workflows.
+pub mod handoff {
+    use super::*;
+
+    /// Strongest available target for a chat-send handoff.
+    #[derive(Debug, Clone)]
+    pub enum SendChatTarget {
+        /// Canonical channel id.
+        ChannelId(ChannelId),
+        /// Canonical channel name.
+        ChannelName(String),
+    }
+
+    /// Inputs for sending a chat message through the handoff path.
+    #[derive(Debug, Clone)]
+    pub struct SendChatMessageRequest {
+        /// Strongest available channel target.
+        pub target: SendChatTarget,
+        /// Message content.
+        pub content: String,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for joining a channel by name through the handoff path.
+    #[derive(Debug, Clone)]
+    pub struct JoinChannelByNameRequest {
+        /// Canonical channel name as entered by the frontend.
+        pub channel_name: String,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for retrying a previously failed chat message.
+    #[derive(Debug, Clone)]
+    pub struct RetryChatMessageRequest {
+        /// Strongest available channel target.
+        pub target: SendChatTarget,
+        /// Message content to retry.
+        pub content: String,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+    }
+
+    /// Inputs for inviting an authoritative actor to an authoritative channel.
+    #[derive(Debug, Clone)]
+    pub struct InviteAuthorityToChannelRequest {
+        /// Receiver authority id.
+        pub receiver: AuthorityId,
+        /// Canonical channel id.
+        pub channel_id: ChannelId,
+        /// Optional authoritative context id.
+        pub context_id: Option<ContextId>,
+        /// Optional canonical channel-name hint.
+        pub channel_name_hint: Option<String>,
+        /// Optional frontend-owned semantic instance id.
+        pub operation_instance_id: Option<OperationInstanceId>,
+        /// Optional invitation message.
+        pub message: Option<String>,
+        /// Optional invitation TTL in milliseconds.
+        pub ttl_ms: Option<u64>,
+    }
+
+    /// Send a chat message through one typed handoff workflow.
+    pub async fn send_chat_message(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: SendChatMessageRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+        match request.target {
+            SendChatTarget::ChannelId(channel_id) => {
+                super::send_message_now_with_terminal_status(
+                    app_core,
+                    channel_id,
+                    &request.content,
+                    request.operation_instance_id,
+                )
+                .await
+            }
+            SendChatTarget::ChannelName(channel_name) => {
+                super::send_message_by_name_now_with_terminal_status(
+                    app_core,
+                    &channel_name,
+                    &request.content,
+                    request.operation_instance_id,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Join a channel by name as one typed handoff workflow.
+    pub async fn join_channel_by_name(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: JoinChannelByNameRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+        super::join_channel_by_name_with_terminal_status(
+            app_core,
+            &request.channel_name,
+            request.operation_instance_id,
+        )
+        .await
+    }
+
+    /// Retry a failed chat message through one typed handoff workflow.
+    pub async fn retry_chat_message(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: RetryChatMessageRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+        match request.target {
+            SendChatTarget::ChannelId(channel_id) => {
+                super::retry_message_with_terminal_status(
+                    app_core,
+                    channel_id,
+                    &request.content,
+                    request.operation_instance_id,
+                )
+                .await
+            }
+            SendChatTarget::ChannelName(channel_name) => {
+                super::retry_message_by_name_with_terminal_status(
+                    app_core,
+                    &channel_name,
+                    &request.content,
+                    request.operation_instance_id,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Invite an authoritative receiver to an authoritative channel.
+    pub async fn invite_authority_to_channel(
+        app_core: &Arc<RwLock<AppCore>>,
+        request: InviteAuthorityToChannelRequest,
+    ) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
+        super::invite_authority_to_channel_with_context_terminal_status(
+            app_core,
+            request.receiver,
+            request.channel_id,
+            request.context_id,
+            request.channel_name_hint,
+            request.operation_instance_id,
+            request.message,
+            request.ttl_ms,
+        )
+        .await
+    }
+}
+
 /// Join an existing channel by name and return the directly-settled terminal
 /// status for frontend handoff consumers.
 pub async fn join_channel_by_name_with_terminal_status(
@@ -2664,8 +2972,73 @@ pub async fn join_channel_by_name_with_binding_terminal_status(
         owner
             .publish_phase(SemanticOperationPhase::WorkflowDispatched)
             .await?;
-        let channel_id = join_channel_by_name_owned(app_core, channel_name, &owner, None).await?;
-        join_channel_binding_witness(app_core, &channel_id).await
+        if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
+            let channel_id =
+                join_channel_by_name_owned(app_core, channel_name, &owner, None).await?;
+            return join_channel_binding_witness(app_core, &channel_id).await;
+        }
+
+        let authoritative_binding =
+            resolve_authoritative_channel_binding_from_input(app_core, channel_name).await?;
+        let _channel_id = join_channel_by_name_owned(app_core, channel_name, &owner, None).await?;
+        Ok(crate::ui_contract::ChannelBindingWitness::new(
+            authoritative_binding.channel_id.to_string(),
+            Some(authoritative_binding.context_id.to_string()),
+        ))
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+/// Retry a failed chat message by canonical channel id and return the
+/// directly-settled terminal status for frontend handoff consumers.
+pub async fn retry_message_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    content: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::retry_message(),
+        instance_id.clone(),
+        SemanticOperationKind::RetryChatMessage,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        send_message_now_with_instance(app_core, channel_id, content, instance_id).await
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+/// Retry a failed chat message by canonical channel name and return the
+/// directly-settled terminal status for frontend handoff consumers.
+pub async fn retry_message_by_name_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    content: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::retry_message(),
+        instance_id.clone(),
+        SemanticOperationKind::RetryChatMessage,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        send_message_by_name_now_with_instance(app_core, channel_name, content, instance_id).await
     }
     .await;
     crate::ui_contract::WorkflowTerminalOutcome {
@@ -3105,6 +3478,33 @@ pub async fn send_message_now_with_instance(
     send_message_with_instance(app_core, channel_id, content, timestamp_ms, instance_id).await
 }
 
+/// Resolve workflow time and send a message by typed channel ID while
+/// returning a directly-settled terminal status for handoff consumers.
+pub async fn send_message_now_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    content: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await;
+    match timestamp_ms {
+        Ok(timestamp_ms) => {
+            send_message_with_terminal_status(
+                app_core,
+                ChannelRef::Id(channel_id),
+                content,
+                timestamp_ms,
+                instance_id,
+            )
+            .await
+        }
+        Err(error) => crate::ui_contract::WorkflowTerminalOutcome {
+            result: Err(error.into()),
+            terminal: None,
+        },
+    }
+}
+
 /// Send a message by channel name while binding lifecycle publication to an
 /// exact submitted operation instance.
 pub async fn send_message_by_name_with_instance(
@@ -3118,6 +3518,25 @@ pub async fn send_message_by_name_with_instance(
     send_message_ref_with_instance(app_core, channel_ref, content, timestamp_ms, instance_id).await
 }
 
+/// Send a message by channel name while returning a directly-settled terminal
+/// status for handoff consumers.
+pub async fn send_message_by_name_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    content: &str,
+    timestamp_ms: u64,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    send_message_with_terminal_status(
+        app_core,
+        ChannelRef::Name(channel_name.to_string()),
+        content,
+        timestamp_ms,
+        instance_id,
+    )
+    .await
+}
+
 /// Resolve workflow time and send a message by channel name while binding
 /// lifecycle publication to an exact submitted operation instance.
 pub async fn send_message_by_name_now_with_instance(
@@ -3129,6 +3548,33 @@ pub async fn send_message_by_name_now_with_instance(
     let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
     send_message_by_name_with_instance(app_core, channel_name, content, timestamp_ms, instance_id)
         .await
+}
+
+/// Resolve workflow time and send a message by channel name while returning a
+/// directly-settled terminal status for handoff consumers.
+pub async fn send_message_by_name_now_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    content: &str,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await;
+    match timestamp_ms {
+        Ok(timestamp_ms) => {
+            send_message_by_name_with_terminal_status(
+                app_core,
+                channel_name,
+                content,
+                timestamp_ms,
+                instance_id,
+            )
+            .await
+        }
+        Err(error) => crate::ui_contract::WorkflowTerminalOutcome {
+            result: Err(error.into()),
+            terminal: None,
+        },
+    }
 }
 
 /// Send a message by channel reference while binding lifecycle publication to
@@ -3147,6 +3593,28 @@ pub async fn send_message_ref_with_instance(
         SemanticOperationKind::SendChatMessage,
     );
     send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await
+}
+
+/// Send a message by channel reference while returning a directly-settled
+/// terminal status for handoff consumers.
+pub async fn send_message_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: ChannelRef,
+    content: &str,
+    timestamp_ms: u64,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<String> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::send_message(),
+        instance_id,
+        SemanticOperationKind::SendChatMessage,
+    );
+    let result = send_message_ref_owned(app_core, channel, content, timestamp_ms, &owner).await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
 }
 
 /// Send a message to a channel by reference.
@@ -3967,6 +4435,75 @@ pub async fn invite_user_to_channel_with_context_terminal_status(
     }
 }
 
+/// Invite an already-authoritative authority to an already-authoritative
+/// channel while returning the directly-settled terminal status for frontend
+/// handoff consumers.
+pub async fn invite_authority_to_channel_with_context_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    channel_id: ChannelId,
+    context_id: Option<ContextId>,
+    channel_name_hint: Option<String>,
+    operation_instance_id: Option<OperationInstanceId>,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationId> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_create(),
+        operation_instance_id,
+        SemanticOperationKind::InviteActorToChannel,
+    );
+    let result = async {
+        owner
+            .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+            .await?;
+        let result = invite_authority_to_channel_with_context(
+            app_core,
+            receiver,
+            channel_id,
+            context_id,
+            channel_name_hint,
+            &owner,
+            None,
+            None,
+            None,
+            message,
+            ttl_ms,
+        )
+        .await;
+
+        if let Err(error) = &result {
+            let semantic_error = SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                SemanticFailureCode::InternalError,
+            )
+            .with_detail(error.to_string());
+            if let Err(_pub_err) = owner.publish_failure(semantic_error).await {
+                #[cfg(feature = "instrumented")]
+                tracing::error!(
+                    operation_error = %error,
+                    publish_error = %_pub_err,
+                    "invite_authority_to_channel_with_context_terminal_status: failed to publish failure fact"
+                );
+            }
+        }
+
+        let invitation_id = result?;
+        owner
+            .publish_success_with(issue_channel_invitation_created_proof(
+                invitation_id.clone(),
+            ))
+            .await?;
+        Ok(invitation_id)
+    }
+    .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
 #[aura_macros::semantic_owner(
     owner = "invite_user_to_channel_with_context",
     terminal = "publish_success_with",
@@ -4116,11 +4653,14 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
+    let emit_stage = |_stage: &'static str| {};
+    emit_stage("require_runtime");
     update_workflow_stage(&stage_tracker, "require_runtime");
     let runtime = require_runtime(app_core).await?;
     let authoritative_channel = match context_id {
         Some(context_id) => AuthoritativeChannelRef::new(channel_id, context_id),
         None => {
+            emit_stage("require_authoritative_context");
             update_workflow_stage(&stage_tracker, "require_authoritative_context");
             timeout_workflow_stage_with_deadline(
                 &runtime,
@@ -4138,6 +4678,11 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         }
     };
     let context_id = authoritative_channel.context_id();
+    let local_projection_name_hint = channel_name_hint.clone();
+    emit_stage("warm_invited_peer_connectivity");
+    update_workflow_stage(&stage_tracker, "warm_invited_peer_connectivity");
+    let _ = warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver).await;
+    emit_stage("create_channel_invitation");
     update_workflow_stage(&stage_tracker, "create_channel_invitation");
     let invitation = crate::workflows::invitation::create_channel_invitation_owned(
         app_core,
@@ -4154,6 +4699,7 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         false,
     )
     .await?;
+    emit_stage("local_projection");
     update_workflow_stage(&stage_tracker, "local_projection");
     timeout_workflow_stage_with_deadline(
         &runtime,
@@ -4161,43 +4707,18 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         "local_projection",
         None,
         async {
-            apply_authoritative_membership_projection(app_core, channel_id, context_id, true, None)
-                .await?;
+            apply_authoritative_membership_projection(
+                app_core,
+                channel_id,
+                context_id,
+                true,
+                local_projection_name_hint.as_deref(),
+            )
+            .await?;
             Ok(())
         },
     )
     .await?;
-    update_workflow_stage(&stage_tracker, "ensure_invited_peer_channel");
-    if let Err(_error) = timeout_workflow_stage_with_deadline(
-        &runtime,
-        "invite_authority_to_channel",
-        "ensure_invited_peer_channel",
-        None,
-        async {
-            runtime
-                .ensure_peer_channel(context_id, receiver)
-                .await
-                .map_err(|error| {
-                    AuraError::from(super::error::runtime_call(
-                        "ensure invited peer channel",
-                        error,
-                    ))
-                })?;
-            converge_runtime(&runtime).await;
-            Ok(())
-        },
-    )
-    .await
-    {
-        messaging_warn!(
-            "Best-effort ensure_invited_peer_channel failed for {} on {} in {}: {}",
-            receiver,
-            channel_id,
-            context_id,
-            _error
-        );
-    }
-
     Ok(invitation.invitation_id)
 }
 
@@ -6770,5 +7291,68 @@ mod tests {
             error,
             SendMessageError::RecipientResolutionNotReady { .. }
         ));
+    }
+
+    #[test]
+    fn invite_authority_with_context_keeps_channel_name_hint_for_local_projection() {
+        let source = include_str!("messaging.rs");
+        let start = source
+            .find("pub(in crate::workflows) async fn invite_authority_to_channel_with_context(")
+            .expect("invite_authority_to_channel_with_context definition");
+        let end = source[start..]
+            .find("update_workflow_stage(&stage_tracker, \"ensure_invited_peer_channel\");")
+            .map(|offset| start + offset)
+            .expect("ensure_invited_peer_channel stage marker");
+        let body = &source[start..end];
+        assert!(
+            body.contains("channel_name_hint.as_deref()"),
+            "invite_authority_to_channel_with_context must preserve canonical channel name hints through local projection"
+        );
+    }
+
+    #[test]
+    fn invite_authority_with_context_warms_receiver_before_create() {
+        let source = include_str!("messaging.rs");
+        let start = source
+            .find("pub(in crate::workflows) async fn invite_authority_to_channel_with_context(")
+            .expect("invite_authority_to_channel_with_context definition");
+        let end = source[start..]
+            .find("update_workflow_stage(&stage_tracker, \"create_channel_invitation\");")
+            .map(|offset| start + offset)
+            .expect("create_channel_invitation stage marker");
+        let body = &source[start..end];
+        assert!(
+            body.contains("warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver)")
+                || body.contains(
+                    "warm_invited_peer_connectivity(app_core, &runtime, context_id, receiver).await;"
+                ),
+            "invite_authority_to_channel_with_context must warm the invite receiver before creating the channel invitation"
+        );
+        assert!(
+            body.contains("authority_default_relational_context(receiver)"),
+            "invite_authority_to_channel_with_context must warm the receiver's authority-scoped peer path before delivery"
+        );
+    }
+
+    #[test]
+    fn invite_authority_terminal_wrapper_publishes_terminal_status() {
+        let source = include_str!("messaging.rs");
+        let start = source
+            .find("pub async fn invite_authority_to_channel_with_context_terminal_status(")
+            .expect("invite_authority_to_channel_with_context_terminal_status definition");
+        let end = source[start..]
+            .find("crate::ui_contract::WorkflowTerminalOutcome {")
+            .map(|offset| start + offset)
+            .expect("terminal outcome marker");
+        let body = &source[start..end];
+        assert!(
+            body.contains("owner.publish_failure(semantic_error).await"),
+            "authoritative terminal wrapper must publish failure before returning terminal status"
+        );
+        assert!(
+            body.contains("owner\n            .publish_success_with(issue_channel_invitation_created_proof(")
+                || body.contains("owner\r\n            .publish_success_with(issue_channel_invitation_created_proof("),
+            "authoritative terminal wrapper must publish success before returning terminal status"
+        );
     }
 }

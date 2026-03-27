@@ -62,10 +62,25 @@ pub struct TextModalState {
     pub value: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CreateInvitationModalState {
     pub receiver_id: String,
     pub receiver_label: Option<String>,
+    pub message: String,
+    pub ttl_hours: u64,
+    pub active_field: FieldId,
+}
+
+impl Default for CreateInvitationModalState {
+    fn default() -> Self {
+        Self {
+            receiver_id: String::new(),
+            receiver_label: None,
+            message: String::new(),
+            ttl_hours: 24,
+            active_field: FieldId::InvitationReceiver,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +151,7 @@ pub struct ThresholdWizardModalState {
     pub selected_count: u8,
     pub threshold_k: u8,
     pub threshold_input: String,
+    pub ceremony_id: Option<CeremonyId>,
 }
 
 impl ThresholdWizardModalState {
@@ -148,6 +164,7 @@ impl ThresholdWizardModalState {
             selected_count,
             threshold_k,
             threshold_input: String::new(),
+            ceremony_id: None,
         }
     }
 }

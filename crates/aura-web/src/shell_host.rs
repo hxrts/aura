@@ -387,7 +387,11 @@ async fn reconcile_pending_device_enrollment_import(
     Ok(Some(result.bootstrap_name))
 }
 
-fn install_harness_instrumentation(controller: Arc<UiController>, generation_id: u64) {
+fn install_harness_instrumentation(
+    controller: Arc<UiController>,
+    generation_id: u64,
+    harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<aura_agent::AuraAgent>)>,
+) {
     if !harness_mode_enabled() {
         return;
     }
@@ -397,7 +401,7 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
 
     harness_bridge::set_active_generation(generation_id);
     harness_bridge::set_controller(controller.clone());
-    if let Err(error) = harness_bridge::install_window_harness_api() {
+    if let Err(error) = harness_bridge::install_window_harness_api(harness_transport_context) {
         log_web_error(
             "error",
             &WebUiError::operation(
@@ -626,7 +630,11 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
             controller.finalize_account_setup(aura_app::ui::contract::ScreenId::Neighborhood);
         }
         phase.advance_to(BootstrapPhase::InstallHarness)?;
-        install_harness_instrumentation(controller.clone(), generation_id);
+        install_harness_instrumentation(
+            controller.clone(),
+            generation_id,
+            Some((app_core.clone(), agent.clone())),
+        );
         if account_ready {
             if let Err(error) =
                 settings_workflows::refresh_settings_from_runtime(controller.app_core()).await
@@ -796,7 +804,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
         let controller = Arc::new(UiController::new(app_core, clipboard));
         controller.set_account_setup_state(false, "", None);
         phase.advance_to(BootstrapPhase::InstallHarness)?;
-        install_harness_instrumentation(controller.clone(), generation_id);
+        install_harness_instrumentation(controller.clone(), generation_id, None);
         let waiting_event = BootstrapEvent::new(
             BootstrapSurface::Web,
             BootstrapEventKind::ShellAwaitingAccount,

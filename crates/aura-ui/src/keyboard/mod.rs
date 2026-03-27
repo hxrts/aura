@@ -320,6 +320,9 @@ mod tests {
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             receiver_id: String::new(),
             receiver_label: None,
+            message: String::new(),
+            ttl_hours: 24,
+            active_field: aura_app::ui::contract::FieldId::InvitationReceiver,
         }));
         model.last_invite_code = Some("INVITE-9".to_string());
 

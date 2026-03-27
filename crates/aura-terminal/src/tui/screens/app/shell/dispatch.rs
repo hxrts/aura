@@ -8,7 +8,9 @@ use crate::tui::screens::app::subscriptions::{
     SharedChannels, SharedContacts, SharedDiscoveredPeers, SharedInvitations, SharedMessages,
     SharedPendingRequests, SharedThreshold,
 };
-use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
+use crate::tui::semantic_lifecycle::{
+    CeremonySubmissionOwner, LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
+};
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{publish_ui_update, UiOperationFailure, UiUpdatePublication};
 use aura_app::ui_contract::ChannelBindingWitness;
@@ -72,6 +74,7 @@ pub(super) fn authoritative_binding_for_requested_join(
             let selected_name = normalized_channel_name_for_harness(&selected_channel.name);
             if selected_channel.id == binding.channel_id
                 && selected_name.eq_ignore_ascii_case(requested)
+                && binding.context_id.is_some()
             {
                 return Some(binding.clone().semantic_value());
             }
@@ -141,6 +144,16 @@ pub(super) fn submit_workflow_handoff_operation(
     kind: SemanticOperationKind,
 ) -> WorkflowHandoffOperationOwner {
     WorkflowHandoffOperationOwner::submit(app_core, tasks, update_tx, operation_id, kind)
+}
+
+pub(super) fn submit_ceremony_operation(
+    app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+    tasks: Arc<UiTaskOwner>,
+    update_tx: UiUpdateSender,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+) -> CeremonySubmissionOwner {
+    CeremonySubmissionOwner::submit(app_core, tasks, update_tx, operation_id, kind)
 }
 
 pub(super) fn set_authoritative_operation_state_sanctioned(
@@ -642,8 +655,19 @@ pub(super) fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Settings callbacks are unavailable".to_string());
             };
-            (cb.settings.on_remove_device)(device_id);
-            Ok(None)
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = submit_ceremony_operation(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::remove_device(),
+                SemanticOperationKind::RemoveDevice,
+            );
+            let handle = operation.harness_handle();
+            (cb.settings.on_remove_device)(device_id, operation);
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal) => {
             let current_devices = shared_devices.read().clone();
@@ -724,8 +748,19 @@ pub(super) fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Settings callbacks are unavailable".to_string());
             };
-            (cb.settings.on_remove_device)(device_id.into());
-            Ok(None)
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = submit_ceremony_operation(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::remove_device(),
+                SemanticOperationKind::RemoveDevice,
+            );
+            let handle = operation.harness_handle();
+            (cb.settings.on_remove_device)(device_id.into(), operation);
+            Ok(Some(handle))
         }
         _ => Ok(None),
     }
@@ -1020,4 +1055,53 @@ pub(super) fn handle_dispatch_command(
     }
 
     handle_dispatch_command_match(dispatch_cmd, new_state, event_ctx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authoritative_binding_for_requested_join;
+    use crate::tui::types::Channel;
+    use aura_app::scenario_contract::SemanticCommandValue;
+    use aura_app::ui::contract::HarnessUiCommand;
+    use aura_app::ui_contract::ChannelBindingWitness;
+
+    #[test]
+    fn immediate_join_binding_requires_authoritative_context() {
+        let command = HarnessUiCommand::JoinChannel {
+            channel_name: "shared-parity-lab".to_string(),
+        };
+        let channels = vec![Channel::new("channel-1", "shared-parity-lab")];
+        let weak_binding = ChannelBindingWitness::new("channel-1", None);
+
+        let value = authoritative_binding_for_requested_join(
+            &command,
+            &channels,
+            Some(0),
+            Some(&weak_binding),
+        );
+
+        assert!(value.is_none());
+    }
+
+    #[test]
+    fn immediate_join_binding_accepts_authoritative_selected_binding() {
+        let command = HarnessUiCommand::JoinChannel {
+            channel_name: "#shared-parity-lab".to_string(),
+        };
+        let mut channel = Channel::new("channel-1", "shared-parity-lab");
+        channel.context_id = Some("ctx-1".parse().expect("valid context id"));
+        let channels = vec![channel];
+        let binding = ChannelBindingWitness::new("channel-1", Some("ctx-1".to_string()));
+
+        let value =
+            authoritative_binding_for_requested_join(&command, &channels, Some(0), Some(&binding));
+
+        assert!(matches!(
+            value,
+            Some(SemanticCommandValue::AuthoritativeChannelBinding {
+                ref channel_id,
+                ref context_id
+            }) if channel_id == "channel-1" && context_id == "ctx-1"
+        ));
+    }
 }

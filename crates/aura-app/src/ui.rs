@@ -114,6 +114,7 @@ pub mod workflows {
     pub use crate::workflows::runtime;
     pub use crate::workflows::settings;
     pub use crate::workflows::signals;
+    pub use crate::workflows::slash_commands;
     pub use crate::workflows::snapshot;
     pub use crate::workflows::strong_command;
     pub use crate::workflows::sync;

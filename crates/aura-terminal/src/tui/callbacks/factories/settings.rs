@@ -7,6 +7,8 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 
 use crate::tui::key_rotation::{key_rotation_lifecycle_toast, key_rotation_status_update};
+use crate::tui::semantic_lifecycle::CeremonySubmissionOwner;
+use crate::tui::state::DeviceId;
 use crate::tui::updates::send_ui_update_required_blocking;
 
 async fn physical_sleep(duration: Duration) {
@@ -281,64 +283,68 @@ impl SettingsCallbacks {
     }
 
     fn make_remove_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RemoveDeviceCallback {
-        Arc::new(move |device_id| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let device_id_clone = device_id.to_string();
+        Arc::new(
+            move |device_id: DeviceId, operation: CeremonySubmissionOwner| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
+                let device_id_clone = device_id.to_string();
 
-            spawn_ctx(ctx.clone(), async move {
-                let handle = match ctx.start_device_removal(&device_id_clone).await {
-                    Ok(handle) => handle,
-                    Err(error) => {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::ToastAdded(ToastMessage::error(
-                                "device-removal-failed",
-                                format!("Device removal failed: {error}"),
-                            )),
-                        )
-                        .await;
-                        return;
-                    }
-                };
-                let status_handle = handle.status_handle();
-
-                send_ui_update_required(
-                    &tx,
-                    UiUpdate::ToastAdded(ToastMessage::info(
-                        "device-removal-started",
-                        "Device removal started",
-                    )),
-                )
-                .await;
-
-                ctx.remember_key_rotation_ceremony(handle).await;
-
-                #[cfg(feature = "development")]
-                {
-                    // In demo mode, make sure the simulated mobile device processes incoming
-                    // threshold key packages so the removal ceremony can reach completion.
-                    if device_id_clone == ctx.demo_mobile_device_id() {
-                        let demo_ctx = ctx.clone();
-                        spawn_ctx(ctx.clone(), async move {
-                            for _ in 0..6 {
-                                let _ = demo_ctx.process_demo_mobile_ceremony_acceptances().await;
-                                physical_sleep(Duration::from_millis(150)).await;
-                            }
-                        });
-                    }
-                }
-
-                // Best-effort: monitor completion and toast success/failure.
-                let tx_monitor = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    let policy = aura_app::ui::workflows::ceremonies::CeremonyPollPolicy {
-                        interval: Duration::from_millis(250),
-                        max_attempts: 160,
-                        rollback_on_failure: true,
-                        refresh_settings_on_complete: true,
+                    let handle = match ctx.start_device_removal(&device_id_clone).await {
+                        Ok(handle) => handle,
+                        Err(error) => {
+                            operation.fail(error.to_string()).await;
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "device-removal-failed",
+                                    format!("Device removal failed: {error}"),
+                                )),
+                            )
+                            .await;
+                            return;
+                        }
                     };
-                    match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
+                    operation.monitor_started().await;
+                    let status_handle = handle.status_handle();
+
+                    send_ui_update_required(
+                        &tx,
+                        UiUpdate::ToastAdded(ToastMessage::info(
+                            "device-removal-started",
+                            "Device removal started",
+                        )),
+                    )
+                    .await;
+
+                    ctx.remember_key_rotation_ceremony(handle).await;
+
+                    #[cfg(feature = "development")]
+                    {
+                        // In demo mode, make sure the simulated mobile device processes incoming
+                        // threshold key packages so the removal ceremony can reach completion.
+                        if device_id_clone == ctx.demo_mobile_device_id() {
+                            let demo_ctx = ctx.clone();
+                            spawn_ctx(ctx.clone(), async move {
+                                for _ in 0..6 {
+                                    let _ =
+                                        demo_ctx.process_demo_mobile_ceremony_acceptances().await;
+                                    physical_sleep(Duration::from_millis(150)).await;
+                                }
+                            });
+                        }
+                    }
+
+                    // Best-effort: monitor completion and toast success/failure.
+                    let tx_monitor = tx.clone();
+                    spawn_ctx(ctx.clone(), async move {
+                        let policy = aura_app::ui::workflows::ceremonies::CeremonyPollPolicy {
+                            interval: Duration::from_millis(250),
+                            max_attempts: 160,
+                            rollback_on_failure: true,
+                            refresh_settings_on_complete: true,
+                        };
+                        match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony_with_policy(
                         ctx.app_core_raw(),
                         &status_handle,
                         policy,
@@ -388,9 +394,10 @@ impl SettingsCallbacks {
                             // monitor already emitted error via ERROR_SIGNAL on polling failures.
                         }
                     }
+                    });
                 });
-            });
-        })
+            },
+        )
     }
 
     fn make_import_device_enrollment(

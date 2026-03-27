@@ -624,10 +624,13 @@ pub enum ControlId {
     NeighborhoodAcceptInvitationButton,
     ContactsCreateInvitationButton,
     ContactsInviteToChannelButton,
+    ContactsAddGuardianButton,
     ContactsEditNicknameButton,
     ContactsRemoveContactButton,
     NeighborhoodEnterAsButton,
     ChatNewGroupButton,
+    ChatCloseChannelButton,
+    ChatRetryMessageButton,
     ContactsStartChatButton,
     SettingsEditNicknameButton,
     SettingsConfigureThresholdButton,
@@ -674,10 +677,13 @@ impl ControlId {
             Self::NeighborhoodAcceptInvitationButton => Some("aura-neighborhood-accept-invitation"),
             Self::ContactsCreateInvitationButton => Some("aura-contacts-create-invitation"),
             Self::ContactsInviteToChannelButton => Some("aura-contacts-invite-channel"),
+            Self::ContactsAddGuardianButton => Some("aura-contacts-add-guardian"),
             Self::ContactsEditNicknameButton => Some("aura-contacts-edit-nickname"),
             Self::ContactsRemoveContactButton => Some("aura-contacts-remove-contact"),
             Self::NeighborhoodEnterAsButton => Some("aura-neighborhood-enter-as"),
             Self::ChatNewGroupButton => Some("aura-chat-new-group"),
+            Self::ChatCloseChannelButton => Some("aura-chat-close-channel"),
+            Self::ChatRetryMessageButton => Some("aura-chat-retry-message"),
             Self::ContactsStartChatButton => Some("aura-contacts-start-chat"),
             Self::SettingsEditNicknameButton => Some("aura-settings-edit-nickname"),
             Self::SettingsConfigureThresholdButton => Some("aura-settings-configure-threshold"),
@@ -729,8 +735,11 @@ impl ControlId {
             Self::NeighborhoodAcceptInvitationButton => Some("a"),
             Self::ContactsCreateInvitationButton => Some("n"),
             Self::ContactsInviteToChannelButton => Some("i"),
+            Self::ContactsAddGuardianButton => Some("g"),
             Self::NeighborhoodEnterAsButton => Some("d"),
             Self::ChatNewGroupButton => Some("n"),
+            Self::ChatCloseChannelButton => Some("x"),
+            Self::ChatRetryMessageButton => Some("r"),
             Self::ContactsStartChatButton => Some("c"),
             Self::SettingsEditNicknameButton => Some("e"),
             Self::SettingsConfigureThresholdButton => Some("t"),
@@ -853,11 +862,19 @@ pub enum SemanticOperationKind {
     CreateHome,
     CreateNeighborhood,
     CreateChannel,
+    StartGuardianCeremony,
+    StartMultifactorCeremony,
+    CancelGuardianCeremony,
+    CancelKeyRotationCeremony,
     StartDeviceEnrollment,
+    RemoveDevice,
     ImportDeviceEnrollmentCode,
     CreateContactInvitation,
+    CreateHomeInvitation,
     CreateGuardianInvitation,
+    ExportInvitation,
     AcceptContactInvitation,
+    AcceptPendingHomeInvitation,
     DeclineInvitation,
     RevokeInvitation,
     InviteActorToChannel,
@@ -866,7 +883,15 @@ pub enum SemanticOperationKind {
     SendChatMessage,
     RetryChatMessage,
     SetChannelTopic,
+    SetChannelMode,
     CloseChannel,
+    KickActor,
+    BanActor,
+    UnbanActor,
+    MuteActor,
+    UnmuteActor,
+    PinMessage,
+    UnpinMessage,
     UpdateContactNickname,
     StartDirectChat,
     UpdateNicknameSuggestion,
@@ -876,6 +901,7 @@ pub enum SemanticOperationKind {
     RevokeModerator,
     AddHomeToNeighborhood,
     LinkHomeOneHopLink,
+    MovePosition,
     RemoveContact,
     StartRecovery,
     SubmitGuardianApproval,
@@ -1328,8 +1354,33 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn start_guardian_ceremony() -> Self {
+        Self("start_guardian_ceremony".to_string())
+    }
+
+    #[must_use]
+    pub fn start_multifactor_ceremony() -> Self {
+        Self("start_multifactor_ceremony".to_string())
+    }
+
+    #[must_use]
+    pub fn cancel_guardian_ceremony() -> Self {
+        Self("cancel_guardian_ceremony".to_string())
+    }
+
+    #[must_use]
+    pub fn cancel_key_rotation_ceremony() -> Self {
+        Self("cancel_key_rotation_ceremony".to_string())
+    }
+
+    #[must_use]
     pub fn invitation_create() -> Self {
         Self("invitation_create".to_string())
+    }
+
+    #[must_use]
+    pub fn home_invitation_create() -> Self {
+        Self("home_invitation_create".to_string())
     }
 
     #[must_use]
@@ -1338,8 +1389,23 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn home_invitation_accept() -> Self {
+        Self("home_invitation_accept".to_string())
+    }
+
+    #[must_use]
+    pub fn invitation_export() -> Self {
+        Self("invitation_export".to_string())
+    }
+
+    #[must_use]
     pub fn device_enrollment() -> Self {
         Self("device_enrollment".to_string())
+    }
+
+    #[must_use]
+    pub fn remove_device() -> Self {
+        Self("remove_device".to_string())
     }
 
     #[must_use]
@@ -1378,8 +1444,48 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn set_channel_mode() -> Self {
+        Self("set_channel_mode".to_string())
+    }
+
+    #[must_use]
     pub fn close_channel() -> Self {
         Self("close_channel".to_string())
+    }
+
+    #[must_use]
+    pub fn kick_actor() -> Self {
+        Self("kick_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn ban_actor() -> Self {
+        Self("ban_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn unban_actor() -> Self {
+        Self("unban_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn mute_actor() -> Self {
+        Self("mute_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn unmute_actor() -> Self {
+        Self("unmute_actor".to_string())
+    }
+
+    #[must_use]
+    pub fn pin_message() -> Self {
+        Self("pin_message".to_string())
+    }
+
+    #[must_use]
+    pub fn unpin_message() -> Self {
+        Self("unpin_message".to_string())
     }
 
     #[must_use]
@@ -1430,6 +1536,11 @@ impl OperationId {
     #[must_use]
     pub fn link_home_one_hop_link() -> Self {
         Self("link_home_one_hop_link".to_string())
+    }
+
+    #[must_use]
+    pub fn move_position() -> Self {
+        Self("move_position".to_string())
     }
 
     #[must_use]
@@ -4647,8 +4758,11 @@ mod tests {
             ControlId::NeighborhoodAcceptInvitationButton,
             ControlId::ContactsCreateInvitationButton,
             ControlId::ContactsInviteToChannelButton,
+            ControlId::ContactsAddGuardianButton,
             ControlId::NeighborhoodEnterAsButton,
             ControlId::ChatNewGroupButton,
+            ControlId::ChatCloseChannelButton,
+            ControlId::ChatRetryMessageButton,
             ControlId::ContactsStartChatButton,
             ControlId::SettingsEditNicknameButton,
             ControlId::SettingsConfigureThresholdButton,

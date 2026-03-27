@@ -89,6 +89,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::str::FromStr;
 use uuid::Uuid;
 use validation::InvitationValidationHandler;
+#[cfg(target_arch = "wasm32")]
+use web_sys::js_sys;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -112,6 +114,8 @@ const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const INVITATION_CONTENT_TYPE: &str = "application/aura-invitation";
 const INVITATION_PREPARE_STAGE_TIMEOUT_MS: u64 = 4_000;
 const INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS: u64 = 2_000;
+const INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS: usize = 8;
+const INVITATION_BEST_EFFORT_NETWORK_SEND_BACKOFF_MS: u64 = 200;
 const INVITATION_ACCEPT_OPERATION_TIMEOUT_MS: u64 = 60_000;
 const INVITATION_ACCEPT_VALIDATE_STAGE_TIMEOUT_MS: u64 = 5_000;
 const INVITATION_ACCEPT_PREPARE_STAGE_TIMEOUT_MS: u64 = 5_000;
@@ -243,13 +247,49 @@ async fn attempt_network_send_envelope(
     envelope: TransportEnvelope,
 ) -> AgentResult<()> {
     timeout_deferred_network_stage(effects, stage, async {
-        effects
-            .send_envelope(envelope)
-            .await
-            .map_err(|error| AgentError::effects(format!("{stage}: {error}")))
+        let mut last_error = None;
+        for attempt in 0..INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS {
+            match effects.send_envelope(envelope.clone()).await {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    if attempt + 1 < INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS {
+                        let _ = effects
+                            .sleep_ms(INVITATION_BEST_EFFORT_NETWORK_SEND_BACKOFF_MS)
+                            .await;
+                    }
+                }
+            }
+        }
+
+        Err(AgentError::effects(format!(
+            "{stage}: {}",
+            last_error.unwrap_or_else(|| "transport send failed without detail".to_string())
+        )))
     })
     .await
 }
+
+#[cfg(target_arch = "wasm32")]
+fn emit_browser_harness_debug_event(event: &str, detail: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(origin) = window.location().origin() else {
+        return;
+    };
+    let event = js_sys::encode_uri_component(event)
+        .as_string()
+        .unwrap_or_else(|| event.to_string());
+    let detail = js_sys::encode_uri_component(detail)
+        .as_string()
+        .unwrap_or_else(|| detail.to_string());
+    let url = format!("{origin}/__aura_harness_debug__/event?event={event}&detail={detail}");
+    let _ = window.fetch_with_str(&url);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_browser_harness_debug_event(_event: &str, _detail: &str) {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ContactInvitationAcceptance {
@@ -3065,15 +3105,21 @@ async fn execute_charge_flow_budget(
     peer: AuthorityId,
     effects: &AuraEffectSystem,
 ) -> AgentResult<Option<Receipt>> {
+    emit_browser_harness_debug_event("invite_charge_begin", &format!("{context_id}:{peer}"));
     // Deterministic testing/simulation modes do not model flow charging.
     if effects.is_testing() {
+        emit_browser_harness_debug_event("invite_charge_testing", "");
         return Ok(None);
     }
 
     let receipt = effects
         .charge_flow(&context_id, &peer, cost)
         .await
-        .map_err(|e| AgentError::effects(format!("Failed to charge invitation flow: {e}")))?;
+        .map_err(|e| {
+            emit_browser_harness_debug_event("invite_charge_err", &e.to_string());
+            AgentError::effects(format!("Failed to charge invitation flow: {e}"))
+        })?;
+    emit_browser_harness_debug_event("invite_charge_ok", "");
     Ok(Some(receipt))
 }
 
@@ -3085,15 +3131,18 @@ async fn execute_notify_peer(
     effects: &AuraEffectSystem,
     best_effort_network_failures: bool,
 ) -> AgentResult<()> {
+    emit_browser_harness_debug_event("invite_notify_begin", &peer.to_string());
     // Use explicit test mode, not `is_testing()`: simulation runs should still
     // exercise transport delivery on the shared deterministic network.
     if effects.is_test_mode() {
+        emit_browser_harness_debug_event("invite_notify_test_mode", "");
         return Ok(());
     }
 
     if peer == authority.authority_id() {
         // Self-addressed invitations are intended for out-of-band sharing.
         // Skip network notify when inviting ourselves.
+        emit_browser_harness_debug_event("invite_notify_self", "");
         return Ok(());
     }
 
@@ -3179,6 +3228,7 @@ async fn execute_notify_peer(
         code_has_context_field = code.contains("\"context_id\""),
         "Sending invitation envelope"
     );
+    emit_browser_harness_debug_event("invite_notify_send", &peer.to_string());
 
     // The invitation establishes or extends semantic access to `invitation_context`,
     // so the transport envelope itself must ride over the existing authority-scoped
@@ -3202,6 +3252,7 @@ async fn execute_notify_peer(
             AgentError::effects(format!("Failed to notify peer with invitation: {e}"))
         })?;
     }
+    emit_browser_harness_debug_event("invite_notify_ok", &peer.to_string());
 
     Ok(())
 }

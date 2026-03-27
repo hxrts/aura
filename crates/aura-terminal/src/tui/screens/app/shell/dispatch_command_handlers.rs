@@ -138,6 +138,17 @@ fn handle_recovery_and_ceremonies_dispatch(
             let app_core = app_core_for_ceremony.clone();
             let io_ctx = io_ctx_for_ceremony.clone();
             let update_tx = update_tx_for_ceremony.clone();
+            let Some(update_tx_for_owner) = update_tx.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_ceremony_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx_for_owner,
+                OperationId::start_guardian_ceremony(),
+                SemanticOperationKind::StartGuardianCeremony,
+            );
 
             let tasks = tasks_for_events.clone();
             let tasks_handle = tasks.clone();
@@ -145,6 +156,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                 let app = app_core.raw();
                 match start_guardian_ceremony(app, threshold, n, ids).await {
                     Ok(ceremony_handle) => {
+                        operation.monitor_started().await;
                         let status_handle = ceremony_handle.status_handle();
                         io_ctx.remember_key_rotation_ceremony(ceremony_handle).await;
                         let k = threshold.value();
@@ -244,6 +256,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                         });
                     }
                     Err(error) => {
+                        operation.fail(error.to_string()).await;
                         tracing::error!("Failed to initiate guardian ceremony: {}", error);
 
                         if let Some(tx) = update_tx {
@@ -296,6 +309,17 @@ fn handle_recovery_and_ceremonies_dispatch(
             let app_core = app_core_for_ceremony.clone();
             let io_ctx = io_ctx_for_ceremony.clone();
             let update_tx = update_tx_for_ceremony.clone();
+            let Some(update_tx_for_owner) = update_tx.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_ceremony_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx_for_owner,
+                OperationId::start_multifactor_ceremony(),
+                SemanticOperationKind::StartMultifactorCeremony,
+            );
 
             let tasks = tasks_for_events.clone();
             let tasks_handle = tasks.clone();
@@ -311,6 +335,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                 .await
                 {
                     Ok(ceremony_handle) => {
+                        operation.monitor_started().await;
                         let status_handle = ceremony_handle.status_handle();
                         io_ctx.remember_key_rotation_ceremony(ceremony_handle).await;
                         let k = threshold.value();
@@ -408,6 +433,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                         });
                     }
                     Err(error) => {
+                        operation.fail(error.to_string()).await;
                         tracing::error!("Failed to initiate multifactor ceremony: {}", error);
 
                         if let Some(tx) = update_tx {
@@ -430,6 +456,17 @@ fn handle_recovery_and_ceremonies_dispatch(
             let app_core = app_core_for_ceremony.clone();
             let io_ctx = io_ctx_for_ceremony.clone();
             let update_tx = update_tx_for_ceremony.clone();
+            let Some(update_tx_for_owner) = update_tx.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_ceremony_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx_for_owner,
+                OperationId::cancel_guardian_ceremony(),
+                SemanticOperationKind::CancelGuardianCeremony,
+            );
 
             let tasks = tasks_for_events.clone();
             tasks.spawn(async move {
@@ -437,6 +474,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                 let handle = match io_ctx.take_key_rotation_ceremony_handle(&ceremony_id).await {
                     Ok(handle) => handle,
                     Err(error) => {
+                        operation.fail(error.to_string()).await;
                         tracing::error!("Failed to resolve guardian ceremony handle: {}", error);
                         send_optional_ui_update_required(
                             &update_tx,
@@ -453,6 +491,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                     aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony(app, handle)
                         .await
                 {
+                    operation.fail(error.to_string()).await;
                     tracing::error!("Failed to cancel guardian ceremony: {}", error);
                     send_optional_ui_update_required(
                         &update_tx,
@@ -465,6 +504,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                     return;
                 }
                 io_ctx.forget_key_rotation_ceremony(&ceremony_id).await;
+                operation.cancel().await;
 
                 send_optional_ui_update_required(
                     &update_tx,
@@ -482,6 +522,17 @@ fn handle_recovery_and_ceremonies_dispatch(
             let app_core = app_core_for_ceremony.clone();
             let io_ctx = io_ctx_for_ceremony.clone();
             let update_tx = update_tx_for_ceremony.clone();
+            let Some(update_tx_for_owner) = update_tx.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_ceremony_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx_for_owner,
+                OperationId::cancel_key_rotation_ceremony(),
+                SemanticOperationKind::CancelKeyRotationCeremony,
+            );
 
             let tasks = tasks_for_events.clone();
             tasks.spawn(async move {
@@ -489,6 +540,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                 let handle = match io_ctx.take_key_rotation_ceremony_handle(&ceremony_id).await {
                     Ok(handle) => handle,
                     Err(error) => {
+                        operation.fail(error.to_string()).await;
                         tracing::error!("Failed to resolve ceremony handle: {}", error);
                         send_optional_ui_update_required(
                             &update_tx,
@@ -505,6 +557,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                     aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony(app, handle)
                         .await
                 {
+                    operation.fail(error.to_string()).await;
                     tracing::error!("Failed to cancel ceremony: {}", error);
                     send_optional_ui_update_required(
                         &update_tx,
@@ -517,6 +570,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                     return;
                 }
                 io_ctx.forget_key_rotation_ceremony(&ceremony_id).await;
+                operation.cancel().await;
 
                 send_optional_ui_update_required(
                     &update_tx,
@@ -1303,7 +1357,18 @@ pub(super) fn handle_dispatch_command_match(
             (cb.settings.on_add_device)(name, invitee_authority_id, operation);
         }
         DispatchCommand::RemoveDevice { device_id } => {
-            (cb.settings.on_remove_device)(device_id);
+            let Some(update_tx) = update_tx_for_events.clone() else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_ceremony_operation(
+                app_core_for_events.clone(),
+                tasks_for_events.clone(),
+                update_tx,
+                OperationId::remove_device(),
+                SemanticOperationKind::RemoveDevice,
+            );
+            (cb.settings.on_remove_device)(device_id, operation);
         }
         DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
             let Some(update_tx) = update_tx_for_events.clone() else {

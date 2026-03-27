@@ -210,12 +210,16 @@ pub trait SharedSemanticBackend {
         &mut self,
         authority_id: &str,
         channel_id: Option<&str>,
+        context_id: Option<&str>,
+        channel_name: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         expect_semantic_command_unit_with_required_handle(
             self.submit_semantic_command(SemanticCommandRequest::new(
                 IntentAction::InviteActorToChannel {
                     authority_id: authority_id.to_string(),
                     channel_id: channel_id.map(ToOwned::to_owned),
+                    context_id: context_id.map(ToOwned::to_owned),
+                    channel_name: channel_name.map(ToOwned::to_owned),
                 },
             ))?,
             "submit_invite_actor_to_channel",

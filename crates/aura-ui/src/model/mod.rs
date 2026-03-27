@@ -951,6 +951,9 @@ impl UiController {
         model.active_modal = Some(ActiveModal::CreateInvitation(CreateInvitationModalState {
             receiver_id: receiver_id.map(ToString::to_string).unwrap_or_default(),
             receiver_label: receiver_label.map(str::to_string),
+            message: String::new(),
+            ttl_hours: 24,
+            active_field: FieldId::InvitationReceiver,
         }));
         drop(model);
         self.request_rerender();
@@ -971,6 +974,13 @@ impl UiController {
 
     pub fn write_clipboard(&self, text: &str) {
         self.clipboard.write(text);
+    }
+
+    pub fn remember_invitation_code(&self, code: &str) {
+        let mut model = write_model(&self.model);
+        model.last_invite_code = Some(code.to_string());
+        drop(model);
+        self.request_rerender();
     }
 
     pub fn tail_log(&self, lines: usize) -> Vec<String> {

@@ -52,6 +52,14 @@ enum BackendState {
 #[serde(deny_unknown_fields)]
 struct BrowserDiagnosticScreenPayload {
     authoritative_screen: String,
+    #[serde(default, rename = "screen")]
+    _screen: Option<String>,
+    #[serde(default, rename = "raw_screen")]
+    _raw_screen: Option<String>,
+    #[serde(default, rename = "normalized_screen")]
+    _normalized_screen: Option<String>,
+    #[serde(default, rename = "capture_consistency")]
+    _capture_consistency: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -768,6 +776,13 @@ impl DiagnosticBackend for PlaywrightBrowserBackend {
     }
 }
 
+fn ui_snapshot_event_timeout(error: &anyhow::Error) -> bool {
+    let message = error.to_string();
+    message.contains("wait_for_ui_state timed out")
+        || message.contains("request:wait_for_ui_state timed out")
+        || message.contains("Playwright driver wait_for_ui_state timed out")
+}
+
 impl ObservationBackend for PlaywrightBrowserBackend {
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
         let payload = self.with_session(|session| {
@@ -786,21 +801,33 @@ impl ObservationBackend for PlaywrightBrowserBackend {
         timeout: Duration,
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>> {
-        Some(self.with_session(|session| {
-            let payload = session.rpc_call_with_timeout(
-                "wait_for_ui_state",
-                json!({
-                    "instance_id": self.config.id,
-                    "timeout_ms": timeout.as_millis(),
-                    "after_version": after_version,
-                }),
-                timeout
-                    .as_millis()
-                    .clamp(1, u128::from(u64::MAX))
-                    .try_into()
-                    .unwrap_or(u64::MAX)
-                    .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
-            )?;
+        Some((|| {
+            let payload = match self.with_session(|session| {
+                session.rpc_call_with_timeout(
+                    "wait_for_ui_state",
+                    json!({
+                        "instance_id": self.config.id,
+                        "timeout_ms": timeout.as_millis(),
+                        "after_version": after_version,
+                    }),
+                    timeout
+                        .as_millis()
+                        .clamp(1, u128::from(u64::MAX))
+                        .try_into()
+                        .unwrap_or(u64::MAX)
+                        .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+                )
+            }) {
+                Ok(payload) => payload,
+                Err(error) if ui_snapshot_event_timeout(&error) => {
+                    let snapshot = self.ui_snapshot()?;
+                    return Ok(UiSnapshotEvent {
+                        version: snapshot.revision.semantic_seq,
+                        snapshot,
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
                 format!(
                     "failed to decode browser ui event payload for instance {}",
@@ -811,7 +838,7 @@ impl ObservationBackend for PlaywrightBrowserBackend {
                 snapshot: payload.snapshot,
                 version: payload.version,
             })
-        }))
+        })())
     }
 }
 

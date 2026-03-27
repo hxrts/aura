@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use crate::tui::semantic_lifecycle::{LocalTerminalOperationOwner, WorkflowHandoffOperationOwner};
+use crate::tui::semantic_lifecycle::{
+    CeremonySubmissionOwner, LocalTerminalOperationOwner, WorkflowHandoffOperationOwner,
+};
 use crate::tui::state::DeviceId;
 use crate::tui::types::MfaPolicy;
 use aura_core::AuthorityId;
@@ -105,7 +107,9 @@ pub(crate) type UpdateMfaCallback =
 #[allow(private_interfaces)]
 pub type AddDeviceCallback =
     Arc<dyn Fn(String, AuthorityId, LocalTerminalOperationOwner) + Send + Sync>;
-pub type RemoveDeviceCallback = Arc<dyn Fn(DeviceId) + Send + Sync>;
+#[doc(hidden)]
+#[allow(private_interfaces)]
+pub type RemoveDeviceCallback = Arc<dyn Fn(DeviceId, CeremonySubmissionOwner) + Send + Sync>;
 pub(crate) type UpdateThresholdCallback = ThresholdLocalOwnedCallback;
 pub(crate) type ImportDeviceEnrollmentCallback =
     Arc<dyn Fn(String, LocalTerminalOperationOwner) + Send + Sync>;

@@ -88,12 +88,12 @@ impl ChatCallbacks {
     }
 
     fn make_run_slash_command(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SlashCommandCallback {
-        let strong_resolver =
+        let slash_resolver =
             Arc::new(aura_app::ui::workflows::strong_command::CommandResolver::default());
         Arc::new(move |channel_id: String, content: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let strong_resolver = strong_resolver.clone();
+            let slash_resolver = slash_resolver.clone();
             let channel_id_clone = channel_id;
             let content_clone = content;
 
@@ -103,216 +103,57 @@ impl ChatCallbacks {
 
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
-                    // IRC-style command path
-                    let parsed = match aura_app::ui::workflows::strong_command::ParsedCommand::parse(
-                        trimmed,
-                    ) {
-                        Ok(command) => command,
-                        Err(e) => {
-                            let (status, reason) = classify_chat_command_error(&e);
-                            let message =
-                                command_outcome_message(e.to_string(), status, reason, None);
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error("command", message)),
-                            )
-                            .await;
-                            return;
-                        }
+                    let actor = {
+                        let core = ctx.app_core_raw().read().await;
+                        core.runtime()
+                            .map(|runtime| runtime.authority_id())
+                            .or_else(|| core.authority().copied())
                     };
-                    let irc_name = trimmed
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("/command")
-                        .trim_start_matches('/')
-                        .to_string();
-                    match parsed {
-                        aura_app::ui::workflows::strong_command::ParsedCommand::Help {
-                            command,
-                        } => {
-                            if let Some(raw_name) = command
-                                .as_deref()
-                                .map(str::trim)
-                                .filter(|value| !value.is_empty())
-                            {
-                                let normalized = raw_name.trim_start_matches('/').to_lowercase();
-                                if let Some(help) =
-                                    aura_app::ui::workflows::chat_commands::command_help(
-                                        &normalized,
-                                    )
-                                {
-                                    send_ui_update_reliable(
-                                        &tx,
-                                        UiUpdate::ToastAdded(ToastMessage::info(
-                                            "help",
-                                            format!("{} — {}", help.syntax, help.description),
-                                        )),
-                                    )
-                                    .await;
-                                } else {
-                                    send_ui_update_reliable(
-                                        &tx,
-                                        UiUpdate::ToastAdded(ToastMessage::error(
-                                            "help",
-                                            format!("Unknown command: /{normalized}"),
-                                        )),
-                                    )
-                                    .await;
-                                }
-                            } else {
-                                send_ui_update_reliable(
-                                    &tx,
-                                    UiUpdate::ToastAdded(ToastMessage::info(
-                                        "help",
-                                        "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink",
-                                    )),
-                                )
-                                .await;
+                    let report = aura_app::ui::workflows::slash_commands::prepare_and_execute(
+                        slash_resolver.as_ref(),
+                        ctx.app_core_raw(),
+                        trimmed,
+                        Some(&channel_id_clone),
+                        actor,
+                    )
+                    .await;
+                    if let Some(semantic) = report
+                        .metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.semantic_operation.clone())
+                    {
+                        let owner =
+                            crate::tui::semantic_lifecycle::LocalTerminalOperationOwner::submit(
+                                ctx.app_core_raw().clone(),
+                                ctx.tasks(),
+                                tx.clone(),
+                                semantic.operation_id,
+                                semantic.kind,
+                            );
+                        match report.feedback.terminal_settlement.clone() {
+                            Some(aura_app::ui::workflows::slash_commands::SlashCommandTerminalSettlement::Succeeded) => {
+                                owner.succeed().await;
                             }
-                            return;
-                        }
-                        parsed => {
-                            let actor = {
-                                let core = ctx.app_core_raw().read().await;
-                                core.runtime()
-                                    .map(|runtime| runtime.authority_id())
-                                    .or_else(|| core.authority().copied())
-                            };
-
-                            let snapshot =
-                                strong_resolver.capture_snapshot(ctx.app_core_raw()).await;
-                            let resolved = match strong_resolver.resolve(parsed, &snapshot) {
-                                Ok(value) => value,
-                                Err(e) => {
-                                    let (status, reason) = classify_command_resolver_error(&e);
-                                    let message = command_outcome_message(
-                                        e.to_string(),
-                                        status,
-                                        reason,
-                                        None,
-                                    );
-                                    send_ui_update_reliable(
-                                        &tx,
-                                        UiUpdate::ToastAdded(ToastMessage::error(
-                                            "command", message,
-                                        )),
-                                    )
-                                    .await;
-                                    return;
-                                }
-                            };
-                            let plan = match strong_resolver.plan(
-                                resolved,
-                                &snapshot,
-                                Some(&channel_id_clone),
-                                actor,
-                            ) {
-                                Ok(value) => value,
-                                Err(e) => {
-                                    let (status, reason) = classify_command_resolver_error(&e);
-                                    let message = command_outcome_message(
-                                        e.to_string(),
-                                        status,
-                                        reason,
-                                        None,
-                                    );
-                                    send_ui_update_reliable(
-                                        &tx,
-                                        UiUpdate::ToastAdded(ToastMessage::error(
-                                            "command", message,
-                                        )),
-                                    )
-                                    .await;
-                                    return;
-                                }
-                            };
-
-                            match aura_app::ui::workflows::strong_command::execute_planned(
-                                ctx.app_core_raw(),
-                                plan,
-                            )
-                            .await
-                            {
-                                Ok(result) => {
-                                    let state_label = result.consistency_label();
-
-                                    if let Some(classification) = result.terminal_classification() {
-                                        let details = result
-                                            .details
-                                            .as_deref()
-                                            .map(str::to_owned)
-                                            .or_else(|| {
-                                                result
-                                                    .default_terminal_detail()
-                                                    .map(ToOwned::to_owned)
-                                            })
-                                            .unwrap_or_else(|| {
-                                                "command did not reach the required lifecycle state"
-                                                    .to_string()
-                                            });
-                                        let message = command_outcome_message(
-                                            format!("/{irc_name}: {details} ({state_label})"),
-                                            classification.status,
-                                            classification.reason,
-                                            Some(state_label),
-                                        );
-                                        send_ui_update_reliable(
-                                            &tx,
-                                            UiUpdate::ToastAdded(ToastMessage::error(
-                                                "command", message,
-                                            )),
-                                        )
-                                        .await;
-                                    } else if let Some(details) = result.details {
-                                        let message = command_outcome_message(
-                                            format!("{details} ({state_label})"),
-                                            CommandOutcomeStatus::Ok,
-                                            CommandReasonCode::None,
-                                            Some(state_label),
-                                        );
-                                        send_ui_update_reliable(
-                                            &tx,
-                                            UiUpdate::ToastAdded(ToastMessage::info(
-                                                "command", message,
-                                            )),
-                                        )
-                                        .await;
-                                    } else {
-                                        let message = command_outcome_message(
-                                            format!("/{irc_name} ({state_label})"),
-                                            CommandOutcomeStatus::Ok,
-                                            CommandReasonCode::None,
-                                            Some(state_label),
-                                        );
-                                        send_ui_update_reliable(
-                                            &tx,
-                                            UiUpdate::ToastAdded(ToastMessage::success(
-                                                "command", message,
-                                            )),
-                                        )
-                                        .await;
-                                    }
-                                }
-                                Err(e) => {
-                                    let (status, reason) = classify_command_error(&e);
-                                    let message = command_outcome_message(
-                                        format!("/{irc_name}: {e}"),
-                                        status,
-                                        reason,
-                                        None,
-                                    );
-                                    send_ui_update_reliable(
-                                        &tx,
-                                        UiUpdate::ToastAdded(ToastMessage::error(
-                                            "command", message,
-                                        )),
-                                    )
-                                    .await;
-                                }
+                            Some(aura_app::ui::workflows::slash_commands::SlashCommandTerminalSettlement::Failed(error)) => {
+                                owner.fail_with(error).await;
                             }
-                            return;
+                            None => {}
                         }
                     }
+                    let feedback = report.feedback;
+                    let toast = match feedback.toast_kind {
+                        aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Success => {
+                            ToastMessage::success(feedback.topic, feedback.message)
+                        }
+                        aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Info => {
+                            ToastMessage::info(feedback.topic, feedback.message)
+                        }
+                        aura_app::ui::workflows::slash_commands::SlashCommandToastKind::Error => {
+                            ToastMessage::error(feedback.topic, feedback.message)
+                        }
+                    };
+                    send_ui_update_reliable(&tx, UiUpdate::ToastAdded(toast)).await;
+                    return;
                 }
 
                 send_ui_update_reliable(
@@ -347,78 +188,44 @@ impl ChatCallbacks {
                         content: content_clone.clone(),
                     });
 
-                    let result = match channel_id_clone.parse() {
+                    let target = match channel_id_clone.parse() {
                         Ok(channel_id) => {
-                            aura_app::ui::workflows::messaging::send_message_now_with_instance(
-                                &app_core,
+                            aura_app::ui::workflows::messaging::handoff::SendChatTarget::ChannelId(
                                 channel_id,
-                                &content_clone,
-                                Some(operation_instance_id.clone()),
                             )
-                            .await
                         }
                         Err(_) => {
-                            aura_app::ui::workflows::messaging::send_message_by_name_now_with_instance(
-                                &app_core,
-                                &channel_id_clone,
-                                &content_clone,
-                                Some(operation_instance_id.clone()),
+                            aura_app::ui::workflows::messaging::handoff::SendChatTarget::ChannelName(
+                                channel_id_clone.clone(),
                             )
-                            .await
                         }
                     };
+                    let workflow_app_core = app_core.clone();
+                    let result = transfer
+                        .run_workflow(
+                            app_core,
+                            tx.clone(),
+                            "make_send_owned send_chat_message",
+                            aura_app::ui::workflows::messaging::handoff::send_chat_message(
+                                &workflow_app_core,
+                                aura_app::ui::workflows::messaging::handoff::SendChatMessageRequest {
+                                    target,
+                                    content: content_clone.clone(),
+                                    operation_instance_id: Some(operation_instance_id),
+                                },
+                            ),
+                        )
+                        .await;
 
-                    match result {
-                        Ok(_) => {
-                            // Terminal settlement first.
-                            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
-                                causality: None,
-                                status: SemanticOperationStatus::new(
-                                    transfer.kind(),
-                                    SemanticOperationPhase::Succeeded,
-                                ),
-                            };
-                            let _ = apply_handed_off_terminal_status(
-                                &app_core,
-                                &tx,
-                                transfer.operation_id().clone(),
-                                operation_instance_id,
-                                transfer.kind(),
-                                Some(terminal),
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            // Terminal failure settlement.
-                            let terminal = aura_app::ui_contract::WorkflowTerminalStatus {
-                                causality: None,
-                                status: SemanticOperationStatus::failed(
-                                    transfer.kind(),
-                                    SemanticOperationError::new(
-                                        SemanticFailureDomain::Command,
-                                        SemanticFailureCode::InternalError,
-                                    )
-                                    .with_detail(e.to_string()),
-                                ),
-                            };
-                            let _ = apply_handed_off_terminal_status(
-                                &app_core,
-                                &tx,
-                                transfer.operation_id().clone(),
-                                operation_instance_id,
-                                transfer.kind(),
-                                Some(terminal),
-                            )
-                            .await;
-                            send_ui_update_reliable(
-                                &tx,
-                                UiUpdate::ToastAdded(ToastMessage::error(
-                                    "chat",
-                                    format!("Send message failed: {e}"),
-                                )),
-                            )
-                            .await;
-                        }
+                    if let Err(error) = result {
+                        send_ui_update_reliable(
+                            &tx,
+                            UiUpdate::ToastAdded(ToastMessage::error(
+                                "chat",
+                                format!("Send message failed: {error}"),
+                            )),
+                        )
+                        .await;
                     }
                 });
             },

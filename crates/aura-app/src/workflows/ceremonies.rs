@@ -344,6 +344,17 @@ pub async fn cancel_key_rotation_ceremony(
         .map_err(|e| ceremony_op("cancel ceremony", e).into())
 }
 
+/// Cancel a key-rotation ceremony using a stored ceremony id.
+pub async fn cancel_key_rotation_ceremony_by_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: CeremonyId,
+) -> Result<(), AuraError> {
+    let core = app_core.read().await;
+    core.cancel_key_rotation_ceremony(&ceremony_id)
+        .await
+        .map_err(|e| ceremony_op("cancel ceremony", e).into())
+}
+
 /// Poll a key rotation ceremony until completion or failure using a policy.
 ///
 /// This is a portable (frontend-agnostic) helper for driving ceremony progress UIs.

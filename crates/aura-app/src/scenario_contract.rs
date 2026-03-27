@@ -672,6 +672,10 @@ pub enum IntentAction {
         authority_id: String,
         #[serde(default)]
         channel_id: Option<String>,
+        #[serde(default)]
+        context_id: Option<String>,
+        #[serde(default)]
+        channel_name: Option<String>,
     },
     SendChatMessage {
         message: String,
@@ -1589,6 +1593,8 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Intent(IntentAction::InviteActorToChannel {
                     authority_id: required(value.value, "value", value.action)?,
                     channel_id: None,
+                    context_id: None,
+                    channel_name: None,
                 })
             }
             SemanticActionKind::Navigate => ScenarioAction::Ui(UiAction::Navigate(required(
@@ -2081,6 +2087,8 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
@@ -2142,6 +2150,8 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
@@ -2202,6 +2212,8 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:peer".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),
@@ -2231,6 +2243,8 @@ mod tests {
         let invite_contract = IntentAction::InviteActorToChannel {
             authority_id: "authority:peer".to_string(),
             channel_id: None,
+            context_id: None,
+            channel_name: None,
         }
         .contract();
         assert!(
@@ -2368,6 +2382,8 @@ mod tests {
             IntentAction::InviteActorToChannel {
                 authority_id: "authority:test".to_string(),
                 channel_id: None,
+                context_id: None,
+                channel_name: None,
             },
             IntentAction::SendChatMessage {
                 message: "hello".to_string(),

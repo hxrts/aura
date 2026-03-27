@@ -159,12 +159,51 @@ impl CapabilityConfigModalState {
     }
 }
 
+impl CreateInvitationModalState {
+    fn field_descriptor(&self) -> ModalFieldDescriptor {
+        ModalFieldDescriptor::Direct(self.active_field)
+    }
+
+    fn text_value(&self) -> String {
+        match self.active_field {
+            FieldId::InvitationMessage => self.message.clone(),
+            FieldId::InvitationTtl => self.ttl_hours.to_string(),
+            _ => self.receiver_id.clone(),
+        }
+    }
+
+    fn set_text_value(&mut self, value: String) {
+        match self.active_field {
+            FieldId::InvitationMessage => self.message = value,
+            FieldId::InvitationTtl => {
+                self.ttl_hours = value.trim().parse::<u64>().unwrap_or(self.ttl_hours.max(1))
+            }
+            _ => self.receiver_id = value,
+        }
+    }
+
+    fn set_field_value(&mut self, field_id: FieldId, value: String) {
+        self.active_field = match field_id {
+            FieldId::InvitationMessage => FieldId::InvitationMessage,
+            FieldId::InvitationTtl => FieldId::InvitationTtl,
+            _ => FieldId::InvitationReceiver,
+        };
+        self.set_text_value(value);
+    }
+
+    fn set_active_field(&mut self, field_id: FieldId) {
+        self.active_field = match field_id {
+            FieldId::InvitationMessage => FieldId::InvitationMessage,
+            FieldId::InvitationTtl => FieldId::InvitationTtl,
+            _ => FieldId::InvitationReceiver,
+        };
+    }
+}
+
 impl ActiveModal {
     pub(super) fn field_descriptor(&self) -> Option<ModalFieldDescriptor> {
         match self {
-            Self::CreateInvitation(_) => {
-                Some(ModalFieldDescriptor::Direct(FieldId::InvitationReceiver))
-            }
+            Self::CreateInvitation(state) => Some(state.field_descriptor()),
             Self::AcceptInvitation(_) => {
                 Some(ModalFieldDescriptor::Direct(FieldId::InvitationCode))
             }
@@ -186,7 +225,7 @@ impl ActiveModal {
 
     pub(super) fn text_value(&self) -> Option<String> {
         match self {
-            Self::CreateInvitation(state) => Some(state.receiver_id.clone()),
+            Self::CreateInvitation(state) => Some(state.text_value()),
             Self::AcceptInvitation(state)
             | Self::CreateHome(state)
             | Self::SetChannelTopic(state)
@@ -202,7 +241,7 @@ impl ActiveModal {
 
     pub(super) fn set_text_value(&mut self, value: String) {
         match self {
-            Self::CreateInvitation(state) => state.receiver_id = value,
+            Self::CreateInvitation(state) => state.set_text_value(value),
             Self::AcceptInvitation(state)
             | Self::CreateHome(state)
             | Self::SetChannelTopic(state)
@@ -217,6 +256,10 @@ impl ActiveModal {
     }
 
     pub(super) fn set_field_value(&mut self, field_id: FieldId, value: String) {
+        if let Self::CreateInvitation(state) = self {
+            state.set_field_value(field_id, value);
+            return;
+        }
         if let Self::CreateChannel(state) = self {
             if state.set_field_value(field_id, value.clone()) {
                 return;
@@ -226,6 +269,10 @@ impl ActiveModal {
     }
 
     pub(super) fn set_active_field(&mut self, field_id: FieldId) {
+        if let Self::CreateInvitation(state) = self {
+            state.set_active_field(field_id);
+            return;
+        }
         if let Self::CreateChannel(state) = self {
             state.set_active_field(field_id);
         }

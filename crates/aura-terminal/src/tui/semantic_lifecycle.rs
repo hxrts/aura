@@ -4,21 +4,23 @@ use std::sync::Arc;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
+use async_trait::async_trait;
+use aura_app::frontend_primitives::{
+    dropped_owner_error, CeremonyMonitorHandoffSubmission, LocalTerminalSubmission,
+    SubmittedOperationPublisher, SubmittedOperationWorkflowError, WorkflowHandoffRelease,
+    WorkflowHandoffSubmission,
+};
 use aura_app::ui::types::AppCore;
 use aura_app::ui_contract::{
     HarnessUiOperationHandle, OperationId, OperationInstanceId, SemanticFailureCode,
     SemanticFailureDomain, SemanticOperationCausality, SemanticOperationError,
-    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
+    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
+    WorkflowTerminalOutcome, WorkflowTerminalStatus,
 };
-use aura_core::SemanticOwnerProtocol;
+use futures::executor::block_on;
+use std::future::Future;
 
 static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SemanticOperationOwner {
-    FrontendCallback,
-    AppWorkflow,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationTransferScope {
@@ -38,12 +40,10 @@ pub(crate) enum SemanticOperationTransferResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SemanticOperationTransfer {
-    prior_owner: SemanticOperationOwner,
-    new_owner: SemanticOperationOwner,
+    release: WorkflowHandoffRelease,
     operation_id: OperationId,
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
-    protocol: SemanticOwnerProtocol,
     scope: SemanticOperationTransferScope,
     result: SemanticOperationTransferResult,
 }
@@ -154,97 +154,118 @@ fn next_owned_operation_instance_id(operation_id: &OperationId) -> OperationInst
     OperationInstanceId(format!("tui-op-{}-{}", operation_id.0, nonce))
 }
 
-struct SubmittedOperationOwner {
-    _app_core: Arc<RwLock<AppCore>>,
+#[derive(Clone)]
+struct TuiSubmittedOperationPublisher {
     tx: UiUpdateSender,
-    operation_id: OperationId,
-    instance_id: OperationInstanceId,
-    kind: SemanticOperationKind,
-    owner: SemanticOperationOwner,
-    settled: bool,
 }
 
-#[must_use]
-pub struct LocalTerminalOperationOwner(SubmittedOperationOwner);
-
-#[must_use]
-pub struct WorkflowHandoffOperationOwner(SubmittedOperationOwner);
-
-impl SubmittedOperationOwner {
-    fn submit(
-        app_core: Arc<RwLock<AppCore>>,
-        _tasks: Arc<UiTaskOwner>,
-        tx: UiUpdateSender,
-        operation_id: OperationId,
+#[async_trait]
+impl SubmittedOperationPublisher for TuiSubmittedOperationPublisher {
+    async fn publish_dispatched(
+        &self,
+        operation_id: &OperationId,
+        instance_id: &OperationInstanceId,
         kind: SemanticOperationKind,
-    ) -> Self {
-        let instance_id = next_owned_operation_instance_id(&operation_id);
+    ) {
         let submission = authoritative_operation_status_update(
             operation_id.clone(),
             Some(instance_id.clone()),
             None,
             SemanticOperationStatus::new(kind, SemanticOperationPhase::WorkflowDispatched),
         );
-        if !send_ui_update_required_blocking(&tx, submission) {
+        if !send_ui_update_required_blocking(&self.tx, submission) {
             tracing::warn!(
                 operation_id = %operation_id.0,
                 instance_id = %instance_id.0,
                 "terminal submission delivery failed: UI update channel closed"
             );
         }
-
-        Self {
-            _app_core: app_core,
-            tx,
-            operation_id,
-            instance_id,
-            kind,
-            owner: SemanticOperationOwner::FrontendCallback,
-            settled: false,
-        }
     }
 
-    fn submit_local_terminal(
-        app_core: Arc<RwLock<AppCore>>,
-        tasks: Arc<UiTaskOwner>,
-        tx: UiUpdateSender,
-        operation_id: OperationId,
-        kind: SemanticOperationKind,
-    ) -> Self {
-        Self::submit(app_core, tasks, tx, operation_id, kind)
-    }
-
-    fn submit_for_app_handoff(
-        app_core: Arc<RwLock<AppCore>>,
-        tasks: Arc<UiTaskOwner>,
-        tx: UiUpdateSender,
-        operation_id: OperationId,
-        kind: SemanticOperationKind,
-    ) -> Self {
-        Self::submit(app_core, tasks, tx, operation_id, kind)
-    }
-
-    async fn succeed(mut self) {
-        self.settled = true;
-        let status = SemanticOperationStatus::new(self.kind, SemanticOperationPhase::Succeeded);
-        if !publish_ui_update(
-            &self.tx,
-            authoritative_operation_status_update(
-                self.operation_id.clone(),
-                Some(self.instance_id.clone()),
-                None,
-                status,
-            ),
-            UiUpdatePublication::RequiredUnordered,
-        )
-        .await
-        {
+    async fn publish_terminal(
+        &self,
+        operation_id: &OperationId,
+        instance_id: &OperationInstanceId,
+        causality: Option<SemanticOperationCausality>,
+        status: SemanticOperationStatus,
+    ) {
+        let update = authoritative_operation_status_update(
+            operation_id.clone(),
+            Some(instance_id.clone()),
+            causality,
+            status.clone(),
+        );
+        let delivered = if status.phase == SemanticOperationPhase::Succeeded {
+            publish_ui_update(&self.tx, update, UiUpdatePublication::RequiredUnordered).await
+        } else {
+            send_ui_update_required(&self.tx, update).await
+        };
+        if !delivered {
             tracing::warn!(
-                operation_id = %self.operation_id.0,
-                instance_id = %self.instance_id.0,
-                "terminal success delivery failed: UI update channel closed"
+                operation_id = %operation_id.0,
+                instance_id = %instance_id.0,
+                "terminal status delivery failed: UI update channel closed"
             );
         }
+    }
+
+    fn publish_drop_failure(
+        &self,
+        operation_id: &OperationId,
+        instance_id: &OperationInstanceId,
+        kind: SemanticOperationKind,
+    ) {
+        let update = authoritative_operation_status_update(
+            operation_id.clone(),
+            Some(instance_id.clone()),
+            None,
+            dropped_owner_error(kind),
+        );
+        if self.tx.try_send(update).is_err() {
+            tracing::warn!(
+                operation_id = %operation_id.0,
+                instance_id = %instance_id.0,
+                "dropped-owner failure delivery failed: UI update channel full or closed"
+            );
+        }
+    }
+}
+
+struct SubmittedLocalOperationOwner(LocalTerminalSubmission<TuiSubmittedOperationPublisher>);
+struct SubmittedWorkflowOperationOwner(WorkflowHandoffSubmission<TuiSubmittedOperationPublisher>);
+
+struct SubmittedCeremonyOwner {
+    inner: CeremonyMonitorHandoffSubmission<TuiSubmittedOperationPublisher>,
+}
+
+#[must_use]
+pub struct LocalTerminalOperationOwner(SubmittedLocalOperationOwner);
+
+#[must_use]
+pub struct WorkflowHandoffOperationOwner(SubmittedWorkflowOperationOwner);
+
+#[must_use]
+pub struct CeremonySubmissionOwner(SubmittedCeremonyOwner);
+
+impl SubmittedLocalOperationOwner {
+    fn submit(
+        _app_core: Arc<RwLock<AppCore>>,
+        _tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        let publisher = TuiSubmittedOperationPublisher { tx };
+        Self(block_on(LocalTerminalSubmission::submit(
+            publisher,
+            operation_id,
+            kind,
+            next_owned_operation_instance_id,
+        )))
+    }
+
+    async fn succeed(self) {
+        self.0.succeed(None).await;
     }
 
     async fn fail(self, detail: impl Into<String>) {
@@ -256,47 +277,111 @@ impl SubmittedOperationOwner {
         self.fail_with(error).await;
     }
 
-    async fn fail_with(mut self, error: SemanticOperationError) {
-        self.settled = true;
-        let status = SemanticOperationStatus::failed(self.kind, error.clone());
-        if !send_ui_update_required(
-            &self.tx,
-            authoritative_operation_status_update(
-                self.operation_id.clone(),
-                Some(self.instance_id.clone()),
-                None,
-                status,
-            ),
-        )
-        .await
-        {
-            tracing::warn!(
-                operation_id = %self.operation_id.0,
-                instance_id = %self.instance_id.0,
-                "terminal failure delivery failed: UI update channel closed"
-            );
-        }
+    async fn fail_with(self, error: SemanticOperationError) {
+        self.0.fail(error).await;
+    }
+
+    fn harness_handle(&self) -> HarnessUiOperationHandle {
+        HarnessUiOperationHandle::new(self.0.operation_id().clone(), self.0.instance_id().clone())
+    }
+
+    #[cfg(test)]
+    #[cfg(test)]
+    fn instance_id(&self) -> &OperationInstanceId {
+        self.0.instance_id()
+    }
+}
+
+impl SubmittedWorkflowOperationOwner {
+    fn submit(
+        _app_core: Arc<RwLock<AppCore>>,
+        _tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        let publisher = TuiSubmittedOperationPublisher { tx };
+        Self(block_on(WorkflowHandoffSubmission::submit(
+            publisher,
+            operation_id,
+            kind,
+            next_owned_operation_instance_id,
+        )))
     }
 
     fn handoff_to_app_workflow(
-        mut self,
+        self,
         scope: SemanticOperationTransferScope,
     ) -> SemanticOperationTransfer {
-        self.settled = true;
+        let release = self.0.handoff_to_workflow();
+        let operation_id = release.operation_id().clone();
+        let instance_id = release.instance_id().clone();
+        let kind = release.kind();
         SemanticOperationTransfer {
-            prior_owner: self.owner,
-            new_owner: SemanticOperationOwner::AppWorkflow,
-            operation_id: self.operation_id.clone(),
-            instance_id: self.instance_id.clone(),
-            kind: self.kind,
-            protocol: SemanticOwnerProtocol::CANONICAL,
+            release,
+            operation_id,
+            instance_id,
+            kind,
             scope,
             result: SemanticOperationTransferResult::Relinquished,
         }
     }
 
     fn harness_handle(&self) -> HarnessUiOperationHandle {
-        HarnessUiOperationHandle::new(self.operation_id.clone(), self.instance_id.clone())
+        HarnessUiOperationHandle::new(self.0.operation_id().clone(), self.0.instance_id().clone())
+    }
+
+    #[cfg(test)]
+    fn instance_id(&self) -> &OperationInstanceId {
+        self.0.instance_id()
+    }
+}
+
+impl SubmittedCeremonyOwner {
+    fn submit(
+        _app_core: Arc<RwLock<AppCore>>,
+        _tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        let publisher = TuiSubmittedOperationPublisher { tx };
+        Self {
+            inner: block_on(CeremonyMonitorHandoffSubmission::submit(
+                publisher,
+                operation_id,
+                kind,
+                next_owned_operation_instance_id,
+            )),
+        }
+    }
+
+    fn harness_handle(&self) -> HarnessUiOperationHandle {
+        HarnessUiOperationHandle::new(
+            self.inner.operation_id().clone(),
+            self.inner.instance_id().clone(),
+        )
+    }
+
+    async fn fail_with(self, error: SemanticOperationError) {
+        self.inner.fail(error).await;
+    }
+
+    async fn fail(self, detail: impl Into<String>) {
+        let error = SemanticOperationError::new(
+            SemanticFailureDomain::Command,
+            SemanticFailureCode::InternalError,
+        )
+        .with_detail(detail.into());
+        self.fail_with(error).await;
+    }
+
+    async fn monitor_started(self) {
+        let _ = self.inner.monitor_started(None).await;
+    }
+
+    async fn cancel(self) {
+        let _ = self.inner.cancel().await;
     }
 }
 
@@ -308,7 +393,7 @@ impl LocalTerminalOperationOwner {
         operation_id: OperationId,
         kind: SemanticOperationKind,
     ) -> Self {
-        Self(SubmittedOperationOwner::submit_local_terminal(
+        Self(SubmittedLocalOperationOwner::submit(
             app_core,
             tasks,
             tx,
@@ -322,7 +407,7 @@ impl LocalTerminalOperationOwner {
     }
 
     pub(crate) fn ui_update_instance_id(&self) -> Option<OperationInstanceId> {
-        Some(self.0.instance_id.clone())
+        Some(self.0 .0.instance_id().clone())
     }
 
     pub(crate) async fn succeed(self) {
@@ -331,6 +416,10 @@ impl LocalTerminalOperationOwner {
 
     pub(crate) async fn fail(self, detail: impl Into<String>) {
         self.0.fail(detail).await;
+    }
+
+    pub(crate) async fn fail_with(self, error: SemanticOperationError) {
+        self.0.fail_with(error).await;
     }
 }
 
@@ -342,7 +431,7 @@ impl WorkflowHandoffOperationOwner {
         operation_id: OperationId,
         kind: SemanticOperationKind,
     ) -> Self {
-        Self(SubmittedOperationOwner::submit_for_app_handoff(
+        Self(SubmittedWorkflowOperationOwner::submit(
             app_core,
             tasks,
             tx,
@@ -356,7 +445,7 @@ impl WorkflowHandoffOperationOwner {
     }
 
     pub(crate) fn workflow_instance_id(&self) -> Option<OperationInstanceId> {
-        Some(self.0.instance_id.clone())
+        Some(self.0 .0.instance_id().clone())
     }
 
     pub(crate) fn handoff_to_app_workflow(
@@ -364,6 +453,39 @@ impl WorkflowHandoffOperationOwner {
         scope: SemanticOperationTransferScope,
     ) -> SemanticOperationTransfer {
         self.0.handoff_to_app_workflow(scope)
+    }
+}
+
+impl CeremonySubmissionOwner {
+    pub(crate) fn submit(
+        app_core: Arc<RwLock<AppCore>>,
+        tasks: Arc<UiTaskOwner>,
+        tx: UiUpdateSender,
+        operation_id: OperationId,
+        kind: SemanticOperationKind,
+    ) -> Self {
+        Self(SubmittedCeremonyOwner::submit(
+            app_core,
+            tasks,
+            tx,
+            operation_id,
+            kind,
+        ))
+    }
+
+    pub(crate) async fn monitor_started(self) {
+        self.0.monitor_started().await;
+    }
+
+    pub(crate) fn harness_handle(&self) -> HarnessUiOperationHandle {
+        self.0.harness_handle()
+    }
+
+    pub(crate) async fn fail(self, detail: impl Into<String>) {
+        self.0.fail(detail).await;
+    }
+    pub(crate) async fn cancel(self) {
+        self.0.cancel().await;
     }
 }
 
@@ -380,37 +502,57 @@ impl SemanticOperationTransfer {
     pub(crate) fn kind(&self) -> SemanticOperationKind {
         self.kind
     }
-}
 
-impl Drop for SubmittedOperationOwner {
-    fn drop(&mut self) {
-        if self.settled {
-            return;
-        }
-
-        let detail =
-            "semantic operation owner dropped before terminal publication or explicit handoff"
-                .to_string();
-        let error = SemanticOperationError::new(
-            SemanticFailureDomain::Command,
-            SemanticFailureCode::InternalError,
-        )
-        .with_detail(detail);
-        let status = SemanticOperationStatus::failed(self.kind, error);
-
-        // Synchronous try_send — works during teardown without a task spawner.
-        let update = authoritative_operation_status_update(
-            self.operation_id.clone(),
-            Some(self.instance_id.clone()),
-            None,
-            status,
-        );
-        if self.tx.try_send(update).is_err() {
-            tracing::warn!(
-                operation_id = %self.operation_id.0,
-                instance_id = %self.instance_id.0,
-                "dropped-owner failure delivery failed: UI update channel full or closed"
-            );
+    pub(crate) async fn run_workflow<T, Fut>(
+        self,
+        app_core: Arc<RwLock<AppCore>>,
+        tx: UiUpdateSender,
+        panic_context: &'static str,
+        workflow: Fut,
+    ) -> Result<T, SubmittedOperationWorkflowError>
+    where
+        Fut: Future<Output = WorkflowTerminalOutcome<T>>,
+    {
+        match self.release.run_workflow(panic_context, workflow).await {
+            Ok(outcome) => {
+                if let Err(detail) = apply_handed_off_terminal_status(
+                    &app_core,
+                    &tx,
+                    self.operation_id,
+                    self.instance_id,
+                    self.kind,
+                    outcome.terminal,
+                )
+                .await
+                {
+                    return Err(SubmittedOperationWorkflowError::Protocol(detail));
+                }
+                outcome
+                    .result
+                    .map_err(SubmittedOperationWorkflowError::Workflow)
+            }
+            Err(detail) => {
+                let _ = apply_handed_off_terminal_status(
+                    &app_core,
+                    &tx,
+                    self.operation_id,
+                    self.instance_id,
+                    self.kind,
+                    Some(WorkflowTerminalStatus {
+                        causality: None,
+                        status: SemanticOperationStatus::failed(
+                            self.kind,
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Command,
+                                SemanticFailureCode::InternalError,
+                            )
+                            .with_detail(detail.clone()),
+                        ),
+                    }),
+                )
+                .await;
+                Err(SubmittedOperationWorkflowError::Panicked(detail))
+            }
         }
     }
 }
@@ -478,7 +620,7 @@ mod tests {
         Arc<RwLock<AppCore>>,
         Arc<UiTaskOwner>,
         mpsc::Receiver<UiUpdate>,
-        SubmittedOperationOwner,
+        SubmittedLocalOperationOwner,
     ) {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
@@ -486,7 +628,7 @@ mod tests {
         init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
-        let owner = SubmittedOperationOwner::submit_local_terminal(
+        let owner = SubmittedLocalOperationOwner::submit(
             app_core.clone(),
             tasks.clone(),
             tx,
@@ -502,7 +644,7 @@ mod tests {
         Arc<RwLock<AppCore>>,
         Arc<UiTaskOwner>,
         mpsc::Receiver<UiUpdate>,
-        SubmittedOperationOwner,
+        SubmittedWorkflowOperationOwner,
     ) {
         let app_core = Arc::new(RwLock::new(
             AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
@@ -510,7 +652,7 @@ mod tests {
         init_signals_for_test(&app_core).await;
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, rx) = mpsc::channel(8);
-        let owner = SubmittedOperationOwner::submit_for_app_handoff(
+        let owner = SubmittedWorkflowOperationOwner::submit(
             app_core.clone(),
             tasks.clone(),
             tx,
@@ -640,7 +782,7 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        let owner = SubmittedOperationOwner::submit_for_app_handoff(
+        let owner = SubmittedWorkflowOperationOwner::submit(
             app_core.clone(),
             tasks.clone(),
             tx,
@@ -705,7 +847,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         let tx_best_effort = tx.clone();
 
-        let owner = SubmittedOperationOwner::submit_local_terminal(
+        let owner = SubmittedLocalOperationOwner::submit(
             app_core,
             tasks.clone(),
             tx,
@@ -789,14 +931,14 @@ mod tests {
         let operation_id = OperationId::invitation_accept();
 
         // First owner: submit and handoff to app workflow.
-        let first_owner = SubmittedOperationOwner::submit_for_app_handoff(
+        let first_owner = SubmittedWorkflowOperationOwner::submit(
             app_core.clone(),
             tasks.clone(),
             tx.clone(),
             operation_id.clone(),
             SemanticOperationKind::AcceptPendingChannelInvitation,
         );
-        let first_instance_id = first_owner.instance_id.clone();
+        let first_instance_id = first_owner.instance_id().clone();
         let _transfer = first_owner.handoff_to_app_workflow(
             SemanticOperationTransferScope::AcceptPendingChannelInvitation,
         );
@@ -819,14 +961,14 @@ mod tests {
         }
 
         // Second owner: same operation_id but gets a different instance_id.
-        let second_owner = SubmittedOperationOwner::submit_for_app_handoff(
+        let second_owner = SubmittedWorkflowOperationOwner::submit(
             app_core,
             tasks.clone(),
             tx,
             operation_id,
             SemanticOperationKind::AcceptPendingChannelInvitation,
         );
-        let second_instance_id = second_owner.instance_id.clone();
+        let second_instance_id = second_owner.instance_id().clone();
 
         // The two submissions must have distinct instance_ids.
         assert_ne!(
@@ -896,7 +1038,7 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        let owner = SubmittedOperationOwner::submit_for_app_handoff(
+        let owner = SubmittedWorkflowOperationOwner::submit(
             app_core,
             tasks.clone(),
             tx,
@@ -907,11 +1049,6 @@ mod tests {
         let transfer =
             owner.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
-        assert_eq!(
-            transfer.prior_owner,
-            SemanticOperationOwner::FrontendCallback
-        );
-        assert_eq!(transfer.new_owner, SemanticOperationOwner::AppWorkflow);
         assert_eq!(
             transfer.kind,
             SemanticOperationKind::AcceptContactInvitation
@@ -952,7 +1089,7 @@ mod tests {
         let tasks = Arc::new(UiTaskOwner::new());
         let (tx, mut rx) = mpsc::channel(8);
 
-        SubmittedOperationOwner::submit_local_terminal(
+        SubmittedLocalOperationOwner::submit(
             app_core.clone(),
             tasks.clone(),
             tx,

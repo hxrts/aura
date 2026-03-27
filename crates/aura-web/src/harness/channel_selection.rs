@@ -60,11 +60,17 @@ pub(crate) async fn selected_channel_binding(
     controller: &UiController,
 ) -> Result<ChannelBindingWitness, SelectionError> {
     let selection = selected_channel_id(controller)?;
-    let channel_id = selection.channel_id().clone();
+    authoritative_channel_binding(controller, selection.channel_id()).await
+}
+
+pub(crate) async fn authoritative_channel_binding(
+    controller: &UiController,
+    channel_id: &ChannelId,
+) -> Result<ChannelBindingWitness, SelectionError> {
     let context_id = {
         let core = controller.app_core().read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
-        chat.channel(&channel_id)
+        chat.channel(channel_id)
             .and_then(|channel| channel.context_id)
     }
     .ok_or_else(|| SelectionError::MissingSelectedChannelContext(channel_id.to_string()))?;

@@ -1,5 +1,22 @@
 use super::super::shell::submit_runtime_chat_input;
 use super::*;
+use crate::semantic_lifecycle::{
+    UiLocalOperationOwner, UiOperationTransferScope, UiWorkflowHandoffOwner,
+};
+use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
+use aura_app::ui::workflows::messaging::handoff::{RetryChatMessageRequest, SendChatTarget};
+use aura_app::ui_contract::{
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind,
+};
+
+fn command_failure(detail: impl Into<String>) -> SemanticOperationError {
+    SemanticOperationError::new(
+        SemanticFailureDomain::Command,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into())
+}
 
 #[allow(non_snake_case)]
 pub(super) fn ChatScreen(
@@ -30,10 +47,19 @@ pub(super) fn ChatScreen(
     let composer_input_controller = controller.clone();
     let composer_keydown_controller = controller.clone();
     let send_message_controller = controller.clone();
+    let retry_message_controller = controller.clone();
+    let close_channel_controller = controller.clone();
     let exit_insert_mode_controller = controller.clone();
     let composer_value = composer_text.clone();
     let composer_active_channel = active_channel.clone();
     let composer_submit_text = composer_text.clone();
+    let retryable_message = runtime
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.is_own && message.can_retry)
+        .cloned();
+    let can_close_channel = !NOTE_TO_SELF_CHANNEL_NAME.eq_ignore_ascii_case(&active_channel);
     let runtime_channels = if runtime.loaded {
         runtime.channels.clone()
     } else {
@@ -91,10 +117,61 @@ pub(super) fn ChatScreen(
                     }
                     UiCardFooter {
                         extra_class: None,
-                        div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
-                            UiButton {
-                                id: Some(
-                                    ControlId::ChatNewGroupButton
+                            div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
+                                if can_close_channel {
+                                    UiButton {
+                                        id: Some(
+                                            ControlId::ChatCloseChannelButton
+                                                .web_dom_id()
+                                                .required_dom_id("ControlId::ChatCloseChannelButton must define a web DOM id")
+                                                .to_string(),
+                                        ),
+                                        label: "Close Channel".to_string(),
+                                        variant: ButtonVariant::Secondary,
+                                        onclick: {
+                                            let controller = close_channel_controller.clone();
+                                            let channel_name = active_channel.clone();
+                                            move |_| {
+                                                let controller_for_click = controller.clone();
+                                                let channel_name_for_click = channel_name.clone();
+                                                let app_core = controller_for_click.app_core().clone();
+                                                let operation = UiLocalOperationOwner::submit(
+                                                    controller_for_click.clone(),
+                                                    OperationId::close_channel(),
+                                                    SemanticOperationKind::CloseChannel,
+                                                );
+                                                spawn_ui(async move {
+                                                    let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
+                                                        Ok(value) => value,
+                                                        Err(error) => {
+                                                            operation.fail_with(command_failure(error.to_string()));
+                                                            controller_for_click.runtime_error_toast(error.to_string());
+                                                            return;
+                                                        }
+                                                    };
+                                                    match messaging_workflows::close_channel_by_name(
+                                                        &app_core,
+                                                        &channel_name_for_click,
+                                                        timestamp_ms,
+                                                    ).await {
+                                                        Ok(()) => {
+                                                            operation.succeed(None);
+                                                            controller_for_click.info_toast("Channel closed");
+                                                        }
+                                                        Err(error) => {
+                                                            operation.fail_with(command_failure(error.to_string()));
+                                                            controller_for_click.runtime_error_toast(error.to_string());
+                                                        }
+                                                    }
+                                                });
+                                                render_tick.set(render_tick() + 1);
+                                            }
+                                        }
+                                    }
+                                }
+                                UiButton {
+                                    id: Some(
+                                        ControlId::ChatNewGroupButton
                                         .web_dom_id()
                                         .required_dom_id("ControlId::ChatNewGroupButton must define a web DOM id")
                                         .to_string(),
@@ -197,6 +274,71 @@ pub(super) fn ChatScreen(
                                 }
                                 div {
                                     class: "flex h-full min-w-[4.5rem] flex-col items-end justify-end gap-1",
+                                    if let Some(retryable_message) = retryable_message.clone() {
+                                        UiButton {
+                                            id: Some(
+                                                ControlId::ChatRetryMessageButton
+                                                    .web_dom_id()
+                                                    .required_dom_id("ControlId::ChatRetryMessageButton must define a web DOM id")
+                                                    .to_string()
+                                            ),
+                                            label: "Retry".to_string(),
+                                            variant: ButtonVariant::Secondary,
+                                            onclick: {
+                                                let controller = retry_message_controller.clone();
+                                                let active_channel = active_channel.clone();
+                                                move |_| {
+                                                    let controller_for_click = controller.clone();
+                                                    let active_channel_for_click = active_channel.clone();
+                                                    let retry_message_for_click = retryable_message.clone();
+                                                    let app_core = controller_for_click.app_core().clone();
+                                                    let operation = UiWorkflowHandoffOwner::submit(
+                                                        controller_for_click.clone(),
+                                                        OperationId::retry_message(),
+                                                        SemanticOperationKind::RetryChatMessage,
+                                                    );
+                                                    let workflow_instance_id = operation.workflow_instance_id();
+                                                    let transfer = operation.handoff_to_app_workflow(
+                                                        UiOperationTransferScope::SendChatMessage,
+                                                    );
+                                                    spawn_ui(async move {
+                                                        let target = retry_message_for_click
+                                                            .channel_id
+                                                            .parse::<aura_core::ChannelId>()
+                                                            .map(SendChatTarget::ChannelId)
+                                                            .unwrap_or_else(|_| SendChatTarget::ChannelName(active_channel_for_click));
+                                                        match transfer
+                                                            .run_workflow(
+                                                                controller_for_click.clone(),
+                                                                "retry_chat_message",
+                                                                messaging_workflows::handoff::retry_chat_message(
+                                                                    &app_core,
+                                                                    RetryChatMessageRequest {
+                                                                        target,
+                                                                        content: retry_message_for_click.content.clone(),
+                                                                        operation_instance_id: workflow_instance_id,
+                                                                    },
+                                                                ),
+                                                            )
+                                                            .await
+                                                        {
+                                                            Ok(_) => controller_for_click.info_toast("Message retry queued"),
+                                                            Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                                                                controller_for_click.runtime_error_toast(error.to_string());
+                                                            }
+                                                            Err(
+                                                                SubmittedOperationWorkflowError::Protocol(detail)
+                                                                | SubmittedOperationWorkflowError::Panicked(detail),
+                                                            ) => {
+                                                                controller_for_click.runtime_error_toast(detail);
+                                                            }
+                                                        }
+                                                    });
+                                                    render_tick.set(render_tick() + 1);
+                                                }
+                                            }
+                                        }
+                                    }
                                     UiButton {
                                         id: Some(
                                             ControlId::ChatSendMessageButton

@@ -1,4 +1,23 @@
 use super::*;
+use crate::semantic_lifecycle::{
+    UiLocalOperationOwner, UiOperationTransferScope, UiWorkflowHandoffOwner,
+};
+use aura_app::ui::workflows::slash_commands::{
+    self as slash_command_workflows, SlashCommandTerminalSettlement, SlashCommandToastKind,
+};
+use aura_app::ui::workflows::strong_command::CommandResolver;
+use aura_app::ui_contract::{
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind,
+};
+
+fn command_failure(detail: impl Into<String>) -> SemanticOperationError {
+    SemanticOperationError::new(
+        SemanticFailureDomain::Command,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into())
+}
 pub(crate) fn selected_home_id_for_modal(
     runtime: &NeighborhoodRuntimeView,
     model: &UiModel,
@@ -29,288 +48,100 @@ pub(crate) fn submit_runtime_chat_input(
         return false;
     }
 
+    if !trimmed.starts_with('/') {
+        let app_core = controller.app_core().clone();
+        let controller_for_task = controller.clone();
+        let operation = UiWorkflowHandoffOwner::submit(
+            controller.clone(),
+            OperationId::send_message(),
+            SemanticOperationKind::SendChatMessage,
+        );
+        let transfer = operation.handoff_to_app_workflow(UiOperationTransferScope::SendChatMessage);
+        let content = trimmed.clone();
+
+        controller.clear_input_buffer();
+        spawn_ui(async move {
+            let result = transfer
+                .run_workflow(
+                    controller_for_task.clone(),
+                    "submit_runtime_chat_input send_chat_message",
+                    messaging_workflows::handoff::send_chat_message(
+                        &app_core,
+                        messaging_workflows::handoff::SendChatMessageRequest {
+                            target: messaging_workflows::handoff::SendChatTarget::ChannelName(
+                                channel_name.clone(),
+                            ),
+                            content: content.clone(),
+                            operation_instance_id: None,
+                        },
+                    ),
+                )
+                .await;
+
+            match result {
+                Ok(_) => controller_for_task.push_runtime_fact(RuntimeFact::MessageCommitted {
+                    channel: ChannelFactKey::named(channel_name.clone()),
+                    content: content.clone(),
+                }),
+                Err(error) => {
+                    controller_for_task.push_log(&format!("chat_command: error {error}"));
+                    controller_for_task.runtime_error_toast(error.to_string());
+                }
+            }
+            rerender();
+        });
+        return true;
+    }
+
     let app_core = controller.app_core().clone();
     let controller_for_task = controller.clone();
     spawn_ui(async move {
-        let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
-            Ok(value) => value,
-            Err(error) => {
-                controller_for_task.runtime_error_toast(error.to_string());
-                rerender();
-                return;
-            }
+        let raw = trimmed.clone();
+        let actor = {
+            let core = app_core.read().await;
+            core.runtime()
+                .map(|runtime| runtime.authority_id())
+                .or_else(|| core.authority().copied())
         };
-
-        let result: Result<Option<String>, aura_core::AuraError> = if let Some(command_input) =
-            trimmed.strip_prefix('/')
+        let resolver = CommandResolver::default();
+        let report = slash_command_workflows::prepare_and_execute(
+            &resolver,
+            &app_core,
+            &raw,
+            Some(&channel_name),
+            actor,
+        )
+        .await;
+        if let Some(semantic) = report
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.semantic_operation.clone())
         {
-            let raw = format!("/{command_input}");
-            match parse_chat_command(&raw) {
-                Ok(ChatCommand::Join { channel }) => {
-                    controller_for_task.push_log(&format!("chat_join: start channel={channel}"));
-                    messaging_workflows::join_channel_by_name(&app_core, &channel)
-                        .await
-                        .map(|channel_id| {
-                            controller_for_task.select_channel_by_id(&channel_id);
-                            controller_for_task.push_runtime_fact(RuntimeFact::ChannelJoined {
-                                channel: Some(ChannelFactKey::identified(channel_id.clone())),
-                                source: Some("join_command".to_string()),
-                            });
-                            controller_for_task.push_log(&format!(
-                                "chat_join: success channel={channel} selected_id={channel_id}"
-                            ));
-                            Some(format!("joined #{}", channel.trim_start_matches('#')))
-                        })
-                }
-                Ok(ChatCommand::Leave) => {
-                    messaging_workflows::leave_channel_by_name(&app_core, &channel_name)
-                        .await
-                        .map(|_| Some("left channel".to_string()))
-                }
-                Ok(ChatCommand::Topic { text }) => messaging_workflows::set_topic_by_name(
-                    &app_core,
-                    &channel_name,
-                    &text,
-                    timestamp_ms,
-                )
-                .await
-                .map(|_| Some("topic updated".to_string())),
-                Ok(ChatCommand::Me { action }) => messaging_workflows::send_action_by_name(
-                    &app_core,
-                    &channel_name,
-                    &action,
-                    timestamp_ms,
-                )
-                .await
-                .map(|_| Some("action sent".to_string())),
-                Ok(ChatCommand::Msg { target, text }) => messaging_workflows::send_direct_message(
-                    &app_core,
-                    &target,
-                    &text,
-                    timestamp_ms,
-                )
-                .await
-                .map(|_| Some("direct message sent".to_string())),
-                Ok(ChatCommand::Nick { name }) => {
-                    settings_workflows::update_nickname(&app_core, name)
-                        .await
-                        .map(|_| Some("nickname updated".to_string()))
-                }
-                Ok(ChatCommand::Invite { target }) => messaging_workflows::invite_user_to_channel(
-                    &app_core,
-                    &target,
-                    &channel_name,
-                    None,
-                    None,
-                )
-                .await
-                .map(|_| Some("invitation sent".to_string())),
-                Ok(ChatCommand::Who) => {
-                    query_workflows::list_participants(&app_core, &channel_name)
-                        .await
-                        .map(|participants| {
-                            Some(if participants.is_empty() {
-                                "No participants".to_string()
-                            } else {
-                                participants.join(", ")
-                            })
-                        })
-                }
-                Ok(ChatCommand::Whois { target }) => {
-                    query_workflows::get_user_info(&app_core, &target)
-                        .await
-                        .map(|contact| {
-                            let id = contact.id.to_string();
-                            let name = if !contact.nickname.is_empty() {
-                                contact.nickname
-                            } else if let Some(value) = contact.nickname_suggestion {
-                                value
-                            } else {
-                                id.chars().take(8).collect::<String>() + "..."
-                            };
-                            Some(format!("User: {name} ({id})"))
-                        })
-                }
-                Ok(ChatCommand::Help { command }) => Ok(Some(match command {
-                    Some(command_name) => {
-                        if let Some(help) = command_help(&command_name) {
-                            format!(
-                                "/{name} {syntax} — {description}",
-                                name = help.name,
-                                syntax = help.syntax,
-                                description = help.description
-                            )
-                        } else {
-                            format!("Unknown command: {command_name}")
-                        }
-                    }
-                    None => {
-                        let commands = all_command_help()
-                            .into_iter()
-                            .take(8)
-                            .map(|help| format!("/{}", help.name))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("Common commands: {commands}. Use /help <command> for details.")
-                    }
-                })),
-                Ok(ChatCommand::Neighborhood { name }) => {
-                    context_workflows::create_neighborhood(&app_core, name)
-                        .await
-                        .map(|_| Some("neighborhood updated".to_string()))
-                }
-                Ok(ChatCommand::NhAdd { home_id }) => {
-                    context_workflows::add_home_to_neighborhood(&app_core, &home_id)
-                        .await
-                        .map(|_| Some("home added to neighborhood".to_string()))
-                }
-                Ok(ChatCommand::NhLink { home_id }) => {
-                    context_workflows::link_home_one_hop_link(&app_core, &home_id)
-                        .await
-                        .map(|_| Some("home one-hop link linked".to_string()))
-                }
-                Ok(ChatCommand::HomeInvite { target }) => {
-                    let home_id = match context_workflows::current_home_id(&app_core).await {
-                        Ok(home_id) => home_id.to_string(),
-                        Err(error) => {
-                            controller_for_task.runtime_error_toast(error.to_string());
-                            rerender();
-                            return;
-                        }
-                    };
-                    let target_authority =
-                        match query_workflows::resolve_contact(&app_core, &target).await {
-                            Ok(contact) => contact.id,
-                            Err(_) => match target.parse::<AuthorityId>() {
-                                Ok(authority_id) => authority_id,
-                                Err(error) => {
-                                    controller_for_task.runtime_error_toast(format!(
-                                        "Invalid authority id: {error}"
-                                    ));
-                                    rerender();
-                                    return;
-                                }
-                            },
-                        };
-                    invitation_workflows::create_channel_invitation(
-                        &app_core,
-                        target_authority,
-                        home_id,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map(|_| Some("home invitation sent".to_string()))
-                }
-                Ok(ChatCommand::HomeAccept) => {
-                    invitation_workflows::accept_pending_home_invitation(&app_core)
-                        .await
-                        .map(|_| Some("home invitation accepted".to_string()))
-                }
-                Ok(ChatCommand::Kick { target, reason }) => moderation_workflows::kick_user(
-                    &app_core,
-                    &channel_name,
-                    &target,
-                    reason.as_deref(),
-                    timestamp_ms,
-                )
-                .await
-                .map(|_| Some("kick applied".to_string())),
-                Ok(ChatCommand::Ban { target, reason }) => moderation_workflows::ban_user(
-                    &app_core,
-                    Some(&channel_name),
-                    &target,
-                    reason.as_deref(),
-                    timestamp_ms,
-                )
-                .await
-                .map(|_| Some("ban applied".to_string())),
-                Ok(ChatCommand::Unban { target }) => {
-                    moderation_workflows::unban_user(&app_core, Some(&channel_name), &target)
-                        .await
-                        .map(|_| Some("unban applied".to_string()))
-                }
-                Ok(ChatCommand::Mute { target, duration }) => moderation_workflows::mute_user(
-                    &app_core,
-                    Some(&channel_name),
-                    &target,
-                    duration.map(|value| value.as_secs()),
-                    timestamp_ms,
-                )
-                .await
-                .map(|_| Some("mute applied".to_string())),
-                Ok(ChatCommand::Unmute { target }) => {
-                    moderation_workflows::unmute_user(&app_core, Some(&channel_name), &target)
-                        .await
-                        .map(|_| Some("unmute applied".to_string()))
-                }
-                Ok(ChatCommand::Pin { message_id }) => {
-                    moderation_workflows::pin_message(&app_core, &message_id)
-                        .await
-                        .map(|_| Some("message pinned".to_string()))
-                }
-                Ok(ChatCommand::Unpin { message_id }) => {
-                    moderation_workflows::unpin_message(&app_core, &message_id)
-                        .await
-                        .map(|_| Some("message unpinned".to_string()))
-                }
-                Ok(ChatCommand::Op { target }) => {
-                    moderator_workflows::grant_moderator(&app_core, Some(&channel_name), &target)
-                        .await
-                        .map(|_| Some("moderator granted".to_string()))
-                }
-                Ok(ChatCommand::Deop { target }) => {
-                    moderator_workflows::revoke_moderator(&app_core, Some(&channel_name), &target)
-                        .await
-                        .map(|_| Some("moderator revoked".to_string()))
-                }
-                Ok(ChatCommand::Mode { channel, flags }) => {
-                    settings_workflows::set_channel_mode(&app_core, channel, flags)
-                        .await
-                        .map(|_| Some("channel mode updated".to_string()))
-                }
-                Err(error) => Err(aura_core::AuraError::invalid(error.to_string())),
+            let owner = crate::semantic_lifecycle::UiLocalOperationOwner::submit(
+                controller_for_task.clone(),
+                semantic.operation_id,
+                semantic.kind,
+            );
+            match report.feedback.terminal_settlement.clone() {
+                Some(SlashCommandTerminalSettlement::Succeeded) => owner.succeed(None),
+                Some(SlashCommandTerminalSettlement::Failed(error)) => owner.fail_with(error),
+                None => {}
             }
-        } else {
-            messaging_workflows::send_message_by_name(
-                &app_core,
-                &channel_name,
-                &trimmed,
-                timestamp_ms,
-            )
-            .await
-            .map(|_| {
-                controller_for_task.push_runtime_fact(RuntimeFact::MessageCommitted {
-                    channel: ChannelFactKey::named(channel_name.clone()),
-                    content: trimmed.clone(),
-                });
-                None
-            })
-        };
+        }
+        let feedback = report.feedback;
 
-        match result {
-            Ok(message) => {
-                controller_for_task.clear_input_buffer();
-                if let Some(message) = message {
-                    controller_for_task.push_log(&format!("chat_command: ok message={message}"));
-                    controller_for_task.info_toast(message);
-                }
-            }
-            Err(error) => {
-                controller_for_task.push_log(&format!("chat_command: error {error}"));
-                controller_for_task.runtime_error_toast(error.to_string());
+        controller_for_task.clear_input_buffer();
+        controller_for_task.push_log(&format!("chat_command: {}", feedback.message));
+        match feedback.toast_kind {
+            SlashCommandToastKind::Success => controller_for_task.info_toast(feedback.message),
+            SlashCommandToastKind::Info => controller_for_task.info_toast(feedback.message),
+            SlashCommandToastKind::Error => {
+                controller_for_task.runtime_error_toast(feedback.message)
             }
         }
         rerender();
     });
 
-    controller.clear_input_buffer();
     true
 }
 
@@ -328,12 +159,23 @@ pub(crate) fn handle_runtime_character_shortcut(
     match (model.screen, key) {
         (ScreenId::Neighborhood, "m") => {
             let app_core = controller.app_core().clone();
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::create_neighborhood(),
+                SemanticOperationKind::CreateNeighborhood,
+            );
             spawn_ui(async move {
                 match context_workflows::create_neighborhood(&app_core, "Neighborhood".to_string())
                     .await
                 {
-                    Ok(_) => controller.info_toast("Neighborhood ready"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.info_toast("Neighborhood ready");
+                    }
+                    Err(error) => {
+                        operation.fail_with(command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender();
             });
@@ -346,10 +188,21 @@ pub(crate) fn handle_runtime_character_shortcut(
                 return true;
             };
             let app_core = controller.app_core().clone();
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::add_home_to_neighborhood(),
+                SemanticOperationKind::AddHomeToNeighborhood,
+            );
             spawn_ui(async move {
                 match context_workflows::add_home_to_neighborhood(&app_core, &home_id).await {
-                    Ok(_) => controller.info_toast("Home added to neighborhood"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.info_toast("Home added to neighborhood");
+                    }
+                    Err(error) => {
+                        operation.fail_with(command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender();
             });
@@ -362,10 +215,21 @@ pub(crate) fn handle_runtime_character_shortcut(
                 return true;
             };
             let app_core = controller.app_core().clone();
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::link_home_one_hop_link(),
+                SemanticOperationKind::LinkHomeOneHopLink,
+            );
             spawn_ui(async move {
                 match context_workflows::link_home_one_hop_link(&app_core, &home_id).await {
-                    Ok(_) => controller.info_toast("Direct one-hop link created"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.info_toast("Direct one-hop link created");
+                    }
+                    Err(error) => {
+                        operation.fail_with(command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender();
             });

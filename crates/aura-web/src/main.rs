@@ -166,7 +166,7 @@ mod tests {
             .find("controller.set_account_setup_state(account_ready, \"\", None);")
             .unwrap_or_else(|| panic!("missing runtime bootstrap account gate"));
         let runtime_install_index = runtime_branch
-            .find("install_harness_instrumentation(controller.clone(), generation_id);")
+            .find("install_harness_instrumentation(")
             .unwrap_or_else(|| panic!("missing runtime bootstrap harness install"));
         assert!(
             runtime_gate_index < runtime_install_index,
@@ -185,7 +185,7 @@ mod tests {
             .find("controller.set_account_setup_state(false, \"\", None);")
             .unwrap_or_else(|| panic!("missing shell bootstrap account gate"));
         let shell_install_index = shell_branch
-            .find("install_harness_instrumentation(controller.clone(), generation_id);")
+            .find("install_harness_instrumentation(")
             .unwrap_or_else(|| panic!("missing shell bootstrap harness install"));
         assert!(
             shell_gate_index < shell_install_index,

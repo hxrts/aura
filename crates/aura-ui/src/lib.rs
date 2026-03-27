@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 pub mod app;
+pub mod channel_selection;
 pub mod clipboard;
 pub mod components;
 pub mod dom_ids;
@@ -8,6 +9,7 @@ pub mod keyboard;
 pub mod model;
 pub mod operations;
 pub(crate) mod readiness_owner;
+pub mod semantic_lifecycle;
 pub mod snapshot;
 pub mod task_owner;
 

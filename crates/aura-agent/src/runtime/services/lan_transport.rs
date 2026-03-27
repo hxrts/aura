@@ -10,6 +10,27 @@ cfg_if! {
         use std::sync::Arc;
         use tokio::sync::RwLock;
 
+        const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+
+        fn harness_browser_transport_addr() -> Option<String> {
+            let window = web_sys::window()?;
+            let search = window.location().search().ok()?;
+            let query = search.strip_prefix('?').unwrap_or(&search);
+            let harness_mode = query.split('&').any(|pair: &str| {
+                pair.split_once('=')
+                    .is_some_and(|(key, value)| key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty())
+            });
+            if !harness_mode {
+                return None;
+            }
+
+            let host = window.location().host().ok()?;
+            if host.is_empty() {
+                return None;
+            }
+            Some(host)
+        }
+
         #[derive(Debug)]
         struct LanTransportShared {
             metrics: Arc<RwLock<LanTransportMetrics>>,
@@ -43,9 +64,12 @@ cfg_if! {
             /// WASM runtimes cannot bind TCP listeners directly, so this returns an empty
             /// transport placeholder.
             pub async fn bind(_bind_addr: &str) -> Result<Self, String> {
+                let websocket_addrs = harness_browser_transport_addr()
+                    .into_iter()
+                    .collect::<Vec<_>>();
                 Ok(Self {
                     advertised_addrs: Vec::new(),
-                    websocket_addrs: Vec::new(),
+                    websocket_addrs,
                     shared: Arc::new(LanTransportShared {
                         metrics: Arc::new(RwLock::new(LanTransportMetrics::default())),
                     }),

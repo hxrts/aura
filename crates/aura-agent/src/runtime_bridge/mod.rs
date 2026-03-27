@@ -90,6 +90,7 @@ use invitation::convert_invitation_to_bridge_info;
 const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 const FACT_SYNC_REQUEST_CONTENT_TYPE: &str = "application/aura-fact-sync-request";
 const FACT_SYNC_RESPONSE_CONTENT_TYPE: &str = "application/aura-fact-sync-response";
+const FACT_SYNC_SOCKET_TIMEOUT_MS: u64 = 750;
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
@@ -317,6 +318,43 @@ fn harness_sync_backoff_ms() -> u64 {
         .unwrap_or(DEFAULT_HARNESS_SYNC_BACKOFF_MS)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn browser_harness_page_enabled() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(search) = window.location().search() else {
+        return false;
+    };
+    let query = search.strip_prefix('?').unwrap_or(&search);
+    let harness_page = query.split('&').any(|pair: &str| {
+        pair.split_once('=')
+            .is_some_and(|(key, value)| key == "__aura_harness_instance" && !value.is_empty())
+    });
+    harness_page
+}
+
+#[cfg(target_arch = "wasm32")]
+fn is_harness_browser_mailbox_url(url: &str) -> bool {
+    if !browser_harness_page_enabled() {
+        return false;
+    }
+
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(host) = window.location().host() else {
+        return false;
+    };
+    if host.is_empty() {
+        return false;
+    }
+
+    let ws_host = format!("ws://{host}");
+    let wss_host = format!("wss://{host}");
+    url == ws_host || url == wss_host
+}
+
 /// Wrapper to implement RuntimeBridge for AuraAgent
 ///
 /// This struct wraps an Arc<AuraAgent> to provide the RuntimeBridge implementation.
@@ -422,6 +460,13 @@ impl AgentRuntimeBridge {
             format!("ws://{addr}")
         };
 
+        #[cfg(target_arch = "wasm32")]
+        if is_harness_browser_mailbox_url(&url) {
+            return Err(IntentError::network_error(format!(
+                "Harness browser mailbox transport does not support relational fact sync pull to {peer}"
+            )));
+        }
+
         let request = TransportEnvelope {
             destination: peer,
             source: self.agent.authority_id(),
@@ -438,92 +483,128 @@ impl AgentRuntimeBridge {
             IntentError::internal_error(format!("Failed to encode fact sync request: {e}"))
         })?;
 
-        #[cfg(target_arch = "wasm32")]
-        let remote_facts: Vec<RelationalFact> = run_local_ws(move || async move {
-            let mut socket = WebSocket::open(&url).map_err(|e| {
-                IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
-            })?;
-            socket.send(Message::Bytes(bytes)).await.map_err(|e| {
-                IntentError::network_error(format!("Failed to send fact sync request: {e}"))
-            })?;
+        let effects = self.agent.runtime().effects();
+        let remote_facts: Vec<RelationalFact> = execute_with_effect_timeout(
+            &effects,
+            Duration::from_millis(FACT_SYNC_SOCKET_TIMEOUT_MS),
+            || async move {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    run_local_ws(move || async move {
+                        let mut socket = WebSocket::open(&url).map_err(|e| {
+                            IntentError::network_error(format!(
+                                "Failed to open fact sync websocket {url}: {e}"
+                            ))
+                        })?;
+                        socket.send(Message::Bytes(bytes)).await.map_err(|e| {
+                            IntentError::network_error(format!(
+                                "Failed to send fact sync request: {e}"
+                            ))
+                        })?;
 
-            let response = socket.next().await.ok_or_else(|| {
-                IntentError::network_error("Fact sync websocket closed before response".to_string())
-            })?;
-            let payload = match response.map_err(|e| {
-                IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
-            })? {
-                Message::Bytes(payload) => payload,
-                _ => {
-                    return Err(IntentError::network_error(
-                        "Fact sync websocket returned non-binary payload".to_string(),
-                    ));
+                        let response = socket.next().await.ok_or_else(|| {
+                            IntentError::network_error(
+                                "Fact sync websocket closed before response".to_string(),
+                            )
+                        })?;
+                        let payload = match response.map_err(|e| {
+                            IntentError::network_error(format!(
+                                "Fact sync websocket read failed: {e}"
+                            ))
+                        })? {
+                            Message::Bytes(payload) => payload,
+                            _ => {
+                                return Err(IntentError::network_error(
+                                    "Fact sync websocket returned non-binary payload".to_string(),
+                                ));
+                            }
+                        };
+
+                        let envelope: TransportEnvelope =
+                            aura_core::util::serialization::from_slice(&payload).map_err(|e| {
+                                IntentError::internal_error(format!(
+                                    "Failed to decode fact sync response: {e}"
+                                ))
+                            })?;
+
+                        if envelope
+                            .metadata
+                            .get("content-type")
+                            .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+                        {
+                            return Err(IntentError::network_error(
+                                "Fact sync response had unexpected content type".to_string(),
+                            ));
+                        }
+
+                        aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
+                            IntentError::internal_error(format!(
+                                "Failed to decode fact sync payload: {e}"
+                            ))
+                        })
+                    })
+                    .await
                 }
-            };
 
-            let envelope: TransportEnvelope = aura_core::util::serialization::from_slice(&payload)
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to decode fact sync response: {e}"))
-                })?;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let (mut socket, _) = connect_async(&url).await.map_err(|e| {
+                        IntentError::network_error(format!(
+                            "Failed to open fact sync websocket {url}: {e}"
+                        ))
+                    })?;
+                    socket.send(Message::Binary(bytes)).await.map_err(|e| {
+                        IntentError::network_error(format!("Failed to send fact sync request: {e}"))
+                    })?;
 
-            if envelope
-                .metadata
-                .get("content-type")
-                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
-            {
-                return Err(IntentError::network_error(
-                    "Fact sync response had unexpected content type".to_string(),
-                ));
-            }
+                    let response = socket.next().await.ok_or_else(|| {
+                        IntentError::network_error(
+                            "Fact sync websocket closed before response".to_string(),
+                        )
+                    })?;
+                    let payload = match response.map_err(|e| {
+                        IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
+                    })? {
+                        Message::Binary(payload) => payload,
+                        _ => {
+                            return Err(IntentError::network_error(
+                                "Fact sync websocket returned non-binary payload".to_string(),
+                            ));
+                        }
+                    };
 
-            aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
-                IntentError::internal_error(format!("Failed to decode fact sync payload: {e}"))
-            })
-        })
-        .await?;
+                    let envelope: TransportEnvelope =
+                        aura_core::util::serialization::from_slice(&payload).map_err(|e| {
+                            IntentError::internal_error(format!(
+                                "Failed to decode fact sync response: {e}"
+                            ))
+                        })?;
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let remote_facts: Vec<RelationalFact> = {
-            let (mut socket, _) = connect_async(&url).await.map_err(|e| {
-                IntentError::network_error(format!("Failed to open fact sync websocket {url}: {e}"))
-            })?;
-            socket.send(Message::Binary(bytes)).await.map_err(|e| {
-                IntentError::network_error(format!("Failed to send fact sync request: {e}"))
-            })?;
+                    if envelope
+                        .metadata
+                        .get("content-type")
+                        .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
+                    {
+                        return Err(IntentError::network_error(
+                            "Fact sync response had unexpected content type".to_string(),
+                        ));
+                    }
 
-            let response = socket.next().await.ok_or_else(|| {
-                IntentError::network_error("Fact sync websocket closed before response".to_string())
-            })?;
-            let payload = match response.map_err(|e| {
-                IntentError::network_error(format!("Fact sync websocket read failed: {e}"))
-            })? {
-                Message::Binary(payload) => payload,
-                _ => {
-                    return Err(IntentError::network_error(
-                        "Fact sync websocket returned non-binary payload".to_string(),
-                    ));
+                    aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
+                        IntentError::internal_error(format!(
+                            "Failed to decode fact sync payload: {e}"
+                        ))
+                    })
                 }
-            };
-
-            let envelope: TransportEnvelope = aura_core::util::serialization::from_slice(&payload)
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to decode fact sync response: {e}"))
-                })?;
-
-            if envelope
-                .metadata
-                .get("content-type")
-                .map_or(true, |value| value != FACT_SYNC_RESPONSE_CONTENT_TYPE)
-            {
-                return Err(IntentError::network_error(
-                    "Fact sync response had unexpected content type".to_string(),
-                ));
-            }
-
-            aura_core::util::serialization::from_slice(&envelope.payload).map_err(|e| {
-                IntentError::internal_error(format!("Failed to decode fact sync payload: {e}"))
-            })?
-        };
+            },
+        )
+        .await
+        .map_err(|error| match error {
+            TimeoutRunError::Timeout(_) => IntentError::network_error(format!(
+                "Fact sync websocket timed out after {FACT_SYNC_SOCKET_TIMEOUT_MS}ms"
+            )),
+            TimeoutRunError::Operation(error) => error,
+        })?;
 
         tracing::info!(
             peer = %peer,
@@ -535,7 +616,6 @@ impl AgentRuntimeBridge {
             return Ok(0);
         }
 
-        let effects = self.agent.runtime().effects();
         let local = effects
             .load_committed_facts(self.agent.authority_id())
             .await
@@ -1672,7 +1752,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 };
 
                 let mut pull_error: Option<IntentError> = None;
+                #[cfg(target_arch = "wasm32")]
+                let skip_harness_browser_fact_pull = browser_harness_page_enabled();
+                #[cfg(not(target_arch = "wasm32"))]
+                let skip_harness_browser_fact_pull = false;
                 for peer in authority_peers {
+                    if skip_harness_browser_fact_pull {
+                        tracing::debug!(
+                            peer = %peer,
+                            "skipping harness browser relational fact sync pull"
+                        );
+                        continue;
+                    }
                     if let Err(error) = self.pull_remote_relational_facts(peer).await {
                         tracing::warn!(peer = %peer, error = %error, "fact sync pull failed");
                         if pull_error.is_none() {

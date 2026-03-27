@@ -422,13 +422,30 @@ impl InvitationServiceApi {
             )
             .await?;
         let invitation = prepared.invitation;
-        execute_invitation_effect_commands(
-            prepared.deferred_network_effects.into_commands(),
-            self.handler.authority_context(),
-            self.effects.as_ref(),
-            true,
-        )
-        .await?;
+        let deferred_network_effects = prepared.deferred_network_effects;
+        #[cfg(target_arch = "wasm32")]
+        if self.effects.harness_mode_enabled() {
+            if let Err(error) = execute_invitation_effect_commands(
+                deferred_network_effects.into_commands(),
+                self.handler.authority_context(),
+                self.effects.as_ref(),
+                true,
+            )
+            .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation.invitation_id,
+                    sender_id = %invitation.sender_id,
+                    receiver_id = %invitation.receiver_id,
+                    error = %error,
+                    "Inline harness channel invitation delivery failed"
+                );
+            }
+        } else {
+            self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
         self.spawn_invitation_ceremony_registration(&invitation);
         self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
@@ -498,6 +515,28 @@ impl InvitationServiceApi {
             .await?;
         let invitation = prepared.invitation;
         self.spawn_invitation_ceremony_registration(&invitation);
+        #[cfg(target_arch = "wasm32")]
+        if self.effects.harness_mode_enabled() {
+            if let Err(error) = execute_invitation_effect_commands(
+                prepared.deferred_network_effects.into_commands(),
+                self.handler.authority_context(),
+                self.effects.as_ref(),
+                true,
+            )
+            .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation.invitation_id,
+                    sender_id = %invitation.sender_id,
+                    receiver_id = %invitation.receiver_id,
+                    error = %error,
+                    "Inline harness contact invitation delivery failed"
+                );
+            }
+        } else {
+            self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
         Ok(invitation)
     }
@@ -991,6 +1030,25 @@ mod tests {
             } => assert_eq!(nickname_suggestion.as_deref(), Some("shared-parity-lab")),
             _ => panic!("expected channel invitation"),
         }
+    }
+
+    #[test]
+    fn invite_to_channel_defers_best_effort_delivery() {
+        let source = include_str!("invitation_service.rs");
+        let start = source
+            .find("pub async fn invite_to_channel(")
+            .expect("invite_to_channel definition");
+        let body = &source[start..];
+        assert!(
+            body.contains(
+                "self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);"
+            ),
+            "channel invites must defer best-effort delivery instead of blocking terminal settlement"
+        );
+        assert!(
+            !body.contains("execute_invitation_effect_commands(\n            prepared.deferred_network_effects.into_commands(),"),
+            "channel invites must not execute deferred network effects inline"
+        );
     }
 
     #[tokio::test]

@@ -113,37 +113,6 @@ impl UiController {
         self.request_rerender();
     }
 
-    pub(crate) fn complete_runtime_invitation_operation(&self) {
-        let mut model = write_model(&self.model);
-        dismiss_modal(&mut model);
-        model.push_runtime_fact(RuntimeFact::InvitationAccepted {
-            invitation_kind: InvitationFactKind::Generic,
-            authority_id: None,
-            operation_state: None,
-        });
-        let snapshot = model.semantic_snapshot();
-        let snapshot_modal = snapshot
-            .open_modal
-            .map(|modal| format!("{modal:?}"))
-            .unwrap_or_else(|| "None".to_string());
-        let invitation_state = snapshot
-            .operations
-            .iter()
-            .find(|operation| operation.id == OperationId::invitation_accept())
-            .map(|operation| format!("{:?}", operation.state))
-            .unwrap_or_else(|| "Missing".to_string());
-        tracing::info!(
-            modal = %snapshot_modal,
-            invitation_accept = %invitation_state,
-            "complete_runtime_invitation_operation snapshot"
-        );
-        model.logs.push(format!(
-            "complete_runtime_invitation_operation snapshot modal={snapshot_modal} invitation_accept={invitation_state}"
-        ));
-        drop(model);
-        self.request_rerender();
-    }
-
     /// Apply the shared UI completion effects for a successful imported contact
     /// invitation acceptance.
     pub fn complete_runtime_contact_invitation_acceptance(
@@ -156,7 +125,7 @@ impl UiController {
         model.push_runtime_fact(RuntimeFact::InvitationAccepted {
             invitation_kind: InvitationFactKind::Contact,
             authority_id: Some(authority_id.to_string()),
-            operation_state: None,
+            operation_state: Some(OperationState::Succeeded),
         });
         model.push_runtime_fact(RuntimeFact::ContactLinkReady {
             authority_id: Some(authority_id.to_string()),
@@ -223,6 +192,24 @@ impl UiController {
         let mut model = write_model(&self.model);
         if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
             state.ceremony_id = Some(ceremony_id);
+        }
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub(crate) fn set_runtime_guardian_ceremony_id(&self, ceremony_id: CeremonyId) {
+        let mut model = write_model(&self.model);
+        if let Some(ActiveModal::GuardianSetup(state)) = model.active_modal.as_mut() {
+            state.ceremony_id = Some(ceremony_id);
+        }
+        drop(model);
+        self.request_rerender();
+    }
+
+    pub(crate) fn clear_runtime_guardian_ceremony_id(&self) {
+        let mut model = write_model(&self.model);
+        if let Some(ActiveModal::GuardianSetup(state)) = model.active_modal.as_mut() {
+            state.ceremony_id = None;
         }
         drop(model);
         self.request_rerender();

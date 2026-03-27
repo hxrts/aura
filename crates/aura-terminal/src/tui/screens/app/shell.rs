@@ -3,6 +3,7 @@
 // Allow manual map patterns in element! macro contexts for clarity
 #![allow(clippy::manual_map)]
 
+use self::dispatch::submit_ceremony_operation;
 use super::modal_overlays::{
     render_access_override_modal, render_account_setup_modal, render_add_device_modal,
     render_capability_config_modal, render_channel_info_modal, render_chat_create_modal,
@@ -15,6 +16,7 @@ use super::modal_overlays::{
     GlobalModalProps,
 };
 
+use aura_app::ui_contract::{OperationId, SemanticOperationKind};
 use iocraft::prelude::*;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -1202,7 +1204,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     new_state.toast_error("No removable device is visible");
                                     continue;
                                 };
-                                (cb.settings.on_remove_device)(device_id.into());
+                                let Some(update_tx) = update_tx_for_events.clone() else {
+                                    new_state.toast_error("UI update sender is unavailable");
+                                    continue;
+                                };
+                                let operation = submit_ceremony_operation(
+                                    app_ctx_for_dispatch.app_core.raw().clone(),
+                                    tasks_for_events.clone(),
+                                    update_tx,
+                                    OperationId::remove_device(),
+                                    SemanticOperationKind::RemoveDevice,
+                                );
+                                (cb.settings.on_remove_device)(device_id.into(), operation);
                             }
                             TuiCommand::Dispatch(dispatch_cmd) => {
                                 let outcome = handle_dispatch_command(

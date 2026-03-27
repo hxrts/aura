@@ -306,6 +306,70 @@ mod tests {
     }
 
     #[test]
+    fn ceremony_dispatch_paths_use_ceremony_submission_owner() {
+        let shell_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
+        let dispatch_source =
+            read_repo_source("crates/aura-terminal/src/tui/screens/app/shell/dispatch.rs");
+
+        assert!(dispatch_source.contains("submit_ceremony_operation("));
+        assert!(shell_source.contains("OperationId::start_guardian_ceremony()"));
+        assert!(shell_source.contains("SemanticOperationKind::StartGuardianCeremony"));
+        assert!(shell_source.contains("OperationId::start_multifactor_ceremony()"));
+        assert!(shell_source.contains("SemanticOperationKind::StartMultifactorCeremony"));
+        assert!(shell_source.contains("OperationId::cancel_guardian_ceremony()"));
+        assert!(shell_source.contains("SemanticOperationKind::CancelGuardianCeremony"));
+        assert!(shell_source.contains("OperationId::cancel_key_rotation_ceremony()"));
+        assert!(shell_source.contains("SemanticOperationKind::CancelKeyRotationCeremony"));
+        assert!(shell_source.contains("operation.monitor_started().await"));
+        assert!(shell_source.contains("operation.cancel().await"));
+    }
+
+    #[test]
+    fn slash_command_dispatch_uses_shared_typed_execution_and_owner_metadata() {
+        let source = read_repo_source("crates/aura-terminal/src/tui/callbacks/factories/chat.rs");
+
+        assert!(source.contains("ui::workflows::slash_commands::prepare_and_execute("));
+        assert!(source.contains("let report ="));
+        assert!(source.contains(".and_then(|metadata| metadata.semantic_operation.clone())"));
+        assert!(source.contains("LocalTerminalOperationOwner::submit("));
+        assert!(!source.contains("ui::workflows::slash_commands::prepare("));
+        assert!(!source.contains("ui::workflows::slash_commands::execute("));
+        assert!(!source.contains("parse_chat_command(trimmed)"));
+    }
+
+    #[test]
+    fn terminal_semantic_lifecycle_delegates_to_shared_typed_submission_wrappers() {
+        let source = read_repo_source("crates/aura-terminal/src/tui/semantic_lifecycle.rs");
+
+        assert!(source.contains("LocalTerminalSubmission<TuiSubmittedOperationPublisher>"));
+        assert!(source.contains("WorkflowHandoffSubmission<TuiSubmittedOperationPublisher>"));
+        assert!(source.contains("CeremonyMonitorHandoffSubmission<TuiSubmittedOperationPublisher>"));
+        assert!(!source.contains("SubmittedOperation<TuiSubmittedOperationPublisher>"));
+        assert!(!source.contains("SemanticOperationOwner"));
+    }
+
+    #[test]
+    fn remove_device_dispatch_uses_ceremony_submission_owner() {
+        let handlers_source = read_repo_source(
+            "crates/aura-terminal/src/tui/screens/app/shell/dispatch_command_handlers.rs",
+        );
+        let dispatch_source =
+            read_repo_source("crates/aura-terminal/src/tui/screens/app/shell/dispatch.rs");
+        let settings_source =
+            read_repo_source("crates/aura-terminal/src/tui/callbacks/factories/settings.rs");
+
+        assert!(handlers_source.contains("OperationId::remove_device()"));
+        assert!(handlers_source.contains("SemanticOperationKind::RemoveDevice"));
+        assert!(handlers_source.contains("submit_ceremony_operation("));
+        assert!(dispatch_source.contains("OperationId::remove_device()"));
+        assert!(dispatch_source.contains("SemanticOperationKind::RemoveDevice"));
+        assert!(dispatch_source.contains("submit_ceremony_operation("));
+        assert!(settings_source.contains("operation.monitor_started().await"));
+    }
+
+    #[test]
     fn authority_updates_use_required_publication() {
         let source = read_repo_source(
             "crates/aura-terminal/src/tui/screens/app/subscriptions/nav_status.rs",

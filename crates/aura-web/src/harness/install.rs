@@ -1,8 +1,11 @@
+use async_lock::RwLock;
+use aura_agent::AuraAgent;
 use aura_app::ui::contract::{
     classify_screen_item_id, classify_semantic_settings_section_item_id, ScreenId,
 };
 use aura_app::ui::scenarios::SemanticCommandRequest;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
+use aura_app::AppCore;
 use aura_ui::{control_selector, UiController};
 use js_sys::{Array, Function, Object, Reflect};
 use serde_json::{from_str, to_string};
@@ -66,6 +69,9 @@ window.__AURA_DRIVER_SEMANTIC_DEBUG__ =
   window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? {
     last_event: "installed",
     active_command_id: null,
+    last_command_id: null,
+    last_completed_command_id: null,
+    last_result_ok: null,
     last_error: null,
     queue_depth: 0,
     last_progress_at: Date.now(),
@@ -173,6 +179,7 @@ window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__ = () => {
   if (semanticDebug) {
     semanticDebug.last_event = "queue_start";
     semanticDebug.active_command_id = next.command_id;
+    semanticDebug.last_command_id = next.command_id;
     semanticDebug.last_error = null;
     semanticDebug.last_progress_at = Date.now();
   }
@@ -200,6 +207,8 @@ window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__ = () => {
       if (semanticDebug) {
         semanticDebug.last_event = "queue_ok";
         semanticDebug.active_command_id = null;
+        semanticDebug.last_completed_command_id = next.command_id;
+        semanticDebug.last_result_ok = true;
         semanticDebug.last_progress_at = Date.now();
       }
     })
@@ -222,6 +231,8 @@ window.__AURA_DRIVER_RUN_SEMANTIC_QUEUE__ = () => {
         semanticDebug.last_event = "queue_error";
         semanticDebug.last_error = error?.message ?? String(error);
         semanticDebug.active_command_id = null;
+        semanticDebug.last_completed_command_id = next.command_id;
+        semanticDebug.last_result_ok = false;
         semanticDebug.last_progress_at = Date.now();
       }
     })
@@ -463,7 +474,9 @@ return true;
     installer.call0(window.as_ref()).map(|_| ())
 }
 
-pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
+pub(crate) fn install_window_harness_api(
+    harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
+) -> Result<(), JsValue> {
     let harness = Object::new();
     let observe = Object::new();
 
@@ -791,6 +804,54 @@ try {
         tail_log.as_ref().unchecked_ref(),
     )?;
     tail_log.forget();
+
+    let process_harness_transport_context = harness_transport_context.clone();
+    let process_harness_transport = Closure::wrap(Box::new(move || -> js_sys::Promise {
+        let context = process_harness_transport_context.clone();
+        future_to_promise(async move {
+            if let Some((app_core, agent)) = context {
+                crate::shell::run_harness_transport_tick_for(app_core, agent).await;
+            } else {
+                crate::shell::run_harness_transport_tick_once().await;
+            }
+            Ok(JsValue::UNDEFINED)
+        })
+    }) as Box<dyn FnMut() -> js_sys::Promise>);
+    Reflect::set(
+        &harness,
+        &JsValue::from_str("process_harness_transport"),
+        process_harness_transport.as_ref().unchecked_ref(),
+    )?;
+    process_harness_transport.forget();
+    if let Some(window) = web_sys::window() {
+        let install_transport_interval = Function::new_no_args(
+            r#"
+const window = globalThis;
+if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_INSTALLED__) {
+  return true;
+}
+window.__AURA_HARNESS_TRANSPORT_INTERVAL_INSTALLED__ = true;
+window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
+window.setInterval(() => {
+  if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__) {
+    return;
+  }
+  const processTransport = window.__AURA_HARNESS__?.process_harness_transport;
+  if (typeof processTransport !== "function") {
+    return;
+  }
+  window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = true;
+  Promise.resolve(processTransport())
+    .catch(() => {})
+    .finally(() => {
+      window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
+    });
+}, 100);
+return true;
+"#,
+        );
+        let _ = install_transport_interval.call0(window.as_ref());
+    }
 
     let root_structure = Closure::wrap(Box::new(move || -> JsValue {
         let Ok(controller) = current_controller() else {

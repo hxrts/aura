@@ -83,6 +83,7 @@ tokio-tungstenite = { workspace = true }
 gloo-net = { version = "0.6", features = ["websocket"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location"] }
 
 # Platform-specific secure storage
 [target.'cfg(target_os = "macos")'.dependencies]

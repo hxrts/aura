@@ -101,6 +101,7 @@ pub(crate) mod runtime_error_classification;
 pub mod semantic_facts;
 pub mod settings;
 pub mod signals;
+pub mod slash_commands;
 pub mod snapshot;
 pub(crate) mod stage_tracker;
 pub mod strong_command;

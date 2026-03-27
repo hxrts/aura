@@ -1,7 +1,24 @@
 use super::*;
+use crate::semantic_lifecycle::{
+    UiCeremonySubmissionOwner, UiLocalOperationOwner, UiOperationTransferScope,
+    UiWorkflowHandoffOwner,
+};
+use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
+use aura_app::ui_contract::{
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind,
+};
 
 pub(crate) fn harness_log(line: &str) {
     tracing::info!("{line}");
+}
+
+fn invitation_command_failure(detail: impl Into<String>) -> SemanticOperationError {
+    SemanticOperationError::new(
+        SemanticFailureDomain::Command,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into())
 }
 
 pub(crate) fn selected_contact_for_modal(
@@ -85,6 +102,47 @@ pub(crate) fn monitor_runtime_device_enrollment_ceremony(
     });
 }
 
+pub(crate) fn monitor_runtime_key_rotation_ceremony(
+    controller: Arc<UiController>,
+    app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+    status_handle: ceremony_workflows::CeremonyStatusHandle,
+    label: &'static str,
+    rerender: Arc<dyn Fn() + Send + Sync>,
+) {
+    spawn_ui(async move {
+        let lifecycle = ceremony_workflows::monitor_key_rotation_ceremony_with_policy(
+            &app_core,
+            &status_handle,
+            ceremony_workflows::CeremonyPollPolicy::with_interval(Duration::from_secs(1)),
+            |_| {},
+            |duration| {
+                let app_core = app_core.clone();
+                async move {
+                    let sleep_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+                    let _ = time_workflows::sleep_ms(&app_core, sleep_ms).await;
+                }
+            },
+        )
+        .await;
+
+        match lifecycle {
+            Ok(lifecycle)
+                if lifecycle.state == ceremony_workflows::CeremonyLifecycleState::TimedOut =>
+            {
+                controller.runtime_error_toast(format!(
+                    "{label} status monitoring timed out; reopen the wizard to inspect progress"
+                ));
+                rerender();
+            }
+            Ok(_) => {}
+            Err(error) => {
+                controller.runtime_error_toast(error.to_string());
+                rerender();
+            }
+        }
+    });
+}
+
 pub(crate) fn removable_device_for_modal(
     runtime: &SettingsRuntimeView,
     model: &UiModel,
@@ -124,7 +182,6 @@ enum ObservedModalSubmitAction {
 enum SimpleModalSubmitAction {
     CreateHome,
     AcceptInvitation,
-    ImportDeviceEnrollmentCode,
     CreateInvitation,
     SetChannelTopic,
     EditNickname,
@@ -216,7 +273,7 @@ fn classify_modal_submit(
             SimpleModalSubmitAction::AcceptInvitation,
         )),
         Some(ModalState::ImportDeviceEnrollmentCode) => Some(ModalSubmitClass::SimpleDispatch(
-            SimpleModalSubmitAction::ImportDeviceEnrollmentCode,
+            SimpleModalSubmitAction::AcceptInvitation,
         )),
         Some(ModalState::CreateInvitation) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::CreateInvitation,
@@ -291,6 +348,11 @@ fn submit_wizard_modal_action(
                 return true;
             }
 
+            let owner = UiCeremonySubmissionOwner::submit(
+                controller.clone(),
+                OperationId::device_enrollment(),
+                SemanticOperationKind::StartDeviceEnrollment,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_start = rerender.clone();
             let invitee_authority_id =
@@ -305,6 +367,7 @@ fn submit_wizard_modal_action(
                 {
                     Ok(start) => {
                         let status_handle = start.status_handle.clone();
+                        owner.monitor_started();
                         controller.set_runtime_device_enrollment_ceremony(start.handle);
                         controller
                             .set_runtime_device_enrollment_ceremony_id(start.ceremony_id.clone());
@@ -319,7 +382,10 @@ fn submit_wizard_modal_action(
                             rerender_for_start.clone(),
                         );
                     }
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Err(error) => {
+                        owner.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_start();
             });
@@ -374,12 +440,18 @@ fn submit_wizard_modal_action(
                     ),
                     _ => (Vec::new(), String::new(), String::new(), 1),
                 };
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::create_channel(),
+                SemanticOperationKind::CreateChannel,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
             spawn_ui(async move {
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
                         controller.runtime_error_toast(error.to_string());
                         rerender_for_create();
                         return;
@@ -413,11 +485,17 @@ fn submit_wizard_modal_action(
                 )
                 .await
                 {
-                    Ok(_) => controller.complete_runtime_modal_success(format!(
-                        "Created '{}'",
-                        channel_name.trim()
-                    )),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success(format!(
+                            "Created '{}'",
+                            channel_name.trim()
+                        ));
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_create();
             });
@@ -433,8 +511,16 @@ fn submit_wizard_modal_action(
                 }
                 _ => (Vec::new(), 1),
             };
+            let owner = UiCeremonySubmissionOwner::submit(
+                controller.clone(),
+                OperationId::start_guardian_ceremony(),
+                SemanticOperationKind::StartGuardianCeremony,
+            );
             let app_core = controller.app_core().clone();
+            let monitor_app_core = app_core.clone();
             let rerender_for_guardians = rerender.clone();
+            let rerender_for_monitor = rerender.clone();
+            let controller_for_monitor = controller.clone();
             spawn_ui(async move {
                 let ids: Vec<AuthorityId> = selected_indices
                     .iter()
@@ -445,6 +531,9 @@ fn submit_wizard_modal_action(
                 {
                     Ok(value) => value,
                     Err(error) => {
+                        owner.fail_with(invitation_command_failure(format!(
+                            "Invalid threshold: {error}"
+                        )));
                         controller.runtime_error_toast(format!("Invalid threshold: {error}"));
                         rerender_for_guardians();
                         return;
@@ -459,8 +548,24 @@ fn submit_wizard_modal_action(
                 )
                 .await
                 {
-                    Ok(_) => controller.complete_runtime_modal_success("Guardian ceremony started"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(ceremony_handle) => {
+                        controller.set_runtime_guardian_ceremony_id(
+                            ceremony_handle.ceremony_id().clone(),
+                        );
+                        owner.monitor_started();
+                        monitor_runtime_key_rotation_ceremony(
+                            controller_for_monitor,
+                            monitor_app_core,
+                            ceremony_handle.status_handle(),
+                            "Guardian ceremony",
+                            rerender_for_monitor,
+                        );
+                        controller.complete_runtime_modal_success("Guardian ceremony started");
+                    }
+                    Err(error) => {
+                        owner.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_guardians();
             });
@@ -470,10 +575,19 @@ fn submit_wizard_modal_action(
             let Some(model) = current_model else {
                 return false;
             };
+            let owner = UiCeremonySubmissionOwner::submit(
+                controller.clone(),
+                OperationId::start_multifactor_ceremony(),
+                SemanticOperationKind::StartMultifactorCeremony,
+            );
             let app_core = controller.app_core().clone();
+            let monitor_app_core = app_core.clone();
             let rerender_for_mfa = rerender.clone();
+            let rerender_for_monitor = rerender.clone();
+            let controller_for_monitor = controller.clone();
             spawn_ui(async move {
                 let Some(mfa_state) = model.mfa_setup_modal() else {
+                    owner.fail_with(invitation_command_failure("Missing MFA setup modal state"));
                     rerender_for_mfa();
                     return;
                 };
@@ -487,6 +601,9 @@ fn submit_wizard_modal_action(
                     match aura_core::types::FrostThreshold::new(u16::from(mfa_state.threshold_k)) {
                         Ok(value) => value,
                         Err(error) => {
+                            owner.fail_with(invitation_command_failure(format!(
+                                "Invalid threshold: {error}"
+                            )));
                             controller.runtime_error_toast(format!("Invalid threshold: {error}"));
                             rerender_for_mfa();
                             return;
@@ -501,10 +618,21 @@ fn submit_wizard_modal_action(
                 )
                 .await
                 {
-                    Ok(_) => {
+                    Ok(ceremony_handle) => {
+                        owner.monitor_started();
+                        monitor_runtime_key_rotation_ceremony(
+                            controller_for_monitor,
+                            monitor_app_core,
+                            ceremony_handle.status_handle(),
+                            "Multifactor ceremony",
+                            rerender_for_monitor,
+                        );
                         controller.complete_runtime_modal_success("Multifactor ceremony started")
                     }
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Err(error) => {
+                        owner.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_mfa();
             });
@@ -536,12 +664,23 @@ fn submit_simple_modal_action(
                 return true;
             }
 
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::create_home(),
+                SemanticOperationKind::CreateHome,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_create = rerender.clone();
             spawn_ui(async move {
                 match context_workflows::create_home(&app_core, Some(name.clone()), None).await {
-                    Ok(_) => controller.complete_runtime_home_created(&name),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_home_created(&name);
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_create();
             });
@@ -558,6 +697,24 @@ fn submit_simple_modal_action(
             let submit_log = format!("accept_invitation submit start code_len={}", code.len());
             controller.push_log(&submit_log);
             harness_log(&submit_log);
+            let device_import_modal = current_model.as_ref().is_some_and(|model| {
+                matches!(
+                    model.active_modal.as_ref(),
+                    Some(ActiveModal::ImportDeviceEnrollmentCode(_))
+                )
+            });
+            let operation_id = if device_import_modal {
+                OperationId::device_enrollment()
+            } else {
+                OperationId::invitation_accept()
+            };
+            let base_kind = if device_import_modal {
+                SemanticOperationKind::ImportDeviceEnrollmentCode
+            } else {
+                SemanticOperationKind::AcceptContactInvitation
+            };
+            let operation =
+                UiWorkflowHandoffOwner::submit(controller.clone(), operation_id.clone(), base_kind);
             let app_core = controller.app_core().clone();
             let controller_for_import = controller.clone();
             let rerender_for_import = rerender.clone();
@@ -582,45 +739,32 @@ fn submit_simple_modal_action(
                         harness_log(&import_ok_log);
                         controller_for_import.push_log("accept_invitation runtime_accept start");
                         harness_log("accept_invitation runtime_accept start");
-                        let accepted = match &invitation_info.invitation_type {
-                            InvitationBridgeType::DeviceEnrollment { .. } => {
-                                invitation_workflows::accept_device_enrollment_invitation(
+                        let workflow_instance_id = operation.workflow_instance_id();
+                        let transfer = operation
+                            .handoff_to_app_workflow(UiOperationTransferScope::InvitationImport);
+                        match transfer
+                            .run_workflow(
+                                controller_for_import.clone(),
+                                "accept_imported_invitation",
+                                invitation_workflows::handoff::accept_imported_invitation(
                                     &app_core,
-                                    &invitation_info,
-                                )
-                                .await
-                            }
-                            _ => {
-                                invitation_workflows::accept_invitation(&app_core, invitation).await
-                            }
-                        };
-
-                        match accepted {
-                            Ok(_) => {
+                                    invitation_workflows::handoff::AcceptImportedInvitationRequest {
+                                        invitation,
+                                        operation_instance_id: workflow_instance_id,
+                                    },
+                                ),
+                            )
+                            .await
+                        {
+                            Ok(()) => {
                                 controller_for_import
                                     .push_log("accept_invitation runtime_accept ok");
                                 harness_log("accept_invitation runtime_accept ok");
-                                controller_for_import.push_runtime_fact(
-                                    RuntimeFact::RemoteFactsPulled {
-                                        contact_count: 0,
-                                        lan_peer_count: 0,
-                                    },
-                                );
                                 if matches!(
                                     &invitation_info.invitation_type,
                                     InvitationBridgeType::DeviceEnrollment { .. }
                                 ) {
-                                    controller_for_import
-                                        .push_log("accept_invitation refresh_settings start");
-                                    harness_log("accept_invitation refresh_settings start");
-                                    let _ = settings_workflows::refresh_settings_from_runtime(
-                                        &app_core,
-                                    )
-                                    .await;
-                                    controller_for_import
-                                        .push_log("accept_invitation refresh_settings done");
-                                    harness_log("accept_invitation refresh_settings done");
-                                    controller.complete_runtime_modal_success(
+                                    controller_for_import.complete_runtime_modal_success(
                                         "Device enrollment complete",
                                     );
                                     controller_for_import
@@ -647,52 +791,30 @@ fn submit_simple_modal_action(
                                         return;
                                     }
                                     match &invitation_info.invitation_type {
-                                        InvitationBridgeType::Guardian { .. } => {
-                                            controller_for_import.push_log(
-                                                "accept_invitation refresh_contacts start",
-                                            );
-                                            harness_log("accept_invitation refresh_contacts start");
-                                            let _ = load_contacts_runtime_view(
-                                                controller_for_import.clone(),
-                                            )
-                                            .await;
-                                            controller_for_import.push_log(
-                                                "accept_invitation refresh_contacts done",
-                                            );
-                                            harness_log("accept_invitation refresh_contacts done");
-                                        }
-                                        InvitationBridgeType::Channel { .. } => {
-                                            controller_for_import.push_runtime_fact(
-                                                RuntimeFact::ChannelJoined {
-                                                    channel: None,
-                                                    source: Some("accepted_invitation".to_string()),
-                                                },
-                                            );
-                                        }
+                                        InvitationBridgeType::Guardian { .. }
+                                        | InvitationBridgeType::Channel { .. } => {}
                                         InvitationBridgeType::DeviceEnrollment { .. }
                                         | InvitationBridgeType::Contact { .. } => {}
                                     }
                                     controller_for_import
-                                        .push_log("accept_invitation refresh_contacts start");
-                                    harness_log("accept_invitation refresh_contacts start");
-                                    let _ =
-                                        load_contacts_runtime_view(controller_for_import.clone())
-                                            .await;
-                                    controller_for_import
-                                        .push_log("accept_invitation refresh_contacts done");
-                                    harness_log("accept_invitation refresh_contacts done");
-                                    controller_for_import.complete_runtime_invitation_operation();
+                                        .complete_runtime_modal_success("Invitation accepted");
                                     controller_for_import
                                         .push_log("accept_invitation complete generic");
                                     harness_log("accept_invitation complete generic");
                                 }
                             }
-                            Err(error) => {
+                            Err(SubmittedOperationWorkflowError::Workflow(error)) => {
                                 let error_log =
                                     format!("accept_invitation runtime_accept error={error}");
                                 controller_for_import.push_log(&error_log);
                                 harness_log(&error_log);
-                                controller.runtime_error_toast(error.to_string());
+                                controller_for_import.runtime_error_toast(error.to_string());
+                            }
+                            Err(
+                                SubmittedOperationWorkflowError::Protocol(detail)
+                                | SubmittedOperationWorkflowError::Panicked(detail),
+                            ) => {
+                                controller_for_import.runtime_error_toast(detail);
                             }
                         }
                     }
@@ -700,66 +822,32 @@ fn submit_simple_modal_action(
                         let error_log = format!("accept_invitation import_details error={error}");
                         controller_for_import.push_log(&error_log);
                         harness_log(&error_log);
-                        controller.runtime_error_toast(error.to_string());
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller_for_import.runtime_error_toast(error.to_string());
                     }
-                }
-                rerender_for_import();
-            });
-            true
-        }
-        SimpleModalSubmitAction::ImportDeviceEnrollmentCode => {
-            let code = modal_text_value.trim().to_string();
-            if code.is_empty() {
-                controller.runtime_error_toast("Enrollment code is required");
-                rerender();
-                return true;
-            }
-
-            let app_core = controller.app_core().clone();
-            let rerender_for_import = rerender.clone();
-            spawn_ui(async move {
-                match invitation_workflows::import_invitation_details(&app_core, &code).await {
-                    Ok(invitation) => {
-                        let invitation_info = invitation.info().clone();
-                        if !matches!(
-                            &invitation_info.invitation_type,
-                            InvitationBridgeType::DeviceEnrollment { .. }
-                        ) {
-                            controller
-                                .runtime_error_toast("Code is not a device enrollment invitation");
-                            rerender_for_import();
-                            return;
-                        }
-
-                        match invitation_workflows::accept_device_enrollment_invitation(
-                            &app_core,
-                            &invitation_info,
-                        )
-                        .await
-                        {
-                            Ok(()) => {
-                                let _ =
-                                    settings_workflows::refresh_settings_from_runtime(&app_core)
-                                        .await;
-                                controller
-                                    .complete_runtime_modal_success("Device enrollment complete");
-                            }
-                            Err(error) => controller.runtime_error_toast(error.to_string()),
-                        }
-                    }
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
                 }
                 rerender_for_import();
             });
             true
         }
         SimpleModalSubmitAction::CreateInvitation => {
-            let receiver = modal_text_value.trim().to_string();
+            let Some(create_state) = current_model
+                .as_ref()
+                .and_then(UiModel::create_invitation_modal)
+                .cloned()
+            else {
+                controller.runtime_error_toast("Invitation modal state is unavailable");
+                rerender();
+                return true;
+            };
+            let receiver = create_state.receiver_id.trim().to_string();
             if receiver.is_empty() {
                 controller.runtime_error_toast("Receiver authority id is required");
                 rerender();
                 return true;
             }
+            let message = (!create_state.message.trim().is_empty()).then(|| create_state.message);
+            let ttl_ms = Some(create_state.ttl_hours.max(1).saturating_mul(60 * 60 * 1000));
 
             let app_core = controller.app_core().clone();
             spawn_ui(async move {
@@ -774,49 +862,56 @@ fn submit_simple_modal_action(
                     }
                 };
 
-                match invitation_workflows::create_contact_invitation(
-                    &app_core,
-                    receiver_id,
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(invitation) => {
-                        tracing::info!(invitation_id = %invitation.invitation_id(), "create_invitation create_contact_invitation ok");
-                        tracing::info!(invitation_id = %invitation.invitation_id(), "create_invitation export_invitation start");
-                        match invitation_workflows::export_invitation(
+                let operation = UiWorkflowHandoffOwner::submit(
+                    controller.clone(),
+                    OperationId::invitation_create(),
+                    SemanticOperationKind::CreateContactInvitation,
+                );
+                let workflow_instance_id = operation.workflow_instance_id();
+                let transfer =
+                    operation.handoff_to_app_workflow(UiOperationTransferScope::CreateInvitation);
+                match transfer
+                    .run_workflow(
+                        controller.clone(),
+                        "create_contact_invitation",
+                        invitation_workflows::handoff::create_contact_invitation(
                             &app_core,
-                            invitation.invitation_id(),
-                        )
-                        .await
-                        {
-                            Ok(code) => {
-                                tracing::info!("create_invitation export_invitation ok");
-                                controller.write_clipboard(&code);
-                                tracing::info!("create_invitation write_clipboard ok");
-                                controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
-                                    receiver_authority_id: Some(receiver_id.to_string()),
-                                    source_operation: OperationId::invitation_create(),
-                                    code: Some(code),
-                                });
-                                controller.complete_runtime_modal_operation_success(
-                                    OperationId::invitation_create(),
-                                    "Invitation code copied to clipboard",
-                                );
-                                tracing::info!("create_invitation operation succeeded");
-                                tracing::info!("create_invitation complete");
-                            }
-                            Err(error) => {
-                                tracing::warn!(error = %error, "create_invitation export_invitation failed");
-                                controller.runtime_error_toast(error.to_string());
-                            }
-                        }
+                            invitation_workflows::handoff::CreateContactInvitationRequest {
+                                receiver: receiver_id,
+                                nickname: None,
+                                message,
+                                ttl_ms,
+                                operation_instance_id: workflow_instance_id,
+                            },
+                        ),
+                    )
+                    .await
+                {
+                    Ok(code) => {
+                        tracing::info!("create_invitation export_invitation ok");
+                        controller.write_clipboard(&code);
+                        controller.remember_invitation_code(&code);
+                        tracing::info!("create_invitation write_clipboard ok");
+                        controller.push_runtime_fact(RuntimeFact::InvitationCodeReady {
+                            receiver_authority_id: Some(receiver_id.to_string()),
+                            source_operation: OperationId::invitation_create(),
+                            code: Some(code),
+                        });
+                        controller
+                            .complete_runtime_modal_success("Invitation code copied to clipboard");
+                        tracing::info!("create_invitation operation succeeded");
+                        tracing::info!("create_invitation complete");
                     }
-                    Err(error) => {
-                        tracing::warn!(error = %error, "create_invitation create_contact_invitation failed");
+                    Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                        tracing::warn!(error = %error, "create_invitation workflow failed");
                         controller.runtime_error_toast(error.to_string());
+                    }
+                    Err(
+                        SubmittedOperationWorkflowError::Protocol(detail)
+                        | SubmittedOperationWorkflowError::Panicked(detail),
+                    ) => {
+                        tracing::warn!("create_invitation workflow panicked");
+                        controller.runtime_error_toast(detail);
                     }
                 }
                 tracing::info!("create_invitation rerender");
@@ -832,12 +927,18 @@ fn submit_simple_modal_action(
                 return true;
             }
 
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::set_channel_topic(),
+                SemanticOperationKind::SetChannelTopic,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_topic = rerender.clone();
             spawn_ui(async move {
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
                         controller.runtime_error_toast(error.to_string());
                         rerender_for_topic();
                         return;
@@ -851,8 +952,14 @@ fn submit_simple_modal_action(
                 )
                 .await
                 {
-                    Ok(()) => controller.complete_runtime_modal_success("Topic updated"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(()) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success("Topic updated");
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_topic();
             });
@@ -875,18 +982,37 @@ fn submit_simple_modal_action(
                 .as_ref()
                 .map(|model| matches!(model.screen, ScreenId::Settings))
                 .unwrap_or(false);
+            if !is_settings_screen && selected_contact.is_none() {
+                controller.runtime_error_toast("No contact selected");
+                rerender();
+                return true;
+            }
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                if is_settings_screen {
+                    OperationId::update_nickname_suggestion()
+                } else {
+                    OperationId::update_contact_nickname()
+                },
+                if is_settings_screen {
+                    SemanticOperationKind::UpdateNicknameSuggestion
+                } else {
+                    SemanticOperationKind::UpdateContactNickname
+                },
+            );
             spawn_ui(async move {
-                let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
-                    Ok(value) => value,
-                    Err(error) => {
-                        controller.runtime_error_toast(error.to_string());
-                        rerender_for_nickname();
-                        return;
-                    }
-                };
                 let result = if is_settings_screen {
                     settings_workflows::update_nickname(&app_core, value.clone()).await
                 } else if let Some(contact) = selected_contact {
+                    let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
+                        Ok(value) => value,
+                        Err(error) => {
+                            operation.fail_with(invitation_command_failure(error.to_string()));
+                            controller.runtime_error_toast(error.to_string());
+                            rerender_for_nickname();
+                            return;
+                        }
+                    };
                     let authority_id = contact.authority_id.to_string();
                     contacts_workflows::update_contact_nickname(
                         &app_core,
@@ -900,8 +1026,14 @@ fn submit_simple_modal_action(
                 };
 
                 match result {
-                    Ok(()) => controller.complete_runtime_modal_success("Nickname updated"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(()) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success("Nickname updated");
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_nickname();
             });
@@ -916,6 +1048,11 @@ fn submit_simple_modal_action(
                 rerender();
                 return true;
             };
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::remove_contact(),
+                SemanticOperationKind::RemoveContact,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_remove = rerender.clone();
             spawn_ui(async move {
@@ -923,6 +1060,7 @@ fn submit_simple_modal_action(
                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                     Ok(value) => value,
                     Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
                         controller.runtime_error_toast(error.to_string());
                         rerender_for_remove();
                         return;
@@ -931,20 +1069,37 @@ fn submit_simple_modal_action(
                 match contacts_workflows::remove_contact(&app_core, &authority_id, timestamp_ms)
                     .await
                 {
-                    Ok(()) => controller.complete_runtime_modal_success("Contact removed"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(()) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success("Contact removed");
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_remove();
             });
             true
         }
         SimpleModalSubmitAction::RequestRecovery => {
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                OperationId::start_recovery(),
+                SemanticOperationKind::StartRecovery,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_recovery = rerender.clone();
             spawn_ui(async move {
                 match recovery_workflows::start_recovery_from_state(&app_core).await {
-                    Ok(_) => controller.complete_runtime_modal_success("Recovery process started"),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success("Recovery process started");
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_recovery();
             });
@@ -959,6 +1114,11 @@ fn submit_simple_modal_action(
                 rerender();
                 return true;
             };
+            let owner = UiCeremonySubmissionOwner::submit(
+                controller.clone(),
+                OperationId::remove_device(),
+                SemanticOperationKind::RemoveDevice,
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_remove = rerender.clone();
             spawn_ui(async move {
@@ -969,6 +1129,7 @@ fn submit_simple_modal_action(
                 .await
                 {
                     Ok(ceremony_handle) => {
+                        owner.monitor_started();
                         let status_handle = ceremony_handle.status_handle();
                         match ceremony_workflows::get_key_rotation_ceremony_status(
                             &app_core,
@@ -991,7 +1152,10 @@ fn submit_simple_modal_action(
                             Err(error) => controller.runtime_error_toast(error.to_string()),
                         }
                     }
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Err(error) => {
+                        owner.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_remove();
             });
@@ -1023,6 +1187,19 @@ fn submit_simple_modal_action(
                 return true;
             }
 
+            let operation = UiLocalOperationOwner::submit(
+                controller.clone(),
+                if member.is_moderator {
+                    OperationId::revoke_moderator()
+                } else {
+                    OperationId::grant_moderator()
+                },
+                if member.is_moderator {
+                    SemanticOperationKind::RevokeModerator
+                } else {
+                    SemanticOperationKind::GrantModerator
+                },
+            );
             let app_core = controller.app_core().clone();
             let rerender_for_moderator = rerender.clone();
             spawn_ui(async move {
@@ -1043,12 +1220,18 @@ fn submit_simple_modal_action(
                 };
 
                 match result {
-                    Ok(_) => controller.complete_runtime_modal_success(if member.is_moderator {
-                        format!("Moderator revoked for {}", member.name)
-                    } else {
-                        format!("Moderator granted for {}", member.name)
-                    }),
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                    Ok(_) => {
+                        operation.succeed(None);
+                        controller.complete_runtime_modal_success(if member.is_moderator {
+                            format!("Moderator revoked for {}", member.name)
+                        } else {
+                            format!("Moderator granted for {}", member.name)
+                        });
+                    }
+                    Err(error) => {
+                        operation.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
                 }
                 rerender_for_moderator();
             });
@@ -1250,36 +1433,90 @@ pub(crate) fn cancel_runtime_modal_action(
     add_device_has_failed: bool,
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) -> bool {
-    if !matches!(modal_state, Some(ModalState::AddDeviceStep1)) {
-        return false;
-    }
-    if matches!(add_device_step, AddDeviceWizardStep::Name)
-        || add_device_is_complete
-        || add_device_has_failed
-    {
-        return false;
-    }
-
-    let Some(_ceremony_id) = add_device_ceremony_id else {
-        return false;
-    };
-
-    let app_core = controller.app_core().clone();
-    let rerender_for_cancel = rerender.clone();
-    spawn_ui(async move {
-        match controller.take_runtime_device_enrollment_ceremony() {
-            Some(handle) => {
-                match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, handle).await {
-                    Ok(()) => {
-                        controller.complete_runtime_modal_success("Device enrollment canceled");
-                        controller.clear_runtime_device_enrollment_ceremony();
-                    }
-                    Err(error) => controller.runtime_error_toast(error.to_string()),
-                }
+    match modal_state {
+        Some(ModalState::AddDeviceStep1) => {
+            if matches!(add_device_step, AddDeviceWizardStep::Name)
+                || add_device_is_complete
+                || add_device_has_failed
+            {
+                return false;
             }
-            None => controller.runtime_error_toast("No active enrollment ceremony handle"),
+
+            let Some(_ceremony_id) = add_device_ceremony_id else {
+                return false;
+            };
+
+            let app_core = controller.app_core().clone();
+            let rerender_for_cancel = rerender.clone();
+            let owner = UiCeremonySubmissionOwner::submit(
+                controller.clone(),
+                OperationId::cancel_key_rotation_ceremony(),
+                SemanticOperationKind::CancelKeyRotationCeremony,
+            );
+            spawn_ui(async move {
+                match controller.take_runtime_device_enrollment_ceremony() {
+                    Some(handle) => {
+                        match ceremony_workflows::cancel_key_rotation_ceremony(&app_core, handle)
+                            .await
+                        {
+                            Ok(()) => {
+                                owner.cancel();
+                                controller
+                                    .complete_runtime_modal_success("Device enrollment canceled");
+                                controller.clear_runtime_device_enrollment_ceremony();
+                            }
+                            Err(error) => {
+                                owner.fail_with(invitation_command_failure(error.to_string()));
+                                controller.runtime_error_toast(error.to_string());
+                            }
+                        }
+                    }
+                    None => {
+                        owner.fail_with(invitation_command_failure(
+                            "No active enrollment ceremony handle",
+                        ));
+                        controller.runtime_error_toast("No active enrollment ceremony handle");
+                    }
+                }
+                rerender_for_cancel();
+            });
+            true
         }
-        rerender_for_cancel();
-    });
-    true
+        Some(ModalState::GuardianSetup) => {
+            let guardian_ceremony_id = controller.ui_model().and_then(|model| {
+                model
+                    .guardian_setup_modal()
+                    .and_then(|state| state.ceremony_id.clone())
+            });
+            let Some(ceremony_id) = guardian_ceremony_id else {
+                return false;
+            };
+
+            let app_core = controller.app_core().clone();
+            let rerender_for_cancel = rerender.clone();
+            let owner = UiCeremonySubmissionOwner::submit(
+                controller.clone(),
+                OperationId::cancel_guardian_ceremony(),
+                SemanticOperationKind::CancelGuardianCeremony,
+            );
+            spawn_ui(async move {
+                match ceremony_workflows::cancel_key_rotation_ceremony_by_id(&app_core, ceremony_id)
+                    .await
+                {
+                    Ok(()) => {
+                        owner.cancel();
+                        controller.complete_runtime_modal_success("Guardian ceremony canceled");
+                        controller.clear_runtime_guardian_ceremony_id();
+                    }
+                    Err(error) => {
+                        owner.fail_with(invitation_command_failure(error.to_string()));
+                        controller.runtime_error_toast(error.to_string());
+                    }
+                }
+                rerender_for_cancel();
+            });
+            true
+        }
+        _ => false,
+    }
 }

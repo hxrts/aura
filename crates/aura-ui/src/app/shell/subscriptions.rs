@@ -320,16 +320,18 @@ pub(in crate::app) fn use_runtime_bridge_subscriptions(
                         .await
                         .unwrap_or_default()
                 };
+                for (_kind, fact) in facts.iter().filter_map(|fact| fact.runtime_fact_bridge()) {
+                    controller_for_authoritative_operations.push_runtime_fact(fact);
+                }
                 for (operation_id, _instance_id, _causality, status) in
                     bridged_operation_statuses(&facts)
                 {
-                    controller_for_authoritative_operations
-                        .apply_authoritative_operation_status(
-                            operation_id,
-                            _instance_id,
-                            _causality,
-                            status,
-                        );
+                    controller_for_authoritative_operations.apply_authoritative_operation_status(
+                        operation_id,
+                        _instance_id,
+                        _causality,
+                        status,
+                    );
                 }
             }
         });

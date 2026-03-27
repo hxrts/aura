@@ -19,10 +19,13 @@ pub(in crate::app) struct ChatRuntimeChannel {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct ChatRuntimeMessage {
+    pub(in crate::app) id: String,
+    pub(in crate::app) channel_id: String,
     pub(in crate::app) sender_name: String,
     pub(in crate::app) content: String,
     pub(in crate::app) is_own: bool,
     pub(in crate::app) delivery_status: String,
+    pub(in crate::app) can_retry: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -74,10 +77,13 @@ fn build_chat_runtime_view(chat: ChatState, selected_channel_id: Option<&str>) -
             chat.messages_for_channel(&channel.id)
                 .iter()
                 .map(|message| ChatRuntimeMessage {
+                    id: message.id.clone(),
+                    channel_id: channel.id.to_string(),
                     sender_name: message.sender_name.clone(),
                     content: message.content.clone(),
                     is_own: message.is_own,
                     delivery_status: message.delivery_status.description().to_string(),
+                    can_retry: message.delivery_status.can_retry(),
                 })
                 .collect()
         })

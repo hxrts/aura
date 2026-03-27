@@ -99,7 +99,8 @@ impl UiModel {
                     return;
                 }
                 _ => {
-                    self.operations.retain(|operation| operation.id != operation_id);
+                    self.operations
+                        .retain(|operation| operation.id != operation_id);
                     self.operations.push(OperationSnapshot {
                         id: operation_id.clone(),
                         instance_id,
@@ -209,18 +210,6 @@ impl UiController {
     ) -> UiOperationHandle {
         let instance_id = self.begin_exact_operation_submission(operation_id.clone());
         UiOperationHandle::new(operation_id, instance_id)
-    }
-
-    pub(crate) fn complete_runtime_modal_operation_success(
-        &self,
-        _operation_id: OperationId,
-        message: impl Into<String>,
-    ) {
-        let mut model = write_model(&self.model);
-        set_toast(&mut model, '✓', message);
-        dismiss_modal(&mut model);
-        drop(model);
-        self.request_rerender();
     }
 
     pub(crate) fn complete_runtime_modal_success(&self, message: impl Into<String>) {

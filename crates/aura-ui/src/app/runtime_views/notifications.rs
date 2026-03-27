@@ -20,6 +20,7 @@ pub(in crate::app) enum NotificationRuntimeAction {
     #[default]
     None,
     ReceivedInvitation,
+    PendingChannelInvitation,
     SentInvitation,
     RecoveryApproval,
 }
@@ -93,7 +94,7 @@ fn build_notifications_runtime_view(
                         .home_name
                         .clone()
                         .unwrap_or_else(|| invitation.from_id.to_string()),
-                    NotificationRuntimeAction::ReceivedInvitation,
+                    NotificationRuntimeAction::PendingChannelInvitation,
                 ),
                 (
                     aura_app::ui::types::InvitationDirection::Sent,

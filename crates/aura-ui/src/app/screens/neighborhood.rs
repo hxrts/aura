@@ -1,4 +1,9 @@
 use super::*;
+use crate::semantic_lifecycle::UiLocalOperationOwner;
+use aura_app::ui_contract::{
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind,
+};
 
 #[allow(non_snake_case)]
 pub(super) fn NeighborhoodScreen(
@@ -465,6 +470,11 @@ pub(super) fn NeighborhoodScreen(
                                                 };
                                                 let controller = controller.clone();
                                                 let app_core = controller.app_core().clone();
+                                                let operation = UiLocalOperationOwner::submit(
+                                                    controller.clone(),
+                                                    OperationId::move_position(),
+                                                    SemanticOperationKind::MovePosition,
+                                                );
                                                 let mut tick = render_tick;
                                                 let home_name = home_name.clone();
                                                 spawn_ui(async move {
@@ -476,12 +486,20 @@ pub(super) fn NeighborhoodScreen(
                                                     .await
                                                     {
                                                         Ok(_) => {
+                                                            operation.succeed(None);
                                                             controller.complete_runtime_enter_home(
                                                                 &home_name,
                                                                 depth,
                                                             );
                                                         }
                                                         Err(error) => {
+                                                            operation.fail_with(
+                                                                SemanticOperationError::new(
+                                                                    SemanticFailureDomain::Command,
+                                                                    SemanticFailureCode::InternalError,
+                                                                )
+                                                                .with_detail(error.to_string()),
+                                                            );
                                                             controller.runtime_error_toast(
                                                                 error.to_string(),
                                                             );

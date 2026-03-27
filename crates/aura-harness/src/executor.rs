@@ -108,6 +108,7 @@ struct ScenarioContext {
     vars: BTreeMap<String, String>,
     last_operation_handle: BTreeMap<String, UiOperationHandle>,
     current_channel_binding: BTreeMap<String, ChannelBinding>,
+    current_channel_name: BTreeMap<String, String>,
     pending_projection_baseline: BTreeMap<String, ProjectionRevision>,
     canonical_trace: Vec<CanonicalTraceEvent>,
 }
@@ -149,6 +150,16 @@ fn record_current_channel_binding(
     context
         .current_channel_binding
         .insert(instance_id.to_string(), binding);
+}
+
+fn record_current_channel_name(
+    context: &mut ScenarioContext,
+    instance_id: &str,
+    channel_name: &str,
+) {
+    context
+        .current_channel_name
+        .insert(instance_id.to_string(), channel_name.to_string());
 }
 
 impl Default for ExecutionBudgets {
@@ -1189,6 +1200,7 @@ fn execute_semantic_intent(
             record_submission_handle(context, &instance_id, handle.clone());
             let _ = channel_name;
             record_current_channel_binding(context, &instance_id, channel_binding.clone());
+            record_current_channel_name(context, &instance_id, channel_name);
             wait_for_contract_barriers(
                 &metadata_step,
                 tool_api,
@@ -1383,8 +1395,8 @@ fn execute_semantic_intent(
                 response,
             )?;
             record_submission_handle(context, &instance_id, Some(handle.clone()));
-            let _ = channel_name;
             record_current_channel_binding(context, &instance_id, channel_binding.clone());
+            record_current_channel_name(context, &instance_id, channel_name);
             wait_for_contract_barriers(
                 &metadata_step,
                 tool_api,
@@ -1401,10 +1413,10 @@ fn execute_semantic_intent(
             Ok(())
         }
         IntentAction::InviteActorToChannel { authority_id, .. } => {
-            let explicit_channel_id = context
+            let explicit_binding = context
                 .current_channel_binding
                 .get(&instance_id)
-                .map(|binding| binding.channel_id.clone())
+                .cloned()
                 .ok_or_else(|| {
                     anyhow!(
                         "invite_actor_to_channel requires an authoritative current channel binding"
@@ -1412,7 +1424,9 @@ fn execute_semantic_intent(
                 })?;
             let invite_intent = IntentAction::InviteActorToChannel {
                 authority_id: authority_id.clone(),
-                channel_id: Some(explicit_channel_id),
+                channel_id: Some(explicit_binding.channel_id),
+                context_id: Some(explicit_binding.context_id),
+                channel_name: context.current_channel_name.get(&instance_id).cloned(),
             };
             let contract = invite_intent.contract();
             let response = submit_shared_intent(
@@ -1627,11 +1641,21 @@ fn resolve_intent_templates(
         IntentAction::InviteActorToChannel {
             authority_id,
             channel_id,
+            context_id,
+            channel_name,
         } => IntentAction::InviteActorToChannel {
             authority_id: resolve_template(authority_id, context)?,
             channel_id: channel_id
                 .clone()
                 .map(|channel_id| resolve_template(&channel_id, context))
+                .transpose()?,
+            context_id: context_id
+                .clone()
+                .map(|context_id| resolve_template(&context_id, context))
+                .transpose()?,
+            channel_name: channel_name
+                .clone()
+                .map(|channel_name| resolve_template(&channel_name, context))
                 .transpose()?,
         },
         IntentAction::SendChatMessage { message } => IntentAction::SendChatMessage {

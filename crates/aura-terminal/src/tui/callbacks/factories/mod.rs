@@ -290,47 +290,26 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
     SuccessFut: Future<Output = ()> + Send + 'static,
 {
     let app_core = ctx.app_core_raw().clone();
-    let operation_instance_id = operation.harness_handle().instance_id().clone();
     let spec_for_handoff = spec.clone();
     spawn_ctx(ctx, async move {
         let workflow_instance_id = operation.workflow_instance_id();
-        let _ = operation.handoff_to_app_workflow(spec_for_handoff.scope);
+        let transfer = operation.handoff_to_app_workflow(spec_for_handoff.scope);
 
-        match std::panic::AssertUnwindSafe(workflow(app_core.clone(), workflow_instance_id))
-            .catch_unwind()
+        match transfer
+            .run_workflow(
+                app_core.clone(),
+                tx.clone(),
+                spec.panic_context,
+                workflow(app_core.clone(), workflow_instance_id),
+            )
             .await
         {
-            Ok(WorkflowTerminalOutcome {
-                result: Ok(value),
-                terminal,
-            }) => {
+            Ok(value) => {
                 on_success(tx.clone(), value).await;
-                if let Err(error) = apply_handed_off_terminal_status(
-                    &app_core,
-                    &tx,
-                    spec.operation_id.clone(),
-                    operation_instance_id,
-                    spec.kind,
-                    terminal,
-                )
-                .await
-                {
-                    emit_error_toast(&tx, spec.toast_scope, error).await;
-                }
             }
-            Ok(WorkflowTerminalOutcome {
-                result: Err(error),
-                terminal,
-            }) => {
-                let _ = apply_handed_off_terminal_status(
-                    &app_core,
-                    &tx,
-                    spec.operation_id.clone(),
-                    operation_instance_id.clone(),
-                    spec.kind,
-                    terminal,
-                )
-                .await;
+            Err(aura_app::frontend_primitives::SubmittedOperationWorkflowError::Workflow(
+                error,
+            )) => {
                 emit_error_toast(
                     &tx,
                     spec.toast_scope,
@@ -338,17 +317,10 @@ fn spawn_handoff_workflow_callback_with_success<T, Fut, F, Success, SuccessFut>(
                 )
                 .await;
             }
-            Err(panic) => {
-                let detail = panic_detail(spec.panic_context, panic.as_ref());
-                let _ = apply_handed_off_terminal_status(
-                    &app_core,
-                    &tx,
-                    spec.operation_id,
-                    operation_instance_id,
-                    spec.kind,
-                    None,
-                )
-                .await;
+            Err(
+                aura_app::frontend_primitives::SubmittedOperationWorkflowError::Protocol(detail)
+                | aura_app::frontend_primitives::SubmittedOperationWorkflowError::Panicked(detail),
+            ) => {
                 emit_error_toast(&tx, spec.toast_scope, detail).await;
             }
         }
@@ -372,7 +344,8 @@ async fn run_invitation_import_flow(
     let kind = SemanticOperationKind::AcceptContactInvitation;
     let operation_instance_id = operation.harness_handle().instance_id().clone();
     let workflow_instance_id = operation.workflow_instance_id();
-    let _ = operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
+    let transfer =
+        operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
 
     let invitation = match import_invitation_details(&app_core, &code).await {
         Ok(invitation) => invitation,
@@ -409,49 +382,39 @@ async fn run_invitation_import_flow(
         }
     };
 
-    match aura_app::ui::workflows::invitation::accept_imported_invitation_with_terminal_status(
-        &app_core,
-        invitation,
-        workflow_instance_id,
-    )
-    .await
+    match transfer
+        .run_workflow(
+            app_core.clone(),
+            tx.clone(),
+            "accept_imported_invitation",
+            aura_app::ui::workflows::invitation::handoff::accept_imported_invitation(
+                &app_core,
+                aura_app::ui::workflows::invitation::handoff::AcceptImportedInvitationRequest {
+                    invitation,
+                    operation_instance_id: workflow_instance_id,
+                },
+            ),
+        )
+        .await
     {
-        WorkflowTerminalOutcome {
-            result: Ok(()),
-            terminal,
-        } => {
+        Ok(()) => {
             for update in invitation_import_success_updates(&code) {
                 send_ui_update_required(&tx, update).await;
             }
-            let _ = apply_handed_off_terminal_status(
-                &app_core,
-                &tx,
-                operation_id,
-                operation_instance_id,
-                kind,
-                terminal,
-            )
-            .await;
         }
-        WorkflowTerminalOutcome {
-            result: Err(error),
-            terminal,
-        } => {
-            let _ = apply_handed_off_terminal_status(
-                &app_core,
-                &tx,
-                operation_id,
-                operation_instance_id,
-                kind,
-                terminal,
-            )
-            .await;
+        Err(aura_app::frontend_primitives::SubmittedOperationWorkflowError::Workflow(error)) => {
             emit_error_toast(
                 &tx,
                 "invitation",
                 format!("Import invitation failed: {error}"),
             )
             .await;
+        }
+        Err(
+            aura_app::frontend_primitives::SubmittedOperationWorkflowError::Protocol(detail)
+            | aura_app::frontend_primitives::SubmittedOperationWorkflowError::Panicked(detail),
+        ) => {
+            emit_error_toast(&tx, "invitation", detail).await;
         }
     }
 }

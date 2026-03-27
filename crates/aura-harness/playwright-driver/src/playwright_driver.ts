@@ -48,6 +48,11 @@ const MAX_TIMEOUT_MS = 600000;
 const MAX_START_ATTEMPTS = 10;
 const STARTUP_READINESS_SEMANTIC = "semantic_ready";
 const STARTUP_READINESS_SUBMIT = "submit_ready";
+const CHROMIUM_HARNESS_ARGS = [
+  "--disable-background-timer-throttling",
+  "--disable-backgrounding-occluded-windows",
+  "--disable-renderer-backgrounding",
+];
 
 async function getChromium() {
   if (!chromiumPromise) {
@@ -352,56 +357,74 @@ async function observeSemanticCompletionAfterEnqueueFailure(
   commandId,
   responsePromise,
   reason,
-  timeoutMs = 750,
+  timeoutMs = 4000,
 ) {
-  const cachedPayload = takeSemanticResultFromCache(session, commandId);
-  if (cachedPayload) {
-    console.error(
-      `[driver] semantic_enqueue_result_cache_hit instance=${session.id} command_id=${commandId} reason=${reason} ok=${cachedPayload.ok === true}`,
-    );
-    return cachedPayload;
-  }
-
-  const settled = await Promise.race([
-    responsePromise
-      .then((payload) => ({ status: "result", payload }))
-      .catch((error) => ({ status: "error", error })),
-    delay(timeoutMs).then(() => ({ status: "pending" })),
-  ]);
-  if (settled?.status === "result") {
-    console.error(
-      `[driver] semantic_enqueue_result_observed instance=${session.id} command_id=${commandId} reason=${reason} ok=${settled.payload?.ok === true}`,
-    );
-    return settled.payload;
-  }
-
-  const pageStatus = await withOperationTimeout(
-    `semantic_enqueue_probe_${session.id}`,
-    session.page.evaluate((activeCommandId) => {
-      const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
-      const debug = window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null;
-      const result =
-        semanticResults &&
-        Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
-          ? semanticResults[activeCommandId]
-          : null;
-      return JSON.stringify({ result, debug });
-    }, commandId),
-    timeoutMs,
-  ).catch(() => null);
-  if (typeof pageStatus !== "string") {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(pageStatus);
-    if (parsed?.result) {
+  const deadlineMs = Date.now() + timeoutMs;
+  let commandObservedOnPage = false;
+  while (Date.now() < deadlineMs) {
+    const cachedPayload = takeSemanticResultFromCache(session, commandId);
+    if (cachedPayload) {
       console.error(
-        `[driver] semantic_enqueue_result_page_probe instance=${session.id} command_id=${commandId} reason=${reason} ok=${parsed.result?.ok === true}`,
+        `[driver] semantic_enqueue_result_cache_hit instance=${session.id} command_id=${commandId} reason=${reason} ok=${cachedPayload.ok === true}`,
       );
-      return parsed.result;
+      return cachedPayload;
     }
-  } catch {
-    return null;
+
+    const settled = await Promise.race([
+      responsePromise
+        .then((payload) => ({ status: "result", payload }))
+        .catch((error) => ({ status: "error", error })),
+      delay(commandObservedOnPage ? 300 : 150).then(() => ({ status: "pending" })),
+    ]);
+    if (settled?.status === "result") {
+      console.error(
+        `[driver] semantic_enqueue_result_observed instance=${session.id} command_id=${commandId} reason=${reason} ok=${settled.payload?.ok === true}`,
+      );
+      return settled.payload;
+    }
+
+    const pageStatus = await withOperationTimeout(
+      `semantic_enqueue_probe_${session.id}`,
+      session.page.evaluate((activeCommandId) => {
+        const semanticResults = window.__AURA_DRIVER_SEMANTIC_RESULTS__;
+        const debug = window.__AURA_DRIVER_SEMANTIC_DEBUG__ ?? null;
+        const result =
+          semanticResults &&
+          Object.prototype.hasOwnProperty.call(semanticResults, activeCommandId)
+            ? semanticResults[activeCommandId]
+            : null;
+        return JSON.stringify({ result, debug });
+      }, commandId),
+      commandObservedOnPage ? 1500 : 1000,
+    ).catch(() => null);
+    if (typeof pageStatus !== "string") {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(pageStatus);
+      if (parsed?.result) {
+        console.error(
+          `[driver] semantic_enqueue_result_page_probe instance=${session.id} command_id=${commandId} reason=${reason} ok=${parsed.result?.ok === true}`,
+        );
+        return parsed.result;
+      }
+      const debug = parsed?.debug ?? null;
+      if (
+        debug &&
+        (debug.active_command_id === commandId ||
+          debug.last_command_id === commandId ||
+          debug.last_completed_command_id === commandId)
+      ) {
+        if (!commandObservedOnPage) {
+          console.error(
+            `[driver] semantic_enqueue_page_lifecycle_observed instance=${session.id} command_id=${commandId} reason=${reason} state=${JSON.stringify(debug)}`,
+          );
+        }
+        commandObservedOnPage = true;
+      }
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -2378,6 +2401,7 @@ async function startPage(params) {
         headless,
         viewport: { width: 1280, height: 900 },
         ignoreHTTPSErrors: true,
+        args: CHROMIUM_HARNESS_ARGS,
       });
       if (pendingSemanticPayload) {
         await context.addInitScript((payloadJson) => {
@@ -3123,9 +3147,40 @@ async function snapshot(params) {
   };
 }
 
+async function processHarnessTransport(session, instanceId) {
+  try {
+    await focusAuraPageSafe(
+      session.page,
+      instanceId,
+      "process_harness_transport",
+    );
+    traceDriver(
+      `[driver] process_harness_transport start instance=${instanceId}`,
+    );
+    await withOperationTimeout(
+      `process_harness_transport_${instanceId}`,
+      session.page.evaluate(async () => {
+        const fn = window.__AURA_HARNESS__?.process_harness_transport;
+        if (typeof fn === "function") {
+          await fn();
+        }
+      }),
+      2500,
+    );
+    traceDriver(
+      `[driver] process_harness_transport done instance=${instanceId}`,
+    );
+  } catch (error) {
+    traceDriver(
+      `[driver] process_harness_transport skipped instance=${instanceId} error=${normalizeClickError(error)}`,
+    );
+  }
+}
+
 async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
+  await processHarnessTransport(session, instanceId);
   const recoveryTimeoutMs = Math.min(UI_STATE_TIMEOUT_MS, 4000);
   const recentConsole = consoleTailText(session, 8).replace(/\n/g, " | ");
   traceDriver(
@@ -3172,6 +3227,7 @@ async function uiState(params) {
 async function waitForUiState(params) {
   const instanceId = normalizeInstanceId(params);
   const session = getSession(instanceId);
+  await processHarnessTransport(session, instanceId);
   const timeoutMs = Number(params?.timeout_ms ?? UI_STATE_TIMEOUT_MS);
   const rawAfterVersion = params?.after_version;
   const afterVersion =
@@ -3192,6 +3248,7 @@ async function waitForUiState(params) {
   const deadlineMs = Date.now() + timeoutMs;
 
   while (true) {
+    await processHarnessTransport(session, instanceId);
     if (session.uiStateCache && typeof session.uiStateCache === "object") {
       const cached =
         typeof session.uiStateCacheJson === "string"
@@ -3682,7 +3739,19 @@ async function submitSemanticCommand(params) {
     request_json: requestJson,
   });
   const enqueueCommand = async (activeSession, label, timeoutMs) =>
-    enqueueSemanticPayload(activeSession, enqueuePayload, label, timeoutMs);
+    {
+      await focusAuraPageSafe(
+        activeSession.page,
+        instanceId,
+        `submit_semantic_command:${label}`,
+      );
+      return enqueueSemanticPayload(
+        activeSession,
+        enqueuePayload,
+        label,
+        timeoutMs,
+      );
+    };
   try {
     await enqueueCommand(
       session,

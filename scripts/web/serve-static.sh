@@ -18,7 +18,7 @@ restore_dioxus_config() {
 }
 
 cd "$web_root"
-if [ ! -d node_modules ]; then
+if [ ! -d node_modules ] || [ ! -d node_modules/ws ]; then
     npm ci
 fi
 npm run tailwind:build >/dev/null
@@ -80,9 +80,13 @@ exec "$node_bin" -e '
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { WebSocketServer } = require("ws");
 const publicDir = process.argv[1];
 const port = Number(process.argv[2]);
 const host = "127.0.0.1";
+const TRANSPORT_POLL_PATH = "/__aura_harness_transport__/poll";
+const TRANSPORT_ENQUEUE_PATH = "/__aura_harness_transport__/enqueue";
+const DEBUG_EVENT_PATH = "/__aura_harness_debug__/event";
 const mime = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "application/javascript; charset=utf-8"],
@@ -97,8 +101,136 @@ const mime = new Map([
   [".ico", "image/x-icon"],
   [".txt", "text/plain; charset=utf-8"]
 ]);
-http.createServer((req, res) => {
+const transportQueues = new Map();
+
+function queueKey(authority, deviceId) {
+  return `${authority}::${deviceId || ""}`;
+}
+
+function enqueueTransportEnvelope(authority, deviceId, envelopeB64) {
+  const key = queueKey(authority, deviceId);
+  const queue = transportQueues.get(key) || [];
+  queue.push(envelopeB64);
+  transportQueues.set(key, queue);
+  process.stdout.write(
+    `[serve-web-static] transport enqueue authority=${authority} device=${deviceId || "<any>"} depth=${queue.length}\n`,
+  );
+}
+
+function drainTransportEnvelopes(authority, deviceId) {
+  const drained = [];
+  const wildcardKey = queueKey(authority, "");
+  const exactKey = queueKey(authority, deviceId || "");
+  for (const key of new Set([wildcardKey, exactKey])) {
+    const queue = transportQueues.get(key);
+    if (!queue || queue.length === 0) {
+      continue;
+    }
+    drained.push(...queue);
+    transportQueues.delete(key);
+  }
+  if (drained.length > 0) {
+    process.stdout.write(
+      `[serve-web-static] transport drain authority=${authority} device=${deviceId || "<any>"} count=${drained.length}\n`,
+    );
+  }
+  return drained;
+}
+
+function handleTransportEnvelopeMessage(message, onSuccess, onError) {
+  if (message?.kind !== "transport_envelope") {
+    onError(`unsupported harness transport kind: ${message?.kind ?? "<missing>"}`);
+    return;
+  }
+
+  if (
+    typeof message.destination !== "string" ||
+    message.destination.length === 0 ||
+    typeof message.envelope_b64 !== "string" ||
+    message.envelope_b64.length === 0
+  ) {
+    onError("malformed harness transport envelope");
+    return;
+  }
+
+  const destinationDeviceId =
+    typeof message.destination_device_id === "string" &&
+    message.destination_device_id.length > 0
+      ? message.destination_device_id
+      : "";
+  enqueueTransportEnvelope(
+    message.destination,
+    destinationDeviceId,
+    message.envelope_b64,
+  );
+  onSuccess();
+}
+
+const server = http.createServer((req, res) => {
   const reqPath = new URL(req.url, `http://${host}:${port}`).pathname;
+  if (req.method === "GET" && reqPath === TRANSPORT_POLL_PATH) {
+    const requestUrl = new URL(req.url, `http://${host}:${port}`);
+    const authority = requestUrl.searchParams.get("authority");
+    const deviceId = requestUrl.searchParams.get("device");
+    if (!authority) {
+      res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ error: "missing authority" }));
+      return;
+    }
+    const envelopes = drainTransportEnvelopes(authority, deviceId);
+    process.stdout.write(
+      `[serve-web-static] transport poll authority=${authority} device=${deviceId || "<any>"} count=${envelopes.length}\n`,
+    );
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    res.end(JSON.stringify({ envelopes }));
+    return;
+  }
+  if (req.method === "POST" && reqPath === TRANSPORT_ENQUEUE_PATH) {
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      raw += chunk;
+    });
+    req.on("end", () => {
+      let message;
+      try {
+        message = JSON.parse(raw);
+      } catch (error) {
+        console.error(`[serve-web-static] invalid harness transport payload: ${error?.message ?? String(error)}`);
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ error: "invalid-json" }));
+        return;
+      }
+
+      handleTransportEnvelopeMessage(
+        message,
+        () => {
+          res.writeHead(204, { "Cache-Control": "no-store" });
+          res.end();
+        },
+        (error) => {
+          console.error(`[serve-web-static] ${error}`);
+          res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ error }));
+        },
+      );
+    });
+    return;
+  }
+  if (req.method === "GET" && reqPath === DEBUG_EVENT_PATH) {
+    const requestUrl = new URL(req.url, `http://${host}:${port}`);
+    const event = requestUrl.searchParams.get("event") || "<missing>";
+    const detail = requestUrl.searchParams.get("detail") || "";
+    process.stdout.write(
+      `[serve-web-static] debug event=${event} detail=${detail}\n`,
+    );
+    res.writeHead(204, { "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
   const resolved = path.normalize(decodeURIComponent(reqPath)).replace(/^(\.\.[/\\])+/, "");
   let filePath = path.join(publicDir, resolved);
   if (reqPath.endsWith("/")) filePath = path.join(filePath, "index.html");
@@ -123,7 +255,49 @@ http.createServer((req, res) => {
       res.end(data);
     });
   });
-}).listen(port, host, () => {
+});
+
+const websocketServer = new WebSocketServer({ noServer: true });
+
+websocketServer.on("connection", (socket) => {
+  socket.on("message", (raw, isBinary) => {
+    let payload = raw;
+    if (isBinary && Buffer.isBuffer(raw)) {
+      payload = raw.toString("utf8");
+    } else if (typeof raw !== "string") {
+      payload = Buffer.from(raw).toString("utf8");
+    }
+
+    let message;
+    try {
+      message = JSON.parse(payload);
+    } catch (error) {
+      console.error(`[serve-web-static] invalid harness transport payload: ${error?.message ?? String(error)}`);
+      socket.close(1003, "invalid-json");
+      return;
+    }
+
+    handleTransportEnvelopeMessage(
+      message,
+      () => {
+        socket.send(JSON.stringify({ ok: true }));
+        socket.close(1000, "queued");
+      },
+      (error) => {
+        console.error(`[serve-web-static] ${error}`);
+        socket.close(1003, "invalid-envelope");
+      },
+    );
+  });
+});
+
+server.on("upgrade", (req, socket, head) => {
+  websocketServer.handleUpgrade(req, socket, head, (ws) => {
+    websocketServer.emit("connection", ws, req);
+  });
+});
+
+server.listen(port, host, () => {
   process.stdout.write(`[serve-web-static] serving ${publicDir} on http://${host}:${port}\n`);
 });
 ' "$public_dir" "$port"

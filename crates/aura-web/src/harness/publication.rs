@@ -200,11 +200,6 @@ fn publish_ui_snapshot_now(
     modal: Option<ModalId>,
     operation_count: usize,
 ) -> bool {
-    let should_publish = note_published_ui_snapshot_json(&json);
-    if !should_publish {
-        return false;
-    }
-
     let cache_publish = Reflect::set(
         window.as_ref(),
         &JsValue::from_str("__AURA_UI_STATE_CACHE__"),
@@ -598,10 +593,26 @@ pub(crate) fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(window) = web_sys::window() else {
         return;
     };
+
+    let mut dedup_snapshot = snapshot.clone();
+    dedup_snapshot.revision.render_seq = None;
+    let Ok(dedup_value) = to_value(&dedup_snapshot) else {
+        return;
+    };
+    let Ok(dedup_json) = JSON::stringify(&dedup_value) else {
+        return;
+    };
+    let Some(dedup_json) = dedup_json.as_string() else {
+        return;
+    };
+    if !note_published_ui_snapshot_json(&dedup_json) {
+        return;
+    }
+
     let render_seq = next_render_seq();
-    let mut snapshot = snapshot.clone();
-    snapshot.revision.render_seq = Some(render_seq);
-    let Ok(value) = to_value(&snapshot) else {
+    let mut published_snapshot = snapshot.clone();
+    published_snapshot.revision.render_seq = Some(render_seq);
+    let Ok(value) = to_value(&published_snapshot) else {
         return;
     };
     let Ok(json) = JSON::stringify(&value) else {
@@ -610,14 +621,14 @@ pub(crate) fn publish_ui_snapshot(snapshot: &UiSnapshot) {
     let Some(json) = json.as_string() else {
         return;
     };
-    let screen = snapshot.screen;
-    let open_modal = snapshot.open_modal;
-    let operation_count = snapshot.operations.len();
+    let screen = published_snapshot.screen;
+    let open_modal = published_snapshot.open_modal;
+    let operation_count = published_snapshot.operations.len();
     if !publish_ui_snapshot_now(&window, value, json, screen, open_modal, operation_count) {
         return;
     }
     let generation_id = active_generation();
-    if snapshot_marks_generation_ready(&snapshot) {
+    if snapshot_marks_generation_ready(&published_snapshot) {
         mark_generation_ready(generation_id);
     }
 
@@ -662,4 +673,34 @@ pub(crate) fn publish_semantic_controller_snapshot(controller: Arc<UiController>
         .into(),
     );
     snapshot
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ui_snapshot_dedup_happens_before_render_seq_is_added() {
+        let source = include_str!("publication.rs");
+        let start = source
+            .find("pub(crate) fn publish_ui_snapshot(snapshot: &UiSnapshot) {")
+            .expect("publish_ui_snapshot definition");
+        let end = source[start..]
+            .find("pub(crate) fn publish_semantic_controller_snapshot")
+            .map(|offset| start + offset)
+            .expect("publish_semantic_controller_snapshot marker");
+        let body = &source[start..end];
+        let dedup_index = body
+            .find("note_published_ui_snapshot_json(&dedup_json)")
+            .expect("dedup marker");
+        let render_seq_index = body
+            .find("let render_seq = next_render_seq();")
+            .expect("render_seq marker");
+        assert!(
+            dedup_index < render_seq_index,
+            "stable UI snapshot dedup must happen before render_seq is assigned"
+        );
+        assert!(
+            body.contains("dedup_snapshot.revision.render_seq = None;"),
+            "dedup must ignore render heartbeat sequencing"
+        );
+    }
 }

@@ -1,4 +1,21 @@
 use super::*;
+use crate::channel_selection::selected_authoritative_channel;
+use crate::semantic_lifecycle::{
+    UiLocalOperationOwner, UiOperationTransferScope, UiWorkflowHandoffOwner,
+};
+use aura_app::frontend_primitives::SubmittedOperationWorkflowError;
+use aura_app::ui_contract::{
+    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
+    SemanticOperationKind,
+};
+
+fn command_failure(detail: impl Into<String>) -> SemanticOperationError {
+    SemanticOperationError::new(
+        SemanticFailureDomain::Command,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into())
+}
 
 #[allow(non_snake_case)]
 pub(super) fn ContactsScreen(
@@ -25,6 +42,7 @@ pub(super) fn ContactsScreen(
     let accept_invitation_controller = controller.clone();
     let start_chat_controller = controller.clone();
     let invite_to_channel_controller = controller.clone();
+    let add_guardian_controller = controller.clone();
     let edit_controller = controller.clone();
     let remove_controller = controller.clone();
     rsx! {
@@ -186,41 +204,54 @@ pub(super) fn ContactsScreen(
                                             let app_core = controller.app_core().clone();
                                             let authority_id = contact.authority_id;
                                             spawn_ui(async move {
-                                                match invitation_workflows::create_contact_invitation(
-                                                    &app_core,
-                                                    authority_id,
-                                                    None,
-                                                    None,
-                                                    None,
-                                                )
-                                                .await
-                                                {
-                                                    Ok(invitation) => {
-                                                        match invitation_workflows::export_invitation(
+                                                let operation = UiWorkflowHandoffOwner::submit(
+                                                    controller.clone(),
+                                                    OperationId::invitation_create(),
+                                                    SemanticOperationKind::CreateContactInvitation,
+                                                );
+                                                let workflow_instance_id = operation.workflow_instance_id();
+                                                let transfer = operation.handoff_to_app_workflow(
+                                                    UiOperationTransferScope::CreateInvitation,
+                                                );
+                                                match transfer
+                                                    .run_workflow(
+                                                        controller.clone(),
+                                                        "create_contact_invitation_code",
+                                                        invitation_workflows::handoff::create_contact_invitation(
                                                             &app_core,
-                                                            invitation.invitation_id(),
-                                                        )
-                                                        .await
-                                                        {
-                                                            Ok(code) => {
-                                                                controller.write_clipboard(&code);
-                                                                controller.push_runtime_fact(
-                                                                    RuntimeFact::InvitationCodeReady {
-                                                                        receiver_authority_id: Some(authority_id.to_string()),
-                                                                        source_operation: OperationId::invitation_create(),
-                                                                        code: Some(code),
-                                                                    },
-                                                                );
-                                                                controller.info_toast(
-                                                                    "Invitation code copied to clipboard",
-                                                                );
-                                                            }
-                                                            Err(error) => controller
-                                                                .runtime_error_toast(error.to_string()),
-                                                        }
+                                                            invitation_workflows::handoff::CreateContactInvitationRequest {
+                                                                receiver: authority_id,
+                                                                nickname: None,
+                                                                message: None,
+                                                                ttl_ms: None,
+                                                                operation_instance_id: workflow_instance_id,
+                                                            },
+                                                        ),
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(code) => {
+                                                        controller.write_clipboard(&code);
+                                                        controller.remember_invitation_code(&code);
+                                                        controller.push_runtime_fact(
+                                                            RuntimeFact::InvitationCodeReady {
+                                                                receiver_authority_id: Some(authority_id.to_string()),
+                                                                source_operation: OperationId::invitation_create(),
+                                                                code: Some(code),
+                                                            },
+                                                        );
+                                                        controller.info_toast(
+                                                            "Invitation code copied to clipboard",
+                                                        );
                                                     }
-                                                    Err(error) => {
-                                                        controller.runtime_error_toast(error.to_string());
+                                                    Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                                                        controller.runtime_error_toast(error.to_string())
+                                                    }
+                                                    Err(
+                                                        SubmittedOperationWorkflowError::Protocol(detail)
+                                                        | SubmittedOperationWorkflowError::Panicked(detail),
+                                                    ) => {
+                                                        controller.runtime_error_toast(detail);
                                                     }
                                                 }
                                             });
@@ -267,6 +298,13 @@ pub(super) fn ContactsScreen(
                         }
                         UiCardFooter {
                             extra_class: None,
+                            if let Some(code) = model.last_invite_code.as_ref() {
+                                div {
+                                    class: "w-full rounded-md border border-border bg-background/60 px-3 py-2 text-xs",
+                                    p { class: "m-0 text-[0.7rem] uppercase tracking-[0.06em] text-muted-foreground", "Last Invitation Code" }
+                                    p { class: "m-0 mt-1 break-all font-mono text-foreground", "{code}" }
+                                }
+                            }
                             div { class: "flex h-full w-full items-end justify-end gap-2 overflow-x-auto",
                                 UiButton {
                                     id: Some(
@@ -282,10 +320,16 @@ pub(super) fn ContactsScreen(
                                         move |_| {
                                             let controller = start_chat_controller.clone();
                                             let app_core = controller.app_core().clone();
+                                            let operation = UiLocalOperationOwner::submit(
+                                                controller.clone(),
+                                                OperationId::start_direct_chat(),
+                                                SemanticOperationKind::StartDirectChat,
+                                            );
                                             spawn_ui(async move {
                                                 let timestamp_ms = match context_workflows::current_time_ms(&app_core).await {
                                                     Ok(value) => value,
                                                     Err(error) => {
+                                                        operation.fail_with(command_failure(error.to_string()));
                                                         controller.runtime_error_toast(error.to_string());
                                                         return;
                                                     }
@@ -296,10 +340,14 @@ pub(super) fn ContactsScreen(
                                                     timestamp_ms,
                                                 ).await {
                                                     Ok(channel_id) => {
+                                                        operation.succeed(None);
                                                         controller.set_screen(ScreenId::Chat);
                                                         controller.select_channel_by_id(&channel_id);
                                                     }
-                                                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                    Err(error) => {
+                                                        operation.fail_with(command_failure(error.to_string()));
+                                                        controller.runtime_error_toast(error.to_string());
+                                                    }
                                                 }
                                             });
                                             render_tick.set(render_tick() + 1);
@@ -322,31 +370,132 @@ pub(super) fn ContactsScreen(
                                         move |_| {
                                             let controller = invite_to_channel_controller.clone();
                                             let app_core = controller.app_core().clone();
-                                            let selected_channel_id = controller
-                                                .ui_model()
-                                                .and_then(|model| {
-                                                    model
-                                                        .selected_channel_id()
-                                                        .map(str::to_string)
-                                                });
                                             spawn_ui(async move {
-                                                let Some(channel_id) = selected_channel_id else {
-                                                    controller.runtime_error_toast("Select a channel first");
-                                                    return;
-                                                };
-                                                match messaging_workflows::invite_user_to_channel(
-                                                    &app_core,
-                                                    &authority_id.to_string(),
-                                                    &channel_id,
-                                                    None,
-                                                    None,
+                                                let selected_channel = match selected_authoritative_channel(
+                                                    controller.as_ref(),
                                                 )
-                                                .await {
-                                                    Ok(_) => controller.info_toast("channel invitation sent"),
-                                                    Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                .await
+                                                {
+                                                    Ok(channel) => channel,
+                                                    Err(detail) => {
+                                                        controller.runtime_error_toast(detail);
+                                                        return;
+                                                    }
+                                                };
+                                                let operation = UiWorkflowHandoffOwner::submit(
+                                                    controller.clone(),
+                                                    OperationId::invitation_create(),
+                                                    SemanticOperationKind::InviteActorToChannel,
+                                                );
+                                                let workflow_instance_id = operation.workflow_instance_id();
+                                                let transfer = operation.handoff_to_app_workflow(
+                                                    UiOperationTransferScope::InviteActorToChannel,
+                                                );
+                                                match transfer
+                                                    .run_workflow(
+                                                        controller.clone(),
+                                                        "invite_authority_to_channel_with_context",
+                                                        messaging_workflows::handoff::invite_authority_to_channel(
+                                                            &app_core,
+                                                            messaging_workflows::handoff::InviteAuthorityToChannelRequest {
+                                                                receiver: authority_id,
+                                                                channel_id: selected_channel.channel_id,
+                                                                context_id: Some(selected_channel.context_id),
+                                                                channel_name_hint: Some(selected_channel.channel_name),
+                                                                operation_instance_id: workflow_instance_id,
+                                                                message: None,
+                                                                ttl_ms: None,
+                                                            },
+                                                        ),
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(_) => {
+                                                        controller.info_toast("channel invitation sent");
+                                                    }
+                                                    Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                                                        controller.runtime_error_toast(error.to_string());
+                                                    }
+                                                    Err(
+                                                        SubmittedOperationWorkflowError::Protocol(detail)
+                                                        | SubmittedOperationWorkflowError::Panicked(detail),
+                                                    ) => {
+                                                        controller.runtime_error_toast(detail);
+                                                    }
                                                 }
                                             });
                                             render_tick.set(render_tick() + 1);
+                                        }
+                                    }
+                                }
+                                if !contact.is_guardian {
+                                    UiButton {
+                                        id: Some(
+                                            ControlId::ContactsAddGuardianButton
+                                                .web_dom_id()
+                                                .required_dom_id(
+                                                    "ControlId::ContactsAddGuardianButton must define a web DOM id",
+                                                )
+                                                .to_string(),
+                                        ),
+                                        label: "Add Guardian".to_string(),
+                                        variant: ButtonVariant::Secondary,
+                                        onclick: {
+                                            let authority_id = contact.authority_id;
+                                            move |_| {
+                                                let controller = add_guardian_controller.clone();
+                                                let app_core = controller.app_core().clone();
+                                                spawn_ui(async move {
+                                                    let subject = {
+                                                        let core = app_core.read().await;
+                                                        core.runtime()
+                                                            .map(|runtime| runtime.authority_id())
+                                                            .or_else(|| core.authority().copied())
+                                                    };
+                                                    let Some(subject) = subject else {
+                                                        controller.runtime_error_toast("Authority not set");
+                                                        return;
+                                                    };
+                                                    let operation = UiWorkflowHandoffOwner::submit(
+                                                        controller.clone(),
+                                                        OperationId::invitation_create(),
+                                                        SemanticOperationKind::CreateGuardianInvitation,
+                                                    );
+                                                    let workflow_instance_id = operation.workflow_instance_id();
+                                                    let transfer = operation.handoff_to_app_workflow(
+                                                        UiOperationTransferScope::CreateInvitation,
+                                                    );
+                                                    match transfer
+                                                        .run_workflow(
+                                                            controller.clone(),
+                                                            "create_guardian_invitation",
+                                                            invitation_workflows::handoff::create_guardian_invitation(
+                                                                &app_core,
+                                                                invitation_workflows::handoff::CreateGuardianInvitationRequest {
+                                                                    receiver: authority_id,
+                                                                    subject,
+                                                                    message: None,
+                                                                    ttl_ms: None,
+                                                                    operation_instance_id: workflow_instance_id,
+                                                                },
+                                                            ),
+                                                        )
+                                                        .await
+                                                    {
+                                                        Ok(_) => controller.info_toast("Guardian invitation sent"),
+                                                        Err(SubmittedOperationWorkflowError::Workflow(error)) => {
+                                                            controller.runtime_error_toast(error.to_string());
+                                                        }
+                                                        Err(
+                                                            SubmittedOperationWorkflowError::Protocol(detail)
+                                                            | SubmittedOperationWorkflowError::Panicked(detail),
+                                                        ) => {
+                                                            controller.runtime_error_toast(detail);
+                                                        }
+                                                    }
+                                                });
+                                                render_tick.set(render_tick() + 1);
+                                            }
                                         }
                                     }
                                 }

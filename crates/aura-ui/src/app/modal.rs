@@ -54,18 +54,26 @@ pub(in crate::app) fn modal_view(
                 .and_then(|state| state.receiver_label.as_ref())
                 .is_some()
             {
-                details.push(
-                    "Review or adjust the authority id, then press Enter to generate and copy the code."
-                        .to_string(),
-                );
+                details.push("Review the authority id, optional message, and TTL before generating the code.".to_string());
             } else {
-                details.push("Create an invite code for a contact.".to_string());
-                details.push("Enter the target authority id, then press Enter to generate and copy the code.".to_string());
+                details.push("Create a typed contact invitation.".to_string());
+                details.push("Channel invites stay on the explicit channel-invite path so the selected channel binding remains authoritative.".to_string());
             }
+            let modal_state = model.create_invitation_modal().cloned().unwrap_or_default();
             inputs.push(ModalInputView {
                 label: "Receiver Authority ID".to_string(),
                 field_id: FieldId::InvitationReceiver,
-                value: model.modal_text_value().unwrap_or_default(),
+                value: modal_state.receiver_id,
+            });
+            inputs.push(ModalInputView {
+                label: "Message (optional)".to_string(),
+                field_id: FieldId::InvitationMessage,
+                value: modal_state.message,
+            });
+            inputs.push(ModalInputView {
+                label: "TTL Hours".to_string(),
+                field_id: FieldId::InvitationTtl,
+                value: modal_state.ttl_hours.to_string(),
             });
         }
         ModalState::AcceptInvitation => {
