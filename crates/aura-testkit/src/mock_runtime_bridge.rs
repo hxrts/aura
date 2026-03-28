@@ -3,6 +3,12 @@
 //! Provides a test-friendly implementation of the RuntimeBridge trait that
 //! uses in-memory state instead of real runtime infrastructure.
 //!
+//! Uses `std::sync::Mutex` because this is Layer 8 test infrastructure where:
+//! - task-handle bookkeeping is host-only and never held across `.await`
+//! - deterministic teardown needs short blocking critical sections
+//! - portability-sensitive frontend/shared code is enforced separately
+#![allow(clippy::disallowed_types)]
+//!
 //! ## Usage
 //!
 //! ```rust,ignore

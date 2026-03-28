@@ -1054,46 +1054,6 @@ fn maybe_flag_builder_method_without_must_use(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{is_frontend_portability_path, is_semantic_bridge_contract_path};
-
-    #[test]
-    fn frontend_portability_scope_covers_shared_frontend_owners() {
-        assert!(is_frontend_portability_path(
-            "crates/aura-app/src/frontend_primitives/task_owner.rs"
-        ));
-        assert!(is_frontend_portability_path(
-            "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
-        ));
-        assert!(is_frontend_portability_path(
-            "crates/aura-ui/src/semantic_lifecycle.rs"
-        ));
-        assert!(is_frontend_portability_path(
-            "crates/aura-web/src/task_owner.rs"
-        ));
-        assert!(!is_frontend_portability_path(
-            "crates/aura-web/src/harness/install.rs"
-        ));
-    }
-
-    #[test]
-    fn semantic_bridge_contract_scope_covers_bridge_root_and_harness_modules() {
-        assert!(is_semantic_bridge_contract_path(
-            "crates/aura-web/src/harness/commands.rs"
-        ));
-        assert!(is_semantic_bridge_contract_path(
-            "crates/aura-web/src/harness/install.rs"
-        ));
-        assert!(is_semantic_bridge_contract_path(
-            "crates/aura-web/src/harness_bridge.rs"
-        ));
-        assert!(!is_semantic_bridge_contract_path(
-            "crates/aura-web/src/task_owner.rs"
-        ));
-    }
-}
-
 fn has_must_use(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("must_use"))
 }
@@ -1413,4 +1373,44 @@ fn flag_mock_handler_items(file: &Path, item: &Item, violations: &mut Vec<String
 
 fn is_mock_handler_name(name: &str) -> bool {
     (name.contains("Mock") || name.contains("InMemory")) && name.contains("Handler")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_frontend_portability_path, is_semantic_bridge_contract_path};
+
+    #[test]
+    fn frontend_portability_scope_covers_shared_frontend_owners() {
+        assert!(is_frontend_portability_path(
+            "crates/aura-app/src/frontend_primitives/task_owner.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-terminal/src/tui/semantic_lifecycle.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-ui/src/semantic_lifecycle.rs"
+        ));
+        assert!(is_frontend_portability_path(
+            "crates/aura-web/src/task_owner.rs"
+        ));
+        assert!(!is_frontend_portability_path(
+            "crates/aura-web/src/harness/install.rs"
+        ));
+    }
+
+    #[test]
+    fn semantic_bridge_contract_scope_covers_bridge_root_and_harness_modules() {
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness/commands.rs"
+        ));
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness/install.rs"
+        ));
+        assert!(is_semantic_bridge_contract_path(
+            "crates/aura-web/src/harness_bridge.rs"
+        ));
+        assert!(!is_semantic_bridge_contract_path(
+            "crates/aura-web/src/task_owner.rs"
+        ));
+    }
 }

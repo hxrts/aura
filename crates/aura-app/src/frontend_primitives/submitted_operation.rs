@@ -472,7 +472,8 @@ mod tests {
     };
     use async_trait::async_trait;
     use futures::executor::block_on;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum Event {
@@ -499,10 +500,7 @@ mod tests {
             instance_id: &OperationInstanceId,
             kind: SemanticOperationKind,
         ) {
-            self.events
-                .lock()
-                .expect("submitted operation test events poisoned")
-                .push(Event::Dispatched(
+            self.events.lock().await.push(Event::Dispatched(
                 operation_id.clone(),
                 instance_id.clone(),
                 kind,
@@ -516,10 +514,7 @@ mod tests {
             causality: Option<SemanticOperationCausality>,
             status: SemanticOperationStatus,
         ) {
-            self.events
-                .lock()
-                .expect("submitted operation test events poisoned")
-                .push(Event::Terminal(
+            self.events.lock().await.push(Event::Terminal(
                 operation_id.clone(),
                 instance_id.clone(),
                 causality,
@@ -533,23 +528,18 @@ mod tests {
             instance_id: &OperationInstanceId,
             kind: SemanticOperationKind,
         ) {
-            self.events
-                .lock()
-                .expect("submitted operation test events poisoned")
-                .push(Event::Dropped(
-                operation_id.clone(),
-                instance_id.clone(),
-                kind,
-            ));
+            block_on(async {
+                self.events.lock().await.push(Event::Dropped(
+                    operation_id.clone(),
+                    instance_id.clone(),
+                    kind,
+                ));
+            });
         }
     }
 
     fn events(publisher: &TestPublisher) -> Vec<Event> {
-        publisher
-            .events
-            .lock()
-            .expect("submitted operation test events poisoned")
-            .clone()
+        block_on(async { publisher.events.lock().await.clone() })
     }
 
     #[test]
