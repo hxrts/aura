@@ -38,6 +38,12 @@ struct ReactivePipelineShared {
 }
 
 #[derive(Clone)]
+#[aura_macros::actor_root(
+    owner = "reactive_pipeline_service",
+    domain = "reactive_pipeline",
+    supervision = "reactive_pipeline_task_root",
+    category = "actor_owned"
+)]
 pub struct ReactivePipelineService {
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,

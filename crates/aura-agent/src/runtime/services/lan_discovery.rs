@@ -22,6 +22,12 @@ struct LanDiscoveryShared {
 }
 
 /// LAN discovery service combining announcer and listener tasks.
+#[aura_macros::actor_root(
+    owner = "lan_discovery_service",
+    domain = "lan_discovery",
+    supervision = "lan_discovery_task_root",
+    category = "actor_owned"
+)]
 pub struct LanDiscoveryService {
     config: LanDiscoveryConfig,
     authority_id: AuthorityId,

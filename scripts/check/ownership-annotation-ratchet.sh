@@ -35,7 +35,7 @@ EOF
     mapfile -t scope_paths <<'EOF'
 crates/aura-agent/src/runtime/services
 EOF
-    required_attr='#[aura_macros::actor_owned'
+    required_attr='#[aura_macros::actor_'
     ;;
   capability-boundary)
     mapfile -t scope_paths <<'EOF'
@@ -104,29 +104,12 @@ file_has_attr_for_function() {
 }
 
 check_actor_owned_completeness() {
-  local -a excluded_files=(
-    "crates/aura-agent/src/runtime/services/lan_listener_service.rs"
-    "crates/aura-agent/src/runtime/services/maintenance_service.rs"
-    "crates/aura-agent/src/runtime/services/reactive_pipeline_service.rs"
-    "crates/aura-agent/src/runtime/services/lan_discovery.rs"
-  )
   local file
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
-    local excluded=0
-    local excluded_file
-    for excluded_file in "${excluded_files[@]}"; do
-      if [[ "$file" == "$excluded_file" ]]; then
-        excluded=1
-        break
-      fi
-    done
-    if (( excluded )); then
-      continue
-    fi
     if rg -n '^(pub )?struct [A-Za-z0-9_]*(Service|Manager|Coordinator|Subsystem|Actor)\b' "$file" >/dev/null; then
-      if ! rg -n '^\s*#\[(aura_macros::)?actor_owned' "$file" >/dev/null; then
-        echo "✖ $file: runtime service subtree completeness requires #[aura_macros::actor_owned]" >&2
+      if ! rg -n '^\s*#\[(aura_macros::)?actor_(owned|root)' "$file" >/dev/null; then
+        echo "✖ $file: runtime service subtree completeness requires #[aura_macros::actor_owned] or #[aura_macros::actor_root]" >&2
         violations=$((violations + 1))
       fi
     fi
@@ -201,7 +184,7 @@ while IFS= read -r line; do
           ;;
         actor-owned)
           if is_actor_owned_candidate "$line" && ! window_has_required_attr; then
-            echo "✖ $current_file: added runtime service appears to require $required_attr near ${line#+}" >&2
+            echo "✖ $current_file: added runtime service appears to require #[aura_macros::actor_owned] or #[aura_macros::actor_root] near ${line#+}" >&2
             violations=$((violations + 1))
           fi
           ;;

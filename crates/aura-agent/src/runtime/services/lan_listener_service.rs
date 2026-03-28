@@ -38,6 +38,12 @@ struct LanListenerShared {
 }
 
 #[derive(Clone)]
+#[aura_macros::actor_root(
+    owner = "lan_transport_listener_service",
+    domain = "lan_transport_listener",
+    supervision = "lan_transport_listener_task_root",
+    category = "actor_owned"
+)]
 pub struct LanTransportListenerService {
     #[cfg(not(target_arch = "wasm32"))]
     effects: Arc<AuraEffectSystem>,
