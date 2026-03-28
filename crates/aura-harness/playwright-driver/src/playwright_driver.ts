@@ -51,8 +51,6 @@ import {
   buildSemanticQueuePayloadJson,
   MUTATION_QUEUE_INSTALLED_KEY,
   PENDING_NAV_SCREEN_KEY,
-  PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
-  PENDING_SEMANTIC_QUEUE_SEED_KEY,
   PUSH_RUNTIME_STAGE_RESULT_KEY,
   PUSH_SEMANTIC_RESULT_KEY,
   PUSH_SEMANTIC_SUBMIT_STATE_KEY,
@@ -64,7 +62,6 @@ import {
   SEMANTIC_DEBUG_KEY,
   SEMANTIC_ENQUEUE_KEY,
   SEMANTIC_RESULTS_KEY,
-  seedQueuePayloadArray,
   WAKE_PENDING_NAV_KEY,
 } from "./driver_contract.js";
 
@@ -1412,22 +1409,6 @@ function normalizeStartupReadiness(params) {
   return STARTUP_READINESS_SEMANTIC;
 }
 
-function restartStartupReadiness(reason) {
-  if (
-    reason === "create_account_bootstrap" ||
-    reason === "stage_runtime_identity_bootstrap"
-  ) {
-    // Bootstrap-staging restarts are allowed to recover against the lighter
-    // submit surface because the page may not have an account/runtime-backed
-    // semantic snapshot yet.
-    return STARTUP_READINESS_SUBMIT;
-  }
-  // Semantic-command replay must wait for full semantic readiness again so the
-  // restarted page has completed generation bootstrap and re-owned shell
-  // maintenance before the replayed command runs.
-  return STARTUP_READINESS_SEMANTIC;
-}
-
 function installPageNavigationReset(session) {
   const onNavigation = (frame) => {
     if (frame !== session.page.mainFrame()) {
@@ -2608,16 +2589,6 @@ function parseStartOptions(params) {
   );
   const resetStorage = params?.reset_storage === true;
   const startupReadiness = normalizeStartupReadiness(params);
-  const pendingSemanticPayload =
-    typeof params?.pending_semantic_payload === "string" &&
-    params.pending_semantic_payload.length > 0
-      ? params.pending_semantic_payload
-      : null;
-  const pendingRuntimeStagePayload =
-    typeof params?.pending_runtime_stage_payload === "string" &&
-    params.pending_runtime_stage_payload.length > 0
-      ? params.pending_runtime_stage_payload
-      : null;
 
   return {
     instanceId,
@@ -2632,8 +2603,6 @@ function parseStartOptions(params) {
     startRetryBackoffMs,
     resetStorage,
     startupReadiness,
-    pendingSemanticPayload,
-    pendingRuntimeStagePayload,
   };
 }
 
@@ -2707,8 +2676,6 @@ async function startPage(params) {
     startRetryBackoffMs,
     resetStorage,
     startupReadiness,
-    pendingSemanticPayload,
-    pendingRuntimeStagePayload,
   } = options;
   const targetUrl = withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed);
 
@@ -2739,32 +2706,6 @@ async function startPage(params) {
         ignoreHTTPSErrors: true,
         args: CHROMIUM_HARNESS_ARGS,
       });
-      if (pendingSemanticPayload) {
-        await context.addInitScript(({ payloadJson, pendingSemanticQueueSeedKey }) => {
-          window[pendingSemanticQueueSeedKey] = seedQueuePayloadArray(
-            payloadJson,
-          );
-        }, {
-          payloadJson: pendingSemanticPayload,
-          pendingSemanticQueueSeedKey: PENDING_SEMANTIC_QUEUE_SEED_KEY,
-        });
-        console.error(
-          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} startup_pending_semantic_seed installed`,
-        );
-      }
-      if (pendingRuntimeStagePayload) {
-        await context.addInitScript(({ payloadJson, pendingRuntimeStageQueueSeedKey }) => {
-          window[pendingRuntimeStageQueueSeedKey] = seedQueuePayloadArray(
-            payloadJson,
-          );
-        }, {
-          payloadJson: pendingRuntimeStagePayload,
-          pendingRuntimeStageQueueSeedKey: PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
-        });
-        console.error(
-          `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} startup_pending_runtime_stage_seed installed`,
-        );
-      }
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} launchPersistentContext done`,
       );
@@ -3036,30 +2977,19 @@ async function startPage(params) {
         console.error(
           `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} submit_ready mode active`,
         );
-        const seededStartup =
-          (typeof pendingSemanticPayload === "string" &&
-            pendingSemanticPayload.length > 0) ||
-          (typeof pendingRuntimeStagePayload === "string" &&
-            pendingRuntimeStagePayload.length > 0);
-        if (!seededStartup) {
-          await waitForPageNavigationStabilization(
-            session,
-            `startup_submit_ready:${instanceId}`,
-          );
-          await waitForNavigationQuietPeriod(
-            session,
-            `startup_submit_ready:${instanceId}`,
-          );
-          await waitForSubmitQueueReady(
-            session,
-            `startup_submit_ready:${instanceId}`,
-            Math.min(harnessReadyTimeoutMs, 10000),
-          );
-        } else {
-          console.error(
-            `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} submit_ready seeded fast_path`,
-          );
-        }
+        await waitForPageNavigationStabilization(
+          session,
+          `startup_submit_ready:${instanceId}`,
+        );
+        await waitForNavigationQuietPeriod(
+          session,
+          `startup_submit_ready:${instanceId}`,
+        );
+        await waitForSubmitQueueReady(
+          session,
+          `startup_submit_ready:${instanceId}`,
+          Math.min(harnessReadyTimeoutMs, 10000),
+        );
         consoleLog.push(
           `[${nowIso()}] startup completed in submit_ready mode for ${instanceId}`,
         );
@@ -3107,10 +3037,6 @@ async function startPage(params) {
 async function restartPageSession(
   session,
   reason,
-  {
-    pendingSemanticPayload = null,
-    pendingRuntimeStagePayload = null,
-  } = {},
 ) {
   const options = session.startOptions;
   if (!options) {
@@ -3133,9 +3059,8 @@ async function restartPageSession(
     harness_ready_timeout_ms: options.harnessReadyTimeoutMs,
     start_max_attempts: options.startMaxAttempts,
     start_retry_backoff_ms: options.startRetryBackoffMs,
-    startup_readiness: restartStartupReadiness(reason),
-    pending_semantic_payload: pendingSemanticPayload,
-    pending_runtime_stage_payload: pendingRuntimeStagePayload,
+    startup_readiness:
+      options.startup_readiness ?? STARTUP_READINESS_SEMANTIC,
   });
   console.error(
     `[driver] restart_page_session ready instance=${session.id} reason=${reason}`,
@@ -3499,6 +3424,9 @@ async function navigateScreen(params) {
       1000,
     );
   } catch (error) {
+    if (!isClosedTargetError(error) && !sessionPageClosed(session)) {
+      throw error;
+    }
     console.error(
       `[driver] navigate_screen restart_retry instance=${instanceId} screen=${screen} error=${error?.message ?? String(error)}`,
     );
@@ -3557,6 +3485,9 @@ async function openSettingsSection(params) {
       1000,
     );
   } catch (error) {
+    if (!isClosedTargetError(error) && !sessionPageClosed(session)) {
+      throw error;
+    }
     console.error(
       `[driver] open_settings_section restart_retry instance=${instanceId} section=${section} error=${error?.message ?? String(error)}`,
     );
@@ -3947,23 +3878,15 @@ async function stageRuntimeIdentity(params) {
             `[driver] stage_runtime_identity enqueue_superseded_by_result instance=${instanceId} stage=retry`,
           );
         } else {
-          console.error(
-            `[driver] stage_runtime_identity enqueue_restart instance=${instanceId} error=${retryError?.message ?? String(retryError)}`,
-          );
           invalidateRuntimeStageResultWaiter(
             session,
             commandId,
-            `stage_runtime_identity_restart:${instanceId}`,
+            `stage_runtime_identity_failed_closed:${instanceId}`,
           );
           void responsePromise.catch(() => null);
-          const restartedSession = await restartPageSession(
-            session,
-            `stage_runtime_identity_enqueue:${instanceId}`,
-            { pendingRuntimeStagePayload: enqueuePayload },
+          throw new Error(
+            `stage_runtime_identity_enqueue_failed_closed:${retryError?.message ?? String(retryError)}`,
           );
-          session = restartedSession;
-          responsePromise = waitForRuntimeStageResult(session, commandId, 45000);
-          void responsePromise.catch(() => null);
         }
       }
     }
@@ -4337,67 +4260,15 @@ async function submitSemanticCommand(params) {
                 `[driver] submit_semantic_command enqueue_superseded_by_result instance=${instanceId} stage=recover`,
               );
             } else {
-              console.error(
-                `[driver] submit_semantic_command enqueue_restart instance=${instanceId} error=${recoverError?.message ?? String(recoverError)}`,
-              );
               invalidateSemanticResultWaiter(
                 session,
                 commandId,
-                `submit_semantic_command_restart:${instanceId}`,
+                `submit_semantic_command_failed_closed:${instanceId}`,
               );
               void responsePromise.catch(() => null);
-              const restartedSession = await restartPageSession(
-                session,
-                `submit_semantic_command_enqueue:${instanceId}`,
+              throw new Error(
+                `submit_semantic_command_enqueue_failed_closed:${recoverError?.message ?? String(recoverError)}`,
               );
-              session = restartedSession;
-              await assertSemanticEnqueueCallable(
-                session,
-                `submit_semantic_command_restart:${instanceId}`,
-                2000,
-              );
-              if (
-                !session.semanticResultCache ||
-                typeof session.semanticResultCache !== "object"
-              ) {
-                session.semanticResultCache = Object.create(null);
-              }
-              if (
-                !session.semanticResultWaiters ||
-                typeof session.semanticResultWaiters !== "object"
-              ) {
-                session.semanticResultWaiters = Object.create(null);
-              }
-              delete session.semanticResultCache[commandId];
-              delete session.semanticResultWaiters[commandId];
-              responsePromise = waitForSemanticResult(session, commandId, 10000);
-              void responsePromise.catch(() => null);
-              try {
-                await enqueueCommand(
-                  session,
-                  `submit_semantic_command_enqueue_restart_${instanceId}`,
-                  4000,
-                );
-                console.error(
-                  `[driver] submit_semantic_command enqueue_ok instance=${instanceId} stage=restart`,
-                );
-              } catch (restartError) {
-                const completedAfterRestartFailure =
-                  await observeSemanticCompletionAfterEnqueueFailure(
-                    session,
-                    commandId,
-                    responsePromise,
-                    `restart:${instanceId}`,
-                  );
-                if (completedAfterRestartFailure) {
-                  responsePromise = Promise.resolve(completedAfterRestartFailure);
-                  console.error(
-                    `[driver] submit_semantic_command enqueue_superseded_by_result instance=${instanceId} stage=restart`,
-                  );
-                } else {
-                  throw restartError;
-                }
-              }
             }
           }
         }

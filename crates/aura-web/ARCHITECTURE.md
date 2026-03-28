@@ -100,6 +100,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   phase, and any in-flight bootstrap transition detail so the driver can
   observe product-owned bootstrap/rebinding state instead of inferring
   lifecycle from page-evaluate failures.
+- Driver-owned `restart_page_session` is infrastructure recovery only. Semantic
+  command submission and runtime-identity staging must wait on or fail from the
+  page-owned bootstrap/publication contract rather than replaying work through
+  browser-session restart.
 - Long-lived browser maintenance tasks must surface terminal pause/failure
   through observed UI state or equivalent structured browser signals rather than
   relying on console logging alone.

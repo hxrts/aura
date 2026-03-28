@@ -1391,13 +1391,13 @@ mod tests {
             source.contains(
                 "session.rpc_call_with_timeout(\n                \"submit_semantic_command\","
             ),
-            "browser backend should give semantic submissions an explicit long-lived RPC timeout because preserved-profile restart is part of the owned path"
+            "browser backend should give semantic submissions an explicit long-lived RPC timeout because browser semantic execution still crosses an owned async bridge even after driver-side restart replay is removed"
         );
         assert!(
             source.contains(
                 "session.rpc_call_with_timeout(\n                \"stage_runtime_identity\","
             ),
-            "browser backend should give runtime-identity staging the explicit longer RPC timeout budget required by generation-changing restart flows"
+            "browser backend should give runtime-identity staging the explicit longer RPC timeout budget required by generation-changing bootstrap publication flows"
         );
         assert!(!source.contains("session.rpc_call(\n                \"create_account\","));
         assert!(!source.contains("session.rpc_call(\n                \"create_home\","));
@@ -1501,6 +1501,12 @@ mod tests {
             !driver_source.contains("submit_queue_probe:")
                 && !driver_source.contains("semantic_enqueue_callable_probe:"),
             "browser driver should not regress submit readiness to repeated page-evaluate probe loops once the page-owned semantic submit publication is available"
+        );
+        assert!(
+            !driver_source.contains("submit_semantic_command enqueue_restart")
+                && !driver_source.contains("stage_runtime_identity enqueue_restart")
+                && !driver_source.contains("pendingRuntimeStagePayload: enqueuePayload"),
+            "browser driver should fail closed instead of replaying semantic command or runtime-stage work through restart_page_session"
         );
         assert!(
             contract_source.contains("pub(crate) const RUNTIME_STAGE_ENQUEUE_KEY")
