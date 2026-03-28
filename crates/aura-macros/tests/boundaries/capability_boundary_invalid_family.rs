@@ -1,8 +1,9 @@
 use aura_core::LifecyclePublicationCapability;
 
 #[aura_macros::capability_boundary(
+    category = "capability_gated",
     capability = "demo-capability",
-    family = "capability_accessor"
+    family = "not-a-real-family"
 )]
 fn capability_surface() -> &'static LifecyclePublicationCapability {
     static CAPABILITY: std::sync::LazyLock<LifecyclePublicationCapability> =

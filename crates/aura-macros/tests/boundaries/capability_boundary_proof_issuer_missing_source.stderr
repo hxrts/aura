@@ -1,0 +1,5 @@
+error: proof_issuer boundaries require #[authoritative_source(kind = "proof_issuer")]
+  --> tests/boundaries/capability_boundary_proof_issuer_missing_source.rs:10:14
+   |
+10 |     family = "proof_issuer"
+   |              ^^^^^^^^^^^^^^

@@ -24,9 +24,10 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
-    parse_quote, Block, Error, Expr, ExprAwait, ExprCall, ExprGroup, ExprLit, ExprMethodCall,
-    ExprParen, ExprReference, FnArg, GenericArgument, ImplItemFn, ItemEnum, ItemFn, ItemStruct,
-    Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Token, Type, TypePath,
+    parse_quote, Attribute, Block, Error, Expr, ExprAwait, ExprCall, ExprGroup, ExprLit,
+    ExprMethodCall, ExprParen, ExprReference, FnArg, GenericArgument, ImplItemFn, ItemEnum,
+    ItemFn, ItemStruct, Lit, LitStr, MetaNameValue, PatType, PathArguments,
+    Result as SynResult, Token, Type, TypePath,
 };
 
 mod capability_family;
@@ -547,6 +548,7 @@ struct ActorRootAttr {
 struct CapabilityBoundaryAttr {
     category: LitStr,
     capability: LitStr,
+    family: LitStr,
 }
 
 struct AuthoritativeSourceAttr {
@@ -818,6 +820,7 @@ impl Parse for CapabilityBoundaryAttr {
         let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
         let mut category = None;
         let mut capability = None;
+        let mut family = None;
 
         for meta in metas {
             if meta.path.is_ident("category") {
@@ -832,10 +835,16 @@ impl Parse for CapabilityBoundaryAttr {
                     "capability",
                     "capability_boundary",
                 )?);
+            } else if meta.path.is_ident("family") {
+                family = Some(expect_string_literal(
+                    &meta,
+                    "family",
+                    "capability_boundary",
+                )?);
             } else {
                 return Err(Error::new_spanned(
                     meta,
-                    "unsupported capability_boundary attribute key; expected `category` or `capability`",
+                    "unsupported capability_boundary attribute key; expected `category`, `capability`, or `family`",
                 ));
             }
         }
@@ -851,6 +860,12 @@ impl Parse for CapabilityBoundaryAttr {
                 Error::new(
                     proc_macro2::Span::call_site(),
                     "capability_boundary requires `capability = \"...\"`",
+                )
+            })?,
+            family: family.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "capability_boundary requires `family = \"...\"`",
                 )
             })?,
         })
@@ -1653,6 +1668,7 @@ fn validate_capability_boundary_signature(
     config: &CapabilityBoundaryAttr,
 ) -> SynResult<()> {
     validate_capability_boundary_parts(
+        &function.attrs,
         &function.sig.inputs,
         function.sig.output.to_token_stream().to_string(),
         &function.block,
@@ -1665,6 +1681,7 @@ fn validate_capability_boundary_impl_signature(
     config: &CapabilityBoundaryAttr,
 ) -> SynResult<()> {
     validate_capability_boundary_parts(
+        &function.attrs,
         &function.sig.inputs,
         function.sig.output.to_token_stream().to_string(),
         &function.block,
@@ -1673,6 +1690,7 @@ fn validate_capability_boundary_impl_signature(
 }
 
 fn validate_capability_boundary_parts(
+    attrs: &[Attribute],
     inputs: &syn::punctuated::Punctuated<FnArg, Token![,]>,
     output_tokens: String,
     block: &Block,
@@ -1693,7 +1711,78 @@ fn validate_capability_boundary_parts(
             "capability_boundary requires a capability-bearing signature or body",
         ));
     }
+
+    let family = config.family.value();
+    if !matches!(
+        family.as_str(),
+        "capability_accessor" | "authorizer" | "proof_issuer" | "runtime_helper"
+    ) {
+        return Err(Error::new_spanned(
+            &config.family,
+            "capability_boundary family must be one of `capability_accessor`, `authorizer`, `proof_issuer`, or `runtime_helper`",
+        ));
+    }
+
+    match family.as_str() {
+        "capability_accessor" => {
+            if !inputs.is_empty() {
+                return Err(Error::new_spanned(
+                    inputs,
+                    "capability_accessor boundaries must not take inputs",
+                ));
+            }
+            if !output_tokens.contains("Capability") {
+                return Err(Error::new_spanned(
+                    &config.family,
+                    "capability_accessor boundaries must return a capability-bearing type",
+                ));
+            }
+        }
+        "authorizer" => {
+            if !block_tokens.contains("Authorized") && !block_tokens.contains("authorize") {
+                return Err(Error::new_spanned(
+                    block,
+                    "authorizer boundaries must mint or route an authorized value explicitly",
+                ));
+            }
+        }
+        "proof_issuer" => {
+            if authoritative_source_kind(attrs).as_deref() != Some("proof_issuer") {
+                return Err(Error::new_spanned(
+                    &config.family,
+                    "proof_issuer boundaries require #[authoritative_source(kind = \"proof_issuer\")]",
+                ));
+            }
+        }
+        "runtime_helper" => {}
+        _ => unreachable!("validated capability family"),
+    }
+
     Ok(())
+}
+
+fn authoritative_source_kind(attrs: &[Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        let segment = attr.path().segments.last()?;
+        if segment.ident != "authoritative_source" {
+            return None;
+        }
+        let metas = attr
+            .parse_args_with(Punctuated::<MetaNameValue, Token![,]>::parse_terminated)
+            .ok()?;
+        metas.into_iter().find_map(|meta| {
+            if !meta.path.is_ident("kind") {
+                return None;
+            }
+            match meta.value {
+                Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(value),
+                    ..
+                }) => Some(value.value()),
+                _ => None,
+            }
+        })
+    })
 }
 
 fn build_ownership_lifecycle(

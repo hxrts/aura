@@ -1338,7 +1338,8 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "semantic_readiness"
+    capability = "semantic_readiness",
+    family = "authorizer"
 )]
 async fn publish_authoritative_contact_invitation_accepted(
     app_core: &Arc<RwLock<AppCore>>,

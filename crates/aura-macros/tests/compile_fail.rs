@@ -91,6 +91,9 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/actor_root_on_function.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_category.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_capability.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_missing_family.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_invalid_family.rs");
     t.compile_fail("tests/boundaries/capability_boundary_non_capability_helper.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_proof_issuer_missing_source.rs");
     t.compile_fail("tests/boundaries/ownership_lifecycle_invalid_variant.rs");
 }

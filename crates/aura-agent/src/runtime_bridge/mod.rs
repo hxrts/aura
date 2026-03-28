@@ -98,7 +98,8 @@ const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "secure_storage_bootstrap"
+    capability = "secure_storage_bootstrap",
+    family = "runtime_helper"
 )]
 fn secure_storage_bootstrap_boundary(
     capabilities: &[SecureStorageCapability],
@@ -108,7 +109,8 @@ fn secure_storage_bootstrap_boundary(
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "secure_storage_bootstrap_read_write"
+    capability = "secure_storage_bootstrap_read_write",
+    family = "runtime_helper"
 )]
 fn secure_storage_bootstrap_store_capabilities() -> [SecureStorageCapability; 2] {
     [
