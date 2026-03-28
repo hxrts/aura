@@ -131,6 +131,18 @@ pub async fn submit_bootstrap_handoff(handoff: BootstrapHandoff) -> Result<(), J
     Ok(())
 }
 
+pub fn submit_bootstrap_handoff_accepted(handoff: BootstrapHandoff) -> Result<(), JsValue> {
+    let detail = handoff.detail();
+    web_sys::console::log_1(
+        &format!("[web-harness] submit_bootstrap_handoff accepted detail={detail}").into(),
+    );
+    let submitter = BOOTSTRAP_HANDOFF_SUBMITTER.with(|slot| slot.borrow().clone());
+    let submitter =
+        submitter.ok_or_else(|| JsValue::from_str("bootstrap handoff submitter is unavailable"))?;
+    let _promise = submitter(handoff);
+    Ok(())
+}
+
 pub async fn stage_runtime_identity(serialized_identity: String) -> Result<(), JsValue> {
     web_sys::console::log_1(&"[web-harness] stage_runtime_identity start".into());
     let stager = RUNTIME_IDENTITY_STAGER.with(|slot| slot.borrow().clone());

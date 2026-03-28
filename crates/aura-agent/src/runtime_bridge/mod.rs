@@ -4511,10 +4511,9 @@ mod tests {
             .expect("cache fallback descriptor for initiation");
 
         let bridge = AgentRuntimeBridge::new(agent);
-        let error = bridge
-            .ensure_peer_channel(context, peer)
-            .await
-            .expect_err("peer channel initiation should fail explicitly when prerequisites are unavailable");
+        let error = bridge.ensure_peer_channel(context, peer).await.expect_err(
+            "peer channel initiation should fail explicitly when prerequisites are unavailable",
+        );
         assert!(
             error.to_string().contains("service unavailable"),
             "expected service-unavailable boundary, got: {error}"

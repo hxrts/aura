@@ -25,9 +25,9 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
     parse_quote, Attribute, Block, Error, Expr, ExprAwait, ExprCall, ExprGroup, ExprLit,
-    ExprMethodCall, ExprParen, ExprReference, FnArg, GenericArgument, ImplItemFn, ItemEnum,
-    ItemFn, ItemStruct, Lit, LitStr, MetaNameValue, PatType, PathArguments,
-    Result as SynResult, Token, Type, TypePath,
+    ExprMethodCall, ExprParen, ExprReference, FnArg, GenericArgument, ImplItemFn, ItemEnum, ItemFn,
+    ItemStruct, Lit, LitStr, MetaNameValue, PatType, PathArguments, Result as SynResult, Token,
+    Type, TypePath,
 };
 
 mod capability_family;

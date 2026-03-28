@@ -107,7 +107,10 @@ impl MockRuntimeTaskSpawnerImpl {
     }
 
     fn record(&self, handle: JoinHandle<()>) {
-        self.handles.lock().expect("mock runtime handles poisoned").push(handle);
+        self.handles
+            .lock()
+            .expect("mock runtime handles poisoned")
+            .push(handle);
     }
 
     fn abort_all(&self) {

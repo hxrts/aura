@@ -1,9 +1,9 @@
 use async_lock::RwLock;
 use aura_agent::AuraAgent;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::system as system_workflows;
-use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::AppCore;
 use aura_ui::UiController;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -63,6 +63,24 @@ fn harness_transport_poll_url(agent: &AuraAgent) -> Option<String> {
     Some(format!(
         "{origin}{HARNESS_TRANSPORT_POLL_PATH}?authority={authority}&device={device}"
     ))
+}
+
+async fn yield_browser_maintenance_step(
+    operation: WebUiOperation,
+    error_code: &'static str,
+    label: &'static str,
+) -> Result<(), WebUiError> {
+    browser_sleep_ms(
+        0,
+        operation,
+        "WEB_BROWSER_SLEEP_WINDOW_UNAVAILABLE",
+        error_code,
+        "WEB_BROWSER_SLEEP_DROPPED",
+        "window unavailable for browser maintenance yield",
+        label,
+    )
+    .await
+    .map_err(|error| WebUiError::operation(operation, error_code, error.to_string()))
 }
 
 async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, WebUiError> {
@@ -190,7 +208,6 @@ pub(crate) fn spawn_browser_maintenance_loop<F, Fut>(
 {
     owner.spawn_local_cancellable(async move {
         loop {
-            tick().await;
             if let Err(error) = browser_sleep_ms(
                 interval_ms,
                 _sleep_operation,
@@ -209,6 +226,7 @@ pub(crate) fn spawn_browser_maintenance_loop<F, Fut>(
                 _controller.runtime_error_toast(_pause_message);
                 break;
             }
+            tick().await;
         }
     });
 }
@@ -232,6 +250,16 @@ pub(crate) fn spawn_background_sync_loop(
             async move {
                 let runtime = { tick_app_core.read().await.runtime().cloned() };
                 if let Some(runtime) = runtime {
+                    if let Err(error) = yield_browser_maintenance_step(
+                        WebUiOperation::BackgroundSync,
+                        "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+                        "background sync before trigger_discovery",
+                    )
+                    .await
+                    {
+                        log_web_error("warn", &error);
+                        return;
+                    }
                     if let Err(error) = runtime_workflows::timeout_runtime_call(
                         &runtime,
                         "web_background_sync",
@@ -249,6 +277,16 @@ pub(crate) fn spawn_background_sync_loop(
                                 error.to_string(),
                             ),
                         );
+                    }
+                    if let Err(error) = yield_browser_maintenance_step(
+                        WebUiOperation::BackgroundSync,
+                        "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+                        "background sync before process_ceremony_messages_before_sync",
+                    )
+                    .await
+                    {
+                        log_web_error("warn", &error);
+                        return;
                     }
                     if let Err(error) = runtime_workflows::timeout_runtime_call(
                         &runtime,
@@ -268,6 +306,16 @@ pub(crate) fn spawn_background_sync_loop(
                             ),
                         );
                     }
+                    if let Err(error) = yield_browser_maintenance_step(
+                        WebUiOperation::BackgroundSync,
+                        "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+                        "background sync before trigger_sync",
+                    )
+                    .await
+                    {
+                        log_web_error("warn", &error);
+                        return;
+                    }
                     if let Err(error) = runtime_workflows::timeout_runtime_call(
                         &runtime,
                         "web_background_sync",
@@ -285,6 +333,16 @@ pub(crate) fn spawn_background_sync_loop(
                                 error.to_string(),
                             ),
                         );
+                    }
+                    if let Err(error) = yield_browser_maintenance_step(
+                        WebUiOperation::BackgroundSync,
+                        "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+                        "background sync before process_ceremony_messages_after_sync",
+                    )
+                    .await
+                    {
+                        log_web_error("warn", &error);
+                        return;
                     }
                     if let Err(error) = runtime_workflows::timeout_runtime_call(
                         &runtime,
@@ -305,6 +363,16 @@ pub(crate) fn spawn_background_sync_loop(
                         );
                     }
                 }
+                if let Err(error) = yield_browser_maintenance_step(
+                    WebUiOperation::BackgroundSync,
+                    "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+                    "background sync before refresh_account",
+                )
+                .await
+                {
+                    log_web_error("warn", &error);
+                    return;
+                }
                 if let Err(error) = system_workflows::refresh_account(&tick_app_core).await {
                     log_web_error(
                         "warn",
@@ -314,6 +382,16 @@ pub(crate) fn spawn_background_sync_loop(
                             error.to_string(),
                         ),
                     );
+                }
+                if let Err(error) = yield_browser_maintenance_step(
+                    WebUiOperation::BackgroundSync,
+                    "WEB_BACKGROUND_SYNC_YIELD_FAILED",
+                    "background sync before refresh_discovered_peers",
+                )
+                .await
+                {
+                    log_web_error("warn", &error);
+                    return;
                 }
                 if let Err(error) =
                     network_workflows::refresh_discovered_peers(&tick_app_core).await
@@ -419,6 +497,20 @@ async fn run_harness_transport_tick(app_core: Arc<RwLock<AppCore>>, agent: Arc<A
 
     let runtime = { app_core.read().await.runtime().cloned() };
     if let Some(runtime) = runtime {
+        if let Err(error) = yield_browser_maintenance_step(
+            WebUiOperation::BackgroundSync,
+            "WEB_HARNESS_TRANSPORT_YIELD_FAILED",
+            "harness transport before maintenance pass",
+        )
+        .await
+        {
+            emit_browser_harness_debug_event(
+                "transport_tick_maintenance_yield_error",
+                &format!("authority={};error={error}", agent.authority_id()),
+            );
+            log_web_error("warn", &error);
+            return;
+        }
         emit_browser_harness_debug_event(
             "transport_tick_maintenance_start",
             &format!("authority={};drained={drained}", agent.authority_id()),

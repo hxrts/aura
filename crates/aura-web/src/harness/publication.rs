@@ -1,27 +1,26 @@
 use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
 use aura_ui::UiController;
-use js_sys::{JSON, Object};
+use js_sys::{Object, JSON};
 use serde_wasm_bindgen::to_value;
 use std::borrow::Cow;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
-use crate::harness::generation::{
-    active_generation, browser_shell_phase_label, current_browser_shell_phase, generation_js_value,
-    current_bootstrap_transition_detail, mark_generation_ready, next_render_seq,
-    note_published_ui_snapshot_json, ready_generation, BrowserShellPhase, UI_GENERATION_PHASE_KEY,
-};
-use crate::harness::driver_contract::{
-    PUSH_SEMANTIC_SUBMIT_STATE_KEY, SEMANTIC_ENQUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
-    WAKE_SEMANTIC_QUEUE_KEY,
-};
 use crate::harness::browser_contract::{
     DRIVER_PUSH_RENDER_HEARTBEAT_KEY, DRIVER_PUSH_UI_STATE_KEY, RENDER_HEARTBEAT_JSON_KEY,
     RENDER_HEARTBEAT_KEY, RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
     SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY, UI_PUBLICATION_STATE_KEY, UI_STATE_CACHE_KEY,
     UI_STATE_JSON_KEY,
 };
+use crate::harness::driver_contract::{PUSH_SEMANTIC_SUBMIT_STATE_KEY, WAKE_SEMANTIC_QUEUE_KEY};
+use crate::harness::generation::{
+    active_generation, browser_shell_phase_label, current_bootstrap_transition_detail,
+    current_browser_shell_phase, generation_js_value, mark_generation_ready, next_render_seq,
+    note_published_ui_snapshot_json, ready_generation, BrowserShellPhase, UI_GENERATION_PHASE_KEY,
+};
+use crate::harness::mutation::schedule_browser_task_next_tick;
+use crate::harness::page_owned_queue::wake_pending_mutation_queues_if_needed;
 use crate::harness::window_contract::{object_set, HarnessWindowContract};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,7 +160,11 @@ fn update_publication_state(
     let window_contract = HarnessWindowContract::new(window.clone());
     let state_object = Object::new();
     let _ = object_set(&state_object, "surface", &JsValue::from_str(surface.name));
-    let _ = object_set(&state_object, "status", &JsValue::from_str(state.status.label()));
+    let _ = object_set(
+        &state_object,
+        "status",
+        &JsValue::from_str(state.status.label()),
+    );
     let _ = object_set(&state_object, "detail", &JsValue::from_str(state.detail()));
     let _ = object_set(
         &state_object,
@@ -188,6 +191,35 @@ fn semantic_submit_surface_detail(base: &'static str) -> Cow<'static, str> {
     } else {
         Cow::Borrowed(base)
     }
+}
+
+pub(crate) fn schedule_window_callback_push(
+    window: &web_sys::Window,
+    function_key: &str,
+    payload: JsValue,
+    callback_label: &'static str,
+) -> bool {
+    let window_contract = HarnessWindowContract::new(window.clone());
+    if window_contract.function(function_key).is_none() {
+        return false;
+    }
+
+    let callback_window = window.clone();
+    let callback_key = function_key.to_string();
+    let schedule_result = schedule_browser_task_next_tick(move || {
+        let callback_contract = HarnessWindowContract::new(callback_window.clone());
+        let Some(function) = callback_contract.function(&callback_key) else {
+            return;
+        };
+        if let Err(error) = function.call1(callback_window.as_ref(), &payload) {
+            log_js_callback_error(callback_label, &error);
+        }
+    });
+    if let Err(error) = schedule_result {
+        log_js_callback_error(callback_label, &error);
+        return false;
+    }
+    true
 }
 
 fn publish_ui_snapshot_now(
@@ -218,18 +250,17 @@ fn publish_ui_snapshot_now(
         }
     };
 
-    let (binding_mode, driver_push_published) = window_contract
-        .function(DRIVER_PUSH_UI_STATE_KEY)
-    .map(|function| {
-        if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
-            publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
-            log_js_callback_error("driver UI state push", &error);
-            (PublicationBindingMode::DriverPush, false)
-        } else {
-            (PublicationBindingMode::DriverPush, true)
-        }
-    })
-    .unwrap_or((PublicationBindingMode::WindowCacheOnly, false));
+    let driver_push_published = schedule_window_callback_push(
+        window,
+        DRIVER_PUSH_UI_STATE_KEY,
+        JsValue::from_str(&json),
+        "driver UI state push",
+    );
+    let binding_mode = if driver_push_published {
+        PublicationBindingMode::DriverPush
+    } else {
+        PublicationBindingMode::WindowCacheOnly
+    };
     if binding_mode == PublicationBindingMode::WindowCacheOnly {
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "[aura-ui-publish]binding={};screen={screen:?};modal={modal:?};ops={operation_count}",
@@ -309,18 +340,12 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
         }
     };
 
-    let driver_push_published =
-        if let Some(function) = window_contract.function(DRIVER_PUSH_RENDER_HEARTBEAT_KEY) {
-        if let Err(error) = function.call1(window.as_ref(), &JsValue::from_str(&json)) {
-            publication_issues.push(format!("driver_push_failed: {}", js_value_detail(&error)));
-            log_js_callback_error("driver render heartbeat push", &error);
-            false
-        } else {
-            true
-        }
-    } else {
-        false
-    };
+    let driver_push_published = schedule_window_callback_push(
+        window,
+        DRIVER_PUSH_RENDER_HEARTBEAT_KEY,
+        JsValue::from_str(&json),
+        "driver render heartbeat push",
+    );
 
     let binding_mode = if driver_push_published {
         PublicationBindingMode::DriverPush
@@ -347,24 +372,13 @@ pub(crate) fn publish_render_heartbeat(window: &web_sys::Window, heartbeat: &Ren
     update_publication_state(window, RENDER_HEARTBEAT_SURFACE, &state);
 }
 
-pub(crate) fn wake_page_owned_mutation_queues(window: &web_sys::Window) {
-    let window_contract = HarnessWindowContract::new(window.clone());
-    for key in [WAKE_SEMANTIC_QUEUE_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY] {
-        if let Some(function) = window_contract.function(key) {
-            if let Err(error) = function.call0(window.as_ref()) {
-                log_js_callback_error("page-owned mutation queue wake", &error);
-            }
-        }
-    }
-}
-
 pub(crate) fn semantic_submit_surface_state() -> PublicationState {
     let active_generation = active_generation();
     let has_controller = crate::harness::generation::current_controller().is_some();
     let phase = current_browser_shell_phase();
     let queue_installed = web_sys::window()
         .map(HarnessWindowContract::new)
-        .and_then(|window_contract| window_contract.function(SEMANTIC_ENQUEUE_KEY))
+        .and_then(|window_contract| window_contract.function(WAKE_SEMANTIC_QUEUE_KEY))
         .is_some();
     if active_generation == 0 {
         return PublicationState::new(
@@ -433,7 +447,11 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
     let Some(state_object) = state_object.dyn_into::<Object>().ok() else {
         return;
     };
-    let _ = object_set(&state_object, "generation_id", &generation_js_value(generation_id));
+    let _ = object_set(
+        &state_object,
+        "generation_id",
+        &generation_js_value(generation_id),
+    );
     let _ = object_set(
         &state_object,
         "active_generation",
@@ -464,25 +482,22 @@ pub(crate) fn publish_semantic_submit_state(window: &web_sys::Window, state: &Pu
             );
         }
         None => {
-            let _ = object_set(
-                &state_object,
-                "bootstrap_transition_detail",
-                &JsValue::NULL,
-            );
+            let _ = object_set(&state_object, "bootstrap_transition_detail", &JsValue::NULL);
         }
     }
-    let enqueue_ready = window_contract.function(SEMANTIC_ENQUEUE_KEY).is_some();
+    let enqueue_ready = window_contract.function(WAKE_SEMANTIC_QUEUE_KEY).is_some();
     let _ = object_set(
         &state_object,
         "enqueue_ready",
         &JsValue::from_bool(enqueue_ready),
     );
-    if let Some(function) = window_contract.function(PUSH_SEMANTIC_SUBMIT_STATE_KEY) {
-        if let Err(error) = function.call1(window.as_ref(), &state_object) {
-            log_js_callback_error("driver semantic submit state push", &error);
-        }
-    }
-    wake_page_owned_mutation_queues(window);
+    let _ = schedule_window_callback_push(
+        window,
+        PUSH_SEMANTIC_SUBMIT_STATE_KEY,
+        JsValue::from(state_object),
+        "driver semantic submit state push",
+    );
+    wake_pending_mutation_queues_if_needed(window);
 }
 
 pub(crate) fn refresh_semantic_submit_surface(

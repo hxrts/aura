@@ -358,7 +358,8 @@ impl LocalPtyBackend {
     }
 
     fn ui_state_socket_path(&self, session_generation: u64) -> PathBuf {
-        self.socket_root().join(format!("u{session_generation:x}.sock"))
+        self.socket_root()
+            .join(format!("u{session_generation:x}.sock"))
     }
 
     fn ui_state_file_path(&self, session_generation: u64) -> PathBuf {
@@ -367,7 +368,8 @@ impl LocalPtyBackend {
     }
 
     fn command_socket_path(&self, session_generation: u64) -> PathBuf {
-        self.socket_root().join(format!("c{session_generation:x}.sock"))
+        self.socket_root()
+            .join(format!("c{session_generation:x}.sock"))
     }
 
     fn clipboard_file_path(&self) -> PathBuf {

@@ -1,5 +1,6 @@
 use async_lock::{Mutex, RwLock};
 use aura_agent::AgentBuilder;
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::types::{
     BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
 };
@@ -7,7 +8,6 @@ use aura_app::ui::workflows::account as account_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::system as system_workflows;
-use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::{AppConfig, AppCore};
 use aura_core::types::identifiers::AuthorityId;
 use aura_ui::UiController;

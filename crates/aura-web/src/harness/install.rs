@@ -3,17 +3,17 @@ use aura_app::ui::contract::{
 };
 use aura_app::ui::types::BootstrapRuntimeIdentity;
 use aura_ui::{control_selector, UiController};
-use js_sys::{Array, JSON, Object, Reflect};
+use js_sys::{Array, Object, Reflect, JSON};
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::future_to_promise;
 
-use crate::harness::commands;
 use crate::harness::browser_contract::{
     HARNESS_API_KEY, HARNESS_CLIPBOARD_KEY, HARNESS_OBSERVE_KEY, RENDER_HEARTBEAT_KEY,
     RENDER_HEARTBEAT_STATE_KEY, UI_STATE_OBSERVE_KEY,
 };
+use crate::harness::commands;
 use crate::harness::page_owned_queue;
 use crate::harness::publication::{
     initialize_harness_publication_state, published_ui_snapshot_value,
@@ -216,10 +216,9 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
 
     let read_clipboard = Closure::wrap(Box::new(move || -> JsValue {
         if let Some(window) = web_sys::window() {
-            if let Ok(value) = Reflect::get(
-                window.as_ref(),
-                &JsValue::from_str(HARNESS_CLIPBOARD_KEY),
-            ) {
+            if let Ok(value) =
+                Reflect::get(window.as_ref(), &JsValue::from_str(HARNESS_CLIPBOARD_KEY))
+            {
                 if let Some(text) = value.as_string() {
                     if !text.is_empty() {
                         return JsValue::from_str(&text);
@@ -259,14 +258,9 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
                         })?;
                     let controller = current_controller()?;
                     let request = commands::BrowserSemanticBridgeRequest::from_json(&request_json)?;
-                    commands::update_semantic_debug(
-                        "wrapper_parsed",
-                        Some(&request_json),
-                    );
+                    commands::update_semantic_debug("wrapper_parsed", Some(&request_json));
                     let response = request.submit(controller).await?;
-                    web_sys::console::log_1(
-                        &"[web-harness] submit_semantic_command done".into(),
-                    );
+                    web_sys::console::log_1(&"[web-harness] submit_semantic_command done".into());
                     response.into_js_value()
                 }
                 .await;
@@ -489,11 +483,8 @@ pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
             Some(window) => window,
             None => return JsValue::NULL,
         };
-        Reflect::get(
-            window.as_ref(),
-            &JsValue::from_str(RENDER_HEARTBEAT_KEY),
-        )
-        .unwrap_or(JsValue::NULL)
+        Reflect::get(window.as_ref(), &JsValue::from_str(RENDER_HEARTBEAT_KEY))
+            .unwrap_or(JsValue::NULL)
     }) as Box<dyn FnMut() -> JsValue>);
     Reflect::set(
         &observe,

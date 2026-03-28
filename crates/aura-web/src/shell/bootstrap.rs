@@ -1,9 +1,9 @@
+use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::types::{
     BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity, BootstrapSurface,
     PendingAccountBootstrap,
 };
 use aura_app::ui::workflows::account as account_workflows;
-use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_effects::{new_authority_id, new_device_id, RealRandomHandler};
 
 use crate::error::{log_web_error, WebUiError};
@@ -118,4 +118,16 @@ pub(crate) async fn submit_runtime_bootstrap_handoff(
                 format!("failed to submit web bootstrap handoff: {:?}", error),
             )
         })
+}
+
+pub(crate) fn submit_runtime_bootstrap_handoff_accepted(
+    handoff: harness_bridge::BootstrapHandoff,
+) -> Result<(), WebUiError> {
+    harness_bridge::submit_bootstrap_handoff_accepted(handoff).map_err(|error| {
+        WebUiError::operation(
+            WebUiOperation::SubmitBootstrapHandoff,
+            "WEB_BOOTSTRAP_HANDOFF_SUBMISSION_FAILED",
+            format!("failed to submit web bootstrap handoff: {:?}", error),
+        )
+    })
 }

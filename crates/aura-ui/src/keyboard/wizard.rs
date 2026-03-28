@@ -1,11 +1,11 @@
 use super::navigation::bounded_step;
 use super::set_toast;
-use aura_app::frontend_primitives::ClipboardPort;
 use crate::model::{
     ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CapabilityTier,
     CreateChannelDetailsField, CreateChannelModalState, CreateChannelWizardStep, ModalState,
     SelectDeviceModalState, ThresholdWizardModalState, ThresholdWizardStep, UiModel,
 };
+use aura_app::frontend_primitives::ClipboardPort;
 
 pub(super) fn open_create_channel_wizard(model: &mut UiModel) {
     model.modal_hint = "New Chat Group — Step 1 of 3".to_string();

@@ -31,7 +31,7 @@ cfg_if! {
             pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
             persist_selected_runtime_identity, selected_runtime_identity_key,
             stage_initial_web_account_bootstrap, stage_runtime_bound_web_account_bootstrap,
-            submit_runtime_bootstrap_handoff,
+            submit_runtime_bootstrap_handoff, submit_runtime_bootstrap_handoff_accepted,
         };
 
         fn main() {
@@ -101,6 +101,59 @@ mod tests {
         assert!(helper.contains("spawn_browser_maintenance_loop("));
         assert!(helper.contains("\"Background sync paused; refresh to resume\""));
         assert!(helper.contains("\"WEB_BACKGROUND_SYNC_SLEEP_FAILED\""));
+    }
+
+    #[test]
+    fn web_browser_maintenance_yields_before_first_tick() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
+        let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", maintenance_path.display())
+        });
+
+        let helper_start = source
+            .find("pub(crate) fn spawn_browser_maintenance_loop<")
+            .unwrap_or_else(|| panic!("missing spawn_browser_maintenance_loop"));
+        let helper_end = source[helper_start..]
+            .find("pub(crate) fn spawn_background_sync_loop(")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
+        let helper = &source[helper_start..helper_end];
+        let sleep_index = helper
+            .find("browser_sleep_ms(")
+            .unwrap_or_else(|| panic!("missing browser_sleep_ms call"));
+        let tick_index = helper
+            .find("tick().await;")
+            .unwrap_or_else(|| panic!("missing tick call"));
+        assert!(
+            sleep_index < tick_index,
+            "browser maintenance loops must yield once before the first background tick so bootstrap-handoff interactivity keeps priority over sync/transport work"
+        );
+    }
+
+    #[test]
+    fn web_background_sync_is_cooperative_between_heavy_steps() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let maintenance_path = repo_root.join("crates/aura-web/src/shell/maintenance.rs");
+        let source = std::fs::read_to_string(&maintenance_path).unwrap_or_else(|error| {
+            panic!("failed to read {}: {error}", maintenance_path.display())
+        });
+
+        let helper_start = source
+            .find("pub(crate) fn spawn_background_sync_loop(")
+            .unwrap_or_else(|| panic!("missing spawn_background_sync_loop"));
+        let helper_end = source[helper_start..]
+            .find("fn spawn_ceremony_acceptance_loop(")
+            .map(|offset| helper_start + offset)
+            .unwrap_or_else(|| panic!("missing spawn_ceremony_acceptance_loop"));
+        let helper = &source[helper_start..helper_end];
+
+        assert!(source.contains("async fn yield_browser_maintenance_step("));
+        assert!(helper.contains("\"background sync before trigger_discovery\""));
+        assert!(helper.contains("\"background sync before trigger_sync\""));
+        assert!(helper.contains("\"background sync before refresh_account\""));
+        assert!(helper.contains("\"background sync before refresh_discovered_peers\""));
+        assert!(helper.contains("\"WEB_BACKGROUND_SYNC_YIELD_FAILED\""));
     }
 
     #[test]
@@ -290,7 +343,9 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", install_path.display()));
 
         assert!(source.contains("page_owned_queue::install(window)"));
-        assert!(source.contains("commands::BrowserSemanticBridgeRequest::from_json(&request_json)?"));
+        assert!(
+            source.contains("commands::BrowserSemanticBridgeRequest::from_json(&request_json)?")
+        );
         assert!(!source.contains("include_str!(\"page_owned_mutation_queues.js\")"));
         assert!(!source.contains("Function::new_no_args("));
         assert!(!source.contains("route_semantic_intent("));
@@ -304,9 +359,10 @@ mod tests {
         let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
         let queue_source = std::fs::read_to_string(&queue_path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", queue_path.display()));
-        let publication_source = std::fs::read_to_string(&publication_path).unwrap_or_else(
-            |error| panic!("failed to read {}: {error}", publication_path.display()),
-        );
+        let publication_source =
+            std::fs::read_to_string(&publication_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", publication_path.display())
+            });
 
         for source in [&queue_source, &publication_source] {
             assert!(source.contains("use crate::harness::window_contract::"));
@@ -339,6 +395,62 @@ mod tests {
         assert!(helper.contains("set_browser_shell_phase(BrowserShellPhase::Ready)"));
         assert!(helper.contains("Err(error)"));
         assert!(!helper.contains("spawn_local(async move"));
+    }
+
+    #[test]
+    fn web_harness_immediate_bootstrap_commands_use_accepted_handoff_submission() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let commands_path = repo_root.join("crates/aura-web/src/harness/commands.rs");
+        let source = std::fs::read_to_string(&commands_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", commands_path.display()));
+
+        assert!(source.contains("fn schedule_immediate_bootstrap_handoff("));
+        assert!(source.contains("schedule_browser_task_next_tick(move ||"));
+        assert!(source.contains("submit_runtime_bootstrap_handoff_accepted(handoff)"));
+        assert!(source.contains("create_account_handoff_done"));
+    }
+
+    #[test]
+    fn web_page_owned_queue_drains_pending_seed_payloads_during_run() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let queue_path = repo_root.join("crates/aura-web/src/harness/page_owned_queue.rs");
+        let source = std::fs::read_to_string(&queue_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", queue_path.display()));
+
+        assert!(source.contains("fn drain_pending_seed_queues() {"));
+        assert!(source.contains("fn run_semantic_queue() {\n    drain_pending_seed_queues();"));
+        assert!(source.contains("fn run_runtime_stage_queue() {\n    drain_pending_seed_queues();"));
+        assert!(source.contains("drain_seed_queues(&window)"));
+    }
+
+    #[test]
+    fn web_driver_push_callbacks_are_scheduled_off_page_critical_paths() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");
+        let queue_path = repo_root.join("crates/aura-web/src/harness/page_owned_queue.rs");
+        let publication_source =
+            std::fs::read_to_string(&publication_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", publication_path.display())
+            });
+        let queue_source = std::fs::read_to_string(&queue_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", queue_path.display()));
+
+        assert!(
+            publication_source.contains("pub(crate) fn schedule_window_callback_push(")
+                && publication_source.contains("schedule_browser_task_next_tick(move ||"),
+            "browser publication should schedule driver callback pushes onto the next browser tick instead of calling Playwright bindings inline on the semantic/render publication path"
+        );
+        assert!(
+            publication_source.contains("schedule_window_callback_push(\n        window,\n        DRIVER_PUSH_UI_STATE_KEY,")
+                && publication_source.contains("schedule_window_callback_push(\n        window,\n        DRIVER_PUSH_RENDER_HEARTBEAT_KEY,")
+                && publication_source.contains("schedule_window_callback_push(\n        window,\n        PUSH_SEMANTIC_SUBMIT_STATE_KEY,"),
+            "browser publication should route ui_state, render heartbeat, and semantic submit pushes through the scheduled callback helper"
+        );
+        assert!(
+            queue_source.contains("schedule_window_callback_push(\n            window_contract.raw_window(),\n            PUSH_SEMANTIC_SUBMIT_STATE_KEY,")
+                && queue_source.contains("let _ = function.call1(window_contract.raw_window().as_ref(), &payload);"),
+            "page-owned queue should keep semantic submit state pushes best-effort and scheduled, while terminal semantic/runtime result delivery remains immediate for the driver request/response contract"
+        );
     }
 
     #[test]

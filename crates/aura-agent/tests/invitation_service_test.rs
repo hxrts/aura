@@ -238,7 +238,9 @@ async fn test_decline_invitation_via_agent_succeeds_despite_followup_failure() -
         .await?;
     let imported = receiver_invitations.import_and_cache(&code).await?;
 
-    let result = receiver_invitations.decline(&imported.invitation_id).await?;
+    let result = receiver_invitations
+        .decline(&imported.invitation_id)
+        .await?;
     assert_eq!(result.new_status, InvitationStatus::Declined);
     Ok(())
 }

@@ -622,7 +622,9 @@ impl ScenarioConfig {
             );
         }
 
-        let Some(steps) = (!self.is_semantic_scenario()).then_some(self.compatibility_steps.as_slice()) else {
+        let Some(steps) =
+            (!self.is_semantic_scenario()).then_some(self.compatibility_steps.as_slice())
+        else {
             bail!("validated non-semantic scenarios must expose compatibility steps");
         };
         let mut step_ids = HashSet::new();

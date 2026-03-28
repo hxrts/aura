@@ -1493,14 +1493,18 @@ mod tests {
             "browser driver should advance the semantic observation baseline after semantic submission"
         );
         assert!(
-            driver_source.contains("seedSemanticSubmitStateFromPublication(")
-                && driver_source.contains("waitForUiStateVersion("),
-            "browser driver startup and submit readiness should seed from the published semantic submit surface and prefer observed UI-state publication over structured probe reconstruction"
+            driver_source.contains("waitForUiStateVersion(")
+                && driver_source.contains("waitForSubmitQueueReady(")
+                && !driver_source.contains("waitForPageExecutionChannelReady(\n            session,\n            `startup_semantic:${instanceId}`")
+                && !driver_source.contains("waitForPageExecutionChannelReady(\n          session,\n          `startup_submit_ready:${instanceId}`"),
+            "browser driver startup and submit readiness must bind to observed UI/semantic publication; page execution checks are infrastructure-only and must not redefine semantic readiness"
         );
         assert!(
             !driver_source.contains("submit_queue_probe:")
-                && !driver_source.contains("semantic_enqueue_callable_probe:"),
-            "browser driver should not regress submit readiness to repeated page-evaluate probe loops once the page-owned semantic submit publication is available"
+                && !driver_source.contains("semantic_enqueue_callable_probe:")
+                && driver_source.contains("assert_semantic_enqueue_publication_ready:")
+                && driver_source.contains("semantic_enqueue_publication_ready instance="),
+            "browser driver should keep semantic enqueue preflight publication-owned; do not reintroduce a separate page-evaluate enqueue probe ahead of the real bounded enqueue attempt"
         );
         assert!(
             !driver_source.contains("submit_semantic_command enqueue_restart")
@@ -1516,9 +1520,13 @@ mod tests {
         );
         assert!(
             driver_source.contains("from \"./driver_contract.js\";")
-                && driver_source.contains("window[runtimeStageEnqueueKey](payload)")
+                && driver_source.contains("pendingRuntimeStageQueueSeedKey: PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY")
+                && driver_source.contains("wakeRuntimeStageQueueKey: WAKE_RUNTIME_STAGE_QUEUE_KEY")
+                && driver_source.contains("queue.push(payload);")
+                && driver_source.contains("window.setTimeout(() => {")
+                && !driver_source.contains("liveEnqueue(payload);")
                 && driver_source.contains("buildRuntimeStageQueuePayloadJson("),
-            "browser driver should submit runtime-identity staging through the dedicated driver contract module instead of re-spelling queue globals or payload builders inline"
+            "browser driver should submit runtime-identity staging through the dedicated driver contract module by seeding the page-owned queue and scheduling the wake on the browser turn instead of synchronously invoking the live page closure"
         );
         assert!(
             !driver_source.contains("\"__AURA_DRIVER_RUNTIME_STAGE_ENQUEUE__\"")
@@ -1542,10 +1550,42 @@ mod tests {
             "browser harness bridge should reuse the production-owned driver contract module and keep semantic replay ownership inside the generation-aware page queue"
         );
         assert!(
-            driver_source.contains("window[semanticEnqueueKey](payload)")
+            driver_source.contains("queue.push(payload);")
+                && driver_source.contains("pendingSemanticQueueSeedKey: PENDING_SEMANTIC_QUEUE_SEED_KEY")
+                && driver_source.contains("wakeSemanticQueueKey: WAKE_SEMANTIC_QUEUE_KEY")
+                && driver_source.contains("mode: \"seed_and_wake_scheduled\"")
+                && driver_source.contains("window.setTimeout(() => {")
+                && !driver_source.contains("liveEnqueue(payload);")
+                && !driver_source.contains("mode: \"live\"")
                 && driver_source.contains("buildSemanticQueuePayloadJson(")
                 && !driver_source.contains("request_json: requestJson"),
-            "browser driver should submit semantic commands through the dedicated driver contract module instead of open-coded queue globals or payload JSON"
+            "browser driver should submit semantic commands through the dedicated driver contract module by seeding the page-owned queue and scheduling the wake on the browser turn instead of synchronously invoking the live page closure"
+        );
+        assert!(
+            !driver_source.contains("await ensureSemanticResultTracking(")
+                && !driver_source.contains("await ensureRuntimeStageResultTracking("),
+            "browser driver must not await semantic/runtime result tracking helpers before enqueue; those helpers must return tracking promises immediately so submission can issue before waiting for completion"
+        );
+        assert!(
+            !driver_source.contains("waitForPageExecutionChannelReady(\n            session,\n            `startup_semantic:${instanceId}`")
+                && !driver_source.contains("waitForPageExecutionChannelReady(\n          session,\n          `startup_submit_ready:${instanceId}`"),
+            "browser driver startup must derive semantic and submit readiness from product-owned publication rather than page-execution probes; execution-channel failures are handled only at actual command dispatch or infrastructure recovery boundaries"
+        );
+        assert!(
+            driver_source.contains("diagnostic_dom_observer deferred")
+                && !driver_source.contains("recover_semantic_queue dom_observer_optional_failure")
+                && !driver_source.contains(
+                    "await installDomObserver(session.page, session);\n    await assertRootStructure(session, `ui_state_after_navigation_${reason}`);"
+                )
+                && !driver_source.contains(
+                    "await installDomObserver(session.page, session);\n        await uiState({ instance_id: instanceId });"
+                ),
+            "browser driver shared-semantic startup and recovery must not eagerly install the diagnostic DOM mutation observer; keep that channel lazy and conformance-only so semantic enqueue/readiness do not compete with driver-owned DOM push traffic"
+        );
+        assert!(
+            driver_source.contains("await ensureDiagnosticDomObserver(session, \"wait_for_dom_patterns\");")
+                && driver_source.contains("await ensureDiagnosticDomObserver(session, `wait_for_selector:${selector}`);"),
+            "browser driver should install the DOM mutation observer only on explicit DOM-wait paths that are diagnostic or conformance-oriented"
         );
         assert!(
             !driver_source.contains("\"__AURA_DRIVER_SEMANTIC_ENQUEUE__\"")

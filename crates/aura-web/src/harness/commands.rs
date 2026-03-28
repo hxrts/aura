@@ -1,7 +1,7 @@
+use aura_app::frontend_primitives::FrontendUiOperation;
 use aura_app::scenario_contract::{
     SharedActionContract, SubmissionContract, SubmissionState, SubmissionValueContract,
 };
-use aura_app::frontend_primitives::FrontendUiOperation;
 use aura_app::ui::contract::{OperationId, ScreenId};
 use aura_app::ui::scenarios::{
     IntentAction, SemanticCommandRequest, SemanticCommandResponse, SemanticCommandValue,
@@ -46,13 +46,34 @@ use crate::harness_bridge::{
 };
 use crate::{
     active_storage_prefix, load_selected_runtime_identity, selected_runtime_identity_key,
-    submit_runtime_bootstrap_handoff,
+    submit_runtime_bootstrap_handoff_accepted,
     task_owner::shared_web_task_owner,
     workflows::{
         self, AccountCreationStageMode, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest,
         RebootstrapPolicy,
     },
 };
+
+fn schedule_immediate_bootstrap_handoff(handoff: BootstrapHandoff) -> Result<(), JsValue> {
+    let detail = handoff.detail();
+    let scheduled_detail = detail.clone();
+    crate::harness_bridge::schedule_browser_task_next_tick(move || {
+        if let Err(error) = submit_runtime_bootstrap_handoff_accepted(handoff) {
+            web_sys::console::error_1(
+                &format!(
+                    "[web-harness] deferred bootstrap handoff failed detail={scheduled_detail} error={}",
+                    error.user_message()
+                )
+                .into(),
+            );
+        }
+    })
+    .map_err(|error| {
+        JsValue::from_str(&format!(
+            "failed to schedule deferred bootstrap handoff detail={detail}: {error:?}"
+        ))
+    })
+}
 
 pub(crate) fn browser_settings_section(
     section: SettingsSection,
@@ -69,7 +90,9 @@ impl BrowserSemanticBridgeRequest {
     pub(crate) fn from_json(request_json: &str) -> Result<Self, JsValue> {
         from_str::<SemanticCommandRequest>(request_json)
             .map(Self)
-            .map_err(|error| JsValue::from_str(&format!("invalid semantic command request: {error}")))
+            .map_err(|error| {
+                JsValue::from_str(&format!("invalid semantic command request: {error}"))
+            })
     }
 
     pub(crate) async fn submit(
@@ -95,7 +118,8 @@ impl BrowserSemanticBridgeResponse {
     }
 
     pub(crate) fn into_js_value(self) -> Result<JsValue, JsValue> {
-        self.into_json().map(|response_json| JsValue::from_str(&response_json))
+        self.into_json()
+            .map(|response_json| JsValue::from_str(&response_json))
     }
 }
 
@@ -496,21 +520,18 @@ pub(crate) fn update_semantic_debug(event: &str, detail: Option<&str>) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let debug = js_sys::Reflect::get(
-        window.as_ref(),
-        &JsValue::from_str(SEMANTIC_DEBUG_KEY),
-    )
-    .ok()
-    .filter(|value| !value.is_null() && !value.is_undefined())
-    .unwrap_or_else(|| {
-        let object = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(
-            window.as_ref(),
-            &JsValue::from_str(SEMANTIC_DEBUG_KEY),
-            object.as_ref(),
-        );
-        object.into()
-    });
+    let debug = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str(SEMANTIC_DEBUG_KEY))
+        .ok()
+        .filter(|value| !value.is_null() && !value.is_undefined())
+        .unwrap_or_else(|| {
+            let object = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                window.as_ref(),
+                &JsValue::from_str(SEMANTIC_DEBUG_KEY),
+                object.as_ref(),
+            );
+            object.into()
+        });
     let _ = js_sys::Reflect::set(
         &debug,
         &JsValue::from_str("last_event"),
@@ -650,12 +671,11 @@ async fn execute_semantic_intent(
                 crate::harness_bridge::publish_semantic_controller_snapshot(controller);
             } else {
                 update_semantic_debug("create_account_stage_start", Some(&account_name));
-                submit_runtime_bootstrap_handoff(BootstrapHandoff::PendingAccountBootstrap {
+                schedule_immediate_bootstrap_handoff(BootstrapHandoff::PendingAccountBootstrap {
                     account_name: account_name.clone(),
                     source: PendingAccountBootstrapSource::HarnessSemanticBridge,
                 })
-                .await
-                .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
                 update_semantic_debug("create_account_handoff_done", Some(&account_name));
             }
             update_semantic_debug("create_account_return", Some(&account_name));
@@ -766,13 +786,12 @@ async fn execute_semantic_intent(
             .map_err(|error| JsValue::from_str(&error.user_message()))?;
             if result.rebootstrap_required {
                 let staged_runtime_identity = result.staged_runtime_identity;
-                submit_runtime_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
+                schedule_immediate_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
                     authority_id: staged_runtime_identity.authority_id,
                     device_id: staged_runtime_identity.device_id,
                     source: RuntimeIdentityStageSource::ImportDeviceEnrollment,
                 })
-                .await
-                .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
                 return declared_immediate_unit_response(&contract);
             }
             crate::harness_bridge::apply_browser_ui_mutation(
@@ -1219,8 +1238,8 @@ mod tests {
     use super::{
         BrowserSemanticBridgeRequest, BrowserSemanticBridgeResponse, SemanticCommandResponse,
     };
-    use aura_app::ui::contract::OperationId;
     use aura_app::scenario_contract::{IntentAction, SubmissionContract, SubmissionValueContract};
+    use aura_app::ui::contract::OperationId;
     use serde_json::json;
 
     #[test]

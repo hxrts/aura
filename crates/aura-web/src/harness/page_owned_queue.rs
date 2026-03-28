@@ -1,6 +1,6 @@
 use aura_app::ui::contract::classify_screen_item_id;
 use aura_app::ui::types::BootstrapRuntimeIdentity;
-use js_sys::{Array, Function, JSON, Object};
+use js_sys::{Array, Function, Object, JSON};
 use serde::Deserialize;
 use serde_json::from_str;
 use std::cell::RefCell;
@@ -8,26 +8,25 @@ use std::collections::VecDeque;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 
-use crate::harness::commands;
 use crate::harness::browser_contract::SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY;
+use crate::harness::commands;
 use crate::harness::driver_contract::{
-    MUTATION_QUEUE_INSTALLED_KEY, PENDING_NAV_SCREEN_KEY, PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
-    PENDING_SEMANTIC_QUEUE_SEED_KEY, PUSH_RUNTIME_STAGE_RESULT_KEY,
-    PUSH_SEMANTIC_RESULT_KEY, PUSH_SEMANTIC_SUBMIT_STATE_KEY, RUNTIME_STAGE_BUSY_KEY,
-    RUNTIME_STAGE_DEBUG_KEY, RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY,
-    RUNTIME_STAGE_ENQUEUE_KEY, RUNTIME_STAGE_QUEUE_KEY, RUNTIME_STAGE_RESULTS_KEY,
-    RUNTIME_STAGE_WAKE_SCHEDULED_KEY, RuntimeStageQueuePayload, SEMANTIC_BUSY_KEY,
-    SEMANTIC_DEBUG_KEY, SEMANTIC_ENQUEUE_DISPATCHED_KEY, SEMANTIC_ENQUEUE_KEY,
-    SEMANTIC_QUEUE_KEY, SEMANTIC_RESULTS_KEY, SEMANTIC_WAKE_SCHEDULED_KEY,
-    SemanticQueuePayload, WAKE_PENDING_NAV_KEY, WAKE_RUNTIME_STAGE_QUEUE_KEY,
-    WAKE_SEMANTIC_QUEUE_KEY,
+    RuntimeStageQueuePayload, SemanticQueuePayload, MUTATION_QUEUE_INSTALLED_KEY,
+    PENDING_NAV_SCREEN_KEY, PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY, PENDING_SEMANTIC_QUEUE_SEED_KEY,
+    PUSH_RUNTIME_STAGE_RESULT_KEY, PUSH_SEMANTIC_RESULT_KEY, PUSH_SEMANTIC_SUBMIT_STATE_KEY,
+    RUNTIME_STAGE_BUSY_KEY, RUNTIME_STAGE_DEBUG_KEY, RUNTIME_STAGE_ENQUEUE_KEY,
+    RUNTIME_STAGE_QUEUE_KEY, RUNTIME_STAGE_RESULTS_KEY, RUNTIME_STAGE_WAKE_SCHEDULED_KEY,
+    SEMANTIC_BUSY_KEY, SEMANTIC_DEBUG_KEY, SEMANTIC_ENQUEUE_KEY, SEMANTIC_QUEUE_KEY,
+    SEMANTIC_RESULTS_KEY, SEMANTIC_WAKE_SCHEDULED_KEY, WAKE_PENDING_NAV_KEY,
+    WAKE_RUNTIME_STAGE_QUEUE_KEY, WAKE_SEMANTIC_QUEUE_KEY,
 };
 use crate::harness::generation::current_controller;
 use crate::harness::mutation::{apply_browser_ui_mutation, schedule_browser_task_next_tick};
-use crate::harness::publication::{semantic_submit_surface_state, PublicationStatus};
+use crate::harness::publication::{
+    schedule_window_callback_push, semantic_submit_surface_state, PublicationStatus,
+};
 use crate::harness::window_contract::{
-    ensure_object_field as ensure_window_object_field, object_set,
-    HarnessWindowContract,
+    ensure_object_field as ensure_window_object_field, object_set, HarnessWindowContract,
 };
 use crate::task_owner::shared_web_task_owner;
 
@@ -124,8 +123,6 @@ fn ensure_window_globals(window: &web_sys::Window) -> Result<(), JsValue> {
     ensure_array(&window_contract, RUNTIME_STAGE_QUEUE_KEY)?;
     ensure_object(&window_contract, SEMANTIC_RESULTS_KEY)?;
     ensure_object(&window_contract, RUNTIME_STAGE_RESULTS_KEY)?;
-    ensure_object(&window_contract, SEMANTIC_ENQUEUE_DISPATCHED_KEY)?;
-    ensure_object(&window_contract, RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY)?;
     ensure_semantic_debug(window)?;
     ensure_runtime_stage_debug(window)?;
     ensure_bool(&window_contract, SEMANTIC_BUSY_KEY, false)?;
@@ -160,7 +157,10 @@ fn ensure_object(window_contract: &HarnessWindowContract, key: &str) -> Result<O
 }
 
 fn ensure_semantic_debug(window: &web_sys::Window) -> Result<(), JsValue> {
-    let debug = ensure_object(&HarnessWindowContract::new(window.clone()), SEMANTIC_DEBUG_KEY)?;
+    let debug = ensure_object(
+        &HarnessWindowContract::new(window.clone()),
+        SEMANTIC_DEBUG_KEY,
+    )?;
     ensure_object_field(&debug, "last_event", JsValue::from_str("installed"))?;
     ensure_object_field(&debug, "active_command_id", JsValue::NULL)?;
     ensure_object_field(&debug, "last_command_id", JsValue::NULL)?;
@@ -173,7 +173,10 @@ fn ensure_semantic_debug(window: &web_sys::Window) -> Result<(), JsValue> {
 }
 
 fn ensure_runtime_stage_debug(window: &web_sys::Window) -> Result<(), JsValue> {
-    let debug = ensure_object(&HarnessWindowContract::new(window.clone()), RUNTIME_STAGE_DEBUG_KEY)?;
+    let debug = ensure_object(
+        &HarnessWindowContract::new(window.clone()),
+        RUNTIME_STAGE_DEBUG_KEY,
+    )?;
     ensure_object_field(&debug, "last_event", JsValue::from_str("installed"))?;
     ensure_object_field(&debug, "active_command_id", JsValue::NULL)?;
     ensure_object_field(&debug, "last_error", JsValue::NULL)?;
@@ -206,10 +209,8 @@ where
                 }
                 Err(error) => {
                     web_sys::console::warn_1(
-                        &format!(
-                            "[web-harness-queue] seed parse error key={key} error={error}"
-                        )
-                        .into(),
+                        &format!("[web-harness-queue] seed parse error key={key} error={error}")
+                            .into(),
                     );
                 }
             }
@@ -220,7 +221,7 @@ where
 }
 
 fn install_semantic_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
-    let enqueue = Closure::wrap(Box::new(move |payload: JsValue| -> JsValue {
+    let enqueue = Closure::wrap(Box::new(move |payload: JsValue| {
         if let Some(payload_json) = payload.as_string() {
             match from_str::<SemanticQueuePayload>(&payload_json) {
                 Ok(payload) => {
@@ -251,11 +252,17 @@ fn install_semantic_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
                     );
                 }
             }
+        } else {
+            set_semantic_debug(
+                "enqueue_parse_error",
+                None,
+                None,
+                None,
+                None,
+                Some("semantic enqueue payload must be a string"),
+            );
         }
-        queue_status_snapshot(SEMANTIC_DEBUG_KEY, || {
-            SEMANTIC_QUEUE_STATE.with(|state| state.borrow().queue.len())
-        })
-    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+    }) as Box<dyn FnMut(JsValue)>);
     HarnessWindowContract::new(window.clone())
         .set(SEMANTIC_ENQUEUE_KEY, enqueue.as_ref().unchecked_ref())?;
     enqueue.forget();
@@ -263,7 +270,7 @@ fn install_semantic_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
 }
 
 fn install_runtime_stage_enqueue(window: &web_sys::Window) -> Result<(), JsValue> {
-    let enqueue = Closure::wrap(Box::new(move |payload: JsValue| -> JsValue {
+    let enqueue = Closure::wrap(Box::new(move |payload: JsValue| {
         if let Some(payload_json) = payload.as_string() {
             match from_str::<RuntimeStageQueuePayload>(&payload_json) {
                 Ok(payload) => {
@@ -292,11 +299,15 @@ fn install_runtime_stage_enqueue(window: &web_sys::Window) -> Result<(), JsValue
                     );
                 }
             }
+        } else {
+            set_runtime_stage_debug(
+                "enqueue_parse_error",
+                None,
+                None,
+                Some("runtime stage enqueue payload must be a string"),
+            );
         }
-        queue_status_snapshot(RUNTIME_STAGE_DEBUG_KEY, || {
-            RUNTIME_STAGE_QUEUE_STATE.with(|state| state.borrow().queue.len())
-        })
-    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+    }) as Box<dyn FnMut(JsValue)>);
     HarnessWindowContract::new(window.clone())
         .set(RUNTIME_STAGE_ENQUEUE_KEY, enqueue.as_ref().unchecked_ref())?;
     enqueue.forget();
@@ -338,12 +349,10 @@ fn install_pending_nav_wake(window: &web_sys::Window) -> Result<(), JsValue> {
 fn wake_semantic_queue(delay_ms: i32) {
     let should_schedule = SEMANTIC_QUEUE_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        if delay_ms > 0 {
-            if state.wake_scheduled {
-                return false;
-            }
-            state.wake_scheduled = true;
+        if state.wake_scheduled {
+            return false;
         }
+        state.wake_scheduled = true;
         true
     });
     if !should_schedule {
@@ -361,12 +370,10 @@ fn wake_semantic_queue(delay_ms: i32) {
 fn wake_runtime_stage_queue(delay_ms: i32) {
     let should_schedule = RUNTIME_STAGE_QUEUE_STATE.with(|state| {
         let mut state = state.borrow_mut();
-        if delay_ms > 0 {
-            if state.wake_scheduled {
-                return false;
-            }
-            state.wake_scheduled = true;
+        if state.wake_scheduled {
+            return false;
         }
+        state.wake_scheduled = true;
         true
     });
     if !should_schedule {
@@ -419,7 +426,39 @@ fn wake_pending_nav() {
     });
 }
 
+pub(crate) fn wake_pending_mutation_queues_if_needed(window: &web_sys::Window) {
+    if semantic_queue_has_pending_work(window) {
+        wake_semantic_queue(0);
+    }
+    if runtime_stage_queue_has_pending_work(window) {
+        wake_runtime_stage_queue(0);
+    }
+}
+
+fn semantic_queue_has_pending_work(window: &web_sys::Window) -> bool {
+    let seeded = pending_seed_queue_depth(window, PENDING_SEMANTIC_QUEUE_SEED_KEY);
+    let queued = SEMANTIC_QUEUE_STATE.with(|state| !state.borrow().queue.is_empty());
+    seeded > 0 || queued
+}
+
+fn runtime_stage_queue_has_pending_work(window: &web_sys::Window) -> bool {
+    let seeded = pending_seed_queue_depth(window, PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY);
+    let queued = RUNTIME_STAGE_QUEUE_STATE.with(|state| !state.borrow().queue.is_empty());
+    seeded > 0 || queued
+}
+
+fn pending_seed_queue_depth(window: &web_sys::Window, key: &str) -> u32 {
+    let window_contract = HarnessWindowContract::new(window.clone());
+    window_contract
+        .get(key)
+        .ok()
+        .and_then(|value| value.dyn_into::<Array>().ok())
+        .map(|queue| queue.length())
+        .unwrap_or(0)
+}
+
 fn run_semantic_queue() {
+    drain_pending_seed_queues();
     if semantic_submit_surface_state().status() != PublicationStatus::Ready {
         set_semantic_debug("queue_wait_ready", None, None, None, None, None);
         wake_semantic_queue(25);
@@ -481,11 +520,7 @@ async fn run_semantic_payload(
     let response = request
         .submit(controller)
         .await
-        .map_err(|error| {
-            error
-                .as_string()
-                .unwrap_or_else(|| format!("{error:?}"))
-        })?;
+        .map_err(|error| error.as_string().unwrap_or_else(|| format!("{error:?}")))?;
     response
         .into_json()
         .map(|response_json| JsValue::from_str(&response_json))
@@ -516,14 +551,7 @@ fn finish_semantic_run(command_id: &str, outcome: Result<JsValue, String>) {
                 Some(normalize_driver_result_payload(&result)),
                 None,
             );
-            set_semantic_debug(
-                "queue_ok",
-                None,
-                None,
-                Some(command_id),
-                None,
-                None,
-            );
+            set_semantic_debug("queue_ok", None, None, Some(command_id), None, None);
             set_semantic_last_result_ok(Some(true));
         }
         Err(error) => {
@@ -556,6 +584,7 @@ fn finish_semantic_run(command_id: &str, outcome: Result<JsValue, String>) {
 }
 
 fn run_runtime_stage_queue() {
+    drain_pending_seed_queues();
     let next = RUNTIME_STAGE_QUEUE_STATE.with(|state| {
         let mut state = state.borrow_mut();
         if state.busy || state.queue.is_empty() {
@@ -583,11 +612,7 @@ async fn run_runtime_stage_payload(payload: &RuntimeStageQueuePayload) -> Result
         .map_err(|error| format!("invalid staged runtime identity payload: {error}"))?;
     crate::harness_bridge::stage_runtime_identity(payload.runtime_identity_json.clone())
         .await
-        .map_err(|error| {
-            error
-                .as_string()
-                .unwrap_or_else(|| format!("{error:?}"))
-        })?;
+        .map_err(|error| error.as_string().unwrap_or_else(|| format!("{error:?}")))?;
     Ok(JsValue::UNDEFINED)
 }
 
@@ -599,10 +624,7 @@ fn finish_runtime_stage_run(command_id: &str, outcome: Result<JsValue, String>) 
     match outcome {
         Ok(result) => {
             web_sys::console::log_1(
-                &format!(
-                    "[web-harness-queue] runtime-stage run ok command_id={command_id}"
-                )
-                .into(),
+                &format!("[web-harness-queue] runtime-stage run ok command_id={command_id}").into(),
             );
             push_result(
                 RUNTIME_STAGE_RESULTS_KEY,
@@ -687,7 +709,7 @@ fn notify_push_function(
     let Some(window_contract) = HarnessWindowContract::current() else {
         return;
     };
-    let Some(function) = window_function(&window_contract, function_key) else {
+    if window_function(&window_contract, function_key).is_none() {
         web_sys::console::warn_1(
             &format!(
                 "[web-harness-queue] push function missing key={function_key} command_id={command_id}"
@@ -695,7 +717,7 @@ fn notify_push_function(
             .into(),
         );
         return;
-    };
+    }
     let payload = Object::new();
     let _ = object_set(&payload, "command_id", &JsValue::from_str(command_id));
     let _ = object_set(&payload, "ok", &JsValue::from_bool(ok));
@@ -710,6 +732,9 @@ fn notify_push_function(
     if let Some(error) = error {
         let _ = object_set(&payload, "error", &JsValue::from_str(error));
     }
+    let Some(function) = window_function(&window_contract, function_key) else {
+        return;
+    };
     let _ = function.call1(window_contract.raw_window().as_ref(), &payload);
 }
 
@@ -732,6 +757,16 @@ fn normalize_driver_result_payload(value: &JsValue) -> JsValue {
             );
             payload.into()
         }
+    }
+}
+
+fn drain_pending_seed_queues() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    if drain_seed_queues(&window).is_ok() {
+        sync_semantic_queue_state_to_window();
+        sync_runtime_stage_queue_state_to_window();
     }
 }
 
@@ -851,12 +886,18 @@ fn set_semantic_debug(
             "active_command_id",
             &JsValue::from_str(active_command_id),
         );
-    } else if matches!(event, "queue_ok" | "queue_error" | "queue_wait_ready" | "queue_wait_bridge")
-    {
+    } else if matches!(
+        event,
+        "queue_ok" | "queue_error" | "queue_wait_ready" | "queue_wait_bridge"
+    ) {
         let _ = object_set(&debug, "active_command_id", &JsValue::NULL);
     }
     if let Some(last_command_id) = last_command_id {
-        let _ = object_set(&debug, "last_command_id", &JsValue::from_str(last_command_id));
+        let _ = object_set(
+            &debug,
+            "last_command_id",
+            &JsValue::from_str(last_command_id),
+        );
     }
     if let Some(last_completed_command_id) = last_completed_command_id {
         let _ = object_set(
@@ -866,7 +907,11 @@ fn set_semantic_debug(
         );
     }
     if let Some(queue_depth) = queue_depth {
-        let _ = object_set(&debug, "queue_depth", &JsValue::from_f64(queue_depth as f64));
+        let _ = object_set(
+            &debug,
+            "queue_depth",
+            &JsValue::from_f64(queue_depth as f64),
+        );
     }
     let _ = object_set(&debug, "last_progress_at", &js_sys::Date::now().into());
     if let Some(error) = error {
@@ -913,7 +958,11 @@ fn set_runtime_stage_debug(
         let _ = object_set(&debug, "active_command_id", &JsValue::NULL);
     }
     if let Some(queue_depth) = queue_depth {
-        let _ = object_set(&debug, "queue_depth", &JsValue::from_f64(queue_depth as f64));
+        let _ = object_set(
+            &debug,
+            "queue_depth",
+            &JsValue::from_f64(queue_depth as f64),
+        );
     }
     let _ = object_set(&debug, "last_progress_at", &js_sys::Date::now().into());
     if let Some(error) = error {
@@ -923,26 +972,18 @@ fn set_runtime_stage_debug(
     }
 }
 
-fn queue_status_snapshot(debug_key: &str, depth: impl Fn() -> usize) -> JsValue {
-    let Some(window_contract) = HarnessWindowContract::current() else {
-        return JsValue::NULL;
-    };
-    let payload = Object::new();
-    let queue_depth = depth();
-    let _ = object_set(&payload, "queue_depth", &JsValue::from_f64(queue_depth as f64));
-    if let Ok(debug) = window_contract.get(debug_key) {
-        let _ = object_set(&payload, "debug", &debug);
-    }
-    payload.into()
-}
-
 fn push_current_semantic_submit_state(window: &web_sys::Window) {
     let window_contract = HarnessWindowContract::new(window.clone());
-    let Some(function) = window_function(&window_contract, PUSH_SEMANTIC_SUBMIT_STATE_KEY) else {
+    if window_function(&window_contract, PUSH_SEMANTIC_SUBMIT_STATE_KEY).is_none() {
         return;
-    };
+    }
     if let Ok(state) = window_contract.get(SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY) {
-        let _ = function.call1(window_contract.raw_window().as_ref(), &state);
+        let _ = schedule_window_callback_push(
+            window_contract.raw_window(),
+            PUSH_SEMANTIC_SUBMIT_STATE_KEY,
+            state,
+            "driver semantic submit state push",
+        );
     }
 }
 

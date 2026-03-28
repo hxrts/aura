@@ -12,11 +12,11 @@ mod runtime_events;
 mod settings;
 mod snapshot;
 
-use aura_app::frontend_primitives::ClipboardPort;
 use crate::keyboard::{apply_named_key, apply_text_keys};
 use crate::readiness_owner;
 use crate::snapshot::render_canonical_snapshot;
 use async_lock::RwLock as AsyncRwLock;
+use aura_app::frontend_primitives::ClipboardPort;
 use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, ProjectionRevision, QuiescenceSnapshot,
     RuntimeFact, SemanticOperationCausality, SemanticOperationPhase, SemanticOperationStatus,
