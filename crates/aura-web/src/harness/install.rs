@@ -475,7 +475,7 @@ return true;
 }
 
 pub(crate) fn install_window_harness_api(
-    _harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
+    harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
 ) -> Result<(), JsValue> {
     let harness = Object::new();
     let observe = Object::new();
@@ -805,9 +805,21 @@ try {
     )?;
     tail_log.forget();
 
+    let process_harness_transport_context = harness_transport_context.clone();
     let process_harness_transport = Closure::wrap(Box::new(move || -> js_sys::Promise {
+        let fallback_context = process_harness_transport_context.clone();
         future_to_promise(async move {
-            crate::shell::run_harness_transport_tick_once().await;
+            if fallback_context.is_some() {
+                let global_context_ran = crate::shell::run_harness_transport_tick_once().await;
+                if !global_context_ran {
+                    if let Some((app_core, agent)) = fallback_context {
+                        crate::shell::run_harness_transport_tick_with_context(app_core, agent)
+                            .await;
+                    }
+                }
+            } else {
+                let _ = crate::shell::run_harness_transport_tick_once().await;
+            }
             Ok(JsValue::UNDEFINED)
         })
     }) as Box<dyn FnMut() -> js_sys::Promise>);

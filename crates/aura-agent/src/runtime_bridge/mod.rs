@@ -96,6 +96,16 @@ const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
 const INVITATION_BRIDGE_STAGE_TIMEOUT_MS: u64 = 8_000;
 const AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS: u64 = 1_000;
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "secure_storage_bootstrap"
+)]
+fn secure_storage_bootstrap_boundary(
+    capabilities: &[SecureStorageCapability],
+) -> &[SecureStorageCapability] {
+    capabilities
+}
+
 fn internal_bridge_error(label: &'static str, error: impl Display) -> IntentError {
     IntentError::internal_error(format!("{label}: {error}"))
 }
@@ -831,8 +841,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 &channel,
                 &existing.bootstrap_id,
             );
+            let read_capabilities =
+                secure_storage_bootstrap_boundary(&[SecureStorageCapability::Read]);
             let key = effects
-                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .secure_retrieve(&location, read_capabilities)
                 .await
                 .map_err(|e| {
                     IntentError::internal_error(format!("Failed to load AMP bootstrap key: {e}"))
@@ -860,14 +872,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let bootstrap_id = Hash32::from_bytes(&key_bytes);
 
         let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
+        let store_capabilities = secure_storage_bootstrap_boundary(&[
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ]);
         effects
             .secure_store(
                 &location,
                 &key_bytes,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
+                store_capabilities,
             )
             .await
             .map_err(|e| {

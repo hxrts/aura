@@ -6,6 +6,15 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionManagerCommand {
+    RegisterSession,
+    UpdateMetadata,
+    AddParticipant,
+    RemoveParticipant,
+}
+
 #[derive(Debug, Default)]
 struct SessionState {
     sessions: HashMap<SessionId, SessionRecord>,
@@ -35,6 +44,14 @@ impl SessionState {
 }
 
 #[derive(Debug, Default)]
+#[aura_macros::actor_owned(
+    owner = "session_manager",
+    domain = "session_registry",
+    gate = "session_command_ingress",
+    command = SessionManagerCommand,
+    capacity = 128,
+    category = "actor_owned"
+)]
 pub(crate) struct SessionManager {
     state: RwLock<SessionState>,
 }

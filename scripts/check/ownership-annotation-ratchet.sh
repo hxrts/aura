@@ -67,8 +67,8 @@ reset_window() {
 remember_added_line() {
   local line="$1"
   added_window+=("$line")
-  if (( ${#added_window[@]} > 6 )); then
-    added_window=("${added_window[@]: -6}")
+  if (( ${#added_window[@]} > 16 )); then
+    added_window=("${added_window[@]: -16}")
   fi
 }
 

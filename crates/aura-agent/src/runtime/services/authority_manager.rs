@@ -7,6 +7,16 @@ use super::state::with_state_mut_validated;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthorityManagerCommand {
+    RegisterAuthority,
+    EnsureAuthority,
+    SetStatus,
+    AddContext,
+    RemoveContext,
+}
+
 /// Authority manager error
 #[derive(Debug, thiserror::Error)]
 pub enum AuthorityError {
@@ -26,6 +36,14 @@ pub enum AuthorityError {
 }
 
 /// Authority manager service
+#[aura_macros::actor_owned(
+    owner = "authority_manager",
+    domain = "authority",
+    gate = "authority_command_ingress",
+    command = AuthorityManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct AuthorityManager {
     state: RwLock<AuthorityManagerState>,
 }

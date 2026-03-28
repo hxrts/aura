@@ -424,11 +424,21 @@ async fn run_harness_transport_tick(app_core: Arc<RwLock<AppCore>>, agent: Arc<A
     }
 }
 
-pub(crate) async fn run_harness_transport_tick_once() {
+pub(crate) async fn run_harness_transport_tick_once() -> bool {
     let context = ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| slot.borrow().clone());
     if let Some(context) = context {
         run_harness_transport_tick(context.app_core, context.agent).await;
+        true
+    } else {
+        false
     }
+}
+
+pub(crate) async fn run_harness_transport_tick_with_context(
+    app_core: Arc<RwLock<AppCore>>,
+    agent: Arc<AuraAgent>,
+) {
+    run_harness_transport_tick(app_core, agent).await;
 }
 
 pub(crate) fn spawn_generation_maintenance_loops(

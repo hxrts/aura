@@ -10,6 +10,16 @@ use tokio::sync::RwLock;
 
 const DEFAULT_INVITATION_CACHE_CAPACITY: usize = 1_000;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InvitationManagerCommand {
+    CacheInvitation,
+    UpdateInvitation,
+    RemoveInvitation,
+    ReplaceContactIndex,
+    ReplaceChannelContextIndex,
+}
+
 #[derive(Debug)]
 struct InvitationState {
     invitations: HashMap<InvitationId, Invitation>,
@@ -38,6 +48,14 @@ impl Default for InvitationState {
 }
 
 /// Manages cached invitations for the invitation handler.
+#[aura_macros::actor_owned(
+    owner = "invitation_manager",
+    domain = "invitation_cache",
+    gate = "invitation_cache_command_ingress",
+    command = InvitationManagerCommand,
+    capacity = 128,
+    category = "actor_owned"
+)]
 pub struct InvitationManager {
     state: RwLock<InvitationState>,
     max_invitations: usize,

@@ -66,8 +66,8 @@ build-app-host:
 
 # Check Aura web shell + shared UI core for the WASM target
 web-check:
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-ui
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0" cargo check -p aura-web --target wasm32-unknown-unknown --features web
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-ui
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-web --target wasm32-unknown-unknown --features web
 
 # Rebuild the local Tailwind bundle used by aura-web (no CDN)
 web-tailwind-build:
