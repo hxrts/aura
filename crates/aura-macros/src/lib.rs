@@ -1539,7 +1539,7 @@ fn validate_semantic_owner_signature(
             "semantic_owner requires a non-empty stable wrapper name",
         ));
     }
-    if wrapper_name == function_ident.to_string() {
+    if function_ident == wrapper_name.as_str() {
         return Err(Error::new_spanned(
             &config.wrapper,
             "semantic_owner stable wrapper must name the public wrapper, not the owned function itself",

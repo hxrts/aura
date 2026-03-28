@@ -698,6 +698,16 @@ ci-ownership-policy:
     just ci-harness-ownership-policy
     just ci-testkit-exception-boundary
 
+ci-ratchet-audit:
+    just clippy
+    just lint-arch-syntax
+    just ci-annotation-ratchet
+    just ci-ownership-policy
+    just web-check
+    just ci-agent-wasm
+    env CARGO_TARGET_DIR=target/ratchet just ci-workspace-wasm-test
+    cargo test -p aura-macros --test compile_fail -- --nocapture
+
 ci-annotation-ratchet:
     bash scripts/check/ownership-annotation-ratchet.sh semantic-owner
     bash scripts/check/ownership-annotation-ratchet.sh actor-owned
