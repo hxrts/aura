@@ -17,14 +17,19 @@ use crate::workflows::{
         execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
         warn_workflow_timeout, workflow_timeout_budget,
     },
+    semantic_facts::SemanticWorkflowOwner,
     settings, system,
 };
 use crate::AppCore;
 use async_lock::RwLock;
+use crate::ui_contract::{
+    OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::RetryRunError;
-use aura_core::{AuraError, TimeoutBudgetError, TimeoutRunError};
+use aura_core::{AuraError, OperationContext, TimeoutBudgetError, TimeoutRunError, TraceContext};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -373,9 +378,57 @@ pub async fn initialize_runtime_account(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::account_create(),
+        None,
+        SemanticOperationKind::CreateAccount,
+    );
+    initialize_runtime_account_owned(app_core, nickname_suggestion, &owner, None).await
+}
+
+async fn fail_initialize_runtime_account<T>(
+    owner: &SemanticWorkflowOwner,
+    detail: impl Into<String>,
+) -> Result<T, AuraError> {
+    let error = SemanticOperationError::new(
+        SemanticFailureDomain::Internal,
+        SemanticFailureCode::InternalError,
+    )
+    .with_detail(detail.into());
+    owner.publish_failure(error.clone()).await?;
+    Err(AuraError::agent(
+        error
+            .detail
+            .unwrap_or_else(|| "initialize runtime account failed".to_string()),
+    ))
+}
+
+#[aura_macros::semantic_owner(
+    owner = "initialize_runtime_account_owned",
+    terminal = "publish_success_with",
+    postcondition = "account_created",
+    proof = crate::workflows::semantic_facts::AccountCreatedProof,
+    authoritative_inputs = "runtime,home_projection_published",
+    depends_on = "home_created,settings_refreshed,account_refreshed",
+    child_ops = "create_home",
+    category = "move_owned"
+)]
+async fn initialize_runtime_account_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<(), AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+
     let pending_bootstrap = prepare_pending_account_bootstrap(&nickname_suggestion)?;
     let runtime = require_runtime(app_core).await?;
-    timeout_runtime_call(
+    let init_result = timeout_runtime_call(
         &runtime,
         "initialize_runtime_account",
         "initialize_account",
@@ -383,9 +436,31 @@ pub async fn initialize_runtime_account(
         || runtime.initialize_account(&pending_bootstrap.nickname_suggestion),
     )
     .await
-    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?
-    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))?;
-    finalize_runtime_account_bootstrap(app_core, pending_bootstrap.nickname_suggestion).await
+    .map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))
+    .and_then(|result| {
+        result.map_err(|e| AuraError::from(super::error::runtime_call("initialize account", e)))
+    })
+    .map_err(|error| AuraError::agent(error.to_string()));
+    if let Err(error) = init_result {
+        return fail_initialize_runtime_account(owner, error.to_string()).await;
+    }
+
+    let home_id = match finalize_runtime_account_bootstrap_inner(
+        app_core,
+        pending_bootstrap.nickname_suggestion,
+    )
+    .await
+    {
+        Ok(home_id) => home_id,
+        Err(error) => return fail_initialize_runtime_account(owner, error.to_string()).await,
+    };
+
+    owner
+        .publish_success_with(crate::workflows::semantic_facts::issue_account_created_proof(
+            home_id,
+        ))
+        .await?;
+    Ok(())
 }
 
 /// Reconcile pending first-run runtime bootstrap metadata against the current runtime state.
@@ -422,6 +497,15 @@ pub async fn finalize_runtime_account_bootstrap(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
+    finalize_runtime_account_bootstrap_inner(app_core, nickname_suggestion)
+        .await
+        .map(|_| ())
+}
+
+async fn finalize_runtime_account_bootstrap_inner(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+) -> Result<aura_core::ChannelId, AuraError> {
     let nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
         .map_err(|error| AuraError::invalid(error.to_string()))?;
     let home_name = format!("{nickname_suggestion}'s Home");
@@ -529,7 +613,7 @@ pub async fn finalize_runtime_account_bootstrap(
         },
     )
     .await?;
-    Ok(())
+    Ok(home_id)
 }
 
 // =============================================================================

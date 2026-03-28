@@ -550,8 +550,8 @@ ci-choreo-concurrency-contracts:
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 ci-agent-wasm:
-    cargo check -p aura-agent --target wasm32-unknown-unknown --features web
-    cargo check -p aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-vm"
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-agent --target wasm32-unknown-unknown --features web
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-vm"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:

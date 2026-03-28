@@ -13,6 +13,14 @@ use aura_transport::relay::DeterministicRandomSelector;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SocialManagerCommand {
+    Initialize,
+    RefreshTopology,
+    UpdateSelectionPolicy,
+}
+
 /// Configuration for the social topology manager
 #[derive(Debug, Clone)]
 pub struct SocialManagerConfig {
@@ -58,6 +66,14 @@ pub enum SocialManagerState {
 /// - Social topology for peer discovery
 /// - Relay selector using deterministic selection
 /// - Discovery layer determination
+#[aura_macros::actor_owned(
+    owner = "social_manager",
+    domain = "social_topology",
+    gate = "social_command_ingress",
+    command = SocialManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct SocialManager {
     /// Social topology
     topology: RwLock<SocialTopology>,

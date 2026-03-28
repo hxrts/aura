@@ -6,6 +6,14 @@ use aura_core::types::identifiers::RecoveryId;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryManagerCommand {
+    Insert,
+    Remove,
+    MutateRecovery,
+}
+
 #[derive(Debug, Default)]
 struct RecoveryStateCache {
     recoveries: HashMap<RecoveryId, ActiveRecovery>,
@@ -19,6 +27,14 @@ impl RecoveryStateCache {
 
 /// Manages active recovery ceremonies for the recovery handler.
 #[derive(Default)]
+#[aura_macros::actor_owned(
+    owner = "recovery_manager",
+    domain = "recovery",
+    gate = "recovery_command_ingress",
+    command = RecoveryManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct RecoveryManager {
     state: RwLock<RecoveryStateCache>,
 }

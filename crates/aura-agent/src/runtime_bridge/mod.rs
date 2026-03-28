@@ -106,6 +106,14 @@ fn secure_storage_bootstrap_boundary(
     capabilities
 }
 
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "secure_storage_bootstrap_read_write"
+)]
+fn secure_storage_bootstrap_store_capabilities() -> [SecureStorageCapability; 2] {
+    [SecureStorageCapability::Read, SecureStorageCapability::Write]
+}
+
 fn internal_bridge_error(label: &'static str, error: impl Display) -> IntentError {
     IntentError::internal_error(format!("{label}: {error}"))
 }
@@ -872,15 +880,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let bootstrap_id = Hash32::from_bytes(&key_bytes);
 
         let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
-        let store_capabilities = secure_storage_bootstrap_boundary(&[
-            SecureStorageCapability::Read,
-            SecureStorageCapability::Write,
-        ]);
+        let store_capabilities = secure_storage_bootstrap_store_capabilities();
         effects
             .secure_store(
                 &location,
                 &key_bytes,
-                store_capabilities,
+                &store_capabilities,
             )
             .await
             .map_err(|e| {

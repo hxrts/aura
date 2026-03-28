@@ -118,6 +118,24 @@ impl SemanticSuccessProof for HomeCreatedProof {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::workflows) struct AccountCreatedProof {
+    home_id: ChannelId,
+}
+
+impl AccountCreatedProof {
+    pub(in crate::workflows) fn new(home_id: ChannelId) -> Self {
+        Self { home_id }
+    }
+}
+
+impl SemanticSuccessProof for AccountCreatedProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("account_created")
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::workflows) struct ChannelInvitationCreatedProof {
     invitation_id: aura_core::InvitationId,
 }
@@ -539,6 +557,17 @@ pub(in crate::workflows) fn issue_semantic_operation_context(
 pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> HomeCreatedProof {
     let _ = semantic_postcondition_proof_capability();
     HomeCreatedProof { home_id }
+}
+
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof"
+)]
+#[allow(dead_code)]
+pub(in crate::workflows) fn issue_account_created_proof(home_id: ChannelId) -> AccountCreatedProof {
+    let _ = semantic_postcondition_proof_capability();
+    AccountCreatedProof::new(home_id)
 }
 
 #[allow(dead_code)]

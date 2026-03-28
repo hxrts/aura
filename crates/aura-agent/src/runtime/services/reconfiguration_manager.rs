@@ -22,8 +22,25 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReconfigurationManagerCommand {
+    RegisterBundle,
+    LinkBundles,
+    DelegateSession,
+    TransferActiveSessionOwnership,
+}
+
 /// Runtime-owned reconfiguration state and lifecycle methods.
 #[derive(Clone)]
+#[aura_macros::actor_owned(
+    owner = "reconfiguration_manager",
+    domain = "runtime_reconfiguration",
+    gate = "reconfiguration_command_ingress",
+    command = ReconfigurationManagerCommand,
+    capacity = 32,
+    category = "actor_owned"
+)]
 pub struct ReconfigurationManager {
     shared: Arc<ReconfigurationShared>,
     runtime_capabilities: RuntimeCapabilityHandler,

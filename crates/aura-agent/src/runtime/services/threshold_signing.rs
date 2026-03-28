@@ -51,6 +51,22 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThresholdSigningCommand {
+    BootstrapAuthority,
+    LoadDkgTranscript,
+    RecoverShareFromTranscript,
+    SetAgreementMode,
+    AcquireCoordinatorLease,
+    EmitConvergenceCert,
+    EmitReversionFact,
+    Sign,
+    RotateKeys,
+    CommitKeyRotation,
+    RollbackKeyRotation,
+}
+
 /// Threshold config metadata stored alongside keys for recovery during commit
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ThresholdConfigMetadata {
@@ -170,6 +186,14 @@ impl ThresholdSigningState {
 /// - Guardian recovery (cross-authority)
 /// - Group operations (shared authority)
 /// - Hybrid schemes (device + guardian)
+#[aura_macros::actor_owned(
+    owner = "threshold_signing_service",
+    domain = "threshold_signing",
+    gate = "threshold_signing_command_ingress",
+    command = ThresholdSigningCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct ThresholdSigningService {
     /// Effect system for crypto and secure storage operations
     effects: Arc<AuraEffectSystem>,

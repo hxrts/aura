@@ -5,6 +5,13 @@ use crate::handlers::AuthChallenge;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
+#[allow(dead_code)] // Declaration-layer ingress inventory; runtime actor wiring lands incrementally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthManagerCommand {
+    CacheChallenge,
+    RemoveChallenge,
+}
+
 #[derive(Debug, Default)]
 struct AuthState {
     pending_challenges: HashMap<String, AuthChallenge>,
@@ -29,6 +36,14 @@ impl AuthState {
 
 /// Manages authentication challenges for the auth handler.
 #[derive(Default)]
+#[aura_macros::actor_owned(
+    owner = "auth_manager",
+    domain = "authentication",
+    gate = "auth_command_ingress",
+    command = AuthManagerCommand,
+    capacity = 64,
+    category = "actor_owned"
+)]
 pub struct AuthManager {
     state: RwLock<AuthState>,
 }

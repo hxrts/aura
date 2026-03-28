@@ -80,6 +80,82 @@ window_has_required_attr() {
   return 1
 }
 
+file_has_attr_for_function() {
+  local file="$1"
+  local function_name="$2"
+  local attr_regex="$3"
+  awk -v fn="$function_name" -v attr_regex="$attr_regex" '
+    { lines[NR] = $0 }
+    $0 ~ "async fn " fn "\\(" {
+      found = 1
+      for (i = NR - 1; i >= 1 && i >= NR - 16; i--) {
+        if (lines[i] ~ attr_regex) {
+          ok = 1
+          break
+        }
+      }
+    }
+    END {
+      if (!found || !ok) {
+        exit 1
+      }
+    }
+  ' "$file"
+}
+
+check_actor_owned_completeness() {
+  local -a excluded_files=(
+    "crates/aura-agent/src/runtime/services/lan_listener_service.rs"
+    "crates/aura-agent/src/runtime/services/maintenance_service.rs"
+    "crates/aura-agent/src/runtime/services/reactive_pipeline_service.rs"
+    "crates/aura-agent/src/runtime/services/lan_discovery.rs"
+  )
+  local file
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    local excluded=0
+    local excluded_file
+    for excluded_file in "${excluded_files[@]}"; do
+      if [[ "$file" == "$excluded_file" ]]; then
+        excluded=1
+        break
+      fi
+    done
+    if (( excluded )); then
+      continue
+    fi
+    if rg -n '^(pub )?struct [A-Za-z0-9_]*(Service|Manager|Coordinator|Subsystem|Actor)\b' "$file" >/dev/null; then
+      if ! rg -n '^\s*#\[(aura_macros::)?actor_owned' "$file" >/dev/null; then
+        echo "✖ $file: runtime service subtree completeness requires #[aura_macros::actor_owned]" >&2
+        violations=$((violations + 1))
+      fi
+    fi
+  done < <(find crates/aura-agent/src/runtime/services -name '*.rs' | sort)
+}
+
+check_semantic_owner_completeness() {
+  local attr_regex='#[[](aura_macros::)?semantic_owner'
+  local -a required_entries=(
+    "crates/aura-app/src/workflows/account.rs:initialize_runtime_account_owned"
+    "crates/aura-app/src/workflows/ceremonies.rs:start_device_enrollment_ceremony_owned"
+    "crates/aura-app/src/workflows/context.rs:create_home_owned"
+    "crates/aura-app/src/workflows/invitation.rs:accept_invitation_id_owned"
+    "crates/aura-app/src/workflows/invitation.rs:accept_imported_invitation_owned"
+    "crates/aura-app/src/workflows/messaging.rs:join_channel_by_name_owned"
+    "crates/aura-app/src/workflows/messaging.rs:send_message_ref_owned"
+    "crates/aura-app/src/workflows/messaging.rs:invite_user_to_channel_with_context_owned"
+  )
+  local entry file function_name
+  for entry in "${required_entries[@]}"; do
+    file="${entry%%:*}"
+    function_name="${entry##*:}"
+    if ! file_has_attr_for_function "$file" "$function_name" "$attr_regex"; then
+      echo "✖ $file: semantic-owner completeness requires #[aura_macros::semantic_owner] near async fn $function_name(...)" >&2
+      violations=$((violations + 1))
+    fi
+  done
+}
+
 is_semantic_owner_candidate() {
   local line="$1"
   local pattern='^\+.*async[[:space:]]+fn[[:space:]]+[A-Za-z0-9_]+(_owned|_with_terminal_status)\('
@@ -141,6 +217,15 @@ while IFS= read -r line; do
       ;;
   esac
 done <<< "$diff_output"
+
+case "$mode" in
+  actor-owned)
+    check_actor_owned_completeness
+    ;;
+  semantic-owner)
+    check_semantic_owner_completeness
+    ;;
+esac
 
 if (( violations > 0 )); then
   echo "ownership-annotation-ratchet($mode): $violations violation(s)" >&2
