@@ -13,7 +13,6 @@
 //! let app = AppCore::with_runtime(config, Arc::new(bridge))?;
 //! ```
 
-use async_lock::Mutex;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeModerationStatus, BridgeAuthorityInfo, BridgeDeviceInfo,
@@ -46,7 +45,7 @@ use base64::Engine;
 use futures::future::{BoxFuture, LocalBoxFuture};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{watch, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -98,12 +97,12 @@ impl MockRuntimeTaskSpawnerImpl {
     }
 
     fn record(&self, handle: JoinHandle<()>) {
-        self.handles.lock_blocking().push(handle);
+        self.handles.lock().expect("mock runtime handles poisoned").push(handle);
     }
 
     fn abort_all(&self) {
         let _ = self.shutdown_tx.send(true);
-        let mut handles = self.handles.lock_blocking();
+        let mut handles = self.handles.lock().expect("mock runtime handles poisoned");
         for handle in handles.drain(..) {
             handle.abort();
         }

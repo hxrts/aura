@@ -16,47 +16,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use aura_core::effects::ExecutionMode;
-use aura_core::AuraError;
 use aura_mpst::LocalSessionType;
-
-/// Minimal effect type used by mock handlers in tests
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum EffectType {
-    Dummy,
-}
-
-impl EffectType {
-    pub fn all() -> Vec<EffectType> {
-        vec![EffectType::Dummy]
-    }
-}
-
-/// Minimal AuraContext used by mock handlers in tests
-#[derive(Clone, Debug, Default)]
-pub struct AuraContext;
-
-#[async_trait]
-pub trait AuraHandler: Send + Sync {
-    async fn execute_effect(
-        &self,
-        effect_type: EffectType,
-        operation: &str,
-        params: &[u8],
-        context: &AuraContext,
-    ) -> Result<Vec<u8>, AuraError>;
-
-    async fn execute_session(
-        &self,
-        session: LocalSessionType,
-        ctx: &AuraContext,
-    ) -> Result<(), AuraError>;
-
-    fn supports_effect(&self, effect_type: EffectType) -> bool;
-
-    fn execution_mode(&self) -> ExecutionMode;
-
-    fn supported_effects(&self) -> Vec<EffectType>;
-}
+use aura_protocol::handlers::{AuraContext, AuraHandler, AuraHandlerError, EffectType};
 
 /// Mock handler for testing effect execution
 #[derive(Clone)]
@@ -118,7 +79,7 @@ impl AuraHandler for MockHandler {
         operation: &str,
         params: &[u8],
         _context: &AuraContext,
-    ) -> Result<Vec<u8>, AuraError> {
+    ) -> Result<Vec<u8>, AuraHandlerError> {
         // Record the call
         self.calls.lock().unwrap().push(MockCall {
             effect_type,
@@ -153,7 +114,7 @@ impl AuraHandler for MockHandler {
         &self,
         _session: LocalSessionType,
         _ctx: &AuraContext,
-    ) -> Result<(), AuraError> {
+    ) -> Result<(), AuraHandlerError> {
         Ok(()) // Mock implementation does nothing
     }
 

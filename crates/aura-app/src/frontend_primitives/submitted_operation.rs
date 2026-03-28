@@ -470,10 +470,9 @@ mod tests {
         SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalOutcome,
         WorkflowTerminalStatus,
     };
-    use async_lock::Mutex;
     use async_trait::async_trait;
     use futures::executor::block_on;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum Event {
@@ -500,7 +499,10 @@ mod tests {
             instance_id: &OperationInstanceId,
             kind: SemanticOperationKind,
         ) {
-            self.events.lock().await.push(Event::Dispatched(
+            self.events
+                .lock()
+                .expect("submitted operation test events poisoned")
+                .push(Event::Dispatched(
                 operation_id.clone(),
                 instance_id.clone(),
                 kind,
@@ -514,7 +516,10 @@ mod tests {
             causality: Option<SemanticOperationCausality>,
             status: SemanticOperationStatus,
         ) {
-            self.events.lock().await.push(Event::Terminal(
+            self.events
+                .lock()
+                .expect("submitted operation test events poisoned")
+                .push(Event::Terminal(
                 operation_id.clone(),
                 instance_id.clone(),
                 causality,
@@ -528,7 +533,10 @@ mod tests {
             instance_id: &OperationInstanceId,
             kind: SemanticOperationKind,
         ) {
-            self.events.lock_blocking().push(Event::Dropped(
+            self.events
+                .lock()
+                .expect("submitted operation test events poisoned")
+                .push(Event::Dropped(
                 operation_id.clone(),
                 instance_id.clone(),
                 kind,
@@ -537,7 +545,11 @@ mod tests {
     }
 
     fn events(publisher: &TestPublisher) -> Vec<Event> {
-        publisher.events.lock_blocking().clone()
+        publisher
+            .events
+            .lock()
+            .expect("submitted operation test events poisoned")
+            .clone()
     }
 
     #[test]
