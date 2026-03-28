@@ -1,6 +1,6 @@
 use aura_app::ui::contract::{ModalId, RenderHeartbeat, ScreenId, UiSnapshot};
 use aura_ui::UiController;
-use js_sys::{Object, JSON};
+use js_sys::{Function, Object, JSON};
 use serde_wasm_bindgen::to_value;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -19,7 +19,6 @@ use crate::harness::generation::{
     current_browser_shell_phase, generation_js_value, mark_generation_ready, next_render_seq,
     note_published_ui_snapshot_json, ready_generation, BrowserShellPhase, UI_GENERATION_PHASE_KEY,
 };
-use crate::harness::mutation::schedule_browser_task_next_tick;
 use crate::harness::page_owned_queue::wake_pending_mutation_queues_if_needed;
 use crate::harness::window_contract::{object_set, HarnessWindowContract};
 
@@ -204,18 +203,27 @@ pub(crate) fn schedule_window_callback_push(
         return false;
     }
 
-    let callback_window = window.clone();
-    let callback_key = function_key.to_string();
-    let schedule_result = schedule_browser_task_next_tick(move || {
-        let callback_contract = HarnessWindowContract::new(callback_window.clone());
-        let Some(function) = callback_contract.function(&callback_key) else {
-            return;
-        };
-        if let Err(error) = function.call1(callback_window.as_ref(), &payload) {
-            log_js_callback_error(callback_label, &error);
-        }
-    });
-    if let Err(error) = schedule_result {
+    let callback = Function::new_with_args(
+        "functionKey, payload, callbackLabel",
+        r#"
+            const target = window[functionKey];
+            if (typeof target !== "function") {
+                return;
+            }
+            try {
+                target.call(window, payload);
+            } catch (error) {
+                console.error(`[web-harness] ${callbackLabel} failed: ${String(error)}`);
+            }
+        "#,
+    );
+    if let Err(error) = window.set_timeout_with_callback_and_timeout_and_arguments_3(
+        callback.unchecked_ref(),
+        0,
+        &JsValue::from_str(function_key),
+        &payload,
+        &JsValue::from_str(callback_label),
+    ) {
         log_js_callback_error(callback_label, &error);
         return false;
     }
@@ -250,13 +258,18 @@ fn publish_ui_snapshot_now(
         }
     };
 
-    let driver_push_published = schedule_window_callback_push(
-        window,
-        DRIVER_PUSH_UI_STATE_KEY,
-        JsValue::from_str(&json),
-        "driver UI state push",
-    );
-    let binding_mode = if driver_push_published {
+    let driver_push_available = window_contract.function(DRIVER_PUSH_UI_STATE_KEY).is_some();
+    let driver_push_published = if driver_push_available {
+        schedule_window_callback_push(
+            window,
+            DRIVER_PUSH_UI_STATE_KEY,
+            JsValue::from_str(&json),
+            "driver UI state push",
+        )
+    } else {
+        false
+    };
+    let binding_mode = if driver_push_available {
         PublicationBindingMode::DriverPush
     } else {
         PublicationBindingMode::WindowCacheOnly

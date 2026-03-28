@@ -9,7 +9,7 @@
     "driver": "node ./playwright_driver.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "npm run typecheck",
-    "test": "npm run build && node ./tests/smoke.mjs",
+    "test": "npm run build && node ./tests/launcher.mjs && node ./tests/smoke.mjs",
     "install-browsers": "playwright install --with-deps chromium"
   },
   "dependencies": {

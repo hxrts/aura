@@ -788,6 +788,10 @@ fn ui_snapshot_event_timeout(error: &anyhow::Error) -> bool {
         || message.contains("Playwright driver wait_for_ui_state timed out")
 }
 
+fn fallback_ui_snapshot_event_version(after_version: Option<u64>) -> u64 {
+    after_version.unwrap_or(0).saturating_add(1)
+}
+
 impl ObservationBackend for PlaywrightBrowserBackend {
     fn ui_snapshot(&self) -> Result<UiSnapshot> {
         let payload = self.with_session(|session| {
@@ -838,7 +842,7 @@ impl ObservationBackend for PlaywrightBrowserBackend {
                     Err(error) if ui_snapshot_event_timeout(&error) => {
                         let snapshot = self.ui_snapshot()?;
                         return Ok(UiSnapshotEvent {
-                            version: snapshot.revision.semantic_seq,
+                            version: fallback_ui_snapshot_event_version(after_version),
                             snapshot,
                         });
                     }
@@ -1632,6 +1636,27 @@ mod tests {
         assert!(
             !body.contains("blocking_sleep(Duration::from_millis(100))"),
             "browser backend readiness should not poll with fixed sleeps"
+        );
+    }
+
+    #[test]
+    fn playwright_backend_timeout_fallback_uses_monotonic_event_version() {
+        let source = include_str!("playwright_browser.rs");
+        let start = source
+            .find("Err(error) if ui_snapshot_event_timeout(&error) => {")
+            .unwrap_or_else(|| panic!("missing ui snapshot timeout fallback"));
+        let end = source[start..]
+            .find("\n                    }\n                    Err(error) =>")
+            .map(|offset| start + offset)
+            .unwrap_or_else(|| panic!("missing timeout fallback terminator"));
+        let block = &source[start..end];
+        assert!(
+            block.contains("version: fallback_ui_snapshot_event_version(after_version),"),
+            "browser ui snapshot timeout fallback should preserve the monotonic event contract instead of reusing semantic revision as the event version"
+        );
+        assert!(
+            !block.contains("version: snapshot.revision.semantic_seq,"),
+            "browser ui snapshot timeout fallback must not reuse semantic revision as the observation event version"
         );
     }
 

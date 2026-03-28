@@ -46,19 +46,12 @@ export function uiStateStalenessReason(
   if (requiredRevision > 0 && semanticRevision < requiredRevision) {
     return `required_revision_not_reached:${requiredRevision}`;
   }
-  const heartbeatScreen =
-    typeof session.renderHeartbeat?.screen === 'string' ? session.renderHeartbeat.screen : null;
-  if (heartbeatScreen && snapshot.screen && heartbeatScreen !== snapshot.screen) {
-    return `heartbeat_screen_mismatch:${heartbeatScreen}:${snapshot.screen}`;
-  }
-  const heartbeatRenderRevision = Number(session.renderHeartbeat?.render_seq ?? 0);
-  const snapshotRenderRevision = uiSnapshotRenderRevision(snapshot);
-  if (
-    heartbeatRenderRevision > 0 &&
-    snapshotRenderRevision > 0 &&
-    heartbeatRenderRevision > snapshotRenderRevision
-  ) {
-    return `heartbeat_ahead:${heartbeatRenderRevision}:${snapshotRenderRevision}`;
-  }
+  // Render heartbeat is a separate render-convergence signal, not a semantic
+  // freshness gate. During browser rebinding and post-bootstrap publication,
+  // the page-owned semantic snapshot may advance before the next
+  // requestAnimationFrame publishes the matching heartbeat. Shared semantic
+  // waits must accept the authoritative semantic snapshot in that window
+  // instead of treating the older heartbeat as evidence that the snapshot is
+  // stale.
   return null;
 }

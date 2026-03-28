@@ -437,14 +437,18 @@ mod tests {
 
         assert!(
             publication_source.contains("pub(crate) fn schedule_window_callback_push(")
-                && publication_source.contains("schedule_browser_task_next_tick(move ||"),
-            "browser publication should schedule driver callback pushes onto the next browser tick instead of calling Playwright bindings inline on the semantic/render publication path"
+                && publication_source.contains("Function::new_with_args(")
+                && publication_source.contains(
+                    "set_timeout_with_callback_and_timeout_and_arguments_3("
+                ),
+            "browser publication should schedule driver callback pushes through a page-owned JS callback so semantic/render publication does not depend on a Rust generation-owned timer closure"
         );
         assert!(
-            publication_source.contains("schedule_window_callback_push(\n        window,\n        DRIVER_PUSH_UI_STATE_KEY,")
+            publication_source.contains(".function(DRIVER_PUSH_UI_STATE_KEY)")
+                && publication_source.contains("schedule_window_callback_push(\n            window,\n            DRIVER_PUSH_UI_STATE_KEY,")
                 && publication_source.contains("schedule_window_callback_push(\n        window,\n        DRIVER_PUSH_RENDER_HEARTBEAT_KEY,")
                 && publication_source.contains("schedule_window_callback_push(\n        window,\n        PUSH_SEMANTIC_SUBMIT_STATE_KEY,"),
-            "browser publication should route ui_state, render heartbeat, and semantic submit pushes through the scheduled callback helper"
+            "browser publication should publish authoritative ui_state cache/json inline, while all Playwright callback pushes stay scheduled off the browser critical path"
         );
         assert!(
             queue_source.contains("schedule_window_callback_push(\n            window_contract.raw_window(),\n            PUSH_SEMANTIC_SUBMIT_STATE_KEY,")

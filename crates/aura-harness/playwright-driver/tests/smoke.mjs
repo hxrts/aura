@@ -92,6 +92,25 @@ const fixtureHtml = `<!doctype html>
             return state.logs.slice(-lines);
           }
         };
+
+        window.__AURA_UI_ACTIVE_GENERATION__ = 1;
+        window.__AURA_UI_READY_GENERATION__ = 1;
+        window.__AURA_UI_GENERATION_PHASE__ = 'ready';
+        window.__AURA_SEMANTIC_SUBMIT_PUBLICATION_STATE__ = {
+          surface: 'semantic_submit',
+          status: 'ready',
+          detail: 'smoke_fixture_ready',
+          binding_mode: 'semantic_bridge',
+          reliability: 'informational',
+          generation_id: 1,
+          active_generation: 1,
+          ready_generation: 1,
+          generation_ready: true,
+          phase: 'ready',
+          controller_present: true,
+          bootstrap_transition_detail: null,
+          enqueue_ready: true
+        };
       })();
     </script>
   </body>
@@ -174,7 +193,7 @@ async function main() {
       data_dir: path.join(tempRoot, 'data'),
       artifact_dir: path.join(tempRoot, 'artifacts'),
       headless: true,
-      require_semantic_ready: false
+      startup_readiness: 'submit_ready'
     });
 
     await driver.call('send_keys', { instance_id: 'smoke-a', keys: '2hello' });

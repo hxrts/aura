@@ -26,7 +26,10 @@ import {
   HARNESS_OBSERVE_KEY,
   PENDING_RUNTIME_STAGE_QUEUE_SEED_KEY,
   PENDING_SEMANTIC_QUEUE_SEED_KEY,
+  RENDER_HEARTBEAT_JSON_KEY,
+  RENDER_HEARTBEAT_KEY,
   RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+  SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY,
   UI_ACTIVE_GENERATION_KEY,
   UI_GENERATION_PHASE_KEY,
   UI_PUBLICATION_STATE_KEY,
@@ -586,6 +589,11 @@ function trySerializeUiState(value) {
   }
 }
 
+function uiObservationVersion(session) {
+  const version = Number(session?.uiStateVersion ?? 0);
+  return Number.isFinite(version) && version > 0 ? version : 0;
+}
+
 function notifyUiStateWaiters(session) {
   if (
     !session.uiStateCache ||
@@ -594,16 +602,19 @@ function notifyUiStateWaiters(session) {
   ) {
     return;
   }
-  const currentRevision = uiSnapshotRevision(session.uiStateCache);
+  const currentVersion = uiObservationVersion(session);
   const ready = session.uiStateWaiters.filter(
-    (waiter) => currentRevision > waiter.afterVersion,
+    (waiter) => currentVersion > waiter.afterVersion,
+  );
+  console.error(
+    `[driver] ui_state_waiters_notify instance=${session.id} current_version=${currentVersion} waiter_count=${session.uiStateWaiters.length} ready_count=${ready.length}`,
   );
   for (const waiter of ready) {
     removeUiStateWaiter(session, waiter);
     clearTimeout(waiter.timer);
     waiter.resolve({
       snapshot: session.uiStateCache,
-      version: currentRevision,
+      version: currentVersion,
     });
   }
 }
@@ -643,6 +654,8 @@ function resetUiObservationState(session, reason, options = {}) {
   session.uiStateVersion = 0;
   session.domState = normalizeDomState({ text: "", ids: [] });
   session.renderHeartbeat = null;
+  session.semanticSubmitState = null;
+  session.semanticQueueInstalled = false;
   session.requiredUiStateRevision = 0;
   session.requiredUiGeneration = 0;
   session.currentUiGeneration = 0;
@@ -759,23 +772,34 @@ function storeUiState(session, payload, source = "unknown") {
   session.uiStateCacheJson = nextJson;
   session.lastUiStateSource = source;
   clearObservationMutationIfSatisfied(session, parsed);
+  console.error(
+    `[driver] ui_state_store instance=${session.id} source=${source} changed=${changed} next_revision=${uiSnapshotRevision(parsed)} previous_version=${uiObservationVersion(
+      session,
+    )}`,
+  );
   if (changed) {
     session.uiStateVersion = (session.uiStateVersion ?? 0) + 1;
+    console.error(
+      `[driver] ui_state_store_version instance=${session.id} source=${source} version=${session.uiStateVersion}`,
+    );
     notifyUiStateWaiters(session);
   }
   return true;
 }
 
 function waitForUiStateVersion(session, afterVersion, timeoutMs) {
-  const currentRevision = uiSnapshotRevision(session.uiStateCache);
+  const currentVersion = uiObservationVersion(session);
   if (
     session.uiStateCache &&
     typeof session.uiStateCache === "object" &&
-    currentRevision > afterVersion
+    currentVersion > afterVersion
   ) {
+    console.error(
+      `[driver] ui_state_wait immediate instance=${session.id} after_version=${afterVersion} current_version=${currentVersion}`,
+    );
     return Promise.resolve({
       snapshot: session.uiStateCache,
-      version: currentRevision,
+      version: currentVersion,
     });
   }
 
@@ -790,13 +814,21 @@ function waitForUiStateVersion(session, afterVersion, timeoutMs) {
       reject,
       timer: null,
     };
+    console.error(
+      `[driver] ui_state_wait register instance=${session.id} after_version=${afterVersion} current_version=${currentVersion} timeout_ms=${timeoutMs}`,
+    );
     waiter.timer = setTimeout(() => {
       removeUiStateWaiter(session, waiter);
+      console.error(
+        `[driver] ui_state_wait timeout instance=${session.id} after_version=${afterVersion} current_version=${uiObservationVersion(
+          session,
+        )}`,
+      );
       reject(
         new Error(
-          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_revision=${uiSnapshotRevision(
-            session.uiStateCache,
-          )}`,
+          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_version=${uiObservationVersion(
+            session,
+          )} current_revision=${uiSnapshotRevision(session.uiStateCache)}`,
         ),
       );
     }, timeoutMs);
@@ -909,6 +941,17 @@ function normalizeRenderHeartbeat(payload) {
   };
 }
 
+function tryParseRenderHeartbeatValue(payload) {
+  if (typeof payload === "string") {
+    try {
+      return normalizeRenderHeartbeat(JSON.parse(payload));
+    } catch {
+      return null;
+    }
+  }
+  return normalizeRenderHeartbeat(payload);
+}
+
 const SCREEN_DOM_IDS = Object.freeze({
   onboarding: "aura-onboarding-root",
   neighborhood: "aura-screen-neighborhood",
@@ -995,6 +1038,7 @@ function runSelfTest() {
       screen: "chat",
       revision: { semantic_seq: 3, render_seq: 3 },
     },
+    uiStateVersion: 0,
     uiStateWaiters: [],
   };
   markObservationMutation(mutableSession, "click_button");
@@ -1018,8 +1062,8 @@ function runSelfTest() {
     uiStateStalenessReason(staleRevisionSession, {
       screen: "chat",
       revision: { semantic_seq: 7, render_seq: 8 },
-    }) === "heartbeat_ahead:9:8",
-    "heartbeat ahead should reject stale render snapshot",
+    }) === null,
+    "semantic ui-state freshness must not be vetoed by an older render heartbeat; render convergence is tracked separately from semantic publication",
   );
   assert(
     uiStateStalenessReason({}, null) === "missing_snapshot",
@@ -1040,6 +1084,11 @@ function runSelfTest() {
     String(readStructuredUiState).includes(UI_ACTIVE_GENERATION_KEY) &&
       String(readStructuredUiState).includes(UI_READY_GENERATION_KEY),
     "structured observation must wait on the page-owned generation boundary during browser rebinding",
+  );
+  assert(
+    String(readStructuredUiState).includes("renderHeartbeatJsonKey") &&
+      String(readStructuredUiState).includes("session.renderHeartbeat = heartbeat;"),
+    "structured browser observation must refresh the page-owned render heartbeat alongside ui_state so stale driver-side heartbeat cache cannot veto a newer authoritative snapshot",
   );
   assert(
     OBSERVATION_METHODS.has("ui_state") &&
@@ -1064,6 +1113,26 @@ function runSelfTest() {
     "explicit browser recovery path must use the dedicated recovery helper",
   );
   assert(
+    !String(readStructuredUiStateWithNavigationRecovery).includes(
+      "ensureHarnessWithTimeout(",
+    ) &&
+      !String(readStructuredUiStateWithNavigationRecovery).includes(
+        "assertRootStructure(",
+      ),
+    "semantic ui-state navigation recovery must stay on page-owned publication and interactivity contracts; full harness bridge/root checks belong to startup and raw-harness methods only",
+  );
+  assert(
+    String(readStructuredUiStateWithNavigationRecovery).includes(
+      "skipPushWait: true",
+    ),
+    "semantic ui-state recovery must spend its budget on page-owned structured publication, not a redundant second driver-push wait after the first wait has already missed",
+  );
+  assert(
+    !String(ensurePageInteractive).includes("page.waitForFunction(") &&
+      !String(readStructuredUiState).includes("page.waitForFunction("),
+    "driver publication and interactivity waits must stay on driver-owned bounded polling instead of bare page.waitForFunction",
+  );
+  assert(
     mutableSession.requiredUiStateRevision === 4,
     "mutating actions should require a newer semantic revision",
   );
@@ -1078,6 +1147,42 @@ function runSelfTest() {
   assert(
     mutableSession.requiredUiStateRevision == null,
     "fresh snapshot should clear mutation floor",
+  );
+  const observationVersionBeforeEquivalentSemanticPublish =
+    mutableSession.uiStateVersion;
+  storeUiState(
+    mutableSession,
+    {
+      screen: "neighborhood",
+      revision: { semantic_seq: 4, render_seq: 4 },
+    },
+    "selftest_same_semantic_surface_change",
+  );
+  assert(
+    mutableSession.uiStateVersion ===
+      observationVersionBeforeEquivalentSemanticPublish + 1,
+    "authoritative ui publication changes must advance the browser observation version even when semantic revision does not",
+  );
+  assert(
+    uiStatePushWaitBaseline(mutableSession, 3) === 3 &&
+      uiStatePushWaitBaseline(mutableSession, null) === mutableSession.uiStateVersion,
+    "ui_state waits must anchor on the caller after_version so an already-arrived newer browser push cannot be missed by a later local observation version",
+  );
+  assert(
+    String(waitForUiState).indexOf("waitForUiStateVersion(") <
+      String(waitForUiState).indexOf("readStructuredUiStateWithNavigationRecovery("),
+    "wait_for_ui_state must prioritize driver push waits before page recovery probes so steady-state observation does not depend on browser evaluate loops",
+  );
+  assert(
+    !String(waitForUiState).includes("cachedVersion >= afterVersion") &&
+      !String(waitForUiState).includes("recoveredVersion >= afterVersion"),
+    "wait_for_ui_state must return a strictly newer observation version than after_version; semantic freshness must not weaken the event-version contract",
+  );
+  assert(
+    !String(waitForUiState).includes(
+      "waitTimedOut &&\n        session.uiStateCache &&\n        typeof session.uiStateCache === \"object\"\n      ) {\n        continue;",
+    ),
+    "wait_for_ui_state must not spin on a stale cached snapshot after push timeouts; once push delivery misses a newer authoritative publication, the driver must fall back to a bounded structured recovery read",
   );
   const staleAfterMutationSession = {
     uiStateCache: {
@@ -1149,19 +1254,40 @@ async function ensureHarnessWithTimeout(page, timeoutMs) {
 }
 
 async function ensurePageInteractive(page, timeoutMs) {
-  await page.waitForFunction(
-    () => {
-      const title = document.title || "";
-      const bodyText = document.body?.innerText || "";
-      const buildScreenVisible =
-        title.includes("Dioxus Build") ||
-        bodyText.includes("We're building your app now") ||
-        bodyText.includes("Starting the build...");
-      const mainRoot = document.getElementById("main");
-      return !buildScreenVisible && !!mainRoot;
-    },
-    null,
-    { timeout: timeoutMs },
+  const deadlineMs = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadlineMs) {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    try {
+      const interactive = await withOperationTimeout(
+        "ensure_page_interactive",
+        page.evaluate(() => {
+          const title = document.title || "";
+          const bodyText = document.body?.innerText || "";
+          const buildScreenVisible =
+            title.includes("Dioxus Build") ||
+            bodyText.includes("We're building your app now") ||
+            bodyText.includes("Starting the build...");
+          const mainRoot = document.getElementById("main");
+          return !buildScreenVisible && !!mainRoot;
+        }),
+        Math.min(remainingMs, 500),
+      );
+      if (interactive === true) {
+        return;
+      }
+      lastError = null;
+    } catch (error) {
+      if (isNavigationTransitionError(error) || isClosedTargetError(error)) {
+        throw error;
+      }
+      lastError = error;
+    }
+    await delay(25);
+  }
+  throw (
+    lastError ??
+    new Error(`ensure_page_interactive timed out after ${timeoutMs}ms`)
   );
 }
 
@@ -1431,12 +1557,42 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
     `[driver] submit_queue_ready_wait start instance=${session.id} reason=${reason} timeout_ms=${timeoutMs}`,
   );
   while (Date.now() < deadlineMs) {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    await refreshGenerationState(session, `submit_queue_ready:${reason}`);
+    const probeTimeoutMs = Math.min(remainingMs, 500);
+    let directProbeSucceeded = false;
+    try {
+      const directState = await withOperationTimeout(
+        `semantic_submit_probe:${session.id}:${reason}`,
+        session.page.evaluate((semanticSubmitPublicationStateKey) => {
+          const state = window[semanticSubmitPublicationStateKey];
+          return state && typeof state === "object" ? state : null;
+        }, SEMANTIC_SUBMIT_PUBLICATION_STATE_KEY),
+        probeTimeoutMs,
+      );
+      directProbeSucceeded = true;
+      if (directState) {
+        rememberSemanticSubmitPublicationState(session, directState, "page_probe");
+      } else {
+        session.semanticSubmitState = null;
+        session.semanticQueueInstalled = false;
+      }
+    } catch {
+      directProbeSucceeded = false;
+    }
     const state = session.semanticSubmitState;
+    const requiredGeneration = Math.max(
+      0,
+      Number(session.currentUiGeneration ?? 0),
+      Number(session.requiredUiGeneration ?? 0),
+    );
     if (
+      directProbeSucceeded &&
       state?.status === "ready" &&
       state?.enqueue_ready === true &&
       state?.generation_id != null &&
-      state?.generation_ready === true
+      state?.generation_ready === true &&
+      Number(state.generation_id) >= requiredGeneration
     ) {
       console.error(
         `[driver] submit_queue_ready_wait done instance=${session.id} reason=${reason} state=${JSON.stringify(state)}`,
@@ -1749,6 +1905,11 @@ function isNavigationTransitionError(error) {
 function isUiStateWaitInvalidation(error) {
   const message = String(error?.message ?? error ?? "");
   return message.startsWith("ui_state_wait_invalidated:");
+}
+
+function isUiStateWaitTimeout(error) {
+  const message = String(error?.message ?? error ?? "");
+  return message.startsWith("wait_for_ui_state timed out after ");
 }
 
 function isUiStateRecoveryCandidate(error) {
@@ -3142,86 +3303,124 @@ function tryParseUiStateValue(value) {
   return value && typeof value === "object" ? value : null;
 }
 
+function uiStatePushWaitBaseline(session, afterVersion = null) {
+  const currentVersion = uiObservationVersion(session);
+  if (afterVersion == null) {
+    return currentVersion;
+  }
+  const normalizedAfterVersion = Number(afterVersion);
+  if (!Number.isFinite(normalizedAfterVersion) || normalizedAfterVersion < 0) {
+    return currentVersion;
+  }
+  return normalizedAfterVersion;
+}
+
 async function readStructuredUiState(
   session,
   instanceId,
   reason,
   timeoutMs = 1000,
-  { storeResult = false } = {},
+  { storeResult = false, afterVersion = null, skipPushWait = false } = {},
 ) {
+  const pushWaitBaseline = uiStatePushWaitBaseline(session, afterVersion);
   traceDriver(
-    `[driver] ui_state structured_read start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs}`,
+    `[driver] ui_state structured_read start instance=${instanceId} reason=${reason} timeout_ms=${timeoutMs} push_wait_baseline=${pushWaitBaseline}`,
   );
-  const pushTimeoutMs =
-    timeoutMs <= 1 ? timeoutMs : Math.max(1, Math.min(timeoutMs - 1, 1500));
-  const currentRevision =
-    session.uiStateCache && typeof session.uiStateCache === "object"
-      ? uiSnapshotRevision(session.uiStateCache)
-      : -1;
-  try {
-    const pushed = await waitForUiStateVersion(
-      session,
-      currentRevision,
-      pushTimeoutMs,
-    );
-    if (storeResult) {
-      storeUiState(session, pushed.snapshot, `driver_push:${reason}`);
+  const pushTimeoutMs = skipPushWait
+    ? 0
+    : timeoutMs <= 1
+      ? timeoutMs
+      : Math.max(1, Math.min(timeoutMs - 1, 1500));
+  if (!skipPushWait) {
+    try {
+      const pushed = await waitForUiStateVersion(
+        session,
+        pushWaitBaseline,
+        pushTimeoutMs,
+      );
+      if (storeResult) {
+        storeUiState(session, pushed.snapshot, `driver_push:${reason}`);
+      }
+      traceDriver(
+        `[driver] ui_state structured_read pushed instance=${instanceId} reason=${reason} version=${pushed.version}`,
+      );
+      return pushed.snapshot;
+    } catch (error) {
+      traceDriver(
+        `[driver] ui_state structured_read pushed_unavailable instance=${instanceId} reason=${reason} error=${error?.message ?? String(error)}`,
+      );
     }
-    traceDriver(
-      `[driver] ui_state structured_read pushed instance=${instanceId} reason=${reason} version=${pushed.version}`,
-    );
-    return pushed.snapshot;
-  } catch (error) {
-    traceDriver(
-      `[driver] ui_state structured_read pushed_unavailable instance=${instanceId} reason=${reason} error=${error?.message ?? String(error)}`,
-    );
   }
 
   const fallbackTimeoutMs = Math.max(1, timeoutMs - pushTimeoutMs);
   let publicationState = null;
   try {
-    const handle = await session.page.waitForFunction(
-      ({
-        uiStateJsonKey,
-        uiStateCacheKey,
-        activeGenerationKey,
-        readyGenerationKey,
-        uiPublicationStateKey,
-        renderHeartbeatPublicationStateKey,
-      }) => {
-        const hasPublishedUiState =
-          typeof window[uiStateJsonKey] === "string" ||
-          (window[uiStateCacheKey] &&
-            typeof window[uiStateCacheKey] === "object");
-        if (!hasPublishedUiState) {
-          return false;
+    const deadlineMs = Date.now() + fallbackTimeoutMs;
+    let lastPublicationError = null;
+    while (Date.now() < deadlineMs) {
+      const remainingMs = Math.max(1, deadlineMs - Date.now());
+      try {
+        publicationState = await withOperationTimeout(
+          `structured_publication_probe:${reason}`,
+          session.page.evaluate(
+            ({
+              uiStateJsonKey,
+              uiStateCacheKey,
+              activeGenerationKey,
+              readyGenerationKey,
+              uiPublicationStateKey,
+              renderHeartbeatPublicationStateKey,
+            }) => {
+              const hasPublishedUiState =
+                typeof window[uiStateJsonKey] === "string" ||
+                (window[uiStateCacheKey] &&
+                  typeof window[uiStateCacheKey] === "object");
+              const activeGeneration = Number(window[activeGenerationKey] ?? 0);
+              const readyGeneration = Number(window[readyGenerationKey] ?? 0);
+              return {
+                ready:
+                  hasPublishedUiState &&
+                  (activeGeneration <= 0 || readyGeneration >= activeGeneration),
+                active_generation: activeGeneration,
+                ready_generation: readyGeneration,
+                ui_state: window[uiPublicationStateKey] ?? null,
+                render_heartbeat:
+                  window[renderHeartbeatPublicationStateKey] ?? null,
+              };
+            },
+            {
+              uiStateJsonKey: UI_STATE_JSON_KEY,
+              uiStateCacheKey: UI_STATE_CACHE_KEY,
+              activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
+              readyGenerationKey: UI_READY_GENERATION_KEY,
+              uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
+              renderHeartbeatPublicationStateKey:
+                RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
+            },
+          ),
+          Math.min(remainingMs, 500),
+        );
+        noteGenerationState(session, publicationState);
+        if (publicationState?.ready === true) {
+          break;
         }
-
-        const activeGeneration = Number(window[activeGenerationKey] ?? 0);
-        const readyGeneration = Number(window[readyGenerationKey] ?? 0);
-        if (activeGeneration > 0 && readyGeneration < activeGeneration) {
-          return false;
+        lastPublicationError = null;
+      } catch (error) {
+        if (isNavigationTransitionError(error) || isClosedTargetError(error)) {
+          throw error;
         }
-
-        return {
-          active_generation: activeGeneration,
-          ready_generation: readyGeneration,
-          ui_state: window[uiPublicationStateKey] ?? null,
-          render_heartbeat: window[renderHeartbeatPublicationStateKey] ?? null,
-        };
-      },
-      {
-        uiStateJsonKey: UI_STATE_JSON_KEY,
-        uiStateCacheKey: UI_STATE_CACHE_KEY,
-        activeGenerationKey: UI_ACTIVE_GENERATION_KEY,
-        readyGenerationKey: UI_READY_GENERATION_KEY,
-        uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
-        renderHeartbeatPublicationStateKey: RENDER_HEARTBEAT_PUBLICATION_STATE_KEY,
-      },
-      { timeout: fallbackTimeoutMs },
-    );
-    publicationState = await handle.jsonValue().catch(() => null);
-    noteGenerationState(session, publicationState);
+        lastPublicationError = error;
+      }
+      await delay(25);
+    }
+    if (publicationState?.ready !== true) {
+      throw (
+        lastPublicationError ??
+        new Error(
+          `structured_publication_probe timed out after ${fallbackTimeoutMs}ms`,
+        )
+      );
+    }
   } catch (error) {
     const pageGenerationState = await session.page
       .evaluate(({
@@ -3263,27 +3462,53 @@ async function readStructuredUiState(
       return session.page.evaluate(({
         uiStateJsonKey,
         uiStateCacheKey,
+        renderHeartbeatJsonKey,
+        renderHeartbeatKey,
         harnessObserveKey,
         uiStateObserveKey,
         uiPublicationStateKey,
         renderHeartbeatPublicationStateKey,
       }) => {
         if (typeof window[uiStateJsonKey] === "string") {
-          return window[uiStateJsonKey];
+          return {
+            ui_state: window[uiStateJsonKey],
+            render_heartbeat:
+              typeof window[renderHeartbeatJsonKey] === "string"
+                ? window[renderHeartbeatJsonKey]
+                : window[renderHeartbeatKey] ?? null,
+          };
         }
         if (
           window[uiStateCacheKey] &&
           typeof window[uiStateCacheKey] === "object"
         ) {
-          return window[uiStateCacheKey];
+          return {
+            ui_state: window[uiStateCacheKey],
+            render_heartbeat:
+              typeof window[renderHeartbeatJsonKey] === "string"
+                ? window[renderHeartbeatJsonKey]
+                : window[renderHeartbeatKey] ?? null,
+          };
         }
         if (typeof window[harnessObserveKey]?.ui_state === "function") {
-          return window[harnessObserveKey].ui_state();
+          return {
+            ui_state: window[harnessObserveKey].ui_state(),
+            render_heartbeat:
+              typeof window[renderHeartbeatJsonKey] === "string"
+                ? window[renderHeartbeatJsonKey]
+                : window[renderHeartbeatKey] ?? null,
+          };
         }
         if (typeof window[uiStateObserveKey] === "function") {
-          const payload = window[uiStateObserveKey]();
-          if (payload != null) {
-            return payload;
+          const uiStatePayload = window[uiStateObserveKey]();
+          if (uiStatePayload != null) {
+            return {
+              ui_state: uiStatePayload,
+              render_heartbeat:
+                typeof window[renderHeartbeatJsonKey] === "string"
+                  ? window[renderHeartbeatJsonKey]
+                  : window[renderHeartbeatKey] ?? null,
+            };
           }
         }
         throw new Error(
@@ -3296,6 +3521,8 @@ async function readStructuredUiState(
       }, {
         uiStateJsonKey: UI_STATE_JSON_KEY,
         uiStateCacheKey: UI_STATE_CACHE_KEY,
+        renderHeartbeatJsonKey: RENDER_HEARTBEAT_JSON_KEY,
+        renderHeartbeatKey: RENDER_HEARTBEAT_KEY,
         harnessObserveKey: HARNESS_OBSERVE_KEY,
         uiStateObserveKey: UI_STATE_OBSERVE_KEY,
         uiPublicationStateKey: UI_PUBLICATION_STATE_KEY,
@@ -3304,7 +3531,9 @@ async function readStructuredUiState(
     })(),
     fallbackTimeoutMs,
   );
-  const parsed = tryParseUiStateValue(payload);
+  const parsed = tryParseUiStateValue(payload?.ui_state ?? payload);
+  const heartbeat = tryParseRenderHeartbeatValue(payload?.render_heartbeat ?? null);
+  session.renderHeartbeat = heartbeat;
   if (parsed && typeof parsed === "object") {
     noteGenerationState(session, publicationState);
     if (storeResult) {
@@ -3326,10 +3555,13 @@ async function readStructuredUiStateWithNavigationRecovery(
   instanceId,
   reason,
   timeoutMs = 1000,
+  afterVersion = null,
 ) {
   try {
     return await readStructuredUiState(session, instanceId, reason, timeoutMs, {
       storeResult: false,
+      afterVersion,
+      skipPushWait: true,
     });
   } catch (error) {
     if (!isUiStateRecoveryCandidate(error)) {
@@ -3347,6 +3579,8 @@ async function readStructuredUiStateWithNavigationRecovery(
         UI_STATE_TIMEOUT_MS,
         {
           storeResult: false,
+          afterVersion,
+          skipPushWait: true,
         },
       );
     }
@@ -3358,10 +3592,10 @@ async function readStructuredUiStateWithNavigationRecovery(
       session,
       `structured_navigation_${reason}`,
     );
-    await ensureHarnessWithTimeout(session.page, UI_STATE_TIMEOUT_MS);
-    await installUiStateObserver(session.page, session);
-    await installHarnessMutationQueue(session.page, session);
-    await assertRootStructure(session, `ui_state_after_navigation_${reason}`);
+    await ensurePageInteractive(
+      session.page,
+      Math.min(timeoutMs, UI_STATE_TIMEOUT_MS),
+    );
     return readStructuredUiState(
       session,
       instanceId,
@@ -3369,6 +3603,8 @@ async function readStructuredUiStateWithNavigationRecovery(
       UI_STATE_TIMEOUT_MS,
       {
         storeResult: false,
+        afterVersion,
+        skipPushWait: true,
       },
     );
   }
@@ -3646,49 +3882,47 @@ async function uiState(params) {
       typeof session.uiStateCacheJson === "string"
         ? tryParseUiStateValue(session.uiStateCacheJson)
         : session.uiStateCache;
-    if (cached && typeof cached === "object") {
-      traceDriver(`[driver] ui_state cache_hit instance=${instanceId}`);
+    const staleReason = uiStateStalenessReason(session, cached);
+    if (!staleReason) {
+      console.error(
+        `[driver] ui_state cache_hit instance=${instanceId} version=${uiObservationVersion(
+          session,
+        )} screen=${cached?.screen ?? "unknown"} revision=${uiSnapshotRevision(cached)}`,
+      );
       return cached;
     }
   }
 
-  traceDriver(`[driver] ui_state cache_miss instance=${instanceId}`);
-  let observed = null;
   try {
-    observed = await readStructuredUiState(
+    const observed = await readStructuredUiStateWithNavigationRecovery(
       session,
       instanceId,
-      "observation",
+      "ui_state_primary",
       recoveryTimeoutMs,
+      null,
     );
+    if (observed) {
+      const staleReason = uiStateStalenessReason(session, observed);
+      if (!staleReason) {
+        storeUiState(session, observed, "ui_state_structured_primary");
+        console.error(
+          `[driver] ui_state structured_hit instance=${instanceId} version=${uiObservationVersion(
+            session,
+          )} screen=${observed?.screen ?? "unknown"} revision=${uiSnapshotRevision(observed)}`,
+        );
+        return observed;
+      }
+    }
   } catch (error) {
-    if (isClosedTargetError(error)) {
-      session = await restartPageSession(
-        session,
-        `ui_state_observation_closed:${instanceId}`,
-      );
-      observed = await readStructuredUiState(
-        session,
-        instanceId,
-        "observation_after_restart",
-        recoveryTimeoutMs,
-      );
-    } else {
+    if (!isUiStateRecoveryCandidate(error)) {
       throw new Error(
         `structured ui_state observation failed for instance ${instanceId}: ${error}\nBrowser console tail:\n${consoleTailText(session)}`,
       );
     }
   }
-  if (observed) {
-    const staleReason = uiStateStalenessReason(session, observed);
-    if (staleReason) {
-      throw new Error(`structured_ui_state_stale:${staleReason}`);
-    }
-    return observed;
-  }
 
   throw new Error(
-    `browser UI state unavailable for instance ${instanceId}; primary_observation=driver_push_cache secondary_observation=structured_ui_state heartbeat=${JSON.stringify(
+    `browser UI state unavailable for instance ${instanceId}; primary_observation=structured_ui_state secondary_observation=driver_push_cache heartbeat=${JSON.stringify(
       session.renderHeartbeat,
     )}\nBrowser console tail:\n${consoleTailText(session)}`,
   );
@@ -3699,6 +3933,7 @@ async function waitForUiState(params) {
   let session = getSession(instanceId);
   session = await ensureSessionPage(session, `wait_for_ui_state:${instanceId}`);
   const timeoutMs = Number(params?.timeout_ms ?? UI_STATE_TIMEOUT_MS);
+  const recoveryTimeoutMs = Math.min(timeoutMs, UI_STATE_TIMEOUT_MS, 4000);
   const rawAfterVersion = params?.after_version;
   const afterVersion =
     rawAfterVersion == null
@@ -3711,13 +3946,17 @@ async function waitForUiState(params) {
     const snapshot = await uiState({ instance_id: instanceId });
     return {
       snapshot,
-      version: uiSnapshotRevision(snapshot),
+      version: uiObservationVersion(session),
     };
   }
 
   const deadlineMs = Date.now() + timeoutMs;
 
   while (true) {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    const waitSliceMs = Math.max(1, Math.min(remainingMs, 500));
+    const refreshSliceMs = Math.max(1, Math.min(remainingMs, recoveryTimeoutMs));
+
     if (session.uiStateCache && typeof session.uiStateCache === "object") {
       const cached =
         typeof session.uiStateCacheJson === "string"
@@ -3734,79 +3973,17 @@ async function waitForUiState(params) {
         );
         staleReason = uiStateStalenessReason(session, cached);
       }
-      const cachedVersion = uiSnapshotRevision(cached);
-      const mutationSatisfied = (session.requiredUiStateRevision ?? 0) <= 0;
-      if (
-        !staleReason &&
-        (cachedVersion > afterVersion ||
-          (mutationSatisfied && cachedVersion >= afterVersion))
-      ) {
+      const cachedVersion = uiObservationVersion(session);
+      if (!staleReason && cachedVersion > afterVersion) {
+        console.error(
+          `[driver] wait_for_ui_state cache_return instance=${instanceId} after_version=${afterVersion} version=${cachedVersion} screen=${cached?.screen ?? "unknown"} revision=${uiSnapshotRevision(
+            cached,
+          )}`,
+        );
         return {
           snapshot: cached,
           version: cachedVersion,
         };
-      }
-    }
-
-    const remainingMs = Math.max(1, deadlineMs - Date.now());
-    const waitSliceMs = Math.max(1, Math.min(remainingMs, 500));
-    const refreshSliceMs = Math.max(1, Math.min(remainingMs, recoveryTimeoutMs));
-
-    if (session.uiStateCache && typeof session.uiStateCache === "object") {
-      try {
-        const refreshed = await readStructuredUiStateWithNavigationRecovery(
-          session,
-          instanceId,
-          "wait_for_ui_state_refresh",
-          refreshSliceMs,
-        );
-        const staleReason = uiStateStalenessReason(session, refreshed);
-        if (!staleReason) {
-          storeUiState(session, refreshed, "wait_for_ui_state_refresh");
-          const refreshedVersion = uiSnapshotRevision(refreshed);
-          if (refreshedVersion > afterVersion) {
-            return {
-              snapshot: refreshed,
-              version: refreshedVersion,
-            };
-          }
-        }
-      } catch (error) {
-        if (!isUiStateRecoveryCandidate(error)) {
-          throw error;
-        }
-      }
-    }
-
-    if (!session.uiStateCache || typeof session.uiStateCache !== "object") {
-      try {
-        const snapshot = await uiState({ instance_id: instanceId });
-        const version = uiSnapshotRevision(snapshot);
-        if (version > afterVersion) {
-          return { snapshot, version };
-        }
-      } catch (error) {
-        if (!isUiStateRecoveryCandidate(error)) {
-          throw error;
-        }
-
-      const recovered = await readStructuredUiStateWithNavigationRecovery(
-        session,
-        instanceId,
-        "wait_for_ui_state_navigation",
-        remainingMs,
-      );
-        const staleReason = uiStateStalenessReason(session, recovered);
-        if (!staleReason) {
-          storeUiState(session, recovered, "wait_for_ui_state_recovery");
-          const recoveredVersion = uiSnapshotRevision(recovered);
-          if (recoveredVersion > afterVersion) {
-            return {
-              snapshot: recovered,
-              version: recoveredVersion,
-            };
-          }
-        }
       }
     }
 
@@ -3816,38 +3993,58 @@ async function waitForUiState(params) {
         afterVersion,
         waitSliceMs,
       );
+      console.error(
+        `[driver] wait_for_ui_state push_return instance=${instanceId} after_version=${afterVersion} version=${result.version} screen=${result.snapshot?.screen ?? "unknown"} revision=${uiSnapshotRevision(
+          result.snapshot,
+        )}`,
+      );
       return result;
     } catch (error) {
-      if (!isUiStateRecoveryCandidate(error)) {
+      const waitTimedOut = isUiStateWaitTimeout(error);
+      if (!waitTimedOut && !isUiStateRecoveryCandidate(error)) {
         throw error;
       }
 
       if (Date.now() >= deadlineMs) {
         throw new Error(
-          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_revision=${uiSnapshotRevision(
-            session.uiStateCache,
-          )} invalidation=${String(error?.message ?? error)}`,
+          `wait_for_ui_state timed out after ${timeoutMs}ms after_version=${afterVersion} current_version=${uiObservationVersion(
+            session,
+          )} current_revision=${uiSnapshotRevision(session.uiStateCache)} invalidation=${String(
+            error?.message ?? error,
+          )}`,
         );
       }
 
-      const recovered = await readStructuredUiStateWithNavigationRecovery(
-        session,
-        instanceId,
-        "wait_for_ui_state_navigation",
-        Math.max(1, deadlineMs - Date.now()),
-      );
-      const staleReason = uiStateStalenessReason(session, recovered);
-      if (staleReason) {
-        continue;
-      }
+      try {
+        const recovered = await readStructuredUiStateWithNavigationRecovery(
+          session,
+          instanceId,
+          "wait_for_ui_state_navigation",
+          refreshSliceMs,
+          afterVersion,
+        );
+        const staleReason = uiStateStalenessReason(session, recovered);
+        if (staleReason) {
+          continue;
+        }
 
-      storeUiState(session, recovered, "wait_for_ui_state_recovery");
-      const recoveredVersion = uiSnapshotRevision(recovered);
-      if (recoveredVersion > afterVersion) {
-        return {
-          snapshot: recovered,
-          version: recoveredVersion,
-        };
+        storeUiState(session, recovered, "wait_for_ui_state_recovery");
+        const recoveredVersion = uiObservationVersion(session);
+        if (recoveredVersion > afterVersion) {
+          console.error(
+            `[driver] wait_for_ui_state recovery_return instance=${instanceId} after_version=${afterVersion} version=${recoveredVersion} screen=${recovered?.screen ?? "unknown"} revision=${uiSnapshotRevision(
+              recovered,
+            )}`,
+          );
+          return {
+            snapshot: recovered,
+            version: recoveredVersion,
+          };
+        }
+      } catch (recoveryError) {
+        if (!isUiStateRecoveryCandidate(recoveryError)) {
+          throw recoveryError;
+        }
       }
     }
   }
@@ -3865,6 +4062,7 @@ async function recoverUiState(params) {
     instanceId,
     `explicit_recovery:${reason}`,
     UI_STATE_TIMEOUT_MS,
+    null,
   );
   if (!recovered) {
     throw new Error(
