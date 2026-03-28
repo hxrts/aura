@@ -85,7 +85,9 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/actor_owned_forbidden_field.rs");
     t.compile_fail("tests/boundaries/actor_root_missing_supervision.rs");
     t.compile_fail("tests/boundaries/actor_root_invalid_name.rs");
+    t.compile_fail("tests/boundaries/actor_root_on_function.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_category.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_capability.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_non_capability_helper.rs");
     t.compile_fail("tests/boundaries/ownership_lifecycle_invalid_variant.rs");
 }

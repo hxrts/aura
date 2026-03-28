@@ -3905,6 +3905,24 @@ mod tests {
     }
 
     #[test]
+    fn accept_imported_invitation_owned_boundary_preserves_wrapper_and_inner_split() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
+        )
+        .expect("invitation workflow source should be readable");
+
+        assert!(source.contains("owner = \"accept_imported_invitation_owned\""));
+        assert!(source.contains("async fn accept_imported_invitation_owned("));
+        assert!(source.contains("async fn accept_imported_invitation_inner("));
+        assert!(source.contains(
+            "match accept_imported_invitation_inner(app_core, invitation, owner).await? {"
+        ));
+        assert!(source.contains(
+            "accept_imported_invitation_owned(app_core, &invitation, &owner, None).await"
+        ));
+    }
+
+    #[test]
     fn test_parse_invitation_role_guardian() -> Result<(), InvitationRoleParseError> {
         let result = parse_invitation_role("guardian")?;
         assert_eq!(result, InvitationRoleValue::Guardian);

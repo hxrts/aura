@@ -115,11 +115,11 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | semantic_owner missing category | `boundaries/semantic_owner_missing_category.rs` | covered (compile_fail) |
 | semantic_owner missing terminal | `boundaries/semantic_owner_missing_terminal_path.rs` | covered (compile_fail) |
 | actor_owned missing capacity | `boundaries/actor_owned_missing_capacity.rs` | covered (compile_fail) |
-| actor_root missing supervision or invalid root name | `boundaries/actor_root_missing_supervision.rs`, `boundaries/actor_root_invalid_name.rs` | covered (compile_fail) |
+| actor_root missing supervision, invalid root name, or non-struct target | `boundaries/actor_root_missing_supervision.rs`, `boundaries/actor_root_invalid_name.rs`, `boundaries/actor_root_on_function.rs` | covered (compile_fail) |
 | actor_owned missing gate | `boundaries/actor_owned_missing_gate.rs` | covered (compile_fail) |
 | actor_owned bypass without macro | `boundaries/actor_owned_bypass_without_macro.rs` | covered (compile_fail) |
 | actor_owned embeds move-owned or terminal publication field | `boundaries/actor_owned_forbidden_field.rs` | covered (compile_fail) |
-| capability_boundary missing category | `boundaries/capability_boundary_missing_category.rs` | covered (compile_fail) |
+| capability_boundary missing category or non-capability-bearing helper body | `boundaries/capability_boundary_missing_category.rs`, `boundaries/capability_boundary_non_capability_helper.rs` | covered (compile_fail) |
 | ownership_lifecycle invalid variant | `boundaries/ownership_lifecycle_invalid_variant.rs` | covered (compile_fail) |
 | authoritative_source metadata or target invalid | `boundaries/authoritative_source_missing_kind.rs`, `boundaries/authoritative_source_invalid_kind.rs`, `boundaries/authoritative_source_on_struct.rs` | covered (compile_fail) |
 | strong_reference metadata or target invalid | `boundaries/strong_reference_missing_domain.rs`, `boundaries/strong_reference_invalid_domain.rs`, `boundaries/strong_reference_on_function.rs` | covered (compile_fail) |
