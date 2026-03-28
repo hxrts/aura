@@ -1114,8 +1114,11 @@ async function ensureHarnessWithTimeout(page, timeoutMs) {
   const deadlineMs = Date.now() + timeoutMs;
   let lastProbe = null;
   while (Date.now() < deadlineMs) {
-    lastProbe = await page
-      .evaluate(({ harnessApiKey, harnessObserveKey }) => {
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    const probeTimeoutMs = Math.min(remainingMs, 500);
+    lastProbe = await withOperationTimeout(
+      `ensure_harness_probe:${probeTimeoutMs}`,
+      page.evaluate(({ harnessApiKey, harnessObserveKey }) => {
         const bridge = window[harnessApiKey];
         const observe = window[harnessObserveKey];
         return {
@@ -1126,7 +1129,9 @@ async function ensureHarnessWithTimeout(page, timeoutMs) {
       }, {
         harnessApiKey: HARNESS_API_KEY,
         harnessObserveKey: HARNESS_OBSERVE_KEY,
-      })
+      }),
+      probeTimeoutMs,
+    )
       .catch((error) => ({
         bridge_type: null,
         observe_type: null,
@@ -1415,12 +1420,16 @@ async function waitForNavigationQuietPeriod(
 async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
   const deadlineMs = Date.now() + timeoutMs;
   let lastProbe = null;
+  await focusAuraPageSafe(session.page, session.id, `submit_queue_ready:${reason}`);
   console.error(
     `[driver] submit_queue_ready_wait start instance=${session.id} reason=${reason} timeout_ms=${timeoutMs}`,
   );
   while (Date.now() < deadlineMs) {
-    lastProbe = await session.page
-      .evaluate(
+    const remainingMs = Math.max(1, deadlineMs - Date.now());
+    const probeTimeoutMs = Math.min(remainingMs, 500);
+    lastProbe = await withOperationTimeout(
+      `submit_queue_probe:${session.id}:${reason}`,
+      session.page.evaluate(
         ({
           semanticSubmitPublicationStateKey,
           semanticEnqueueKey,
@@ -1452,7 +1461,9 @@ async function waitForSubmitQueueReady(session, reason, timeoutMs = 10000) {
           readyGenerationKey: UI_READY_GENERATION_KEY,
           generationPhaseKey: UI_GENERATION_PHASE_KEY,
         },
-      )
+      ),
+      probeTimeoutMs,
+    )
       .catch(() => ({
         submit_state: session.semanticSubmitState ?? null,
         semantic_queue_installed: session.semanticQueueInstalled === true,
@@ -1501,11 +1512,16 @@ async function assertSemanticEnqueueCallable(
       const deadlineMs = Date.now() + timeoutMs;
       let lastType = null;
       while (Date.now() < deadlineMs) {
-        lastType = await session.page
-          .evaluate(
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const probeTimeoutMs = Math.min(remainingMs, 500);
+        lastType = await withOperationTimeout(
+          `semantic_enqueue_callable_probe:${session.id}:${reason}`,
+          session.page.evaluate(
             (semanticEnqueueKey) => typeof window[semanticEnqueueKey],
             SEMANTIC_ENQUEUE_KEY,
-          )
+          ),
+          probeTimeoutMs,
+        )
           .catch((error) => `eval_failed:${error?.message ?? String(error)}`);
         if (lastType === "function") {
           return;
@@ -1532,11 +1548,16 @@ async function assertRuntimeStageEnqueueCallable(
       const deadlineMs = Date.now() + timeoutMs;
       let lastType = null;
       while (Date.now() < deadlineMs) {
-        lastType = await session.page
-          .evaluate(
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const probeTimeoutMs = Math.min(remainingMs, 500);
+        lastType = await withOperationTimeout(
+          `runtime_stage_enqueue_callable_probe:${session.id}:${reason}`,
+          session.page.evaluate(
             (runtimeStageEnqueueKey) => typeof window[runtimeStageEnqueueKey],
             RUNTIME_STAGE_ENQUEUE_KEY,
-          )
+          ),
+          probeTimeoutMs,
+        )
           .catch((error) => `eval_failed:${error?.message ?? String(error)}`);
         if (lastType === "function") {
           return;
@@ -1566,8 +1587,11 @@ async function enqueueSemanticPayload(
       const deadlineMs = Date.now() + timeoutMs;
       let lastProbe = null;
       while (Date.now() < deadlineMs) {
-        lastProbe = await session.page
-          .evaluate(
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const probeTimeoutMs = Math.min(remainingMs, 500);
+        lastProbe = await withOperationTimeout(
+          `semantic_enqueue_probe:${label}`,
+          session.page.evaluate(
             ({ payload, semanticEnqueueKey, semanticEnqueueDispatchedKey }) => {
               if (typeof window[semanticEnqueueKey] !== "function") {
                 return {
@@ -1603,7 +1627,9 @@ async function enqueueSemanticPayload(
               semanticEnqueueKey: SEMANTIC_ENQUEUE_KEY,
               semanticEnqueueDispatchedKey: SEMANTIC_ENQUEUE_DISPATCHED_KEY,
             },
-          )
+          ),
+          probeTimeoutMs,
+        )
           .catch((error) => ({
             dispatched: false,
             enqueue_type: `eval_failed:${error?.message ?? String(error)}`,
@@ -1632,8 +1658,11 @@ async function enqueueRuntimeStagePayload(
       const deadlineMs = Date.now() + timeoutMs;
       let lastProbe = null;
       while (Date.now() < deadlineMs) {
-        lastProbe = await session.page
-          .evaluate(
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const probeTimeoutMs = Math.min(remainingMs, 500);
+        lastProbe = await withOperationTimeout(
+          `runtime_stage_enqueue_probe:${label}`,
+          session.page.evaluate(
             ({
               payload,
               runtimeStageEnqueueKey,
@@ -1674,7 +1703,9 @@ async function enqueueRuntimeStagePayload(
               runtimeStageEnqueueDispatchedKey:
                 RUNTIME_STAGE_ENQUEUE_DISPATCHED_KEY,
             },
-          )
+          ),
+          probeTimeoutMs,
+        )
           .catch((error) => ({
             dispatched: false,
             enqueue_type: `eval_failed:${error?.message ?? String(error)}`,
@@ -1696,6 +1727,7 @@ async function enqueueRuntimeStagePayload(
 async function recoverSemanticQueueOnCurrentPage(session, reason) {
   resetUiObservationState(session, `semantic_queue_recovery:${reason}`);
   await waitForPageNavigationStabilization(session, `semantic_queue:${reason}`);
+  await focusAuraPageSafe(session.page, session.id, `semantic_queue:${reason}`);
   await ensureHarnessWithTimeout(
     session.page,
     Math.min(session.startOptions?.harnessReadyTimeoutMs ?? 5000, 5000),
@@ -2912,6 +2944,11 @@ async function startPage(params) {
         try {
           await waitForPageNavigationStabilization(
             session,
+            `startup_harness:${instanceId}`,
+          );
+          await focusAuraPageSafe(
+            page,
+            instanceId,
             `startup_harness:${instanceId}`,
           );
           console.error(
@@ -4206,6 +4243,28 @@ async function submitSemanticCommand(params) {
   const enqueuePayload = buildSemanticQueuePayloadJson(commandId, requestJson);
   const enqueueCommand = async (activeSession, label, timeoutMs) =>
     {
+      const readinessTimeoutMs = Math.max(
+        timeoutMs,
+        Math.min(
+          activeSession.startOptions?.harnessReadyTimeoutMs ??
+            DEFAULT_HARNESS_READY_TIMEOUT_MS,
+          10000,
+        ),
+      );
+      await waitForPageNavigationStabilization(
+        activeSession,
+        `semantic_enqueue:${label}`,
+      );
+      await waitForSubmitQueueReady(
+        activeSession,
+        `semantic_enqueue:${label}`,
+        readinessTimeoutMs,
+      );
+      await assertSemanticEnqueueCallable(
+        activeSession,
+        `semantic_enqueue:${label}`,
+        Math.min(readinessTimeoutMs, 3000),
+      );
       await focusAuraPageSafe(
         activeSession.page,
         instanceId,
