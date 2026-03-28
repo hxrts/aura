@@ -161,6 +161,7 @@ pub use context::{ContextSnapshot, EffectContext, OperationSessionId};
 pub use ownership::{
     actor_owned, capability_gated, issue_operation_context, issue_operation_handle,
     issue_owner_token, move_owned, ownership_capability_token_request_for, ActorDeclaration,
+    ActorRootDeclaration, ActorRootSupervisionRegistration,
     ActorIngressMutationCapability, AuthorizedActorIngressMutation, AuthorizedProgressPublication,
     AuthorizedReadinessPublication, AuthorizedTerminalPublication, BestEffortBoundaryProtocol,
     BoundaryDeclarationCategory, BoundedActorIngress, ChildOperationSpawner,

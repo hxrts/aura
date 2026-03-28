@@ -44,6 +44,12 @@ struct RuntimeMaintenanceShared {
 }
 
 #[derive(Clone)]
+#[aura_macros::actor_root(
+    owner = "runtime_maintenance_service",
+    domain = "runtime_maintenance",
+    supervision = "maintenance_task_root",
+    category = "actor_owned"
+)]
 pub struct RuntimeMaintenanceService {
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,

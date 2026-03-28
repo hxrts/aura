@@ -709,6 +709,81 @@ impl<Domain, Message> ActorDeclaration<Domain, Message> {
     }
 }
 
+/// Canonical declaration artifact for actor-root runtime services that own
+/// lifecycle and supervision but do not expose a stable command-ingress type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActorRootDeclaration<Domain> {
+    category: BoundaryDeclarationCategory,
+    owner_name: &'static str,
+    domain_name: &'static str,
+    supervision_gate: &'static str,
+    _domain: PhantomData<fn() -> Domain>,
+}
+
+impl<Domain> ActorRootDeclaration<Domain> {
+    pub fn new(
+        owner_name: &'static str,
+        domain_name: &'static str,
+        supervision_gate: &'static str,
+    ) -> Self {
+        Self {
+            category: BoundaryDeclarationCategory::ActorOwned,
+            owner_name,
+            domain_name,
+            supervision_gate,
+            _domain: PhantomData,
+        }
+    }
+
+    pub fn category(&self) -> BoundaryDeclarationCategory {
+        self.category
+    }
+
+    pub fn owner_name(&self) -> &'static str {
+        self.owner_name
+    }
+
+    pub fn domain_name(&self) -> &'static str {
+        self.domain_name
+    }
+
+    pub fn supervision_gate(&self) -> &'static str {
+        self.supervision_gate
+    }
+
+    pub fn register_supervision<HandleId>(
+        self,
+        handle_id: HandleId,
+        shutdown: OwnedShutdownToken,
+    ) -> ActorRootSupervisionRegistration<Domain, HandleId> {
+        ActorRootSupervisionRegistration {
+            declaration: self,
+            handle: OwnedTaskHandle::new(handle_id, shutdown),
+        }
+    }
+}
+
+/// Typed link between an actor-root declaration and its supervised task handle.
+#[derive(Debug, Clone)]
+pub struct ActorRootSupervisionRegistration<Domain, HandleId> {
+    declaration: ActorRootDeclaration<Domain>,
+    handle: OwnedTaskHandle<HandleId>,
+}
+
+impl<Domain, HandleId> ActorRootSupervisionRegistration<Domain, HandleId> {
+    pub fn declaration(&self) -> &ActorRootDeclaration<Domain> {
+        &self.declaration
+    }
+
+    pub fn handle(&self) -> &OwnedTaskHandle<HandleId> {
+        &self.handle
+    }
+
+    pub fn into_parts(self) -> (ActorRootDeclaration<Domain>, OwnedTaskHandle<HandleId>) {
+        (self.declaration, self.handle)
+    }
+}
+
 /// Typed link between an actor declaration and its supervised task handle.
 #[derive(Debug, Clone)]
 pub struct SupervisionRegistration<Domain, Message, HandleId> {

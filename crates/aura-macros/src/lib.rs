@@ -440,6 +440,62 @@ pub fn actor_owned(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
+#[proc_macro_attribute]
+pub fn actor_root(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<ActorRootAttr>(attr) {
+        Ok(config) => config,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    let strukt = match syn::parse::<ItemStruct>(item.clone()) {
+        Ok(strukt) => strukt,
+        Err(_) => {
+            return Error::new(
+                proc_macro2::Span::call_site(),
+                "#[actor_root] may only be applied to structs",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    if let Err(error) = validate_actor_root_struct(&strukt, &config) {
+        return error.to_compile_error().into();
+    }
+
+    let ident = &strukt.ident;
+    let owner = config.owner;
+    let domain = config.domain;
+    let supervision = config.supervision;
+    let category = config.category;
+
+    quote! {
+        #strukt
+
+        impl #ident {
+            pub const ACTOR_ROOT_BOUNDARY_CATEGORY: ::aura_core::BoundaryDeclarationCategory =
+                ::aura_core::BoundaryDeclarationCategory::ActorOwned;
+            pub const ACTOR_ROOT_OWNER_NAME: &'static str = #owner;
+            pub const ACTOR_ROOT_DOMAIN_NAME: &'static str = #domain;
+            pub const ACTOR_ROOT_SUPERVISION_GATE: &'static str = #supervision;
+            pub const ACTOR_ROOT_DECLARATION_CATEGORY_LITERAL: &'static str = #category;
+
+            pub fn actor_root_declaration() -> ::aura_core::ActorRootDeclaration<Self> {
+                let _: ::aura_core::BoundaryDeclarationCategory =
+                    ::aura_core::BoundaryDeclarationCategory::ActorOwned;
+                ::aura_core::ActorRootDeclaration::new(#owner, #domain, #supervision)
+            }
+
+            pub fn register_actor_root_supervision<HandleId>(
+                handle_id: HandleId,
+                shutdown: ::aura_core::OwnedShutdownToken,
+            ) -> ::aura_core::ActorRootSupervisionRegistration<Self, HandleId> {
+                Self::actor_root_declaration().register_supervision(handle_id, shutdown)
+            }
+        }
+    }
+    .into()
+}
+
 /// Marker attribute for capability-gated mutation/publication points.
 #[proc_macro_attribute]
 pub fn capability_boundary(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -477,6 +533,13 @@ struct ActorOwnedAttr {
     gate: LitStr,
     command: Type,
     capacity: u32,
+    category: LitStr,
+}
+
+struct ActorRootAttr {
+    owner: LitStr,
+    domain: LitStr,
+    supervision: LitStr,
     category: LitStr,
 }
 
@@ -577,6 +640,60 @@ impl Parse for ActorOwnedAttr {
                 Error::new(
                     proc_macro2::Span::call_site(),
                     "actor_owned requires `category = \"actor_owned\"`",
+                )
+            })?,
+        })
+    }
+}
+
+impl Parse for ActorRootAttr {
+    fn parse(input: ParseStream<'_>) -> SynResult<Self> {
+        let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
+        let mut owner = None;
+        let mut domain = None;
+        let mut supervision = None;
+        let mut category = None;
+
+        for meta in metas {
+            if meta.path.is_ident("owner") {
+                owner = Some(expect_string_literal(&meta, "owner", "actor_root")?);
+            } else if meta.path.is_ident("domain") {
+                domain = Some(expect_string_literal(&meta, "domain", "actor_root")?);
+            } else if meta.path.is_ident("supervision") {
+                supervision = Some(expect_string_literal(&meta, "supervision", "actor_root")?);
+            } else if meta.path.is_ident("category") {
+                category = Some(expect_string_literal(&meta, "category", "actor_root")?);
+            } else {
+                return Err(Error::new_spanned(
+                    meta,
+                    "unsupported actor_root attribute key; expected `owner`, `domain`, `supervision`, or `category`",
+                ));
+            }
+        }
+
+        Ok(Self {
+            owner: owner.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_root requires `owner = \"...\"`",
+                )
+            })?,
+            domain: domain.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_root requires `domain = \"...\"`",
+                )
+            })?,
+            supervision: supervision.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_root requires `supervision = \"...\"`",
+                )
+            })?,
+            category: category.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "actor_root requires `category = \"actor_owned\"`",
                 )
             })?,
         })
@@ -1413,6 +1530,25 @@ fn validate_actor_owned_struct(strukt: &ItemStruct, config: &ActorOwnedAttr) -> 
                 "actor_owned structs may not embed move-owned handoff or terminal-publication primitives directly",
             ));
         }
+    }
+
+    Ok(())
+}
+
+fn validate_actor_root_struct(strukt: &ItemStruct, config: &ActorRootAttr) -> SynResult<()> {
+    if config.category.value() != "actor_owned" {
+        return Err(Error::new_spanned(
+            &config.category,
+            "actor_root category must be `actor_owned`",
+        ));
+    }
+
+    let ident = strukt.ident.to_string();
+    if !matches_actor_owned_name(&ident) {
+        return Err(Error::new_spanned(
+            &strukt.ident,
+            "actor_root is reserved for long-lived mutable async service roots (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)",
+        ));
     }
 
     Ok(())

@@ -15,7 +15,7 @@ Compile-time DSL parser for choreographies with Aura-specific annotations. Gener
 | `aura_test` attribute macro: Async test setup with tracing | |
 | `src/bin/arch_lints.rs`: Rust-native syntax lints for `just lint-arch-syntax`, including shared frontend portability and semantic-bridge contract checks | |
 | `src/bin/ownership_lints.rs`: Ownership/runtime boundary enforcement lints for `just ci-ownership-policy`, including frontend handoff, best-effort side-effect, and proof-bearing success boundaries | |
-| Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier` | Unchecked ownership marker comments or ad hoc tags |
+| Validated ownership marker attrs: `authoritative_source`, `strong_reference`, `weak_identifier`, `actor_root` | Unchecked ownership marker comments or ad hoc tags |
 
 ## Dependencies
 
@@ -100,7 +100,7 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | Valid choreography annotations rejected | `boundaries/valid_annotations.rs` | covered (pass) |
 | Valid ceremony facts rejected | `boundaries/ceremony_facts_valid.rs` | covered (pass) |
 | Valid semantic_owner rejected | `boundaries/semantic_owner_valid.rs` | covered (pass) |
-| Valid actor_owned rejected | `boundaries/actor_owned_valid.rs` | covered (pass) |
+| Valid actor_owned / actor_root rejected | `boundaries/actor_owned_valid.rs`, `boundaries/actor_root_valid.rs` | covered (pass) |
 | Valid capability_boundary rejected | `boundaries/capability_boundary_valid.rs` | covered (pass) |
 | Valid ownership_lifecycle rejected | `boundaries/ownership_lifecycle_valid.rs` | covered (pass) |
 | Valid authoritative_source / strong_reference / weak_identifier rejected | `boundaries/authoritative_source_valid.rs`, `boundaries/strong_reference_valid.rs`, `boundaries/weak_identifier_valid.rs` | covered (pass) |
@@ -115,6 +115,7 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 | semantic_owner missing category | `boundaries/semantic_owner_missing_category.rs` | covered (compile_fail) |
 | semantic_owner missing terminal | `boundaries/semantic_owner_missing_terminal_path.rs` | covered (compile_fail) |
 | actor_owned missing capacity | `boundaries/actor_owned_missing_capacity.rs` | covered (compile_fail) |
+| actor_root missing supervision or invalid root name | `boundaries/actor_root_missing_supervision.rs`, `boundaries/actor_root_invalid_name.rs` | covered (compile_fail) |
 | actor_owned missing gate | `boundaries/actor_owned_missing_gate.rs` | covered (compile_fail) |
 | actor_owned bypass without macro | `boundaries/actor_owned_bypass_without_macro.rs` | covered (compile_fail) |
 | actor_owned embeds move-owned or terminal publication field | `boundaries/actor_owned_forbidden_field.rs` | covered (compile_fail) |

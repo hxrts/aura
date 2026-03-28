@@ -1,0 +1,5 @@
+error: actor_root is reserved for long-lived mutable async service roots (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)
+ --> tests/boundaries/actor_root_invalid_name.rs:7:12
+  |
+7 | pub struct MaintenanceRoot;
+  |            ^^^^^^^^^^^^^^^

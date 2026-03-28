@@ -53,6 +53,7 @@ Summary:
 - Mode-aware execution: production, testing, and simulation use same API.
 - For shared semantic flows, `aura-agent` is the primary `ActorOwned` crate. It may own long-lived mutable async runtime state, but it must not leak that ownership into frontend-local semantic lifecycle authorship.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
+- Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.
 
 ### InvariantStructuredConcurrency
 

@@ -54,6 +54,7 @@ fn choreography_annotation_validation() {
     // Ownership macro valid cases
     t.pass("tests/boundaries/semantic_owner_valid.rs");
     t.pass("tests/boundaries/actor_owned_valid.rs");
+    t.pass("tests/boundaries/actor_root_valid.rs");
     t.pass("tests/boundaries/capability_boundary_valid.rs");
     t.pass("tests/boundaries/ownership_lifecycle_valid.rs");
     // Invalid choreographies must produce clear errors
@@ -82,6 +83,8 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/actor_owned_bypass_without_macro.rs");
     t.compile_fail("tests/boundaries/actor_owned_invalid_name.rs");
     t.compile_fail("tests/boundaries/actor_owned_forbidden_field.rs");
+    t.compile_fail("tests/boundaries/actor_root_missing_supervision.rs");
+    t.compile_fail("tests/boundaries/actor_root_invalid_name.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_category.rs");
     t.compile_fail("tests/boundaries/capability_boundary_missing_capability.rs");
     t.compile_fail("tests/boundaries/ownership_lifecycle_invalid_variant.rs");
