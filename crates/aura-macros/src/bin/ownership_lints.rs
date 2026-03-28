@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use proc_macro2::Span;
+use quote::quote;
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -29,6 +30,7 @@ enum LintMode {
     SemanticOwnerDetachedContinuation,
     SemanticOwnerNoSpawn,
     SemanticOwnerProofSuccess,
+    SemanticOwnerStableWrapper,
     WorkflowProofBearingSuccess,
     ProofIssuerAuthoritativeSource,
     ParityCriticalIgnoredResults,
@@ -67,6 +69,7 @@ impl LintMode {
             "semantic-owner-detached-continuation" => Ok(Self::SemanticOwnerDetachedContinuation),
             "semantic-owner-no-spawn" => Ok(Self::SemanticOwnerNoSpawn),
             "semantic-owner-proof-success" => Ok(Self::SemanticOwnerProofSuccess),
+            "semantic-owner-stable-wrapper" => Ok(Self::SemanticOwnerStableWrapper),
             "workflow-proof-bearing-success" => Ok(Self::WorkflowProofBearingSuccess),
             "proof-issuer-authoritative-source" => Ok(Self::ProofIssuerAuthoritativeSource),
             "parity-critical-ignored-results" => Ok(Self::ParityCriticalIgnoredResults),
@@ -106,6 +109,7 @@ impl LintMode {
             Self::SemanticOwnerDetachedContinuation => "semantic-owner-detached-continuation",
             Self::SemanticOwnerNoSpawn => "semantic-owner-no-spawn",
             Self::SemanticOwnerProofSuccess => "semantic-owner-proof-success",
+            Self::SemanticOwnerStableWrapper => "semantic-owner-stable-wrapper",
             Self::WorkflowProofBearingSuccess => "workflow-proof-bearing-success",
             Self::ProofIssuerAuthoritativeSource => "proof-issuer-authoritative-source",
             Self::ParityCriticalIgnoredResults => "parity-critical-ignored-results",
@@ -271,6 +275,10 @@ fn run() -> Result<(), String> {
                 "proof-bound semantic owners still publish plain success or omit typed proof-bearing success"
                     .to_string()
             }
+            LintMode::SemanticOwnerStableWrapper => {
+                "semantic owners still declare missing or malformed stable wrapper boundaries"
+                    .to_string()
+            }
             LintMode::WorkflowProofBearingSuccess => {
                 "workflow code still publishes plain success directly instead of consuming typed postcondition proofs"
                     .to_string()
@@ -430,6 +438,9 @@ fn scan_file(
         }
         LintMode::ProofIssuerAuthoritativeSource => {
             return scan_proof_issuer_authoritative_source(file, syntax);
+        }
+        LintMode::SemanticOwnerStableWrapper => {
+            return scan_semantic_owner_stable_wrapper(file, syntax);
         }
         LintMode::HarnessMoveOwnershipBoundary => {
             return scan_harness_move_ownership_boundary(file, source);
@@ -977,6 +988,7 @@ fn scan_function(
         LintMode::SemanticOwnerDetachedContinuation => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerNoSpawn => has_marker_attr(attrs, "semantic_owner"),
         LintMode::SemanticOwnerProofSuccess => semantic_owner_declares_proof(attrs),
+        LintMode::SemanticOwnerStableWrapper => false,
         LintMode::WorkflowProofBearingSuccess => {
             file.to_string_lossy()
                 .contains("crates/aura-app/src/workflows/")
@@ -1707,6 +1719,7 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::WorkflowNoViewDerivedReadiness
             | LintMode::WorkflowNoViewDerivedRecipientResolution
             | LintMode::SemanticOwnerProofSuccess
+            | LintMode::SemanticOwnerStableWrapper
             | LintMode::WorkflowProofBearingSuccess
             | LintMode::ProofIssuerAuthoritativeSource
             | LintMode::ParityCriticalIgnoredResults
@@ -1921,6 +1934,39 @@ fn semantic_owner_terminal_helpers(attrs: &[syn::Attribute]) -> Vec<String> {
         .collect()
 }
 
+fn semantic_owner_stable_wrapper(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs
+        .iter()
+        .filter(|attr| {
+            matches!(attr.style, AttrStyle::Outer)
+                && attr
+                    .path()
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "semantic_owner")
+        })
+        .filter_map(|attr| {
+            let metas = attr
+                .parse_args_with(
+                    syn::punctuated::Punctuated::<MetaNameValue, Token![,]>::parse_terminated,
+                )
+                .ok()?;
+            metas.into_iter().find_map(|meta| {
+                if !meta.path.is_ident("wrapper") {
+                    return None;
+                }
+                match meta.value {
+                    Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(value),
+                        ..
+                    }) => Some(value.value()),
+                    _ => None,
+                }
+            })
+        })
+        .next()
+}
+
 fn semantic_owner_declares_proof(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         matches!(attr.style, AttrStyle::Outer)
@@ -1936,6 +1982,113 @@ fn semantic_owner_declares_proof(attrs: &[syn::Attribute]) -> bool {
                 .ok()
                 .is_some_and(|metas| metas.into_iter().any(|meta| meta.path.is_ident("proof")))
     })
+}
+
+#[derive(Clone)]
+struct StableWrapperDeclaration {
+    owned_name: String,
+    wrapper_name: String,
+    owned_span: Span,
+}
+
+#[derive(Clone)]
+struct FunctionSignatureRecord {
+    visibility: Visibility,
+    tokens: String,
+}
+
+fn scan_semantic_owner_stable_wrapper(file: &Path, syntax: &File) -> Vec<String> {
+    if !file
+        .to_string_lossy()
+        .contains("crates/aura-app/src/workflows/")
+    {
+        return Vec::new();
+    }
+
+    let mut declarations = Vec::new();
+    let mut functions = HashMap::new();
+    collect_semantic_owner_wrapper_metadata(&syntax.items, &mut declarations, &mut functions);
+
+    let mut violations = Vec::new();
+    for declaration in declarations {
+        let Some(wrapper) = functions.get(&declaration.wrapper_name) else {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` declares stable wrapper `{}` but no such function exists in the file",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+            continue;
+        };
+
+        if !is_pub(&wrapper.visibility) {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` stable wrapper `{}` must be public or crate-visible",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+        }
+
+        let wrapper_tokens = wrapper.tokens.replace(' ', "");
+        if !wrapper_tokens.contains("SemanticWorkflowOwner::new") {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` stable wrapper `{}` does not create a SemanticWorkflowOwner",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+        }
+
+        if !wrapper_tokens.contains(&declaration.owned_name) {
+            violations.push(format!(
+                "{}:{}: semantic owner `{}` stable wrapper `{}` does not call the owned function",
+                file.display(),
+                declaration.owned_span.start().line,
+                declaration.owned_name,
+                declaration.wrapper_name,
+            ));
+        }
+    }
+
+    violations
+}
+
+fn collect_semantic_owner_wrapper_metadata(
+    items: &[Item],
+    declarations: &mut Vec<StableWrapperDeclaration>,
+    functions: &mut HashMap<String, FunctionSignatureRecord>,
+) {
+    for item in items {
+        match item {
+            Item::Fn(item_fn) => {
+                let function_name = item_fn.sig.ident.to_string();
+                functions.insert(
+                    function_name.clone(),
+                    FunctionSignatureRecord {
+                        visibility: item_fn.vis.clone(),
+                        tokens: quote!(#item_fn).to_string(),
+                    },
+                );
+                if let Some(wrapper_name) = semantic_owner_stable_wrapper(&item_fn.attrs) {
+                    declarations.push(StableWrapperDeclaration {
+                        owned_name: function_name,
+                        wrapper_name,
+                        owned_span: item_fn.sig.ident.span(),
+                    });
+                }
+            }
+            Item::Mod(item_mod) => {
+                if let Some((_, nested)) = &item_mod.content {
+                    collect_semantic_owner_wrapper_metadata(nested, declarations, functions);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn is_primary_lifecycle_publication_name(
@@ -2978,5 +3131,100 @@ fn check_parity_critical_callback_settlement(
                 command,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_semantic_owner_stable_wrapper;
+    use std::path::Path;
+    use syn::parse_file;
+
+    #[test]
+    fn semantic_owner_stable_wrapper_accepts_declared_public_wrapper() {
+        let source = r#"
+            use aura_core::{OperationContext, TraceContext};
+
+            struct SemanticWorkflowOwner;
+            impl SemanticWorkflowOwner {
+                fn new() -> Self { Self }
+            }
+
+            #[aura_macros::semantic_owner(
+                owner = "demo_owner",
+                wrapper = "run_demo",
+                terminal = "publish_success_with",
+                postcondition = "done",
+                proof = DemoProof,
+                authoritative_inputs = "",
+                depends_on = "",
+                child_ops = "",
+                category = "move_owned"
+            )]
+            async fn run_demo_owned(
+                _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                publish_success_with();
+            }
+
+            pub async fn run_demo(
+                context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                let owner = SemanticWorkflowOwner::new();
+                let _ = owner;
+                run_demo_owned(context).await;
+            }
+
+            fn publish_success_with() {}
+            struct DemoProof;
+        "#;
+
+        let syntax = parse_file(source).expect("parse lint fixture");
+        let violations = scan_semantic_owner_stable_wrapper(
+            Path::new("crates/aura-app/src/workflows/demo.rs"),
+            &syntax,
+        );
+        assert!(violations.is_empty(), "{violations:#?}");
+    }
+
+    #[test]
+    fn semantic_owner_stable_wrapper_rejects_wrapper_without_owner_creation() {
+        let source = r#"
+            use aura_core::{OperationContext, TraceContext};
+
+            #[aura_macros::semantic_owner(
+                owner = "demo_owner",
+                wrapper = "run_demo",
+                terminal = "publish_success_with",
+                postcondition = "done",
+                proof = DemoProof,
+                authoritative_inputs = "",
+                depends_on = "",
+                child_ops = "",
+                category = "move_owned"
+            )]
+            async fn run_demo_owned(
+                _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                publish_success_with();
+            }
+
+            pub async fn run_demo(
+                context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
+            ) {
+                run_demo_owned(context).await;
+            }
+
+            fn publish_success_with() {}
+            struct DemoProof;
+        "#;
+
+        let syntax = parse_file(source).expect("parse lint fixture");
+        let violations = scan_semantic_owner_stable_wrapper(
+            Path::new("crates/aura-app/src/workflows/demo.rs"),
+            &syntax,
+        );
+        assert_eq!(violations.len(), 1, "{violations:#?}");
+        assert!(violations[0].contains("does not create a SemanticWorkflowOwner"));
     }
 }

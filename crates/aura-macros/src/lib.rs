@@ -518,6 +518,7 @@ pub fn ownership_lifecycle(attr: TokenStream, item: TokenStream) -> TokenStream 
 
 struct SemanticOwnerAttr {
     owner: LitStr,
+    wrapper: LitStr,
     terminal: LitStr,
     postcondition: LitStr,
     proof: Option<Type>,
@@ -704,6 +705,7 @@ impl Parse for SemanticOwnerAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
         let metas = Punctuated::<MetaNameValue, Token![,]>::parse_terminated(input)?;
         let mut owner = None;
+        let mut wrapper = None;
         let mut terminal = None;
         let mut postcondition = None;
         let mut proof = None;
@@ -715,6 +717,8 @@ impl Parse for SemanticOwnerAttr {
         for meta in metas {
             if meta.path.is_ident("owner") {
                 owner = Some(expect_string_literal(&meta, "owner", "semantic_owner")?);
+            } else if meta.path.is_ident("wrapper") {
+                wrapper = Some(expect_string_literal(&meta, "wrapper", "semantic_owner")?);
             } else if meta.path.is_ident("terminal") {
                 terminal = Some(expect_string_literal(&meta, "terminal", "semantic_owner")?);
             } else if meta.path.is_ident("postcondition") {
@@ -748,7 +752,7 @@ impl Parse for SemanticOwnerAttr {
             } else {
                 return Err(Error::new_spanned(
                     meta,
-                    "unsupported semantic_owner attribute key; expected `owner`, `terminal`, `postcondition`, `proof`, `authoritative_inputs`, `depends_on`, `child_ops`, or `category`",
+                    "unsupported semantic_owner attribute key; expected `owner`, `wrapper`, `terminal`, `postcondition`, `proof`, `authoritative_inputs`, `depends_on`, `child_ops`, or `category`",
                 ));
             }
         }
@@ -756,6 +760,12 @@ impl Parse for SemanticOwnerAttr {
         Ok(Self {
             owner: owner.ok_or_else(|| {
                 Error::new(proc_macro2::Span::call_site(), "semantic_owner requires `owner = \"...\"`")
+            })?,
+            wrapper: wrapper.ok_or_else(|| {
+                Error::new(
+                    proc_macro2::Span::call_site(),
+                    "semantic_owner requires `wrapper = \"...\"`",
+                )
             })?,
             terminal: terminal.ok_or_else(|| {
                 Error::new(
@@ -1271,6 +1281,7 @@ fn transform_semantic_owner_fn(
     config: SemanticOwnerAttr,
 ) -> proc_macro2::TokenStream {
     let owner = config.owner.clone();
+    let wrapper = config.wrapper.clone();
     let terminal = config.terminal.clone();
     let postcondition = config.postcondition.clone();
     let proof = config.proof.clone();
@@ -1280,6 +1291,7 @@ fn transform_semantic_owner_fn(
     if let Err(error) = validate_semantic_owner_signature(
         &function.sig.inputs,
         function.sig.asyncness.is_some(),
+        &function.sig.ident,
         &function.block,
         &config,
     ) {
@@ -1301,12 +1313,18 @@ fn transform_semantic_owner_fn(
     function.block.stmts.insert(
         2,
         parse_quote! {
+            let _: &'static str = #wrapper;
+        },
+    );
+    function.block.stmts.insert(
+        3,
+        parse_quote! {
             let _: ::aura_core::BoundaryDeclarationCategory =
                 ::aura_core::BoundaryDeclarationCategory::MoveOwned;
         },
     );
     function.block.stmts.insert(
-        3,
+        4,
         parse_quote! {
             let _: ::aura_core::SemanticOwnerPostcondition =
                 ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
@@ -1314,7 +1332,7 @@ fn transform_semantic_owner_fn(
     );
     if let Some(proof) = proof.clone() {
         function.block.stmts.insert(
-            4,
+            5,
             parse_quote! {
                 let _: fn(#proof) = |proof| {
                     let _: ::aura_core::SemanticOwnerPostcondition =
@@ -1325,7 +1343,7 @@ fn transform_semantic_owner_fn(
     }
     let proof_stmt_count = usize::from(proof.is_some());
     for (index, input) in authoritative_inputs.iter().enumerate() {
-        let stmt_index = 4 + proof_stmt_count + index;
+        let stmt_index = 5 + proof_stmt_count + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -1335,7 +1353,7 @@ fn transform_semantic_owner_fn(
         );
     }
     for (index, dependency) in depends_on.iter().enumerate() {
-        let stmt_index = 4 + proof_stmt_count + authoritative_inputs.len() + index;
+        let stmt_index = 5 + proof_stmt_count + authoritative_inputs.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -1346,7 +1364,7 @@ fn transform_semantic_owner_fn(
     }
     for (index, child_op) in child_ops.iter().enumerate() {
         let stmt_index =
-            4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
+            5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -1356,7 +1374,7 @@ fn transform_semantic_owner_fn(
         );
     }
     function.block.stmts.insert(
-        4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
+        5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
         parse_quote! {
             let _: &'static str = #terminal;
         },
@@ -1369,6 +1387,7 @@ fn transform_semantic_owner_impl_fn(
     config: SemanticOwnerAttr,
 ) -> proc_macro2::TokenStream {
     let owner = config.owner.clone();
+    let wrapper = config.wrapper.clone();
     let terminal = config.terminal.clone();
     let postcondition = config.postcondition.clone();
     let proof = config.proof.clone();
@@ -1378,6 +1397,7 @@ fn transform_semantic_owner_impl_fn(
     if let Err(error) = validate_semantic_owner_signature(
         &function.sig.inputs,
         function.sig.asyncness.is_some(),
+        &function.sig.ident,
         &function.block,
         &config,
     ) {
@@ -1399,12 +1419,18 @@ fn transform_semantic_owner_impl_fn(
     function.block.stmts.insert(
         2,
         parse_quote! {
+            let _: &'static str = #wrapper;
+        },
+    );
+    function.block.stmts.insert(
+        3,
+        parse_quote! {
             let _: ::aura_core::BoundaryDeclarationCategory =
                 ::aura_core::BoundaryDeclarationCategory::MoveOwned;
         },
     );
     function.block.stmts.insert(
-        3,
+        4,
         parse_quote! {
             let _: ::aura_core::SemanticOwnerPostcondition =
                 ::aura_core::SemanticOwnerPostcondition::new(#postcondition);
@@ -1412,7 +1438,7 @@ fn transform_semantic_owner_impl_fn(
     );
     if let Some(proof) = proof.clone() {
         function.block.stmts.insert(
-            4,
+            5,
             parse_quote! {
                 let _: fn(#proof) = |proof| {
                     let _: ::aura_core::SemanticOwnerPostcondition =
@@ -1423,7 +1449,7 @@ fn transform_semantic_owner_impl_fn(
     }
     let proof_stmt_count = usize::from(proof.is_some());
     for (index, input) in authoritative_inputs.iter().enumerate() {
-        let stmt_index = 4 + proof_stmt_count + index;
+        let stmt_index = 5 + proof_stmt_count + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -1433,7 +1459,7 @@ fn transform_semantic_owner_impl_fn(
         );
     }
     for (index, dependency) in depends_on.iter().enumerate() {
-        let stmt_index = 4 + proof_stmt_count + authoritative_inputs.len() + index;
+        let stmt_index = 5 + proof_stmt_count + authoritative_inputs.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -1444,7 +1470,7 @@ fn transform_semantic_owner_impl_fn(
     }
     for (index, child_op) in child_ops.iter().enumerate() {
         let stmt_index =
-            4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
+            5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + index;
         function.block.stmts.insert(
             stmt_index,
             parse_quote! {
@@ -1454,7 +1480,7 @@ fn transform_semantic_owner_impl_fn(
         );
     }
     function.block.stmts.insert(
-        4 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
+        5 + proof_stmt_count + authoritative_inputs.len() + depends_on.len() + child_ops.len(),
         parse_quote! {
             let _: &'static str = #terminal;
         },
@@ -1465,6 +1491,7 @@ fn transform_semantic_owner_impl_fn(
 fn validate_semantic_owner_signature(
     inputs: &syn::punctuated::Punctuated<FnArg, Token![,]>,
     is_async: bool,
+    function_ident: &syn::Ident,
     block: &syn::Block,
     config: &SemanticOwnerAttr,
 ) -> SynResult<()> {
@@ -1487,6 +1514,20 @@ fn validate_semantic_owner_signature(
         return Err(Error::new_spanned(
             inputs,
             "semantic_owner requires a parameter typed as OperationContext or containing OperationContext",
+        ));
+    }
+
+    let wrapper_name = config.wrapper.value();
+    if wrapper_name.trim().is_empty() {
+        return Err(Error::new_spanned(
+            &config.wrapper,
+            "semantic_owner requires a non-empty stable wrapper name",
+        ));
+    }
+    if wrapper_name == function_ident.to_string() {
+        return Err(Error::new_spanned(
+            &config.wrapper,
+            "semantic_owner stable wrapper must name the public wrapper, not the owned function itself",
         ));
     }
 
@@ -1549,6 +1590,22 @@ fn validate_actor_root_struct(strukt: &ItemStruct, config: &ActorRootAttr) -> Sy
             &strukt.ident,
             "actor_root is reserved for long-lived mutable async service roots (expected a name ending with `Service`, `Manager`, `Coordinator`, `Subsystem`, or `Actor`)",
         ));
+    }
+
+    if matches!(strukt.fields, syn::Fields::Unit) || strukt.fields.is_empty() {
+        return Err(Error::new_spanned(
+            &strukt.ident,
+            "actor_root requires concrete state or handles; unit/empty roots are not allowed",
+        ));
+    }
+
+    for field in &strukt.fields {
+        if type_contains_forbidden_actor_substitute(&field.ty) {
+            return Err(Error::new_spanned(
+                &field.ty,
+                "actor_root structs may not embed move-owned handoff or terminal-publication primitives directly",
+            ));
+        }
     }
 
     Ok(())

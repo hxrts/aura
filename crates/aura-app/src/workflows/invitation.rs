@@ -1983,6 +1983,7 @@ pub async fn create_channel_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "create_channel_invitation",
+    wrapper = "create_channel_invitation",
     terminal = "publish_success_with",
     postcondition = "invitation_created",
     proof = crate::workflows::semantic_facts::InvitationCreatedProof,
@@ -2363,6 +2364,7 @@ pub async fn accept_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "invitation_accept_id_owned",
+    wrapper = "accept_invitation_with_instance",
     terminal = "publish_success_with",
     postcondition = "invitation_accepted_or_materialized",
     proof = crate::workflows::semantic_facts::InvitationAcceptedOrMaterializedProof,
@@ -2678,6 +2680,7 @@ pub async fn accept_imported_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "accept_imported_invitation_owned",
+    wrapper = "accept_imported_invitation_with_instance",
     terminal = "publish_success_with",
     postcondition = "invitation_accepted_or_materialized",
     proof = crate::workflows::semantic_facts::InvitationAcceptedOrMaterializedProof,
@@ -3622,6 +3625,7 @@ pub async fn accept_pending_home_invitation(
 
 #[aura_macros::semantic_owner(
     owner = "accept_pending_home_invitation_id_owned",
+    wrapper = "accept_pending_home_invitation_with_instance",
     terminal = "publish_success_with",
     postcondition = "pending_invitation_consumed",
     proof = crate::workflows::semantic_facts::PendingInvitationConsumedProof,

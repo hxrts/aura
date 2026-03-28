@@ -1,10 +1,17 @@
-use aura_core::{OperationContext, TraceContext};
+use aura_core::{OperationContext, SemanticOwnerPostcondition, SemanticSuccessProof, TraceContext};
 
 struct DemoProof;
 
+impl SemanticSuccessProof for DemoProof {
+    fn declared_postcondition(&self) -> SemanticOwnerPostcondition {
+        SemanticOwnerPostcondition::new("demo_done")
+    }
+}
+
+fn publish_done() {}
+
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
-    wrapper = "missing_terminal_path_wrapper",
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,
@@ -13,10 +20,10 @@ struct DemoProof;
     child_ops = "",
     category = "move_owned"
 )]
-async fn missing_terminal_path(
+async fn missing_wrapper(
     _context: Option<&mut OperationContext<&'static str, u64, TraceContext>>,
 ) {
-    let _ = 1usize;
+    publish_done();
 }
 
 fn main() {}

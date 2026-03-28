@@ -668,6 +668,7 @@ ci-ownership-policy:
     just ci-semantic-owner-awaits
     just ci-semantic-owner-detached-continuation
     just ci-semantic-owner-no-spawn
+    just ci-semantic-owner-stable-wrapper
     just ci-semantic-owner-proof-success
     just ci-workflow-proof-bearing-success
     just ci-proof-issuer-authoritative-source
@@ -730,6 +731,9 @@ ci-semantic-owner-detached-continuation:
 
 ci-semantic-owner-no-spawn:
     just _ownership-lint semantic-owner-no-spawn crates/aura-app/src crates/aura-terminal/src crates/aura-web/src
+
+ci-semantic-owner-stable-wrapper:
+    just _ownership-lint semantic-owner-stable-wrapper crates/aura-app/src/workflows
 
 ci-semantic-owner-proof-success:
     just _ownership-lint semantic-owner-proof-success crates/aura-app/src crates/aura-terminal/src crates/aura-web/src

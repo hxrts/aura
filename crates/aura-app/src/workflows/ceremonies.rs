@@ -174,6 +174,7 @@ pub async fn start_device_enrollment_ceremony(
 
 #[aura_macros::semantic_owner(
     owner = "start_device_enrollment_ceremony_owned",
+    wrapper = "start_device_enrollment_ceremony",
     terminal = "publish_success_with",
     postcondition = "device_enrollment_started",
     proof = crate::workflows::semantic_facts::DeviceEnrollmentStartedProof,

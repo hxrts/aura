@@ -1,0 +1,13 @@
+error: actor_root structs may not embed move-owned handoff or terminal-publication primitives directly
+  --> tests/boundaries/actor_root_forbidden_field.rs:10:15
+   |
+10 |     terminal: OperationContext<&'static str, u64, aura_core::TraceContext>,
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `aura_core::OperationContext`
+ --> tests/boundaries/actor_root_forbidden_field.rs:1:5
+  |
+1 | use aura_core::OperationContext;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

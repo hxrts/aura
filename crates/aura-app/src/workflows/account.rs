@@ -404,6 +404,7 @@ async fn fail_initialize_runtime_account<T>(
 
 #[aura_macros::semantic_owner(
     owner = "initialize_runtime_account_owned",
+    wrapper = "initialize_runtime_account",
     terminal = "publish_success_with",
     postcondition = "account_created",
     proof = crate::workflows::semantic_facts::AccountCreatedProof,

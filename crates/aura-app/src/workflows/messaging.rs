@@ -3062,6 +3062,7 @@ pub async fn retry_message_by_name_with_terminal_status(
 
 #[aura_macros::semantic_owner(
     owner = "join_channel_by_name_with_instance",
+    wrapper = "join_channel_by_name_with_instance",
     terminal = "publish_success_with",
     postcondition = "channel_membership_ready",
     proof = crate::workflows::semantic_facts::ChannelMembershipReadyProof,
@@ -3649,6 +3650,7 @@ pub async fn send_message_ref(
 
 #[aura_macros::semantic_owner(
     owner = "send_message_ref_with_instance",
+    wrapper = "send_message_ref_with_instance",
     terminal = "publish_success_with",
     postcondition = "message_committed",
     proof = crate::workflows::semantic_facts::MessageCommittedProof,
@@ -4565,6 +4567,7 @@ pub async fn invite_authority_to_channel_with_context_terminal_status(
 
 #[aura_macros::semantic_owner(
     owner = "invite_user_to_channel_with_context",
+    wrapper = "invite_user_to_channel_with_context",
     terminal = "publish_success_with",
     postcondition = "channel_invitation_created",
     proof = crate::workflows::semantic_facts::ChannelInvitationCreatedProof,

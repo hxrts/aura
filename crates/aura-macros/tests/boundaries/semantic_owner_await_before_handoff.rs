@@ -22,6 +22,7 @@ async fn preflight() {}
 
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
+    wrapper = "invalid_owner_wrapper",
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,

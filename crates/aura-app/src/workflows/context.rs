@@ -477,6 +477,7 @@ async fn fail_create_home<T>(
 
 #[aura_macros::semantic_owner(
     owner = "create_home_owned",
+    wrapper = "create_home",
     terminal = "publish_success_with",
     postcondition = "home_created",
     proof = crate::workflows::semantic_facts::HomeCreatedProof,

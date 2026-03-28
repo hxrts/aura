@@ -3,11 +3,11 @@ error: semantic_owner requires `category = "move_owned"`
    |
  7 | / #[aura_macros::semantic_owner(
  8 | |     owner = "demo-owner",
- 9 | |     terminal = "publish_done",
-10 | |     postcondition = "demo_done",
+ 9 | |     wrapper = "missing_category_wrapper",
+10 | |     terminal = "publish_done",
 ...  |
-14 | |     child_ops = ""
-15 | | )]
+15 | |     child_ops = ""
+16 | | )]
    | |__^
    |
    = note: this error originates in the attribute macro `aura_macros::semantic_owner` (in Nightly builds, run with -Z macro-backtrace for more info)

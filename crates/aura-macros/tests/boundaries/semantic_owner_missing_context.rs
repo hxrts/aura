@@ -4,6 +4,7 @@ fn publish_done() {}
 
 #[aura_macros::semantic_owner(
     owner = "demo-owner",
+    wrapper = "missing_context_wrapper",
     terminal = "publish_done",
     postcondition = "demo_done",
     proof = DemoProof,

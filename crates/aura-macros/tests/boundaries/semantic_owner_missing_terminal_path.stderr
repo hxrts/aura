@@ -1,10 +1,10 @@
 error: semantic_owner requires sanctioned terminal path `publish_done` to appear in the function body
-  --> tests/boundaries/semantic_owner_missing_terminal_path.rs:17:3
+  --> tests/boundaries/semantic_owner_missing_terminal_path.rs:18:3
    |
-17 |   ) {
+18 |   ) {
    |  ___^
-18 | |     let _ = 1usize;
-19 | | }
+19 | |     let _ = 1usize;
+20 | | }
    | |_^
 
 warning: unused imports: `OperationContext` and `TraceContext`

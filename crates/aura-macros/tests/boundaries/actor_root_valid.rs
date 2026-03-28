@@ -6,7 +6,9 @@ use aura_core::OwnedShutdownToken;
     supervision = "maintenance_task_root",
     category = "actor_owned"
 )]
-pub struct RuntimeMaintenanceService;
+pub struct RuntimeMaintenanceService {
+    state: u8,
+}
 
 fn main() {
     let declaration = RuntimeMaintenanceService::actor_root_declaration();
@@ -17,4 +19,5 @@ fn main() {
         7u8,
         OwnedShutdownToken::detached(),
     );
+    let _service = RuntimeMaintenanceService { state: 1 };
 }
