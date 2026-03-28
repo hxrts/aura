@@ -34,7 +34,6 @@ use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
-use aura_app::ui::workflows::system as system_workflows;
 use aura_app::ui_contract::{RuntimeEventKind, RuntimeFact};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::{execute_with_retry_budget, RetryRunError};
@@ -630,41 +629,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 };
 
                 if let Some(runtime) = runtime {
-                    let _ = runtime_workflows::timeout_runtime_call(
-                        &runtime,
-                        "terminal_harness_runtime_maintenance",
-                        "trigger_discovery",
-                        std::time::Duration::from_secs(3),
-                        || runtime.trigger_discovery(),
-                    )
-                    .await;
-                    let _ = runtime_workflows::timeout_runtime_call(
-                        &runtime,
-                        "terminal_harness_runtime_maintenance",
-                        "process_ceremony_messages_before_sync",
-                        std::time::Duration::from_secs(3),
-                        || runtime.process_ceremony_messages(),
-                    )
-                    .await;
-                    let _ = runtime_workflows::timeout_runtime_call(
-                        &runtime,
-                        "terminal_harness_runtime_maintenance",
-                        "trigger_sync",
-                        std::time::Duration::from_secs(3),
-                        || runtime.trigger_sync(),
-                    )
-                    .await;
-                    let _ = runtime_workflows::timeout_runtime_call(
-                        &runtime,
-                        "terminal_harness_runtime_maintenance",
-                        "process_ceremony_messages_after_sync",
-                        std::time::Duration::from_secs(3),
-                        || runtime.process_ceremony_messages(),
+                    let _ = runtime_workflows::run_harness_runtime_maintenance_pass(
+                        &app_core, &runtime,
                     )
                     .await;
                 }
-
-                let _ = system_workflows::refresh_account(&app_core).await;
 
                 effect_sleep(tokio::time::Duration::from_secs(1)).await;
             }

@@ -1978,11 +1978,22 @@ pub async fn create_channel_invitation(
         message,
         ttl_ms,
         true,
+        None,
     )
     .await
     .map(InvitationHandle::new)
 }
 
+#[aura_macros::semantic_owner(
+    owner = "create_channel_invitation",
+    terminal = "publish_success_with",
+    postcondition = "invitation_created",
+    proof = crate::workflows::semantic_facts::InvitationCreatedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "context_and_bootstrap_ready",
+    child_ops = "",
+    category = "move_owned"
+)]
 pub(in crate::workflows) async fn create_channel_invitation_owned(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
@@ -1996,6 +2007,9 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
     message: Option<String>,
     ttl_ms: Option<u64>,
     publish_terminal: bool,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
 ) -> Result<InvitationInfo, AuraError> {
     let stage_tracker =
         external_stage_tracker.or_else(|| Some(new_workflow_stage_tracker("require_runtime")));
@@ -3919,6 +3933,20 @@ mod tests {
         ));
         assert!(source.contains(
             "accept_imported_invitation_owned(app_core, &invitation, &owner, None).await"
+        ));
+    }
+
+    #[test]
+    fn create_channel_invitation_owned_boundary_is_declared() {
+        let source = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/workflows/invitation.rs"),
+        )
+        .expect("invitation workflow source should be readable");
+
+        assert!(source.contains("owner = \"create_channel_invitation\""));
+        assert!(source.contains("async fn create_channel_invitation_owned("));
+        assert!(source.contains(
+            "owner\n            .publish_success_with(issue_invitation_created_proof("
         ));
     }
 

@@ -38,6 +38,12 @@ cfg_if! {
 
         /// LAN transport service placeholder for wasm builds.
         #[derive(Debug)]
+        #[aura_macros::actor_root(
+            owner = "lan_transport_service",
+            domain = "lan_transport",
+            supervision = "lan_transport_task_root",
+            category = "actor_owned"
+        )]
         pub struct LanTransportService {
             advertised_addrs: Vec<String>,
             websocket_addrs: Vec<String>,
@@ -107,6 +113,12 @@ cfg_if! {
 
         /// LAN transport service holding the listener and advertised addresses.
         #[derive(Debug)]
+        #[aura_macros::actor_root(
+            owner = "lan_transport_service",
+            domain = "lan_transport",
+            supervision = "lan_transport_task_root",
+            category = "actor_owned"
+        )]
         pub struct LanTransportService {
             listener: Arc<TcpListener>,
             advertised_addrs: Vec<String>,

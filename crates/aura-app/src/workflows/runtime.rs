@@ -376,6 +376,20 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
     }
 }
 
+/// Run one bounded harness/runtime upkeep pass and then republish observed
+/// account state from the authoritative workflow boundary.
+///
+/// This is the shared frontend-facing maintenance shape for harness-mode real
+/// runtime execution. Frontend shells may schedule when to run the pass, but
+/// they should not fork their own step ordering.
+pub async fn run_harness_runtime_maintenance_pass(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+) -> Result<(), AuraError> {
+    converge_runtime(runtime).await;
+    super::system::refresh_account(app_core).await
+}
+
 /// Validate that the runtime has at least one viable connectivity path before a
 /// shared-flow operation relies on remote convergence.
 pub async fn ensure_runtime_peer_connectivity(

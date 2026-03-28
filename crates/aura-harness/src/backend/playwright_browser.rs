@@ -807,42 +807,52 @@ impl ObservationBackend for PlaywrightBrowserBackend {
         after_version: Option<u64>,
     ) -> Option<Result<UiSnapshotEvent>> {
         Some((|| {
-            let payload = match self.with_session(|session| {
-                session.rpc_call_with_timeout(
-                    "wait_for_ui_state",
-                    json!({
-                        "instance_id": self.config.id,
-                        "timeout_ms": timeout.as_millis(),
-                        "after_version": after_version,
-                    }),
-                    timeout
-                        .as_millis()
-                        .clamp(1, u128::from(u64::MAX))
-                        .try_into()
-                        .unwrap_or(u64::MAX)
-                        .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
-                )
-            }) {
-                Ok(payload) => payload,
-                Err(error) if ui_snapshot_event_timeout(&error) => {
-                    let snapshot = self.ui_snapshot()?;
-                    return Ok(UiSnapshotEvent {
-                        version: snapshot.revision.semantic_seq,
-                        snapshot,
-                    });
-                }
-                Err(error) => return Err(error),
-            };
-            let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
-                format!(
-                    "failed to decode browser ui event payload for instance {}",
-                    self.config.id
-                )
-            })?;
-            Ok(UiSnapshotEvent {
-                snapshot: payload.snapshot,
-                version: payload.version,
-            })
+            let deadline = Instant::now() + timeout;
+            let slice = Duration::from_millis(750);
+
+            loop {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let wait_timeout = std::cmp::min(remaining, slice);
+                let payload = match self.with_session(|session| {
+                    session.rpc_call_with_timeout(
+                        "wait_for_ui_state",
+                        json!({
+                            "instance_id": self.config.id,
+                            "timeout_ms": wait_timeout.as_millis(),
+                            "after_version": after_version,
+                        }),
+                        wait_timeout
+                            .as_millis()
+                            .clamp(1, u128::from(u64::MAX))
+                            .try_into()
+                            .unwrap_or(u64::MAX)
+                            .saturating_add(WAIT_RPC_TIMEOUT_MARGIN_MS),
+                    )
+                }) {
+                    Ok(payload) => payload,
+                    Err(error) if ui_snapshot_event_timeout(&error) && Instant::now() < deadline => {
+                        continue;
+                    }
+                    Err(error) if ui_snapshot_event_timeout(&error) => {
+                        let snapshot = self.ui_snapshot()?;
+                        return Ok(UiSnapshotEvent {
+                            version: snapshot.revision.semantic_seq,
+                            snapshot,
+                        });
+                    }
+                    Err(error) => return Err(error),
+                };
+                let payload: BrowserUiSnapshotEventPayload = decode_rpc_payload(payload, || {
+                    format!(
+                        "failed to decode browser ui event payload for instance {}",
+                        self.config.id
+                    )
+                })?;
+                return Ok(UiSnapshotEvent {
+                    snapshot: payload.snapshot,
+                    version: payload.version,
+                });
+            }
         })())
     }
 }

@@ -2478,7 +2478,6 @@ async function startPage(params) {
         uiStateWaiters: [],
         requiredUiStateRevision: 0,
         requiredUiGeneration: 0,
-        lastHarnessTransportAt: 0,
         currentUiGeneration: 0,
         lastMainFrameNavigationAt: Date.now(),
         observationEpoch: 0,
@@ -3198,36 +3197,6 @@ async function snapshot(params) {
   };
 }
 
-async function processHarnessTransport(session, instanceId) {
-  try {
-    await focusAuraPageSafe(
-      session.page,
-      instanceId,
-      "process_harness_transport",
-    );
-    traceDriver(
-      `[driver] process_harness_transport start instance=${instanceId}`,
-    );
-    await withOperationTimeout(
-      `process_harness_transport_${instanceId}`,
-      session.page.evaluate(async () => {
-        const fn = window.__AURA_HARNESS__?.process_harness_transport;
-        if (typeof fn === "function") {
-          await fn();
-        }
-      }),
-      2500,
-    );
-    traceDriver(
-      `[driver] process_harness_transport done instance=${instanceId}`,
-    );
-  } catch (error) {
-    traceDriver(
-      `[driver] process_harness_transport skipped instance=${instanceId} error=${normalizeClickError(error)}`,
-    );
-  }
-}
-
 async function uiState(params) {
   const instanceId = normalizeInstanceId(params);
   let session = getSession(instanceId);
@@ -3315,11 +3284,6 @@ async function waitForUiState(params) {
   const deadlineMs = Date.now() + timeoutMs;
 
   while (true) {
-    if (Date.now() - Number(session.lastHarnessTransportAt ?? 0) >= 250) {
-      await processHarnessTransport(session, instanceId);
-      session.lastHarnessTransportAt = Date.now();
-    }
-
     if (session.uiStateCache && typeof session.uiStateCache === "object") {
       const cached =
         typeof session.uiStateCacheJson === "string"

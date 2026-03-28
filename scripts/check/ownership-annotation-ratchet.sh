@@ -51,9 +51,9 @@ EOF
 esac
 
 diff_output="$(git diff -U3 "$diff_range" -- "${scope_paths[@]}" || true)"
+has_diff=1
 if [[ -z "$diff_output" ]]; then
-  echo "ownership-annotation-ratchet($mode): no diff in scope"
-  exit 0
+  has_diff=0
 fi
 
 violations=0
@@ -110,6 +110,7 @@ check_capability_boundary_completeness() {
     "crates/aura-app/src/workflows/semantic_facts.rs:semantic_readiness_publication_capability"
     "crates/aura-app/src/workflows/semantic_facts.rs:semantic_postcondition_proof_capability"
     "crates/aura-app/src/workflows/semantic_facts.rs:authorize_readiness_publication"
+    "crates/aura-app/src/workflows/semantic_facts.rs:issue_semantic_operation_context"
     "crates/aura-app/src/workflows/semantic_facts.rs:issue_home_created_proof"
     "crates/aura-app/src/workflows/semantic_facts.rs:issue_account_created_proof"
     "crates/aura-app/src/workflows/semantic_facts.rs:issue_channel_membership_ready_proof"
@@ -159,6 +160,7 @@ check_semantic_owner_completeness() {
     "crates/aura-app/src/workflows/invitation.rs:accept_invitation_id_owned"
     "crates/aura-app/src/workflows/invitation.rs:accept_imported_invitation_owned"
     "crates/aura-app/src/workflows/invitation.rs:accept_pending_home_invitation_id_owned"
+    "crates/aura-app/src/workflows/invitation.rs:create_channel_invitation_owned"
     "crates/aura-app/src/workflows/messaging.rs:join_channel_by_name_owned"
     "crates/aura-app/src/workflows/messaging.rs:send_message_ref_owned"
     "crates/aura-app/src/workflows/messaging.rs:invite_user_to_channel_with_context_owned"
@@ -192,7 +194,7 @@ is_actor_owned_candidate() {
 
 is_capability_boundary_candidate() {
   local line="$1"
-  local pattern='^\+.*fn[[:space:]]+issue_[A-Za-z0-9_]+_proof\('
+  local pattern='^\+.*fn[[:space:]]+(issue_[A-Za-z0-9_]+_(proof|context)|[A-Za-z0-9_]*capability|authorize_[A-Za-z0-9_]+|secure_storage_[A-Za-z0-9_]+)\('
   [[ "$current_file" == crates/aura-app/src/workflows/* \
       || "$current_file" == crates/aura-agent/src/runtime_bridge/* ]] || return 1
   [[ "$line" =~ $pattern ]]
@@ -253,4 +255,8 @@ if (( violations > 0 )); then
   exit 1
 fi
 
-echo "ownership-annotation-ratchet($mode): clean"
+if (( has_diff == 0 )); then
+  echo "ownership-annotation-ratchet($mode): no diff in scope; completeness clean"
+else
+  echo "ownership-annotation-ratchet($mode): clean"
+fi

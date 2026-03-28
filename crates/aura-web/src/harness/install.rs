@@ -474,9 +474,7 @@ return true;
     installer.call0(window.as_ref()).map(|_| ())
 }
 
-pub(crate) fn install_window_harness_api(
-    harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
-) -> Result<(), JsValue> {
+pub(crate) fn install_window_harness_api() -> Result<(), JsValue> {
     let harness = Object::new();
     let observe = Object::new();
 
@@ -804,83 +802,6 @@ try {
         tail_log.as_ref().unchecked_ref(),
     )?;
     tail_log.forget();
-
-    let process_harness_transport_context = harness_transport_context.clone();
-    let process_harness_transport = Closure::wrap(Box::new(move || -> js_sys::Promise {
-        let fallback_context = process_harness_transport_context.clone();
-        future_to_promise(async move {
-            if fallback_context.is_some() {
-                let global_context_ran = crate::shell::run_harness_transport_tick_once().await;
-                if !global_context_ran {
-                    if let Some((app_core, agent)) = fallback_context {
-                        crate::shell::run_harness_transport_tick_with_context(app_core, agent)
-                            .await;
-                    }
-                }
-            } else {
-                let _ = crate::shell::run_harness_transport_tick_once().await;
-            }
-            Ok(JsValue::UNDEFINED)
-        })
-    }) as Box<dyn FnMut() -> js_sys::Promise>);
-    Reflect::set(
-        &harness,
-        &JsValue::from_str("process_harness_transport"),
-        process_harness_transport.as_ref().unchecked_ref(),
-    )?;
-    process_harness_transport.forget();
-    if let Some(window) = web_sys::window() {
-        let install_transport_interval = Function::new_no_args(
-            r#"
-const window = globalThis;
-if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_INSTALLED__) {
-  return true;
-}
-window.__AURA_HARNESS_TRANSPORT_INTERVAL_INSTALLED__ = true;
-window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
-window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
-window.setInterval(() => {
-  if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__) {
-    return;
-  }
-  const processTransport = window.__AURA_HARNESS__?.process_harness_transport;
-  if (typeof processTransport !== "function") {
-    return;
-  }
-  window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = true;
-  if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ !== null) {
-    window.clearTimeout(window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__);
-  }
-  window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = window.setTimeout(() => {
-    window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
-    window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
-  }, 1500);
-  let result;
-  try {
-    result = processTransport();
-  } catch (_) {
-    window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
-    if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ !== null) {
-      window.clearTimeout(window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__);
-      window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
-    }
-    return;
-  }
-  Promise.resolve(result)
-    .catch(() => {})
-    .finally(() => {
-      window.__AURA_HARNESS_TRANSPORT_INTERVAL_BUSY__ = false;
-      if (window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ !== null) {
-        window.clearTimeout(window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__);
-        window.__AURA_HARNESS_TRANSPORT_INTERVAL_WATCHDOG__ = null;
-      }
-    });
-}, 100);
-return true;
-"#,
-        );
-        let _ = install_transport_interval.call0(window.as_ref());
-    }
 
     let root_structure = Closure::wrap(Box::new(move || -> JsValue {
         let Ok(controller) = current_controller() else {

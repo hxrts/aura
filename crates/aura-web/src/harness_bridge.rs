@@ -230,8 +230,6 @@ pub fn publish_ui_snapshot(snapshot: &aura_app::ui::contract::UiSnapshot) {
     publication::publish_ui_snapshot(snapshot);
 }
 
-pub fn install_window_harness_api(
-    harness_transport_context: Option<(Arc<RwLock<AppCore>>, Arc<AuraAgent>)>,
-) -> Result<(), JsValue> {
-    install::install_window_harness_api(harness_transport_context)
+pub fn install_window_harness_api() -> Result<(), JsValue> {
+    install::install_window_harness_api()
 }

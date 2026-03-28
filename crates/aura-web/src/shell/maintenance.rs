@@ -7,13 +7,13 @@ use aura_app::AppCore;
 use aura_ui::{FrontendUiOperation as WebUiOperation, UiController};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use futures::channel::oneshot;
-use gloo_net::http::Request;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::future::Future;
 use std::sync::Arc;
 use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen_futures::JsFuture;
 
 use crate::error::{log_web_error, WebUiError};
 use crate::task_owner::{new_web_task_owner, WebTaskOwner};
@@ -26,15 +26,8 @@ struct GenerationMaintenanceOwner {
     owner: WebTaskOwner,
 }
 
-#[derive(Clone)]
-struct HarnessTransportTickContext {
-    app_core: Arc<RwLock<AppCore>>,
-    agent: Arc<AuraAgent>,
-}
-
 thread_local! {
     static ACTIVE_GENERATION_MAINTENANCE: RefCell<Option<GenerationMaintenanceOwner>> = const { RefCell::new(None) };
-    static ACTIVE_HARNESS_TRANSPORT_TICK: RefCell<Option<HarnessTransportTickContext>> = const { RefCell::new(None) };
 }
 
 #[derive(Deserialize)]
@@ -78,24 +71,86 @@ async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, Web
     let Some(url) = harness_transport_poll_url(agent) else {
         return Ok(0);
     };
+    let authority = agent.authority_id().to_string();
+    emit_browser_harness_debug_event(
+        "transport_poll_url_ready",
+        &format!("authority={authority};url={url}"),
+    );
 
-    let response = Request::get(&url).send().await.map_err(|error| {
+    let window = web_sys::window().ok_or_else(|| {
         WebUiError::operation(
             WebUiOperation::BackgroundSync,
-            "WEB_HARNESS_TRANSPORT_POLL_FAILED",
-            format!("failed to poll harness transport mailbox: {error}"),
+            "WEB_HARNESS_TRANSPORT_WINDOW_UNAVAILABLE",
+            "window unavailable for harness transport poll".to_string(),
         )
     })?;
-    let payload = response
-        .json::<HarnessTransportPollResponse>()
+    emit_browser_harness_debug_event("transport_poll_fetch_begin", &format!("authority={authority}"));
+    let response_value = JsFuture::from(window.fetch_with_str(&url))
         .await
         .map_err(|error| {
+            WebUiError::operation(
+                WebUiOperation::BackgroundSync,
+                "WEB_HARNESS_TRANSPORT_POLL_FAILED",
+                format!("failed to poll harness transport mailbox: {error:?}"),
+            )
+        })?;
+    emit_browser_harness_debug_event(
+        "transport_poll_fetch_resolved",
+        &format!("authority={authority}"),
+    );
+    let response: web_sys::Response = response_value.dyn_into().map_err(|value: JsValue| {
+        WebUiError::operation(
+            WebUiOperation::BackgroundSync,
+            "WEB_HARNESS_TRANSPORT_RESPONSE_CAST_FAILED",
+            format!("failed to cast harness transport poll response: {value:?}"),
+        )
+    })?;
+    emit_browser_harness_debug_event(
+        "transport_poll_response_cast",
+        &format!("authority={authority};ok={}", response.ok()),
+    );
+    let text_promise = response.text().map_err(|error| {
+        WebUiError::operation(
+            WebUiOperation::BackgroundSync,
+            "WEB_HARNESS_TRANSPORT_POLL_TEXT_FAILED",
+            format!("failed to read harness transport mailbox response body: {error:?}"),
+        )
+    })?;
+    emit_browser_harness_debug_event("transport_poll_text_begin", &format!("authority={authority}"));
+    let payload_text = JsFuture::from(text_promise)
+    .await
+    .map_err(|error| {
+        WebUiError::operation(
+            WebUiOperation::BackgroundSync,
+            "WEB_HARNESS_TRANSPORT_POLL_TEXT_AWAIT_FAILED",
+            format!("failed while awaiting harness transport mailbox response body: {error:?}"),
+        )
+    })?
+    .as_string()
+    .ok_or_else(|| {
+        WebUiError::operation(
+            WebUiOperation::BackgroundSync,
+            "WEB_HARNESS_TRANSPORT_POLL_TEXT_INVALID",
+            "harness transport mailbox response body was not a string".to_string(),
+        )
+    })?;
+    emit_browser_harness_debug_event(
+        "transport_poll_text_resolved",
+        &format!("authority={authority};bytes={}", payload_text.len()),
+    );
+    let payload = serde_json::from_str::<HarnessTransportPollResponse>(&payload_text).map_err(
+        |error| {
             WebUiError::operation(
                 WebUiOperation::BackgroundSync,
                 "WEB_HARNESS_TRANSPORT_POLL_DECODE_FAILED",
                 format!("failed to decode harness transport mailbox response: {error}"),
             )
-        })?;
+        },
+    )?;
+    emit_browser_harness_debug_event(
+        "transport_poll_decode_done",
+        &format!("authority={authority};envelopes={}", payload.envelopes.len()),
+    );
 
     let mut drained = 0_usize;
     for encoded in payload.envelopes {
@@ -188,9 +243,6 @@ pub(crate) fn cancel_generation_maintenance_loops() {
         if let Some(active) = slot.borrow_mut().take() {
             active.owner.shutdown();
         }
-    });
-    ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| {
-        slot.borrow_mut().take();
     });
 }
 
@@ -418,27 +470,51 @@ async fn run_harness_transport_tick(app_core: Arc<RwLock<AppCore>>, agent: Arc<A
         "transport_tick_polled",
         &format!("authority={};drained={drained}", agent.authority_id()),
     );
-    let _ = app_core;
     if drained == 0 {
+        emit_browser_harness_debug_event(
+            "transport_tick_done",
+            &format!("authority={};drained=0", agent.authority_id()),
+        );
         return;
     }
-}
 
-pub(crate) async fn run_harness_transport_tick_once() -> bool {
-    let context = ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| slot.borrow().clone());
-    if let Some(context) = context {
-        run_harness_transport_tick(context.app_core, context.agent).await;
-        true
+    let runtime = { app_core.read().await.runtime().cloned() };
+    if let Some(runtime) = runtime {
+        emit_browser_harness_debug_event(
+            "transport_tick_maintenance_start",
+            &format!("authority={};drained={drained}", agent.authority_id()),
+        );
+        if let Err(error) =
+            runtime_workflows::run_harness_runtime_maintenance_pass(&app_core, &runtime).await
+        {
+            emit_browser_harness_debug_event(
+                "transport_tick_maintenance_error",
+                &format!("authority={};error={error}", agent.authority_id()),
+            );
+            log_web_error(
+                "warn",
+                &WebUiError::operation(
+                    WebUiOperation::BackgroundSync,
+                    "WEB_HARNESS_TRANSPORT_MAINTENANCE_FAILED",
+                    error.to_string(),
+                ),
+            );
+        } else {
+            emit_browser_harness_debug_event(
+                "transport_tick_maintenance_done",
+                &format!("authority={};drained={drained}", agent.authority_id()),
+            );
+        }
     } else {
-        false
+        emit_browser_harness_debug_event(
+            "transport_tick_runtime_missing",
+            &format!("authority={};drained={drained}", agent.authority_id()),
+        );
     }
-}
-
-pub(crate) async fn run_harness_transport_tick_with_context(
-    app_core: Arc<RwLock<AppCore>>,
-    agent: Arc<AuraAgent>,
-) {
-    run_harness_transport_tick(app_core, agent).await;
+    emit_browser_harness_debug_event(
+        "transport_tick_done",
+        &format!("authority={};drained={drained}", agent.authority_id()),
+    );
 }
 
 pub(crate) fn spawn_generation_maintenance_loops(
@@ -460,12 +536,6 @@ pub(crate) fn spawn_generation_maintenance_loops(
         spawn_background_sync_loop(&owner, controller.clone(), app_core.clone());
     }
     if let Some(agent) = agent {
-        ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| {
-            slot.borrow_mut().replace(HarnessTransportTickContext {
-                app_core: app_core.clone(),
-                agent: agent.clone(),
-            });
-        });
         spawn_harness_transport_poll_loop(
             &owner,
             controller.clone(),
@@ -473,9 +543,5 @@ pub(crate) fn spawn_generation_maintenance_loops(
             agent.clone(),
         );
         spawn_ceremony_acceptance_loop(&owner, controller, app_core, agent);
-    } else if !account_ready {
-        ACTIVE_HARNESS_TRANSPORT_TICK.with(|slot| {
-            slot.borrow_mut().take();
-        });
     }
 }

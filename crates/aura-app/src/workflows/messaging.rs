@@ -4758,6 +4758,7 @@ pub(in crate::workflows) async fn invite_authority_to_channel_with_context(
         message,
         ttl_ms,
         false,
+        None,
     )
     .await?;
     emit_stage("local_projection");
