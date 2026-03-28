@@ -1177,20 +1177,16 @@ pub(crate) async fn submit_semantic_command(
 #[cfg(test)]
 mod tests {
     use aura_app::ui::contract::OperationId;
-    use aura_app::ui::scenarios::{IntentAction, SubmissionContract, SubmissionValueContract};
-    use aura_core::AuthorityId;
-
-    fn test_authority_id() -> AuthorityId {
-        "aura:a:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-            .parse()
-            .unwrap_or_else(|error| panic!("test authority id must parse: {error}"))
-    }
+    use aura_app::scenario_contract::{IntentAction, SubmissionContract, SubmissionValueContract};
 
     #[test]
     fn start_device_enrollment_contract_requires_handle_submission() {
         let contract = IntentAction::StartDeviceEnrollment {
             device_name: "Browser Device".to_string(),
-            invitee_authority_id: test_authority_id(),
+            code_name: "Browser Code".to_string(),
+            invitee_authority_id:
+                "aura:a:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                    .to_string(),
         }
         .contract();
 
