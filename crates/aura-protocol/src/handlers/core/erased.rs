@@ -259,7 +259,8 @@ mod tests {
 
         struct EchoHandler;
 
-        #[async_trait]
+        #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
         impl AuraHandler for EchoHandler {
             async fn execute_effect(
                 &self,

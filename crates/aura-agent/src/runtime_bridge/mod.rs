@@ -111,7 +111,10 @@ fn secure_storage_bootstrap_boundary(
     capability = "secure_storage_bootstrap_read_write"
 )]
 fn secure_storage_bootstrap_store_capabilities() -> [SecureStorageCapability; 2] {
-    [SecureStorageCapability::Read, SecureStorageCapability::Write]
+    [
+        SecureStorageCapability::Read,
+        SecureStorageCapability::Write,
+    ]
 }
 
 fn internal_bridge_error(label: &'static str, error: impl Display) -> IntentError {
@@ -882,11 +885,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
         let store_capabilities = secure_storage_bootstrap_store_capabilities();
         effects
-            .secure_store(
-                &location,
-                &key_bytes,
-                &store_capabilities,
-            )
+            .secure_store(&location, &key_bytes, &store_capabilities)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to store AMP bootstrap key: {e}"))

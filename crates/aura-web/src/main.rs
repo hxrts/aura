@@ -10,6 +10,7 @@ use cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         mod bootstrap_storage;
+        mod browser_promises;
         mod error;
         mod harness;
         mod harness_bridge;

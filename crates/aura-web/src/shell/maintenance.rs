@@ -74,7 +74,10 @@ async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, Web
         &format!("authority={authority};url={url}"),
     );
 
-    emit_browser_harness_debug_event("transport_poll_fetch_begin", &format!("authority={authority}"));
+    emit_browser_harness_debug_event(
+        "transport_poll_fetch_begin",
+        &format!("authority={authority}"),
+    );
     let payload_text = fetch_text_with_timeout(
         &url,
         3_000,
@@ -89,23 +92,28 @@ async fn drain_harness_transport_mailbox(agent: &AuraAgent) -> Result<usize, Web
         "transport_poll_fetch_resolved",
         &format!("authority={authority}"),
     );
-    emit_browser_harness_debug_event("transport_poll_text_begin", &format!("authority={authority}"));
+    emit_browser_harness_debug_event(
+        "transport_poll_text_begin",
+        &format!("authority={authority}"),
+    );
     emit_browser_harness_debug_event(
         "transport_poll_text_resolved",
         &format!("authority={authority};bytes={}", payload_text.len()),
     );
-    let payload = serde_json::from_str::<HarnessTransportPollResponse>(&payload_text).map_err(
-        |error| {
+    let payload =
+        serde_json::from_str::<HarnessTransportPollResponse>(&payload_text).map_err(|error| {
             WebUiError::operation(
                 WebUiOperation::BackgroundSync,
                 "WEB_HARNESS_TRANSPORT_POLL_DECODE_FAILED",
                 format!("failed to decode harness transport mailbox response: {error}"),
             )
-        },
-    )?;
+        })?;
     emit_browser_harness_debug_event(
         "transport_poll_decode_done",
-        &format!("authority={authority};envelopes={}", payload.envelopes.len()),
+        &format!(
+            "authority={authority};envelopes={}",
+            payload.envelopes.len()
+        ),
     );
 
     let mut drained = 0_usize;

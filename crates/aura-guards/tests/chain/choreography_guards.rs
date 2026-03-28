@@ -30,7 +30,8 @@ impl MockEffectInterpreter {
     }
 }
 
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 #[allow(clippy::unwrap_used)]
 impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
     async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
@@ -250,7 +251,8 @@ async fn test_effect_error_handling() {
     #[derive(Debug, Clone)]
     struct FailingInterpreter;
 
-    #[async_trait::async_trait]
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
     impl aura_core::effects::guard::EffectInterpreter for FailingInterpreter {
         async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
             match command {

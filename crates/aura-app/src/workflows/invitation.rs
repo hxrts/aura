@@ -159,8 +159,7 @@ use crate::workflows::semantic_facts::{
     issue_device_enrollment_imported_proof, issue_invitation_accepted_or_materialized_proof,
     issue_invitation_created_proof, issue_invitation_declined_proof,
     issue_invitation_exported_proof, issue_invitation_revoked_proof,
-    issue_pending_invitation_consumed_proof,
-    publish_authoritative_semantic_fact,
+    issue_pending_invitation_consumed_proof, publish_authoritative_semantic_fact,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
 };
@@ -1017,9 +1016,7 @@ pub async fn run_post_contact_accept_followups(
 ) {
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
-        .capture(propagate_contact_acceptance_followup(
-            app_core, contact_id,
-        ))
+        .capture(propagate_contact_acceptance_followup(app_core, contact_id))
         .await;
     let _ = best_effort.finish();
 }
@@ -2823,11 +2820,9 @@ async fn accept_imported_invitation_inner(
                 )
                 .await;
             }
-            if let Err(error) = publish_authoritative_contact_invitation_accepted(
-                app_core,
-                invitation.sender_id,
-            )
-            .await
+            if let Err(error) =
+                publish_authoritative_contact_invitation_accepted(app_core, invitation.sender_id)
+                    .await
             {
                 return fail_invitation_accept(
                     owner,
@@ -3945,9 +3940,8 @@ mod tests {
 
         assert!(source.contains("owner = \"create_channel_invitation\""));
         assert!(source.contains("async fn create_channel_invitation_owned("));
-        assert!(source.contains(
-            "owner\n            .publish_success_with(issue_invitation_created_proof("
-        ));
+        assert!(source
+            .contains("owner\n            .publish_success_with(issue_invitation_created_proof("));
     }
 
     #[test]

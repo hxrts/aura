@@ -3753,18 +3753,21 @@ async fn send_message_ref_owned(
                 .publish_phase(SemanticOperationPhase::AuthoritativeContextReady)
                 .await?;
             if channel_id != note_to_self_channel_id(sender_id) {
-                let readiness =
-                    match require_send_message_readiness(app_core, authoritative_channel).await {
-                        Ok(readiness) => readiness,
-                        Err(
-                            SendMessageError::RecipientResolutionNotReady { .. }
-                            | SendMessageError::DeliveryNotReady { .. },
-                        ) => {
-                            if let Err(error) =
-                                refresh_authoritative_recipient_resolution_readiness(app_core)
-                                    .await
-                            {
-                                return fail_send_message(
+                let readiness = match require_send_message_readiness(
+                    app_core,
+                    authoritative_channel,
+                )
+                .await
+                {
+                    Ok(readiness) => readiness,
+                    Err(
+                        SendMessageError::RecipientResolutionNotReady { .. }
+                        | SendMessageError::DeliveryNotReady { .. },
+                    ) => {
+                        if let Err(error) =
+                            refresh_authoritative_recipient_resolution_readiness(app_core).await
+                        {
+                            return fail_send_message(
                                     owner,
                                     SendMessageError::ReadinessFactsUnavailable {
                                         detail: format!(
@@ -3773,15 +3776,15 @@ async fn send_message_ref_owned(
                                     },
                                 )
                                 .await;
-                            }
-                            if let Err(error) = refresh_authoritative_delivery_readiness_for_channel(
-                                app_core,
-                                &runtime,
-                                authoritative_channel,
-                            )
-                            .await
-                            {
-                                return fail_send_message(
+                        }
+                        if let Err(error) = refresh_authoritative_delivery_readiness_for_channel(
+                            app_core,
+                            &runtime,
+                            authoritative_channel,
+                        )
+                        .await
+                        {
+                            return fail_send_message(
                                     owner,
                                     SendMessageError::ReadinessFactsUnavailable {
                                         detail: format!(
@@ -3790,33 +3793,28 @@ async fn send_message_ref_owned(
                                     },
                                 )
                                 .await;
-                            }
-                            if !warm_channel_connectivity(
-                                app_core,
-                                &runtime,
-                                authoritative_channel,
-                            )
-                            .await
-                            {
-                                return fail_send_message(
-                                    owner,
-                                    SendMessageError::ReadinessFactsUnavailable {
-                                        detail: format!(
-                                            "channel connectivity warmup failed for {channel_id}"
-                                        ),
-                                    },
-                                )
-                                .await;
-                            }
-                            match require_send_message_readiness(app_core, authoritative_channel)
-                                .await
-                            {
-                                Ok(readiness) => readiness,
-                                Err(error) => return fail_send_message(owner, error).await,
-                            }
                         }
-                        Err(error) => return fail_send_message(owner, error).await,
-                    };
+                        if !warm_channel_connectivity(app_core, &runtime, authoritative_channel)
+                            .await
+                        {
+                            return fail_send_message(
+                                owner,
+                                SendMessageError::ReadinessFactsUnavailable {
+                                    detail: format!(
+                                        "channel connectivity warmup failed for {channel_id}"
+                                    ),
+                                },
+                            )
+                            .await;
+                        }
+                        match require_send_message_readiness(app_core, authoritative_channel).await
+                        {
+                            Ok(readiness) => readiness,
+                            Err(error) => return fail_send_message(owner, error).await,
+                        }
+                    }
+                    Err(error) => return fail_send_message(owner, error).await,
+                };
                 if readiness.recipient_resolution_ready {
                     owner
                         .publish_phase(SemanticOperationPhase::RecipientResolutionReady)

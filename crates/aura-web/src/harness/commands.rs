@@ -33,6 +33,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
+use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::harness::channel_selection::{
     authoritative_channel_binding, selected_authority_id, selected_channel_binding,
     selected_channel_id, selected_device_id, SelectionError, WeakChannelSelection,
@@ -341,8 +342,18 @@ fn spawn_background_semantic_task(
 async fn yield_to_browser_event_loop() {
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&JsValue::UNDEFINED))
-            .await;
+        let _ = await_browser_promise_with_timeout(
+            js_sys::Promise::resolve(&JsValue::UNDEFINED),
+            250,
+            aura_ui::FrontendUiOperation::BackgroundSync,
+            "WEB_BROWSER_EVENT_LOOP_YIELD_REJECTED",
+            "WEB_BROWSER_EVENT_LOOP_YIELD_TIMEOUT",
+            "WEB_BROWSER_EVENT_LOOP_YIELD_TIMEOUT_SCHEDULE_FAILED",
+            "WEB_BROWSER_EVENT_LOOP_YIELD_TIMEOUT_DROPPED",
+            "browser event-loop yield",
+            None,
+        )
+        .await;
     }
 }
 

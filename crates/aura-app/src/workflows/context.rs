@@ -528,7 +528,7 @@ pub async fn create_home(
             .map(|r| r.authority_id())
             .or_else(|| core.authority().copied())
     }
-        .ok_or_else(|| AuraError::permission_denied("Authority not set"));
+    .ok_or_else(|| AuraError::permission_denied("Authority not set"));
 
     let creator = match creator {
         Ok(creator) => creator,

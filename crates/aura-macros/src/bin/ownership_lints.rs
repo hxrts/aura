@@ -16,6 +16,8 @@ use syn::{
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LintMode {
+    BrowserPromiseBoundedAwaits,
+    BrowserTransportSingleOwner,
     WorkflowNoViewReadsForDecisions,
     WorkflowNoViewWrites,
     WorkflowNoFallbackDefaults,
@@ -50,6 +52,8 @@ enum LintMode {
 impl LintMode {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "browser-promise-bounded-awaits" => Ok(Self::BrowserPromiseBoundedAwaits),
+            "browser-transport-single-owner" => Ok(Self::BrowserTransportSingleOwner),
             "workflow-no-view-reads-for-decisions" => Ok(Self::WorkflowNoViewReadsForDecisions),
             "workflow-no-view-writes" => Ok(Self::WorkflowNoViewWrites),
             "workflow-no-fallback-defaults" => Ok(Self::WorkflowNoFallbackDefaults),
@@ -87,6 +91,8 @@ impl LintMode {
 
     fn display_name(self) -> &'static str {
         match self {
+            Self::BrowserPromiseBoundedAwaits => "browser-promise-bounded-awaits",
+            Self::BrowserTransportSingleOwner => "browser-transport-single-owner",
             Self::WorkflowNoViewReadsForDecisions => "workflow-no-view-reads-for-decisions",
             Self::WorkflowNoViewWrites => "workflow-no-view-writes",
             Self::WorkflowNoFallbackDefaults => "workflow-no-fallback-defaults",
@@ -151,6 +157,35 @@ fn run() -> Result<(), String> {
         return Err("expected at least one path to scan".to_string());
     }
 
+    if mode == LintMode::BrowserTransportSingleOwner {
+        let mut source_files = Vec::new();
+        for path in &paths {
+            collect_source_files(path, &mut source_files)?;
+        }
+        source_files.sort();
+        source_files.dedup();
+
+        let mut violations = Vec::new();
+        for file in &source_files {
+            let source = fs::read_to_string(file)
+                .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
+            violations.extend(scan_browser_transport_single_owner(file, &source));
+        }
+
+        if !violations.is_empty() {
+            for violation in violations {
+                eprintln!("{violation}");
+            }
+            return Err(
+                "browser harness transport/mailbox polling ownership escaped the sanctioned shell owner"
+                    .to_string(),
+            );
+        }
+
+        println!("{}: clean", mode.display_name());
+        return Ok(());
+    }
+
     let mut rust_files = Vec::new();
     for path in &paths {
         collect_rust_files(path, &mut rust_files)?;
@@ -189,6 +224,14 @@ fn run() -> Result<(), String> {
             eprintln!("{violation}");
         }
         return Err(match mode {
+            LintMode::BrowserPromiseBoundedAwaits => {
+                "raw browser promise awaits still bypass the sanctioned bounded browser helper"
+                    .to_string()
+            }
+            LintMode::BrowserTransportSingleOwner => {
+                "browser harness transport/mailbox polling ownership escaped the sanctioned shell owner"
+                    .to_string()
+            }
             LintMode::WorkflowNoViewReadsForDecisions => {
                 "parity-critical workflow code still reads projections to make semantic decisions"
                     .to_string()
@@ -335,6 +378,40 @@ fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     Ok(())
 }
 
+fn collect_source_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    if path.is_file() {
+        if matches!(
+            path.extension().and_then(OsStr::to_str),
+            Some("rs" | "ts" | "js")
+        ) {
+            files.push(path.to_path_buf());
+        }
+        return Ok(());
+    }
+    if !path.is_dir() {
+        return Err(format!("path does not exist: {}", path.display()));
+    }
+
+    for entry in fs::read_dir(path)
+        .map_err(|error| format!("failed to read directory {}: {error}", path.display()))?
+    {
+        let entry = entry.map_err(|error| {
+            format!("failed to read directory entry {}: {error}", path.display())
+        })?;
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            collect_source_files(&entry_path, files)?;
+        } else if matches!(
+            entry_path.extension().and_then(OsStr::to_str),
+            Some("rs" | "ts" | "js")
+        ) {
+            files.push(entry_path);
+        }
+    }
+
+    Ok(())
+}
+
 fn scan_file(
     mode: LintMode,
     file: &Path,
@@ -343,6 +420,9 @@ fn scan_file(
     strong_references: &StrongReferenceRegistry,
 ) -> Vec<String> {
     match mode {
+        LintMode::BrowserTransportSingleOwner => {
+            return scan_browser_transport_single_owner(file, source);
+        }
         LintMode::ActorOwnedTaskSpawn => return scan_actor_owned_task_spawn(file, syntax),
         LintMode::AsyncSessionOwnership => return scan_async_session_ownership(file, source),
         LintMode::FrontendSemanticHandoffBoundary => {
@@ -381,7 +461,8 @@ fn scan_file(
         LintMode::TerminalShellExplicitExitIntent => {
             return scan_terminal_shell_explicit_exit_intent(file, source);
         }
-        LintMode::WorkflowNoViewReadsForDecisions
+        LintMode::BrowserPromiseBoundedAwaits
+        | LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
         | LintMode::WorkflowNoFallbackDefaults
         | LintMode::WorkflowNoViewDerivedReadiness
@@ -859,6 +940,12 @@ fn scan_function(
     } = function;
     let contains_handoff = function_contains_call(block, "handoff_to_app_workflow");
     let should_scan = match mode {
+        LintMode::BrowserPromiseBoundedAwaits => {
+            !file
+                .to_string_lossy()
+                .ends_with("crates/aura-web/src/browser_promises.rs")
+                && !has_marker_attr(attrs, "observed_only")
+        }
         LintMode::WorkflowNoViewReadsForDecisions
         | LintMode::WorkflowNoViewWrites
         | LintMode::WorkflowNoFallbackDefaults
@@ -907,6 +994,7 @@ fn scan_function(
             .contains("crates/aura-app/src/workflows/"),
         LintMode::WeakToStrongIdentifierUpgrade => false,
         LintMode::ActorOwnedTaskSpawn
+        | LintMode::BrowserTransportSingleOwner
         | LintMode::AsyncSessionOwnership
         | LintMode::FrontendSemanticHandoffBoundary
         | LintMode::HarnessMoveOwnershipBoundary
@@ -1064,7 +1152,9 @@ impl OwnershipVisitor<'_> {
                 .any(|tag| matches!(tag.as_str(), "first-run-default")),
             LintMode::WorkflowNoViewDerivedReadiness
             | LintMode::WorkflowNoViewDerivedRecipientResolution => false,
-            LintMode::WorkflowUnboundedRuntimeAwaits => false,
+            LintMode::WorkflowUnboundedRuntimeAwaits | LintMode::BrowserPromiseBoundedAwaits => {
+                false
+            }
             _ => false,
         }
     }
@@ -1502,6 +1592,26 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
         );
 
         match self.mode {
+            LintMode::BrowserPromiseBoundedAwaits => {
+                if let Expr::Call(expr_call) = strip_expression(&node.base) {
+                    if let Some(path) = call_path_string(&expr_call.func) {
+                        let normalized = path.replace(' ', "");
+                        if matches!(
+                            normalized.as_str(),
+                            "JsFuture::from" | "wasm_bindgen_futures::JsFuture::from"
+                        ) {
+                            self.push_violation(
+                                node.span(),
+                                format!(
+                                    "raw browser promise await in `{}`: {}. Route browser promises through `crate::browser_promises::await_browser_promise_with_timeout(...)` or `fetch_text_with_timeout(...)`; browser/WASM ownership code must not await `JsFuture::from(...)` directly because repo policy requires bounded browser waits and a single shell-owned transport poller.",
+                                    self.function_name,
+                                    normalized
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
             LintMode::SemanticOwnerBoundedAwaits => {
                 if let Some(method_call) = method_call_on_ident(&node.base, "runtime") {
                     self.push_violation(
@@ -1599,7 +1709,8 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
             | LintMode::SemanticOwnerProofSuccess
             | LintMode::WorkflowProofBearingSuccess
             | LintMode::ProofIssuerAuthoritativeSource
-            | LintMode::ParityCriticalIgnoredResults => {}
+            | LintMode::ParityCriticalIgnoredResults
+            | LintMode::BrowserTransportSingleOwner => {}
             LintMode::ActorOwnedTaskSpawn
             | LintMode::SemanticOwnerDetachedContinuation
             | LintMode::AsyncSessionOwnership
@@ -2147,6 +2258,50 @@ fn source_line_violations(
         if patterns.iter().any(|pattern| line.contains(pattern)) && !approved_file {
             violations.push(format!(
                 "{}:{}:1: forbidden ownership escape hatch: {}",
+                file.display(),
+                index + 1,
+                line.trim()
+            ));
+        }
+    }
+
+    violations
+}
+
+fn scan_browser_transport_single_owner(file: &Path, source: &str) -> Vec<String> {
+    if file_matches_suffix(
+        file,
+        &[
+            "crates/aura-web/src/shell/maintenance.rs",
+            "crates/aura-macros/src/bin/ownership_lints.rs",
+        ],
+    ) {
+        return Vec::new();
+    }
+
+    let owner_escape_hatches = [
+        "HARNESS_TRANSPORT_POLL_PATH",
+        "\"/__aura_harness_transport__/poll\"",
+        "drain_harness_transport_mailbox(",
+        "process_harness_transport",
+        "processHarnessTransport",
+        "run_harness_transport_tick",
+        "kick_harness_transport",
+        "lastHarnessTransportAt",
+        "transport_poll_fetch_begin",
+    ];
+
+    let mut violations = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        if is_comment_line(line) {
+            continue;
+        }
+        if owner_escape_hatches
+            .iter()
+            .any(|pattern| line.contains(pattern))
+        {
+            violations.push(format!(
+                "{}:{}:1: browser harness transport/mailbox polling ownership escaped the sanctioned shell owner: {}. Keep polling owned by `crates/aura-web/src/shell/maintenance.rs`; harness install, bridge, and Playwright code may observe publication state but must not introduce poll URLs, poll entrypoints, transport kickers, or parallel timer bookkeeping.",
                 file.display(),
                 index + 1,
                 line.trim()

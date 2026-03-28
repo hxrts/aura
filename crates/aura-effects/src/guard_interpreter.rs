@@ -366,8 +366,7 @@ mod tests {
     // Mock implementations for testing
     struct MockJournalEffects;
 
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[async_trait]
     impl JournalEffects for MockJournalEffects {
         async fn merge_facts(
             &self,
@@ -432,8 +431,7 @@ mod tests {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[async_trait]
     impl FlowBudgetEffects for MockFlowBudgetEffects {
         async fn charge_flow(
             &self,
@@ -466,8 +464,7 @@ mod tests {
 
     struct MockLeakageEffects;
 
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[async_trait]
     impl LeakageEffects for MockLeakageEffects {
         async fn record_leakage(&self, _event: LeakageEvent) -> Result<()> {
             Ok(())
@@ -500,8 +497,7 @@ mod tests {
 
     struct MockStorageEffects;
 
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[async_trait]
     impl StorageCoreEffects for MockStorageEffects {
         async fn store(
             &self,
@@ -533,8 +529,7 @@ mod tests {
         }
     }
 
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[async_trait]
     impl StorageExtendedEffects for MockStorageEffects {
         async fn exists(
             &self,
@@ -661,8 +656,7 @@ mod tests {
 
     struct MockRandomEffects;
 
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+    #[async_trait]
     impl RandomCoreEffects for MockRandomEffects {
         async fn random_bytes(&self, len: usize) -> Vec<u8> {
             vec![0x42; len]
@@ -682,8 +676,7 @@ mod tests {
     #[derive(Debug)]
     struct MockTimeEffects;
 
-    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    #[async_trait::async_trait]
     impl PhysicalTimeEffects for MockTimeEffects {
         async fn physical_time(
             &self,

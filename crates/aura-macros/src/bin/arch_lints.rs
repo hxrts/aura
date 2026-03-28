@@ -1069,7 +1069,9 @@ mod tests {
         assert!(is_frontend_portability_path(
             "crates/aura-ui/src/semantic_lifecycle.rs"
         ));
-        assert!(is_frontend_portability_path("crates/aura-web/src/task_owner.rs"));
+        assert!(is_frontend_portability_path(
+            "crates/aura-web/src/task_owner.rs"
+        ));
         assert!(!is_frontend_portability_path(
             "crates/aura-web/src/harness/install.rs"
         ));

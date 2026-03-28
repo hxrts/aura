@@ -16,6 +16,7 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::future_to_promise;
 
 use crate::bootstrap_storage::{load_persisted_account_config, persist_runtime_account_config};
+use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::error::{log_web_error, WebUiError};
 use crate::harness::generation::BrowserShellPhase;
 use crate::harness_bridge::{self, BootstrapHandoff, RuntimeIdentityStageSource};
@@ -197,7 +198,19 @@ impl WebShellHost {
                     device_id: runtime_identity.device_id,
                     source: RuntimeIdentityStageSource::HarnessStaging,
                 };
-                let _ = wasm_bindgen_futures::JsFuture::from(submitter(handoff)).await?;
+                let _ = await_browser_promise_with_timeout(
+                    submitter(handoff),
+                    30_000,
+                    WebUiOperation::SubmitBootstrapHandoff,
+                    "WEB_RUNTIME_IDENTITY_STAGE_REJECTED",
+                    "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT",
+                    "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT_SCHEDULE_FAILED",
+                    "WEB_RUNTIME_IDENTITY_STAGE_TIMEOUT_DROPPED",
+                    "runtime identity staging handoff submission",
+                    None,
+                )
+                .await
+                .map_err(|error| JsValue::from_str(&error.user_message()))?;
                 Ok(JsValue::UNDEFINED)
             })
         })
@@ -387,10 +400,7 @@ async fn reconcile_pending_device_enrollment_import(
     Ok(Some(result.bootstrap_name))
 }
 
-fn install_harness_instrumentation(
-    controller: Arc<UiController>,
-    generation_id: u64,
-) {
+fn install_harness_instrumentation(controller: Arc<UiController>, generation_id: u64) {
     if !harness_mode_enabled() {
         return;
     }

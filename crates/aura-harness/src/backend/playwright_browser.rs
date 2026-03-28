@@ -830,7 +830,9 @@ impl ObservationBackend for PlaywrightBrowserBackend {
                     )
                 }) {
                     Ok(payload) => payload,
-                    Err(error) if ui_snapshot_event_timeout(&error) && Instant::now() < deadline => {
+                    Err(error)
+                        if ui_snapshot_event_timeout(&error) && Instant::now() < deadline =>
+                    {
                         continue;
                     }
                     Err(error) if ui_snapshot_event_timeout(&error) => {

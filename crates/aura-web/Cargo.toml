@@ -37,4 +37,4 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 tracing-wasm = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Storage", "Location", "console"] }
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard", "Storage", "Location", "console", "AbortController", "AbortSignal", "RequestInit", "Response"] }

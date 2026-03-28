@@ -3,6 +3,7 @@
 //! Implements the ClipboardPort trait using the browser's Clipboard API,
 //! with a synchronous mirror for read operations that can't await async results.
 
+use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::error::{log_web_error, WebUiError};
 use aura_ui::ClipboardPort;
 use aura_ui::FrontendUiOperation as WebUiOperation;
@@ -10,7 +11,7 @@ use js_sys::Reflect;
 use std::sync::RwLock;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
-use wasm_bindgen_futures::{spawn_local, JsFuture};
+use wasm_bindgen_futures::spawn_local;
 
 #[derive(Default)]
 pub struct WebClipboardAdapter {
@@ -75,13 +76,25 @@ impl ClipboardPort for WebClipboardAdapter {
             let text = text.to_string();
             spawn_local(async move {
                 let promise = clipboard.write_text(&text);
-                if let Err(error) = JsFuture::from(promise).await {
+                if let Err(error) = await_browser_promise_with_timeout(
+                    promise,
+                    5_000,
+                    WebUiOperation::WriteSystemClipboard,
+                    "WEB_SYSTEM_CLIPBOARD_WRITE_REJECTED",
+                    "WEB_SYSTEM_CLIPBOARD_WRITE_TIMEOUT",
+                    "WEB_SYSTEM_CLIPBOARD_WRITE_TIMEOUT_SCHEDULE_FAILED",
+                    "WEB_SYSTEM_CLIPBOARD_WRITE_TIMEOUT_DROPPED",
+                    "system clipboard write",
+                    None,
+                )
+                .await
+                {
                     log_web_error(
                         "warn",
                         &WebUiError::operation(
                             WebUiOperation::WriteSystemClipboard,
                             "WEB_SYSTEM_CLIPBOARD_WRITE_FAILED",
-                            format!("failed to write system clipboard: {error:?}"),
+                            error.user_message(),
                         ),
                     );
                 }

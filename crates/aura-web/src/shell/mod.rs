@@ -9,7 +9,9 @@ pub(crate) use bootstrap::{
     stage_initial_web_account_bootstrap, stage_runtime_bound_web_account_bootstrap,
     submit_runtime_bootstrap_handoff,
 };
-pub(crate) use maintenance::{cancel_generation_maintenance_loops, spawn_generation_maintenance_loops};
+pub(crate) use maintenance::{
+    cancel_generation_maintenance_loops, spawn_generation_maintenance_loops,
+};
 pub(crate) use storage::{
     active_storage_prefix, clear_pending_device_enrollment_code, clear_storage_key,
     harness_instance_id, harness_mode_enabled, load_pending_account_bootstrap,

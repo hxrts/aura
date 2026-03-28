@@ -572,7 +572,7 @@ ci-workspace-wasm-test:
     set -euo pipefail
     : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen-runner.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
-      cargo test --workspace --target wasm32-unknown-unknown \
+      CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo test --workspace --target wasm32-unknown-unknown \
         --exclude aura-terminal \
         --exclude aura-simulator \
         --exclude aura-quint \
@@ -663,6 +663,8 @@ ci-ownership-policy:
     just ci-authoritative-fact-boundary
     just ci-capability-boundaries
     just ci-typed-errors
+    just ci-browser-promise-bounded-awaits
+    just ci-browser-transport-single-owner
     just ci-semantic-owner-awaits
     just ci-semantic-owner-detached-continuation
     just ci-semantic-owner-no-spawn
@@ -713,6 +715,12 @@ ci-capability-boundaries:
 
 ci-typed-errors:
     bash scripts/check/typed-error-boundary.sh
+
+ci-browser-promise-bounded-awaits:
+    just _ownership-lint browser-promise-bounded-awaits crates
+
+ci-browser-transport-single-owner:
+    just _ownership-lint browser-transport-single-owner crates
 
 ci-semantic-owner-awaits:
     just _ownership-lint semantic-owner-bounded-awaits crates/aura-app/src/workflows crates/aura-terminal/src/tui/callbacks crates/aura-web/src

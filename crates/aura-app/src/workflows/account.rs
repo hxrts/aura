@@ -8,6 +8,10 @@
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 
+use crate::ui_contract::{
+    OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
+};
 use crate::views::PendingAccountBootstrap;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workflows::runtime::{execute_with_runtime_retry_budget, workflow_retry_policy};
@@ -22,10 +26,6 @@ use crate::workflows::{
 };
 use crate::AppCore;
 use async_lock::RwLock;
-use crate::ui_contract::{
-    OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
-    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
-};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::RetryRunError;
@@ -397,11 +397,9 @@ async fn fail_initialize_runtime_account<T>(
     )
     .with_detail(detail.into());
     owner.publish_failure(error.clone()).await?;
-    Err(AuraError::agent(
-        error
-            .detail
-            .unwrap_or_else(|| "initialize runtime account failed".to_string()),
-    ))
+    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
+        "initialize runtime account failed".to_string()
+    })))
 }
 
 #[aura_macros::semantic_owner(
@@ -456,9 +454,9 @@ async fn initialize_runtime_account_owned(
     };
 
     owner
-        .publish_success_with(crate::workflows::semantic_facts::issue_account_created_proof(
-            home_id,
-        ))
+        .publish_success_with(
+            crate::workflows::semantic_facts::issue_account_created_proof(home_id),
+        )
         .await?;
     Ok(())
 }
